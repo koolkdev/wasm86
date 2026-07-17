@@ -5,14 +5,16 @@ import type { ConditionCode } from "#core/flags/conditions.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import { DynamicByteOriginRef } from "#compiler/ir/resource.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import { guestMemoryResource } from "#memory/flat.js";
+import type {
+  MemoryAccess,
+  MemoryDataAccessIntent
+} from "#memory/access.js";
 import type {
   SemanticsBuilder,
   GetOptions,
   IfBody,
   LoopBody,
   LoopSemanticsBuilder,
-  MemoryAccessKind,
   SemanticBranchHint,
   SemanticBuildContext,
   SemanticOperandInfo,
@@ -25,7 +27,6 @@ import type {
 } from "#core/semantics/builder.js";
 import type {
   MemRef,
-  MemoryAccess,
   OperandInput,
   OperandRef,
   RegRef,
@@ -243,7 +244,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     this.#emit(`set ${this.#storage(target)}:${accessWidth} <- ${this.#value(value)}`);
   }
 
-  memoryResolve<TIntent extends MemoryAccessKind>(
+  memoryResolve<TIntent extends MemoryDataAccessIntent>(
     memory: MemRef,
     byteLength: ValueInput,
     intent: TIntent
@@ -255,13 +256,10 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     const valid = this.#alloc(`valid(${this.#value(linearAddress)}.${intent})`);
     const invalid = this.#alloc(`not(${this.#value(valid)})`);
     const access: MemoryAccess<TIntent> = {
-      kind: "memoryAccess",
-      resource: guestMemoryResource,
+      range: { start: linearAddress, byteLength },
       origin: new DynamicByteOriginRef(),
-      linearAddress,
-      byteLength,
       invalid,
-      intent
+      fault: { address: linearAddress, intent }
     };
 
     this.#emit(
@@ -531,7 +529,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
   }
 
   #access(access: MemoryAccess): string {
-    return `${this.#value(access.linearAddress)}.${access.intent}`;
+    return `${this.#value(access.fault.address)}.${access.fault.intent}`;
   }
 
   #value(input: ValueInput): string {

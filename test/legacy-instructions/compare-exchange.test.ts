@@ -184,6 +184,7 @@ const fixtures = [
       ...allFlagsSet,
       eip: startAddress
     },
+    initialMemory: [{ address: 0xfffc, bytes: dwordBytes(0x1234_5678) }],
     expected: {
       stop: { kind: "cpuException", exception: pageFault(0xfffe, PageFaultErrorCode.WRITE) },
       state: {
@@ -192,7 +193,8 @@ const fixtures = [
         ...allFlagsSet,
         eip: startAddress,
         instructionCount: 0
-      }
+      },
+      memory: [{ address: 0xfffc, bytes: dwordBytes(0x1234_5678) }]
     }
   },
   {
@@ -206,6 +208,7 @@ const fixtures = [
       ...mixedFlags,
       eip: startAddress
     },
+    initialMemory: [{ address: 0xfffc, bytes: dwordBytes(0x89ab_cdef) }],
     expected: {
       stop: { kind: "cpuException", exception: pageFault(0xfffc, PageFaultErrorCode.WRITE) },
       state: {
@@ -216,7 +219,8 @@ const fixtures = [
         ...mixedFlags,
         eip: startAddress,
         instructionCount: 0
-      }
+      },
+      memory: [{ address: 0xfffc, bytes: dwordBytes(0x89ab_cdef) }]
     }
   }
 ] as const satisfies readonly InstructionFixture[];

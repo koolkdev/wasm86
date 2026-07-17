@@ -306,8 +306,7 @@ test("a dynamic memory check evaluates each semantic operand once", async () => 
   const body = new BodyBuilder(values);
   const fault = flatMemoryAccess(
     values,
-    address,
-    byteLength,
+    { start: address, byteLength },
     "read"
   ).invalid;
   body.push(stateWrite(gprChannel("eax"), fault));
@@ -320,7 +319,7 @@ test("a dynamic memory check evaluates each semantic operand once", async () => 
     [0, 1, 0],
     [guestMemoryMinimumByteLength - 4, 4, 0],
     [guestMemoryMinimumByteLength - 3, 4, 1],
-    [0xffff_ffff, 0, 0],
+    [0xffff_ffff, 0, 1],
     [0, guestMemoryMinimumByteLength + 1, 1]
   ] as const;
 
@@ -338,14 +337,12 @@ test("nested dynamic memory checks compose through the value graph", async () =>
   const body = new BodyBuilder(values);
   const innerFault = flatMemoryAccess(
     values,
-    innerAddress,
-    innerByteLength,
+    { start: innerAddress, byteLength: innerByteLength },
     "read"
   ).invalid;
   const outerFault = flatMemoryAccess(
     values,
-    innerFault,
-    outerByteLength,
+    { start: innerFault, byteLength: outerByteLength },
     "read"
   ).invalid;
   body.push(stateWrite(gprChannel("eax"), outerFault));

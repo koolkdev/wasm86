@@ -10,8 +10,6 @@ import type {
 import {
   toStorageRef,
   type MemRef,
-  type MemoryAccess,
-  type MemoryAccessKind,
   type OperandInput,
   type OperandRef,
   type RegRef,
@@ -19,6 +17,10 @@ import {
   type Value,
   type ValueInput
 } from "#core/semantics/refs.js";
+import type {
+  MemoryAccess,
+  MemoryDataAccessIntent
+} from "#memory/access.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { IfBody, SemanticBranchHint } from "#core/semantics/builder.js";
@@ -188,7 +190,7 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
     this.#context.host.set(target, value, accessWidth);
   }
 
-  memoryResolve<TIntent extends MemoryAccessKind>(
+  memoryResolve<TIntent extends MemoryDataAccessIntent>(
     memory: MemRef,
     byteLength: ValueInput,
     intent: TIntent

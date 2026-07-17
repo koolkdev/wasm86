@@ -14,7 +14,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import { statusFlagResolvers } from "#core/flags/resolvers.js";
 import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
 import type { OperandWidth } from "#core/types.js";
-import { guestMemoryResource } from "#memory/flat.js";
+import { guestMemoryResource } from "#memory/resource.js";
 import { DynamicByteOriginRef } from "#compiler/ir/resource.js";
 
 type TestValueId = ValueId | number;

@@ -7,28 +7,15 @@ import type {
 import {
   DynamicByteOriginRef,
   type ByteRange,
-  type ResourceByteOperand,
-  resourceRef,
-  type ResourceRef
+  type ResourceByteOperand
 } from "#compiler/ir/resource.js";
 import { guestMemoryMinimumByteLength } from "./constants.js";
-
-export const guestMemoryResource = resourceRef("memory.guest");
-
-export type FlatMemoryFault<TIntent extends string> = Readonly<{
-  address: ValueId;
-  intent: TIntent;
-}>;
-
-export type FlatMemoryAccess<TIntent extends string> = Readonly<{
-  resource: ResourceRef;
-  origin: DynamicByteOriginRef;
-  start: ValueId;
-  byteLength: ValueId;
-  invalid: ValueId;
-  fault: FlatMemoryFault<TIntent>;
-  intent: TIntent;
-}>;
+import { guestMemoryResource } from "./resource.js";
+import type {
+  LinearRange,
+  MemoryAccess,
+  MemoryAccessIntent
+} from "./access.js";
 
 type FlatMemoryValues = Pick<ValueBuilder, "const" | "binary" | "compare"> & ConstantValues;
 
@@ -38,13 +25,12 @@ type ConstantValues = Readonly<{
 
 const addressSpaceByteLength = 0x1_0000_0000;
 
-export function flatMemoryAccess<TIntent extends string>(
+export function flatMemoryAccess<TIntent extends MemoryAccessIntent>(
   values: FlatMemoryValues,
-  start: ValueId,
-  byteLength: ValueId,
+  range: LinearRange,
   intent: TIntent
-): FlatMemoryAccess<TIntent> {
-  const staticByteLength = values.constValue(byteLength);
+): MemoryAccess<TIntent> {
+  const staticByteLength = values.constValue(range.byteLength);
 
   if (staticByteLength !== undefined) {
     assert(
@@ -54,55 +40,44 @@ export function flatMemoryAccess<TIntent extends string>(
       `flat access byte length must be an integer between 1 and ${guestMemoryMinimumByteLength}, got ${staticByteLength}`
     );
 
-    return createFlatMemoryAccess(
-      start,
-      byteLength,
+    return createMemoryAccess(
+      range,
       values.compare(
         32,
         "gt_u",
-        start,
+        range.start,
         values.const(guestMemoryMinimumByteLength - staticByteLength)
       ),
       intent
     );
   }
 
-  const zero = values.const(0);
   const one = values.const(1);
   const last = values.const(guestMemoryMinimumByteLength - 1);
-  const lengthMinusOne = values.binary("sub", byteLength, one);
-  const invalidNonzeroRange = values.binary(
+  const lengthMinusOne = values.binary("sub", range.byteLength, one);
+  const invalid = values.binary(
     "or",
-    values.compare(32, "gt_u", start, last),
+    values.compare(32, "gt_u", range.start, last),
     values.compare(
       32,
       "gt_u",
       lengthMinusOne,
-      values.binary("sub", last, start)
+      values.binary("sub", last, range.start)
     )
   );
-  const invalid = values.binary(
-    "and",
-    values.compare(32, "ne", byteLength, zero),
-    invalidNonzeroRange
-  );
-  return createFlatMemoryAccess(start, byteLength, invalid, intent);
+  return createMemoryAccess(range, invalid, intent);
 }
 
-function createFlatMemoryAccess<TIntent extends string>(
-  start: ValueId,
-  byteLength: ValueId,
+function createMemoryAccess<TIntent extends MemoryAccessIntent>(
+  range: LinearRange,
   invalid: ValueId,
   intent: TIntent
-): FlatMemoryAccess<TIntent> {
+): MemoryAccess<TIntent> {
   return {
-    resource: guestMemoryResource,
+    range,
     origin: new DynamicByteOriginRef(),
-    start,
-    byteLength,
     invalid,
-    fault: { address: start, intent },
-    intent
+    fault: { address: range.start, intent }
   };
 }
 
@@ -110,10 +85,7 @@ function createFlatMemoryAccess<TIntent extends string>(
 // reverse-engineered: a dynamic offset therefore widens to the whole origin.
 export function flatMemoryOperand(
   values: FlatMemoryValues,
-  access: Pick<
-    FlatMemoryAccess<string>,
-    "resource" | "origin" | "start" | "byteLength"
-  >,
+  access: MemoryAccess,
   byteOffset: ValueId,
   width: IntegerWidth
 ): ResourceByteOperand {
@@ -122,7 +94,7 @@ export function flatMemoryOperand(
     `flat operation width must be 8, 16, or 32, got ${String(width)}`
   );
   const byteLength = width / 8;
-  const staticAccessByteLength = values.constValue(access.byteLength);
+  const staticAccessByteLength = values.constValue(access.range.byteLength);
   const staticByteOffset = values.constValue(byteOffset);
 
   assert(
@@ -137,11 +109,11 @@ export function flatMemoryOperand(
   );
   const range = flatMemoryRange(values, access, staticByteOffset, byteLength);
   const base = staticByteOffset === undefined
-    ? values.binary("add", access.start, byteOffset)
-    : access.start;
+    ? values.binary("add", access.range.start, byteOffset)
+    : access.range.start;
 
   return {
-    effect: { space: "resource", resource: access.resource, range },
+    effect: { space: "resource", resource: guestMemoryResource, range },
     address: {
       base,
       displacement: staticByteOffset ?? 0
@@ -152,14 +124,14 @@ export function flatMemoryOperand(
 
 function flatMemoryRange(
   values: ConstantValues,
-  access: Pick<FlatMemoryAccess<string>, "origin" | "start">,
+  access: Pick<MemoryAccess, "origin" | "range">,
   staticByteOffset: number | undefined,
   byteLength: number
 ): ByteRange {
   if (staticByteOffset === undefined) {
     return { basis: { kind: "dynamic", origin: access.origin } };
   }
-  const staticStart = values.constValue(access.start);
+  const staticStart = values.constValue(access.range.start);
 
   if (staticStart !== undefined) {
     const absoluteStart = (staticStart >>> 0) + staticByteOffset;

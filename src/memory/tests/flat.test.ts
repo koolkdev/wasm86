@@ -10,15 +10,16 @@ import { ValueTable } from "#compiler/ir/values/table.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   flatMemoryAccess,
-  flatMemoryOperand,
-  guestMemoryResource
+  flatMemoryOperand
 } from "#memory/flat.js";
+import { guestMemoryResource } from "#memory/resource.js";
 
 test("a static-length flat access is one unsigned limit compare", () => {
   const values = new ValueTable();
   const start = values.external(0);
   const byteLength = values.const(4);
-  const access = flatMemoryAccess(values, start, byteLength, "write");
+  const range = { start, byteLength };
+  const access = flatMemoryAccess(values, range, "write");
   const limit = values.const(guestMemoryMinimumByteLength - 4);
 
   deepStrictEqual(values.node(access.invalid), {
@@ -28,33 +29,25 @@ test("a static-length flat access is one unsigned limit compare", () => {
     a: start,
     b: limit
   });
-  strictEqual(access.resource, guestMemoryResource);
-  strictEqual(access.start, start);
-  strictEqual(access.byteLength, byteLength);
+  deepStrictEqual(access.range, range);
   deepStrictEqual(access.fault, { address: start, intent: "write" });
-  strictEqual(access.intent, "write");
 });
 
-test("a dynamic-length flat access uses the complete nonwrapping predicate", () => {
+test("a dynamic-length flat access rejects zero with the complete nonwrapping predicate", () => {
   const values = new ValueTable();
   const start = values.external(0);
   const byteLength = values.external(1);
-  const access = flatMemoryAccess(values, start, byteLength, "read");
-  const zero = values.const(0);
+  const access = flatMemoryAccess(values, { start, byteLength }, "read");
   const one = values.const(1);
   const last = values.const(guestMemoryMinimumByteLength - 1);
   const expectedInvalid = values.binary(
-    "and",
-    values.compare(32, "ne", byteLength, zero),
-    values.binary(
-      "or",
-      values.compare(32, "gt_u", start, last),
-      values.compare(
-        32,
-        "gt_u",
-        values.binary("sub", byteLength, one),
-        values.binary("sub", last, start)
-      )
+    "or",
+    values.compare(32, "gt_u", start, last),
+    values.compare(
+      32,
+      "gt_u",
+      values.binary("sub", byteLength, one),
+      values.binary("sub", last, start)
     )
   );
 
@@ -66,20 +59,23 @@ test("static flat bounds accept the last range and reject invalid lengths", () =
   const values = new ValueTable();
   const finalWord = flatMemoryAccess(
     values,
-    values.const(guestMemoryMinimumByteLength - 4),
-    values.const(4),
+    {
+      start: values.const(guestMemoryMinimumByteLength - 4),
+      byteLength: values.const(4)
+    },
     "read"
   );
   const crossingWord = flatMemoryAccess(
     values,
-    values.const(guestMemoryMinimumByteLength - 3),
-    values.const(4),
+    {
+      start: values.const(guestMemoryMinimumByteLength - 3),
+      byteLength: values.const(4)
+    },
     "read"
   );
   const wrappedByte = flatMemoryAccess(
     values,
-    values.const(-1),
-    values.const(1),
+    { start: values.const(-1), byteLength: values.const(1) },
     "read"
   );
 
@@ -87,14 +83,20 @@ test("static flat bounds accept the last range and reject invalid lengths", () =
   strictEqual(values.constValue(crossingWord.invalid), 1);
   strictEqual(values.constValue(wrappedByte.invalid), 1);
   throws(
-    () => flatMemoryAccess(values, values.const(0), values.const(0), "read"),
+    () => flatMemoryAccess(
+      values,
+      { start: values.const(0), byteLength: values.const(0) },
+      "read"
+    ),
     /flat access byte length must be an integer between 1/
   );
   throws(
     () => flatMemoryAccess(
       values,
-      values.const(0),
-      values.const(guestMemoryMinimumByteLength + 1),
+      {
+        start: values.const(0),
+        byteLength: values.const(guestMemoryMinimumByteLength + 1)
+      },
       "read"
     ),
     /flat access byte length must be an integer between 1/
@@ -105,14 +107,12 @@ test("flat operands derive address normalization and range facts together", () =
   const values = new ValueTable();
   const constant = flatMemoryAccess(
     values,
-    values.const(0x2000),
-    values.const(8),
+    { start: values.const(0x2000), byteLength: values.const(8) },
     "write"
   );
   const dynamic = flatMemoryAccess(
     values,
-    values.external(0),
-    values.const(8),
+    { start: values.external(0), byteLength: values.const(8) },
     "write"
   );
   const byteOffset = values.const(4);
@@ -130,7 +130,7 @@ test("flat operands derive address normalization and range facts together", () =
     }
   );
   deepStrictEqual(absolute.address, {
-    base: constant.start,
+    base: constant.range.start,
     displacement: 4
   });
   strictEqual(absolute.width, 32);
@@ -138,7 +138,7 @@ test("flat operands derive address normalization and range facts together", () =
   const slice = flatMemoryOperand(values, dynamic, byteOffset, 32);
 
   deepStrictEqual(slice.address, {
-    base: dynamic.start,
+    base: dynamic.range.start,
     displacement: 4
   });
   strictEqual(slice.effect.range.basis.kind, "dynamic");
@@ -152,7 +152,7 @@ test("flat operands derive address normalization and range facts together", () =
   const whole = flatMemoryOperand(values, dynamic, dynamicOffset, 32);
 
   deepStrictEqual(whole.address, {
-    base: values.binary("add", dynamic.start, dynamicOffset),
+    base: values.binary("add", dynamic.range.start, dynamicOffset),
     displacement: 0
   });
   strictEqual(whole.effect.range.basis.kind, "dynamic");
@@ -163,8 +163,7 @@ test("flat operands derive address normalization and range facts together", () =
 
   const wrappingConstant = flatMemoryAccess(
     values,
-    values.const(-1),
-    values.const(4),
+    { start: values.const(-1), byteLength: values.const(4) },
     "write"
   );
   const conservative = flatMemoryOperand(
@@ -175,7 +174,7 @@ test("flat operands derive address normalization and range facts together", () =
   );
 
   deepStrictEqual(conservative.address, {
-    base: wrappingConstant.start,
+    base: wrappingConstant.range.start,
     displacement: 0
   });
   strictEqual(conservative.effect.range.basis.kind, "dynamic");
@@ -191,8 +190,7 @@ test("flat operands reject invalid widths and constant subranges", () => {
   const values = new ValueTable();
   const access = flatMemoryAccess(
     values,
-    values.const(0x2000),
-    values.const(4),
+    { start: values.const(0x2000), byteLength: values.const(4) },
     "read"
   );
 

@@ -20,7 +20,7 @@ import {
 } from "#compiler/ir/resource.js";
 import { wasmImport } from "#wasm/abi.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
-import { guestMemoryResource } from "#memory/flat.js";
+import { guestMemoryResource } from "#memory/resource.js";
 import { encodeTransfer } from "./legacy-transfer.js";
 import type { IrBlock } from "#ir/block.js";
 import { walkBodyActions } from "#ir/traverse.js";

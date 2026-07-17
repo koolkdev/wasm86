@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import { resourceRead } from "#compiler/ir/operations/resource.js";
 import { stateRead } from "#compiler/ir/operations/state.js";
 import { buildException } from "#cpu/exit.js";
 import { pageFault, pageFaultErrorCode } from "#core/exceptions.js";
@@ -15,10 +14,7 @@ import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
-import {
-  flatMemoryAccess,
-  flatMemoryOperand
-} from "#memory/flat.js";
+import { MemoryAccessBuilder } from "#memory/access.js";
 
 // Decode reads as action fragments: a guarded instruction fetch is Memory's
 // flat predicate + if + resource.read with a decode-fault body, and the decoded values leave
@@ -40,6 +36,10 @@ export type DecodeCursor =
 
 class DecodeFragment {
   readonly #builder = new BodyBuilder(new ValueTable());
+  readonly #memory = new MemoryAccessBuilder({
+    values: this.#builder.values,
+    currentBody: () => this.#builder
+  });
   readonly #externalLocals = new Map<ExternalValueId, number>();
   readonly #externalsByLocal = new Map<number, ValueId>();
   readonly #outputs = new Map<ValueId, number>();
@@ -86,10 +86,8 @@ class DecodeFragment {
   readGuest(address: ValueId, width: OperandWidth, signed = false): ValueId {
     const byteLength = width / 8;
     const byteLengthValue = this.values.const(byteLength);
-    const access = flatMemoryAccess(
-      this.values,
-      address,
-      byteLengthValue,
+    const access = this.#memory.resolve(
+      { start: address, byteLength: byteLengthValue },
       "instructionFetch"
     );
 
@@ -104,19 +102,11 @@ class DecodeFragment {
       }),
       { hint: "unlikely" }
     );
-    const source = flatMemoryOperand(
-      this.values,
+    return this.#memory.read(
       access,
       this.values.const(0),
-      width
-    );
-
-    return this.#builder.operation(
-      resourceRead.create(
-        signed && width !== 32
-          ? { source, signed: true }
-          : { source }
-      )
+      width,
+      { signed }
     );
   }
 

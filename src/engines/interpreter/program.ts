@@ -25,7 +25,7 @@ import {
 } from "#core/flags/resolvers.js";
 import { wasmBlockExportName, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
-import { guestMemoryResource } from "#memory/flat.js";
+import { guestMemoryResource } from "#memory/resource.js";
 import {
   encodeRmDecodeHelperBody,
   RmDecodeHelpers,

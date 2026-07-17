@@ -21,7 +21,7 @@ import { resourceRef } from "#compiler/ir/resource.js";
 import { statusFlagResolverType } from "#core/flags/resolvers.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
-import { guestMemoryResource } from "#memory/flat.js";
+import { guestMemoryResource } from "#memory/resource.js";
 
 // Test-only module wrapper around the action emitter: imported state + guest
 // memories, one run export returning the encoded i64 exit. The harness

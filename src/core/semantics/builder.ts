@@ -4,11 +4,13 @@ import type { SimpleFlagSource as ArchitecturalSimpleFlagSource } from "#core/fl
 import type { X86Flag, X86StatusFlag } from "#core/flags/definitions.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { CellRef } from "#compiler/refs/cell.js";
+import type {
+  MemoryAccess,
+  MemoryDataAccessIntent
+} from "#memory/access.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type {
   MemRef,
-  MemoryAccess,
-  MemoryAccessKind,
   OperandInput,
   OperandRef,
   RegRef,
@@ -53,7 +55,7 @@ export interface SemanticOps {
 
   get(source: StorageInput, accessWidth?: OperandWidth, options?: GetOptions): Value;
   set(target: StorageInput, value: ValueInput, accessWidth?: OperandWidth): void;
-  memoryResolve<TIntent extends MemoryAccessKind>(
+  memoryResolve<TIntent extends MemoryDataAccessIntent>(
     memory: MemRef,
     byteLength: ValueInput,
     intent: TIntent
@@ -84,8 +86,6 @@ export interface SemanticOps {
   ): void;
   cpuException(exception: CpuException<ValueInput>): void;
 }
-
-export type { MemoryAccess, MemoryAccessKind } from "./refs.js";
 
 export interface LoopSemanticsBuilder extends SemanticOps {}
 

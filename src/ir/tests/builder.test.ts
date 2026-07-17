@@ -47,11 +47,11 @@ import {
 } from "#core/exceptions.js";
 import type { X86Flag, X86StatusFlag } from "#core/flags/definitions.js";
 import type { SemanticOps, SemanticTemplate } from "#core/semantics/builder.js";
+import type { ValueInput } from "#core/semantics/refs.js";
 import type {
   MemoryAccess,
-  MemoryAccessKind,
-  ValueInput
-} from "#core/semantics/refs.js";
+  MemoryDataAccessIntent
+} from "#memory/access.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#core/flags/definitions.js";
 import { aluSemantic, unaryAluSemantic } from "#core/semantics/alu.js";
 import { cmpSemantic } from "#core/semantics/cmp.js";
@@ -111,7 +111,7 @@ function mem(
   }, staticMemSegment(segment));
 }
 
-function resolveDsMemory<TIntent extends MemoryAccessKind>(
+function resolveDsMemory<TIntent extends MemoryDataAccessIntent>(
   s: SemanticOps,
   address: ValueInput,
   byteLength: ValueInput,
@@ -217,7 +217,7 @@ function memoryGuard(
   faultBodyIndex: number,
   _address: ValueId,
   _byteLength: number,
-  _access: MemoryAccessKind
+  _access: MemoryDataAccessIntent
 ): readonly [IfAction] {
   const thenBody = nestedActionBodies(block)[faultBodyIndex - 1];
 
@@ -274,7 +274,7 @@ function finishException(
 
 function pageFaultStop(
   values: ValueTable,
-  access: MemoryAccessKind,
+  access: MemoryDataAccessIntent,
   payload: ValueId
 ): Finish {
   const errorCode = access === "write" ? PageFaultErrorCode.WRITE : 0;

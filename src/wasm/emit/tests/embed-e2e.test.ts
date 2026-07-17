@@ -25,9 +25,9 @@ import { stateRead as stateReadOperation } from "#compiler/ir/operations/state.j
 import { resourceRead } from "#compiler/ir/operations/resource.js";
 import {
   flatMemoryAccess,
-  flatMemoryOperand,
-  guestMemoryResource
+  flatMemoryOperand
 } from "#memory/flat.js";
+import { guestMemoryResource } from "#memory/resource.js";
 
 // Fragments emitted inline in hand-written function bodies. The fragments
 // here are decode reads — a guarded one-byte instruction fetch at eip+k with a
@@ -62,8 +62,7 @@ function decodeReadFragment(k: number): DecodeReadFragment {
   const byteLength = values.const(1);
   const access = flatMemoryAccess(
     values,
-    address,
-    byteLength,
+    { start: address, byteLength },
     "instructionFetch"
   );
   const faultResult = buildException(

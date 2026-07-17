@@ -8,18 +8,22 @@ import type {
 } from "#core/semantics/builder.js";
 import type {
   MemRef,
-  MemoryAccess,
-  MemoryAccessKind,
   OperandRef,
   StorageInput,
   Value,
   ValueInput
 } from "#core/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
+import type {
+  MemoryAccess,
+  MemoryDataAccessIntent
+} from "#memory/access.js";
 
 export type ResolvedOperandStorage = "reg" | "mem";
 
-export type ResolvedStorageAccess<TIntent extends MemoryAccessKind = MemoryAccessKind> =
+export type ResolvedStorageAccess<
+  TIntent extends MemoryDataAccessIntent = MemoryDataAccessIntent
+> =
   | Readonly<{ kind: "storage"; storage: StorageInput }>
   | Readonly<{ kind: "memory"; access: MemoryAccess<TIntent> }>;
 
@@ -70,7 +74,7 @@ export function resolveStorageReadWrite(
   return resolveStorageWrite(s, v, context, storage, width);
 }
 
-export function resolveMemoryAccess<TIntent extends MemoryAccessKind>(
+export function resolveMemoryAccess<TIntent extends MemoryDataAccessIntent>(
   s: SemanticOps,
   memory: MemRef,
   byteLength: ValueInput,
@@ -86,10 +90,14 @@ export function resolveMemoryAccess<TIntent extends MemoryAccessKind>(
   return access;
 }
 
-export function memoryAccessException(access: MemoryAccess): CpuException<ValueInput> {
+export function memoryAccessException(
+  access: MemoryAccess<MemoryDataAccessIntent>
+): CpuException<ValueInput> {
   return pageFault(
-    access.linearAddress,
-    pageFaultErrorCode(access.intent === "write" ? "dataWrite" : "dataRead")
+    access.fault.address,
+    pageFaultErrorCode(
+      access.fault.intent === "write" ? "dataWrite" : "dataRead"
+    )
   );
 }
 
@@ -125,7 +133,7 @@ export function writeStorage(
   }
 }
 
-function resolveStorage<TIntent extends MemoryAccessKind>(
+function resolveStorage<TIntent extends MemoryDataAccessIntent>(
   s: SemanticOps,
   v: ValueBuilder,
   context: SemanticBuildContext,

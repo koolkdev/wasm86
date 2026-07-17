@@ -18,8 +18,6 @@ import type {
 } from "#core/semantics/builder.js";
 import type {
   MemRef,
-  MemoryAccess,
-  MemoryAccessKind,
   OperandInput,
   OperandRef,
   RegRef,
@@ -29,6 +27,11 @@ import type {
   ValueInput
 } from "#core/semantics/refs.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
+import {
+  MemoryAccessBuilder,
+  type MemoryAccess,
+  type MemoryDataAccessIntent
+} from "#memory/access.js";
 import type {
   ExternalValueId,
   OperandBinding,
@@ -38,7 +41,6 @@ import type {
 import { ControlEmitter, type IfOutcome } from "./builder/control.js";
 import { LoopBuilder, type LoopMemoryOps } from "./builder/loop.js";
 import { FinishEmitter } from "./builder/finish.js";
-import { MemoryManager } from "./builder/memory.js";
 import { OperandResolver } from "./builder/operands.js";
 import { SemanticScopeStack } from "./builder/scope.js";
 import { emitSegmentLoad, type SegmentMode } from "./builder/segments.js";
@@ -114,7 +116,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #control: ControlEmitter;
   readonly #finish: FinishEmitter;
   readonly #segmentMode: SegmentMode;
-  readonly #memory: MemoryManager;
+  readonly #memory: MemoryAccessBuilder;
   #instructionLocation: InstructionLocationValues | undefined;
   #finished = false;
   // "terminated" means the root body already holds its terminator.
@@ -130,10 +132,9 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#scopes = new SemanticScopeStack(this.#body);
     this.#state = new State(this.#values, () => this.#scopes.current.body, stateWriteLog);
     this.#operands = new OperandResolver(this.#values, this.#state, () => this.#scopes.current.operands);
-    this.#memory = new MemoryManager({
+    this.#memory = new MemoryAccessBuilder({
       values: this.#values,
-      scopes: this.#scopes,
-      operands: this.#operands
+      currentBody: () => this.#scopes.current.body
     });
     this.#control = new ControlEmitter(this.#state, stateWriteLog, this.#scopes, this, this.#operands);
     this.#finish = new FinishEmitter(this.#state, this.#scopes, this.#values);
@@ -215,11 +216,22 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   }
 
   mem(segment: SegmentRegister, offset: ValueInput): MemRef {
-    return this.#memory.mem(segment, offset);
+    return {
+      segment: { kind: "static", reg: segment },
+      offset
+    };
   }
 
   operandMem(operandRef: OperandInput, displacement?: ValueInput): MemRef {
-    return this.#memory.operandMem(operandRef, displacement);
+    const memory = this.#operands.memoryReference(operandRef.index);
+
+    if (displacement === undefined) {
+      return memory;
+    }
+    return {
+      segment: memory.segment,
+      offset: this.#values.binary("add", memory.offset, displacement)
+    };
   }
 
   var(seed: ValueInput): SemanticVar {
@@ -312,12 +324,18 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     this.#state.instructionCount.add(amount);
   }
 
-  memoryResolve<TIntent extends MemoryAccessKind>(
+  memoryResolve<TIntent extends MemoryDataAccessIntent>(
     memory: MemRef,
     byteLength: ValueInput,
     intent: TIntent
   ): MemoryAccess<TIntent> {
-    return this.#memory.memoryResolve(memory, byteLength, intent);
+    return this.#memory.resolve(
+      {
+        start: this.#operands.resolveAddress(memory),
+        byteLength
+      },
+      intent
+    );
   }
 
   memoryRead(
@@ -326,7 +344,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     width: OperandWidth,
     options: GetOptions = {}
   ): Value {
-    return this.#memory.memoryRead(access, byteOffset, width, options);
+    return this.#memory.read(access, byteOffset, width, options);
   }
 
   memoryWrite(
@@ -335,7 +353,8 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     value: ValueInput,
     width: OperandWidth
   ): void {
-    this.#memory.memoryWrite(access, byteOffset, value, width);
+    this.#scopes.current.recordMemoryWrite();
+    this.#memory.write(access, byteOffset, value, width);
   }
 
   address(operandRef: OperandInput): Value {

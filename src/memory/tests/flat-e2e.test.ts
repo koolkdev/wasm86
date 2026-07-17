@@ -15,9 +15,9 @@ import {
   guestMemoryMinimumPages
 } from "#memory/constants.js";
 import {
-  flatMemoryAccess,
-  guestMemoryResource
+  flatMemoryAccess
 } from "#memory/flat.js";
+import { guestMemoryResource } from "#memory/resource.js";
 import { wasmImport } from "#wasm/abi.js";
 
 test("one flat fragment keeps its fixed capacity when backing memory grows", async () => {
@@ -47,8 +47,7 @@ test("one flat fragment keeps its fixed capacity when backing memory grows", asy
     assert(byteLength !== undefined, "flat classifier length parameter is missing");
     const access = flatMemoryAccess(
       fn.values,
-      start,
-      byteLength,
+      { start, byteLength },
       "read"
     );
 
@@ -79,7 +78,8 @@ test("one flat fragment keeps its fixed capacity when backing memory grows", asy
   strictEqual(classify(guestMemoryMinimumByteLength - 1, 1), 0);
   strictEqual(classify(guestMemoryMinimumByteLength - 1, 2), 1);
   strictEqual(classify(guestMemoryMinimumByteLength, 1), 1);
-  strictEqual(classify(-1, 0), 0);
+  strictEqual(classify(0, 0), 1);
+  strictEqual(classify(-1, 0), 1);
 
   memory.grow(1);
 

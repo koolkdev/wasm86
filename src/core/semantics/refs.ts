@@ -1,9 +1,5 @@
 import { assert } from "#common/assert.js";
 import type { CellRef } from "#compiler/refs/cell.js";
-import type {
-  DynamicByteOriginRef,
-  ResourceRef
-} from "#compiler/ir/resource.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { RegName, SegmentRegister } from "#core/types.js";
 
@@ -17,16 +13,6 @@ export type SegmentRef =
 export type MemRef = Readonly<{
   segment: SegmentRef;
   offset: Value;
-}>;
-export type MemoryAccessKind = "read" | "write";
-export type MemoryAccess<TIntent extends MemoryAccessKind = MemoryAccessKind> = Readonly<{
-  kind: "memoryAccess";
-  resource: ResourceRef;
-  origin: DynamicByteOriginRef;
-  linearAddress: Value;
-  byteLength: Value;
-  invalid: Value;
-  intent: TIntent;
 }>;
 export type StorageRef = OperandRef | RegRef | CellRef<"i32">;
 
