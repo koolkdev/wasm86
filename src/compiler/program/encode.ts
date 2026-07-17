@@ -1,8 +1,6 @@
 import { assert } from "#common/assert.js";
-import {
-  type EncodedWasmFunctionBody,
-  type WasmFunctionReferences
-} from "#compiler/encoder/function-body.js";
+import { buildDefinition } from "#build";
+import type { EncodedWasmFunctionBody } from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import {
   wasmValueType,
@@ -23,6 +21,7 @@ import type {
 import type { FunctionType } from "./function-type.js";
 import type { FunctionDefinition } from "./functions.js";
 import type { Program, ProgramFunction } from "./model.js";
+import { validateProgramEncoding } from "./validate.js";
 
 type LegacyFunction = Extract<ProgramFunction, { kind: "legacy" }>;
 type DefinedFunction = Extract<ProgramFunction, { kind: "function" }>;
@@ -39,6 +38,10 @@ type ProgramLayout = Readonly<{
 export function encodeProgram(program: Program): Uint8Array<ArrayBuffer> {
   const layout = layoutProgram(program);
   const bodies = program.functions.map((fn) => buildFunctionBody(program, layout, fn));
+
+  if (buildDefinition.validation) {
+    validateProgramEncoding(program, bodies);
+  }
   const module = new WasmModuleEncoder();
 
   addFunctionTypes(module, layout);
@@ -195,10 +198,7 @@ function buildLegacyBody(
     tables,
     placements: program.placements
   } satisfies LegacyFunctionBindings;
-  const body = fn.build(bindings);
-
-  validateRecordedReferences(fn, body.references, bindings);
-  return body;
+  return fn.build(bindings);
 }
 
 function buildDefinedBody(
@@ -207,18 +207,11 @@ function buildDefinedBody(
 ): EncodedWasmFunctionBody {
   const functions = resolveDefinitionIndices(layout, fn.callTargets);
   const resources = resolveResourceIndices(layout, fn.resources);
-  const body = emitFunction(fn.body, {
+  return emitFunction(fn.body, {
     functionIndices: functions,
     resourceIndices: resources,
     placement: fn.placement
   });
-
-  validateRecordedIndices(fn, "function", body.references.functionIndices, functions.values());
-  validateRecordedIndices(fn, "type", body.references.typeIndices, []);
-  validateRecordedIndices(fn, "global", body.references.globalIndices, []);
-  validateRecordedIndices(fn, "table", body.references.tableIndices, []);
-  validateRecordedIndices(fn, "memory", body.references.memoryIndices, resources.values());
-  return body;
 }
 
 function resolveResourceIndices(
@@ -264,34 +257,6 @@ function resolveDefinitionIndices(
     functions.set(call, functionIndex);
   }
   return functions;
-}
-
-function validateRecordedReferences(
-  fn: LegacyFunction,
-  references: WasmFunctionReferences,
-  bindings: LegacyFunctionBindings
-): void {
-  validateRecordedIndices(fn, "function", references.functionIndices, bindings.functions.values());
-  validateRecordedIndices(fn, "type", references.typeIndices, [bindings.typeIndex]);
-  validateRecordedIndices(fn, "global", references.globalIndices, bindings.globals.values());
-  validateRecordedIndices(fn, "table", references.tableIndices, bindings.tables.values());
-  validateRecordedIndices(fn, "memory", references.memoryIndices, bindings.resources.values());
-}
-
-function validateRecordedIndices(
-  fn: ProgramFunction,
-  kind: "function" | "type" | "global" | "table" | "memory",
-  recorded: readonly number[],
-  declared: Iterable<number>
-): void {
-  const declaredIndices = new Set(declared);
-
-  for (const index of recorded) {
-    assert(
-      declaredIndices.has(index),
-      `${fn.kind} function ${fn.ref.id} used undeclared Wasm ${kind} index ${index}`
-    );
-  }
 }
 
 function encodeFunctionType(type: FunctionType): WasmFunctionType {

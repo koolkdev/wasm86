@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import { buildDefinition } from "#build";
 import type { BodyAnalysis } from "#compiler/analysis/model.js";
 import { placeBody, type BodyPlacement } from "#compiler/placement/place.js";
 import type { IrBlock } from "#ir/block.js";
@@ -19,6 +20,10 @@ import type {
   TableImport
 } from "./model.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
+import {
+  validateLinkedProgramFunctions,
+  validateProgramFunctionDeclaration
+} from "./validate.js";
 
 export type LinkProgramOptions = Readonly<{
   owner: object;
@@ -35,7 +40,6 @@ export function linkProgram(options: LinkProgramOptions): Program {
   const roots = options.functions.filter(isFunctionDefinition);
   const declarations = collectFunctionDeclarations(options, declaredLegacy);
 
-  validateStaticProgram(options, declaredLegacy, declarations);
   const placements = new Map<IrBlock, BodyPlacement>();
   const legacy = placeLegacyFunctions(declaredLegacy, placements);
   const closure = closeFunctions({
@@ -47,14 +51,16 @@ export function linkProgram(options: LinkProgramOptions): Program {
       declareFunction(options, declarations, definition);
     }
   });
-  const defined = materializeDefinedFunctions(
+  const defined = linkDefinedFunctions(
     closure,
     options.signatures,
     placements
   );
   const functions: readonly ProgramFunction[] = [...legacy.functions, ...defined];
 
-  validateLinkedFunctions(functions, declarations, options.memories);
+  if (buildDefinition.validation) {
+    validateLinkedProgramFunctions(declarations.all(), functions);
+  }
   const program: ProgramData = {
     signatures: options.signatures,
     memories: options.memories,
@@ -80,7 +86,6 @@ function placeLegacyFunctions(
   const rootPlacements: BodyPlacement[] = [];
   const functions = declarations.map((fn): LegacyFunction => {
     const liveCalls: FunctionDefinition[] = [];
-    const liveResources: ResourceRef[] = [];
 
     for (const entry of fn.irBlocks) {
       const placement = placeBody(entry.block, {
@@ -94,16 +99,8 @@ function placeLegacyFunctions(
           liveCalls.push(action.target);
         }
       }
-      liveResources.push(...resourcesUsedBy(placement.analysis));
     }
     const callTargets = unique([...fn.callTargets, ...liveCalls]);
-
-    for (const resource of unique(liveResources)) {
-      assert(
-        fn.resources.includes(resource),
-        `undeclared program resource ${resource.id} used by legacy function ${fn.ref.id}`
-      );
-    }
 
     return {
       ...fn,
@@ -115,7 +112,7 @@ function placeLegacyFunctions(
   return { functions, rootPlacements };
 }
 
-function materializeDefinedFunctions(
+function linkDefinedFunctions(
   closure: FunctionClosure,
   signatures: readonly Signature[],
   placements: Map<IrBlock, BodyPlacement>
@@ -171,107 +168,19 @@ function declareFunction(
   declarations: Declarations<FunctionDeclaration>,
   definition: FunctionDefinition
 ): void {
-  assert(
-    definition.canBeUsedBy(options.owner),
-    `function ${definition.ref.id} belongs to another program`
-  );
+  if (buildDefinition.validation) {
+    validateProgramFunctionDeclaration(
+      options,
+      declarations.all(),
+      definition
+    );
+  }
   const existing = declarations.get(definition.ref);
 
   if (existing === definition) {
     return;
   }
   declarations.add(definition);
-  assert(
-    options.signatures.some((signature) => signature.type === definition.type),
-    `function ${definition.ref.id} has no program signature`
-  );
-}
-
-function validateStaticProgram(
-  options: LinkProgramOptions,
-  legacyFunctions: readonly LegacyFunction[],
-  functions: Declarations<FunctionDeclaration>
-): void {
-  for (const fn of legacyFunctions) {
-    const signature = declarationByRef(options.signatures, fn.signature);
-
-    assert(
-      signature !== undefined,
-      `unknown program signature ${fn.signature.id} declared by function ${fn.ref.id}`
-    );
-    for (const call of fn.calls) {
-      assert(
-        functions.has(call),
-        `unknown program function ${call.id} called by function ${fn.ref.id}`
-      );
-    }
-    for (const resource of fn.resources) {
-      assert(
-        declarationByRef(options.memories, resource) !== undefined,
-        `unknown program resource ${resource.id} used by function ${fn.ref.id}`
-      );
-    }
-    for (const global of fn.globals) {
-      assert(
-        declarationByRef(options.globals, global) !== undefined,
-        `unknown program global ${global.id} used by function ${fn.ref.id}`
-      );
-    }
-    for (const table of fn.tables) {
-      assert(
-        declarationByRef(options.tables, table) !== undefined,
-        `unknown program table ${table.id} used by function ${fn.ref.id}`
-      );
-    }
-  }
-
-  for (const exported of options.exports) {
-    assert(
-      functions.has(exported.target),
-      `unknown program function ${exported.target.id} exported by ${exported.ref.id}`
-    );
-  }
-}
-
-function validateLinkedFunctions(
-  functions: readonly ProgramFunction[],
-  declarations: Declarations<FunctionDeclaration>,
-  memories: readonly MemoryImport[]
-): void {
-  assert(
-    functions.length === declarations.all().length,
-    "linked program omitted a declared function"
-  );
-  for (const fn of functions) {
-    assert(declarations.has(fn.ref), `linked undeclared program function ${fn.ref.id}`);
-    const calls = fn.kind === "legacy"
-      ? fn.calls
-      : fn.callTargets.map((target) => target.ref);
-
-    for (const call of calls) {
-      assert(
-        declarations.has(call),
-        `unknown program function ${call.id} called by function ${fn.ref.id}`
-      );
-    }
-    for (const resource of fn.resources) {
-      assert(
-        declarationByRef(memories, resource) !== undefined,
-        `unknown program resource ${resource.id} used by function ${fn.ref.id}`
-      );
-    }
-    if (fn.kind === "function") {
-      for (const access of [...fn.effects.reads, ...fn.effects.writes]) {
-        if (access.space !== "resource") {
-          continue;
-        }
-        assert(
-          declarationByRef(memories, access.resource) !== undefined,
-          `unknown program resource ${access.resource.id} declared by function ${fn.ref.id}`
-        );
-      }
-    }
-  }
 }
 
 function resourcesUsedBy(analysis: BodyAnalysis): readonly ResourceRef[] {
@@ -291,13 +200,6 @@ function resourcesUsedBy(analysis: BodyAnalysis): readonly ResourceRef[] {
     }
   }
   return unique(resources);
-}
-
-function declarationByRef<TDeclaration extends Readonly<{ ref: object }>>(
-  declarations: readonly TDeclaration[],
-  ref: TDeclaration["ref"]
-): TDeclaration | undefined {
-  return declarations.find((declaration) => declaration.ref === ref);
 }
 
 function isFunctionDefinition(

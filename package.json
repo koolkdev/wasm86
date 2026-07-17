@@ -5,6 +5,11 @@
   "license": "MIT",
   "type": "module",
   "imports": {
+    "#build": {
+      "types": "./src/build.js",
+      "test": "./dist/test/build.js",
+      "default": "./dist/src/build.js"
+    },
     "#cpu/*": {
       "types": "./src/cpu/*",
       "default": "./dist/src/cpu/*"
@@ -49,7 +54,7 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "typecheck": "tsc --noEmit",
-    "test": "npm run clean && tsc -p tsconfig.json && node --test 'dist/src/**/tests/*.test.js' 'dist/test/**/*.test.js'"
+    "test": "npm run clean && tsc -p tsconfig.json && node --conditions=test --test 'dist/src/**/tests/*.test.js' 'dist/test/**/*.test.js'"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

@@ -5,9 +5,6 @@ import type {
 } from "#compiler/ir/effects.js";
 import { validateResourceEffect } from "./resource.js";
 
-// Declared function effects are consumed directly by liveness and alias
-// analysis before a callee body need be built. Validate the retained summary
-// at its declaration boundary rather than trusting its TypeScript shape.
 export function validateDeclaredStorageEffects(
   effects: StorageEffects,
   label: string

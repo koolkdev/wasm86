@@ -1,11 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { BodyAnalysis } from "#compiler/analysis/model.js";
-import type {
-  StorageEffects,
-  StorageAccess
-} from "#compiler/ir/effects.js";
 import { placeFunction, type BodyPlacement } from "#compiler/placement/place.js";
-import { covers } from "#ir/aliasing.js";
 import { buildFunction, type IrFunction } from "#ir/function.js";
 import type { FunctionDefinition } from "./functions.js";
 
@@ -69,67 +64,9 @@ export function closeFunctions(options: CloseFunctionsOptions): FunctionClosure 
     const body = buildFunction(definition.type, (fn) => definition.build(fn));
     const placement = placeFunction(body);
 
-    validateDeclaredEffects(definition, placement.analysis);
     functions.set(definition, { body, placement });
     inspectCalls(placement.analysis);
   }
 
   return { functions };
-}
-
-function validateDeclaredEffects(
-  definition: FunctionDefinition,
-  analysis: BodyAnalysis
-): void {
-  const actual = inferEffects(analysis);
-
-  assertEffectsCovered(definition, "read", actual.reads, definition.effects.reads);
-  assertEffectsCovered(definition, "write", actual.writes, definition.effects.writes);
-}
-
-function inferEffects(analysis: BodyAnalysis): StorageEffects {
-  const reads = new Set<StorageAccess>();
-  const writes = new Set<StorageAccess>();
-
-  for (const { action } of analysis.operations()) {
-    if (analysis.actionMustExecute(action)) {
-      addExternalEffects(action.op.effects.reads, reads);
-      addExternalEffects(action.op.effects.writes, writes);
-    }
-  }
-  for (const { action } of analysis.calls()) {
-    if (!analysis.callActionMustExecute(action)) {
-      continue;
-    }
-    const effects = action.target.effects;
-
-    addExternalEffects(effects.reads, reads);
-    addExternalEffects(effects.writes, writes);
-  }
-  return { reads: [...reads], writes: [...writes] };
-}
-
-function addExternalEffects(
-  effects: readonly StorageAccess[],
-  target: Set<StorageAccess>
-): void {
-  for (const effect of effects) {
-    if (effect.space !== "cell") {
-      target.add(effect);
-    }
-  }
-}
-
-function assertEffectsCovered(
-  definition: FunctionDefinition,
-  kind: "read" | "write",
-  actual: readonly StorageAccess[],
-  declared: readonly StorageAccess[]
-): void {
-  for (const access of actual) {
-    assert(
-      declared.some((candidate) => covers(candidate, access)),
-      `function ${definition.ref.id} has an undeclared ${kind} effect`
-    );
-  }
 }

@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import { buildDefinition } from "#build";
 import type { WasmMemoryLimits } from "#compiler/encoder/memory.js";
 import type { WasmTableLimits } from "#compiler/encoder/module.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
@@ -20,6 +21,10 @@ import type {
   TableImport
 } from "./model.js";
 import type { FunctionRef, SignatureRef } from "./refs.js";
+import {
+  validateProgram,
+  validateProgramDeclarations
+} from "./validate.js";
 
 export type { Program, ProgramFunction } from "./model.js";
 
@@ -119,11 +124,6 @@ export class ProgramBuilder {
 
   exportFunction(declaration: FunctionExport): void {
     this.#assertOpen();
-    assert(declaration.name.length > 0, "empty program function export name");
-    assert(
-      this.#exports.find((exported) => exported.name === declaration.name) === undefined,
-      `duplicate program export name: ${declaration.name}`
-    );
 
     this.#exports.add({
       ref: declaration.ref,
@@ -136,7 +136,7 @@ export class ProgramBuilder {
     this.#assertOpen();
     this.#closing = true;
     try {
-      const program = linkProgram({
+      const declarations = {
         owner: this.#owner,
         signatures: this.#signatures.all(),
         memories: this.#memories.all(),
@@ -144,8 +144,16 @@ export class ProgramBuilder {
         globals: this.#globals.all(),
         functions: this.#functions.all(),
         exports: this.#exports.all()
-      });
+      };
 
+      if (buildDefinition.validation) {
+        validateProgramDeclarations(declarations);
+      }
+      const program = linkProgram(declarations);
+
+      if (buildDefinition.validation) {
+        validateProgram(program);
+      }
       this.#finished = true;
       return program;
     } finally {
@@ -167,7 +175,6 @@ function normalizeLegacyFunction(declaration: LegacyFunctionDeclaration): Legacy
     )
   );
 
-  assert(effects === "none" || effects === "world", `unknown legacy function effects: ${effects}`);
   return {
     kind: "legacy",
     ref: declaration.ref,

@@ -12,7 +12,6 @@ import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
 import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import type { LegacyFunctionBindings } from "#compiler/program/legacy-body.js";
-import { validatePlacement } from "#compiler/placement/validate.js";
 import {
   exportRef,
   functionRef,
@@ -213,14 +212,7 @@ function createIrBlockProgram(
     name: wasmBlockExportName,
     target: entry
   });
-  return validateProgramPlacements(builder.finish());
-}
-
-function validateProgramPlacements(program: Program): Program {
-  for (const placement of program.placements.values()) {
-    validatePlacement(placement.block, placement.analysis, placement.plan);
-  }
-  return program;
+  return builder.finish();
 }
 
 function initializeTestModule(module: WasmModuleEncoder, paramCount: number): number {

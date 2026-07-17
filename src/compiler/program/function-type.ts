@@ -1,4 +1,3 @@
-import { assert } from "#common/assert.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
 
 declare const functionTypeBrand: unique symbol;
@@ -15,10 +14,6 @@ export function functionType(
   parameters: readonly ValueType[],
   results: readonly ValueType[]
 ): FunctionType {
-  for (const type of [...parameters, ...results]) {
-    assert(type === "i32" || type === "i64", `unknown function value type: ${String(type)}`);
-  }
-
   return {
     parameters: [...parameters],
     results: [...results]
