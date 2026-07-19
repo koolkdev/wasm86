@@ -11,7 +11,7 @@ import { wasmValueType } from "#compiler/encoder/types.js";
 import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
 import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
-import type { LegacyFunctionBindings } from "#compiler/program/legacy-body.js";
+import type { LegacyFunctionBodyContext } from "#compiler/program/legacy-body.js";
 import {
   exportRef,
   functionRef,
@@ -59,11 +59,11 @@ export function irBlockBody(block: IrBlock, externalParamCount = 0): EncodedWasm
 function emitIrBlockBody(
   block: IrBlock,
   externalParamCount: number,
-  bindings: LegacyFunctionBindings
+  context: LegacyFunctionBodyContext
 ): EncodedWasmFunctionBody {
   const body = new WasmFunctionBodyEncoder(externalParamCount);
   const scratch = new WasmLocalScratchAllocator(body);
-  const placement = bindings.placements.get(block);
+  const placement = context.placements.get(block);
 
   assert(placement !== undefined, "missing test IR block placement");
 
@@ -72,10 +72,7 @@ function emitIrBlockBody(
     body,
     scratch,
     externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id])),
-    functionIndices: bindings.definitionIndices,
-    typeIndices: bindings.typeIndices,
-    tableIndices: bindings.tables,
-    resourceIndices: bindings.resources,
+    bindings: context.bindings,
     placement,
     embedding: {
       dispatch: { kind: "br", depth: 0 },
@@ -194,16 +191,12 @@ function createIrBlockProgram(
     globals: [],
     tables: [],
     irBlocks: [{ block, allowImplicitEntryFallthrough: true }],
-    build: (bindings) => {
+    build: (context) => {
       assert(
-        bindings.resources.get(cpuStateRef) === wasmMemoryIndex.cpuState,
+        context.bindings.resourceIndex(cpuStateRef) === wasmMemoryIndex.cpuState,
         "unexpected CPU-state memory import index"
       );
-      assert(
-        bindings.resources.has(guestMemoryResource),
-        "missing resolved guest-memory resource"
-      );
-      const body = emitIrBlockBody(block, externalParamCount, bindings);
+      const body = emitIrBlockBody(block, externalParamCount, context);
 
       bodyEncoded?.(body);
       return body;

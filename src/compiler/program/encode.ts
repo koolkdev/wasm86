@@ -15,8 +15,9 @@ import type {
   TableRef
 } from "./refs.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
+import { createModuleBindings } from "./bindings.js";
 import type {
-  LegacyFunctionBindings
+  LegacyFunctionBodyContext
 } from "./legacy-body.js";
 import type { FunctionType } from "./function-type.js";
 import type { FunctionDefinition } from "./functions.js";
@@ -171,9 +172,8 @@ function buildLegacyBody(
   assert(signatureIndex !== undefined, `missing layout for program signature ${fn.signature.id}`);
 
   const functions = resolveFunctionIndices(layout, fn);
-  const definitionIndices = resolveDefinitionIndices(layout, fn.callTargets);
-  const typeIndices = resolveTypeIndices(layout, fn.indirectTypes);
-
+  const definitions = resolveDefinitionIndices(layout, fn.callTargets);
+  const types = resolveTypeIndices(layout, fn.indirectTypes);
   const resources = resolveResourceIndices(layout, fn.resources);
 
   const globals = new Map<GlobalRef, number>();
@@ -187,32 +187,36 @@ function buildLegacyBody(
 
   const tables = resolveTableIndices(layout, fn.tables);
 
-  const bindings = {
-    typeIndex: signatureIndex,
-    typeIndices,
+  const context = {
+    bindings: createModuleBindings({
+      functionDefinitions: definitions,
+      types,
+      tables,
+      resources
+    }),
     functions,
-    definitionIndices,
-    resources,
     globals,
-    tables,
+    signatureIndex,
     placements: program.placements
-  } satisfies LegacyFunctionBindings;
-  return fn.build(bindings);
+  } satisfies LegacyFunctionBodyContext;
+  return fn.build(context);
 }
 
 function buildDefinedBody(
   layout: ProgramLayout,
   fn: DefinedFunction
 ): EncodedWasmFunctionBody {
-  const functions = resolveDefinitionIndices(layout, fn.directTargets);
-  const typeIndices = resolveTypeIndices(layout, fn.indirectTypes);
+  const definitions = resolveDefinitionIndices(layout, fn.directTargets);
+  const types = resolveTypeIndices(layout, fn.indirectTypes);
   const resources = resolveResourceIndices(layout, fn.resources);
-  const tableIndices = resolveTableIndices(layout, fn.tables);
+  const tables = resolveTableIndices(layout, fn.tables);
   return emitFunction(fn.body, {
-    functionIndices: functions,
-    typeIndices,
-    resourceIndices: resources,
-    tableIndices,
+    bindings: createModuleBindings({
+      functionDefinitions: definitions,
+      types,
+      tables,
+      resources
+    }),
     placement: fn.placement
   });
 }

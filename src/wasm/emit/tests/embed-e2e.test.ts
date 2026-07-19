@@ -11,6 +11,7 @@ import { cpuState, cpuStateAccess } from "#cpu/state.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
+import { createModuleBindings } from "#compiler/program/bindings.js";
 import type { RunStop } from "#cpu/cpu.js";
 import { buildExit, decodeExit } from "#cpu/exit.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
@@ -42,13 +43,23 @@ type DecodeReadFragment = Readonly<{
   fetched: ValueId;
 }>;
 
-const stateResourceIndices = new Map([
-  [cpuState.resource, wasmMemoryIndex.cpuState]
-]);
-const decodeResourceIndices = new Map([
-  [cpuState.resource, wasmMemoryIndex.cpuState],
-  [guestMemoryResource, wasmMemoryIndex.guest]
-]);
+const stateBindings = createModuleBindings({
+  functionDefinitions: new Map(),
+  types: new Map(),
+  tables: new Map(),
+  resources: new Map([
+    [cpuState.resource, wasmMemoryIndex.cpuState]
+  ])
+});
+const decodeBindings = createModuleBindings({
+  functionDefinitions: new Map(),
+  types: new Map(),
+  tables: new Map(),
+  resources: new Map([
+    [cpuState.resource, wasmMemoryIndex.cpuState],
+    [guestMemoryResource, wasmMemoryIndex.guest]
+  ])
+});
 
 function dispatchFragment(targetEip: number): IrBlock {
   const values = new ValueTable();
@@ -126,7 +137,7 @@ async function instantiateDecodeRead(fallthrough: FallthroughTarget) {
   emitActionFragment(fragment.block, {
     body,
     scratch,
-    resourceIndices: decodeResourceIndices,
+    bindings: decodeBindings,
     embedding: { fallthrough, outputs: new Map([[fragment.fetched, fetchedLocal]]) }
   });
   body.localGet(fetchedLocal).i64ExtendI32U();
@@ -163,7 +174,7 @@ test("a dispatching fragment requires a dispatch embedding", () => {
       emitActionFragment(dispatchFragment(0x20), {
         body,
         scratch,
-        resourceIndices: stateResourceIndices,
+        bindings: stateBindings,
         embedding: {}
       }),
     /dispatch control requires embedding\.dispatch/
@@ -179,7 +190,7 @@ test("dispatch br target skips later enclosing harness-style nodes", async () =>
   emitActionFragment(dispatchFragment(0x20), {
     body,
     scratch,
-    resourceIndices: stateResourceIndices,
+    bindings: stateBindings,
     embedding: {
       dispatch: { kind: "br", depth: 0 },
       fallthrough: { kind: "fallthrough" }
@@ -220,7 +231,7 @@ test("fallthrough br target lands on the embedder label across the fragment's ne
   emitActionFragment(fragment.block, {
     body,
     scratch,
-    resourceIndices: decodeResourceIndices,
+    bindings: decodeBindings,
     embedding: {
       fallthrough: { kind: "br", depth: 0 },
       outputs: new Map([[fragment.fetched, fetchedLocal]])
@@ -252,7 +263,7 @@ test("consecutive fragments share the embedder's scratch locals", async () => {
     emitActionFragment(fragment.block, {
       body,
       scratch,
-      resourceIndices: decodeResourceIndices,
+      bindings: decodeBindings,
       embedding: {
         fallthrough: { kind: "fallthrough" },
         outputs: new Map([[fragment.fetched, local]])

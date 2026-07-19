@@ -34,7 +34,6 @@ export function operationResult(type: ValueType): OperationResult {
 // occurrence's direct `emit` function uses only the capabilities it needs.
 export type OperationEmitTarget = InvocationEmitTarget & Readonly<{
   cellLocal: (cell: CellRef) => number;
-  resourceIndex: (resource: ResourceRef) => number;
 }>;
 
 export type OperationOutputAllocator = (result: OperationResult) => ValueId;

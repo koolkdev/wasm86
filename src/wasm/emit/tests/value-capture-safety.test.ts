@@ -9,6 +9,7 @@ import { ValueTable } from "#compiler/ir/values/table.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
+import { createModuleBindings } from "#compiler/program/bindings.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
 import { cpuState, cpuStateAccess } from "#cpu/state.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
@@ -279,9 +280,14 @@ test("an exported trapping value evaluates at the fragment boundary", async () =
   emitActionFragment(block, {
     body,
     scratch,
-    resourceIndices: new Map([
-      [cpuState.resource, wasmMemoryIndex.cpuState]
-    ]),
+    bindings: createModuleBindings({
+      functionDefinitions: new Map(),
+      types: new Map(),
+      tables: new Map(),
+      resources: new Map([
+        [cpuState.resource, wasmMemoryIndex.cpuState]
+      ])
+    }),
     externalLocals: new Map([[0, 0], [1, 1]]),
     embedding: {
       fallthrough: { kind: "fallthrough" },

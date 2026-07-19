@@ -3,7 +3,7 @@ import type {
   FunctionRef,
   TableRef
 } from "#compiler/program/refs.js";
-import type { LegacyFunctionBindings } from "#compiler/program/legacy-body.js";
+import type { LegacyFunctionBodyContext } from "#compiler/program/legacy-body.js";
 import { u32 } from "#core/numeric.js";
 import type { LinkCompletion } from "#wasm/emit/embed.js";
 import type { JitLinkLayout } from "./compiled-blocks/module-link-table.js";
@@ -33,7 +33,7 @@ export class LegacyNumericLinkAdapter {
     }
   }
 
-  resolve(bindings: LegacyFunctionBindings): LinkCompletion {
+  resolve(context: LegacyFunctionBodyContext): LinkCompletion {
     const tableLinks = [...this.#linksByTargetEip.values()].filter(
       (link): link is JitLink & Readonly<{
         target: Readonly<{ kind: "table"; table: TableRef }>;
@@ -48,7 +48,7 @@ export class LegacyNumericLinkAdapter {
           return undefined;
         }
 
-        const functionIndex = bindings.functions.get(link.target.function);
+        const functionIndex = context.functions.get(link.target.function);
 
         assert(
           functionIndex !== undefined,
@@ -69,11 +69,10 @@ export class LegacyNumericLinkAdapter {
       tableLinks.every((link) => link.target.table === tableRef),
       "one legacy JIT function cannot resolve multiple numeric link tables"
     );
-    const typeIndex = bindings.typeIndex;
-    const tableIndex = bindings.tables.get(tableRef);
+    const typeIndex = context.signatureIndex;
+    const tableIndex = context.bindings.tableIndex(tableRef);
     const linkLayout = this.#linkLayout;
 
-    assert(tableIndex !== undefined, `missing resolved JIT link table ${tableRef.id}`);
     assert(linkLayout !== undefined, "missing slot layout for resolved JIT links");
     return {
       ...completion,

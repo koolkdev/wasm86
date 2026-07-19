@@ -20,38 +20,26 @@ import {
 import { createCompletionFrame } from "./completion-frame.js";
 import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
 import { ValueEmitter, wasmTypeForValue } from "./value-emitter.js";
-import type { FunctionDefinition } from "#compiler/program/functions.js";
-import type { FunctionType } from "#compiler/program/function-type.js";
-import type { TableRef } from "#compiler/program/refs.js";
-import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { ModuleBindings } from "#compiler/program/bindings.js";
 import type { IrFunction } from "#ir/function.js";
 
 export type ActionFragmentContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   externalLocals?: ReadonlyMap<ExternalValueId, number>;
-  functionIndices?: ReadonlyMap<FunctionDefinition, number> | undefined;
-  typeIndices?: ReadonlyMap<FunctionType, number> | undefined;
-  tableIndices?: ReadonlyMap<TableRef, number> | undefined;
-  resourceIndices?: ReadonlyMap<ResourceRef, number> | undefined;
+  bindings: ModuleBindings;
   placement?: BodyPlacement | undefined;
   embedding: FragmentEmbedding;
 }>;
 
 export type ActionFunctionContext = Readonly<{
-  functionIndices?: ReadonlyMap<FunctionDefinition, number> | undefined;
-  typeIndices?: ReadonlyMap<FunctionType, number> | undefined;
-  tableIndices?: ReadonlyMap<TableRef, number> | undefined;
-  resourceIndices?: ReadonlyMap<ResourceRef, number> | undefined;
+  bindings: ModuleBindings;
   placement?: BodyPlacement | undefined;
   embedding: FunctionEmbedding;
 }>;
 
 export type FunctionEmitContext = Readonly<{
-  functionIndices: ReadonlyMap<FunctionDefinition, number>;
-  typeIndices: ReadonlyMap<FunctionType, number>;
-  tableIndices: ReadonlyMap<TableRef, number>;
-  resourceIndices: ReadonlyMap<ResourceRef, number>;
+  bindings: ModuleBindings;
   placement: BodyPlacement;
 }>;
 
@@ -65,10 +53,7 @@ export function emitFunction(
   emitActionFragment(fn, {
     body,
     scratch,
-    functionIndices: context.functionIndices,
-    typeIndices: context.typeIndices,
-    tableIndices: context.tableIndices,
-    resourceIndices: context.resourceIndices,
+    bindings: context.bindings,
     placement: context.placement,
     embedding: {}
   });
@@ -86,10 +71,7 @@ export function emitActionFunction(
   emitActionFragment(block, {
     body,
     scratch,
-    functionIndices: context.functionIndices,
-    typeIndices: context.typeIndices,
-    tableIndices: context.tableIndices,
-    resourceIndices: context.resourceIndices,
+    bindings: context.bindings,
     placement: context.placement,
     embedding: context.embedding
   });
@@ -107,25 +89,6 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   );
 
   try {
-    const functionIndex = (target: FunctionDefinition): number => {
-      const resolved = context.functionIndices?.get(target);
-
-      assert(resolved !== undefined, `missing resolved function ${target.ref.id}`);
-      return resolved;
-    };
-    const typeIndex = (type: FunctionType): number => {
-      const resolved = context.typeIndices?.get(type);
-
-      assert(resolved !== undefined, "missing resolved indirect call type");
-      return resolved;
-    };
-    const tableIndex = (table: TableRef): number => {
-      const resolved = context.tableIndices?.get(table);
-
-      assert(resolved !== undefined, `missing resolved table ${table.id}`);
-      return resolved;
-    };
-
     const valueEmitter = new ValueEmitter({
       body,
       values: block.values,
@@ -134,15 +97,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       index,
       locals,
       externalLocals: context.externalLocals ?? new Map(),
-      functionIndex,
-      typeIndex,
-      tableIndex,
-      resourceIndex: (resource) => {
-        const resourceIndex = context.resourceIndices?.get(resource);
-
-        assert(resourceIndex !== undefined, `missing resolved resource ${resource.id}`);
-        return resourceIndex;
-      }
+      bindings: context.bindings
     });
     const frame = createCompletionFrame({
       body,
@@ -161,9 +116,7 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     const controlTarget: ControlEmitTarget = {
       body,
       bodyCompletes,
-      functionIndex,
-      typeIndex,
-      tableIndex,
+      bindings: context.bindings,
       emitCaptures: () => valueEmitter.emitCaptures(),
       emitBody,
       controlOutputLocal(output) {

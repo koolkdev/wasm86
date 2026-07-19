@@ -8,19 +8,16 @@ import type {
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { IrBlock } from "#ir/block.js";
 import type { BodyPlacement } from "#compiler/placement/place.js";
+import type { ModuleBindings } from "./bindings.js";
 import type { FunctionDefinition } from "./functions.js";
-import type { FunctionType } from "./function-type.js";
 
 export type LegacyEffects = "none" | "world";
 
-export type LegacyFunctionBindings = Readonly<{
-  typeIndex: number;
-  typeIndices: ReadonlyMap<FunctionType, number>;
+export type LegacyFunctionBodyContext = Readonly<{
+  bindings: ModuleBindings;
   functions: ReadonlyMap<FunctionRef, number>;
-  definitionIndices: ReadonlyMap<FunctionDefinition, number>;
-  resources: ReadonlyMap<ResourceRef, number>;
   globals: ReadonlyMap<GlobalRef, number>;
-  tables: ReadonlyMap<TableRef, number>;
+  signatureIndex: number;
   placements: ReadonlyMap<IrBlock, BodyPlacement>;
 }>;
 
@@ -38,5 +35,5 @@ export type LegacyFunctionDeclaration = Readonly<{
   tables: readonly TableRef[];
   irBlocks: readonly LegacyIrBlockDeclaration[];
   effects?: LegacyEffects;
-  build(bindings: LegacyFunctionBindings): EncodedWasmFunctionBody;
+  build(context: LegacyFunctionBodyContext): EncodedWasmFunctionBody;
 }>;

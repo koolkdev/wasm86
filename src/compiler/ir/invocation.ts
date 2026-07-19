@@ -2,6 +2,7 @@ import { assert } from "#common/assert.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ValueInput } from "#compiler/ir/values/types.js";
+import type { ModuleBindings } from "#compiler/program/bindings.js";
 import type { FunctionType } from "#compiler/program/function-type.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type { TableRef } from "#compiler/program/refs.js";
@@ -9,9 +10,7 @@ import type { ValueUseEmitter } from "#ir/node.js";
 
 export type InvocationEmitTarget = Readonly<{
   body: WasmFunctionBodyEncoder;
-  functionIndex: (definition: FunctionDefinition) => number;
-  typeIndex: (type: FunctionType) => number;
-  tableIndex: (table: TableRef) => number;
+  bindings: ModuleBindings;
 }>;
 
 export type CallTargetReferences = Readonly<{
@@ -68,15 +67,15 @@ export class IndirectCallTarget implements CallTarget {
 
   emitCall(context: InvocationEmitTarget): void {
     context.body.callIndirect(
-      context.typeIndex(this.type),
-      context.tableIndex(this.table)
+      context.bindings.typeIndex(this.type),
+      context.bindings.tableIndex(this.table)
     );
   }
 
   emitReturnCall(context: InvocationEmitTarget): void {
     context.body.returnCallIndirect(
-      context.typeIndex(this.type),
-      context.tableIndex(this.table)
+      context.bindings.typeIndex(this.type),
+      context.bindings.tableIndex(this.table)
     );
   }
 }

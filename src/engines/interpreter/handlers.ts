@@ -27,6 +27,7 @@ import { reg32Index } from "#core/registers.js";
 import { reg16, reg32, reg8, type Reg32, type RegName, type SegmentRegister } from "#core/types.js";
 import { wasmBranchHint, type WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
+import type { ModuleBindings } from "#compiler/program/bindings.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import {
   emitImmediateFetch,
@@ -41,7 +42,6 @@ import {
   type ModRmScratch,
   type RmAddressScratch
 } from "./locals.js";
-import type { FunctionCallBindings } from "./function-calls.js";
 
 // Instruction handlers are single-instruction IrBlocks over the existing
 // semantics templates. Decoded operands arrive as externals — dynamic
@@ -57,9 +57,10 @@ export type InterpreterHandler = Readonly<{
   form: HandlerForm;
 }>;
 
-export type HandlerEmitContext = FunctionCallBindings & Readonly<{
+export type HandlerEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
+  bindings: ModuleBindings;
   locals: InterpreterLocals;
   // Label depth from the emission point to the instruction-complete target.
   continueDepth: number;
@@ -111,10 +112,7 @@ export function emitInstructionHandler(
         body: context.body,
         scratch: context.scratch,
         externalLocals: externals.locals,
-        functionIndices: context.functionIndices,
-        typeIndices: context.typeIndices,
-        tableIndices: context.tableIndices,
-        resourceIndices: context.resourceIndices,
+        bindings: context.bindings,
         embedding: { dispatch: { kind: "br", depth: context.continueDepth } }
       });
       context.handlers.push({

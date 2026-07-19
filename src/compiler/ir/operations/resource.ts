@@ -87,7 +87,7 @@ export class ResourceReadOperation extends OperationBase {
   emit(target: OperationEmitTarget, values: ValueUseEmitter): void {
     values.emitUse(this.inputs[0].value);
     const immediate = resourceImmediate(
-      target.resourceIndex(this.effect.resource),
+      target.bindings.resourceIndex(this.effect.resource),
       this.width,
       this.displacement
     );
@@ -158,7 +158,7 @@ export class ResourceWriteOperation extends OperationBase {
     values.emitUse(this.inputs[0].value);
     values.emitUse(this.inputs[1].value);
     const immediate = resourceImmediate(
-      target.resourceIndex(this.effect.resource),
+      target.bindings.resourceIndex(this.effect.resource),
       this.width,
       this.displacement
     );

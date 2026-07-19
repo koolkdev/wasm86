@@ -9,6 +9,7 @@ import {
   type ResourceEffect
 } from "#compiler/ir/resource.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
+import { createModuleBindings } from "#compiler/program/bindings.js";
 import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import {
@@ -61,10 +62,12 @@ test("dead pure indirect invocations retain no encoding dependencies", () => {
   deepStrictEqual(linked.indirectTypes, []);
   deepStrictEqual(linked.tables, []);
   const body = emitFunction(linked.body, {
-    functionIndices: new Map(),
-    typeIndices: new Map(),
-    resourceIndices: new Map(),
-    tableIndices: new Map(),
+    bindings: createModuleBindings({
+      functionDefinitions: new Map(),
+      types: new Map(),
+      tables: new Map(),
+      resources: new Map()
+    }),
     placement: linked.placement
   });
 
@@ -212,13 +215,10 @@ test("legacy symbolic blocks inherit live indirect dependencies", async () => {
     globals: [],
     tables: [],
     irBlocks: [{ block, allowImplicitEntryFallthrough: true }],
-    build: (bindings) => {
-      const typeIndex = bindings.typeIndices.get(type);
-      const tableIndex = bindings.tables.get(table);
+    build: (context) => {
+      const typeIndex = context.bindings.typeIndex(type);
+      const tableIndex = context.bindings.tableIndex(table);
 
-      if (typeIndex === undefined || tableIndex === undefined) {
-        throw new Error("missing inherited legacy indirect bindings");
-      }
       return new WasmFunctionBodyEncoder()
         .i32Const(0)
         .callIndirect(typeIndex, tableIndex)
@@ -371,18 +371,18 @@ test("defined functions bind ordinary and returning indirect invocations", async
     deepStrictEqual(fn.tables, [table]);
   }
 
-  const emitContext = {
-    functionIndices: new Map(),
-    typeIndices: new Map([[type, 5]]),
-    resourceIndices: new Map(),
-    tableIndices: new Map([[table, 7]])
-  };
+  const bindings = createModuleBindings({
+    functionDefinitions: new Map(),
+    types: new Map([[type, 5]]),
+    tables: new Map([[table, 7]]),
+    resources: new Map()
+  });
   const ordinaryBody = emitFunction(ordinaryFunction.body, {
-    ...emitContext,
+    bindings,
     placement: ordinaryFunction.placement
   });
   const returningBody = emitFunction(returningFunction.body, {
-    ...emitContext,
+    bindings,
     placement: returningFunction.placement
   });
 

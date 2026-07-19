@@ -49,11 +49,11 @@ export class FunctionDefinition implements CallTarget {
   }
 
   emitCall(context: InvocationEmitTarget): void {
-    context.body.callFunction(context.functionIndex(this));
+    context.body.callFunction(context.bindings.functionIndex(this));
   }
 
   emitReturnCall(context: InvocationEmitTarget): void {
-    context.body.returnCallFunction(context.functionIndex(this));
+    context.body.returnCallFunction(context.bindings.functionIndex(this));
   }
 
   build(fn: FunctionBuilder): void {

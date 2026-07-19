@@ -5,8 +5,8 @@ import {
 } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
+import type { ModuleBindings } from "#compiler/program/bindings.js";
 import { functionType } from "#compiler/program/function-type.js";
-import type { ResourceRef } from "#compiler/ir/resource.js";
 import {
   emitRmAddressFragment,
   emitSibFetch,
@@ -99,7 +99,7 @@ type HelperLocals = Readonly<{
 type HelperContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  resourceIndices: ReadonlyMap<ResourceRef, number>;
+  bindings: ModuleBindings;
   locals: HelperLocals;
   globals: RmDecodeGlobals;
 }>;
@@ -107,14 +107,14 @@ type HelperContext = Readonly<{
 export function encodeRmDecodeHelperBody(
   opcodeLength: number,
   globals: RmDecodeGlobals,
-  resourceIndices: ReadonlyMap<ResourceRef, number>
+  bindings: ModuleBindings
 ): EncodedWasmFunctionBody {
   const body = new WasmFunctionBodyEncoder(rmDecodeFunctionType.parameters.length);
   const scratch = new WasmLocalScratchAllocator(body);
   const context: HelperContext = {
     body,
     scratch,
-    resourceIndices,
+    bindings,
     locals: {
       eip: 0,
       mod: 1,

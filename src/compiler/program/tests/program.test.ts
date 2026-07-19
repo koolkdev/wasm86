@@ -1,11 +1,13 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
+import { assert } from "#common/assert.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
+import { createModuleBindings } from "#compiler/program/bindings.js";
 import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { FunctionFamily, type FunctionDefinition } from "#compiler/program/functions.js";
@@ -128,13 +130,11 @@ test("forward function declarations close before their factories build and execu
     globals: [],
     tables: [],
     irBlocks: [],
-    build: (bindings) => {
+    build: (context) => {
       buildCount += 1;
-      const calleeIndex = bindings.functions.get(callee);
+      const calleeIndex = context.functions.get(callee);
 
-      if (calleeIndex === undefined) {
-        throw new Error("missing forward callee binding");
-      }
+      assert(calleeIndex !== undefined, "missing forward callee binding");
       return new WasmFunctionBodyEncoder().callFunction(calleeIndex).finish();
     }
   });
@@ -578,12 +578,13 @@ test("an effectful function call stays single and conditional inside its selecte
     throw new Error("missing conditional caller");
   }
   deepStrictEqual(callerDefinition.effects, effects);
-  const functionIndices = new Map([[callee, 0]]);
   const emitted = emitFunction(callerDefinition.body, {
-    functionIndices,
-    typeIndices: new Map(),
-    tableIndices: new Map(),
-    resourceIndices: new Map(),
+    bindings: createModuleBindings({
+      functionDefinitions: new Map([[callee, 0]]),
+      types: new Map(),
+      tables: new Map(),
+      resources: new Map()
+    }),
     placement: callerDefinition.placement
   });
   const opcodes = wasmBodyOpcodes(emitted.bytes);
@@ -1526,12 +1527,10 @@ test("typed internal globals resolve through declared legacy bindings and execut
     globals: [counter],
     tables: [],
     irBlocks: [],
-    build: (bindings) => {
-      const counterIndex = bindings.globals.get(counter);
+    build: (context) => {
+      const counterIndex = context.globals.get(counter);
 
-      if (counterIndex === undefined) {
-        throw new Error("missing counter global binding");
-      }
+      assert(counterIndex !== undefined, "missing counter global binding");
       return new WasmFunctionBodyEncoder()
         .globalGet(counterIndex)
         .i32Const(1)
@@ -1766,8 +1765,8 @@ test("distinct semantic function contracts coalesce to one physical Wasm type", 
     globals: [],
     tables: [],
     irBlocks: [],
-    build: (bindings) => {
-      firstTypeIndex = bindings.typeIndex;
+    build: (context) => {
+      firstTypeIndex = context.signatureIndex;
       return new WasmFunctionBodyEncoder().i32Const(1).finish();
     }
   });
@@ -1779,8 +1778,8 @@ test("distinct semantic function contracts coalesce to one physical Wasm type", 
     globals: [],
     tables: [],
     irBlocks: [],
-    build: (bindings) => {
-      secondTypeIndex = bindings.typeIndex;
+    build: (context) => {
+      secondTypeIndex = context.signatureIndex;
       return new WasmFunctionBodyEncoder().i32Const(2).finish();
     }
   });

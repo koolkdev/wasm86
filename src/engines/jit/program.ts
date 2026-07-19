@@ -240,8 +240,7 @@ function declareBlocks(
     const adapter = new LegacyActionEmbeddingAdapter({
       ir: block.ir,
       links: new LegacyNumericLinkAdapter(links, linkLayout),
-      cpuState: program.cpuState,
-      guestMemory: program.guestMemory
+      cpuState: program.cpuState
     });
 
     program.builder.legacyFunction({
@@ -255,7 +254,7 @@ function declareBlocks(
         : [],
       irBlocks: [{ block: block.ir, allowImplicitEntryFallthrough: false }],
       effects: legacyJitEffects,
-      build: (bindings) => adapter.build(bindings)
+      build: (context) => adapter.build(context)
     });
     program.builder.exportFunction({
       ref: exportRef(`jit.block-export.${hex(block.entryEip)}`),

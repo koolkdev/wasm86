@@ -17,6 +17,7 @@ import {
 } from "#compiler/ir/resource.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
+import { createModuleBindings } from "#compiler/program/bindings.js";
 import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import {
@@ -150,10 +151,12 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
   deepStrictEqual(callerFunction.directTargets, [target]);
   strictEqual(callerFunction.body.body.nodes[0]?.kind, "return");
   const emitted = emitFunction(callerFunction.body, {
-    functionIndices: new Map([[target, 1]]),
-    typeIndices: new Map(),
-    resourceIndices: new Map(),
-    tableIndices: new Map(),
+    bindings: createModuleBindings({
+      functionDefinitions: new Map([[target, 1]]),
+      types: new Map(),
+      tables: new Map(),
+      resources: new Map()
+    }),
     placement: callerFunction.placement
   });
   const opcodes = wasmBodyOpcodes(emitted.bytes);

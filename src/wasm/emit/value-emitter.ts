@@ -14,10 +14,7 @@ import type { ExternalValueId, ValueId, ValueType } from "#compiler/ir/values/ty
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { PlacementIndex } from "#compiler/placement/index.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
-import type { FunctionDefinition } from "#compiler/program/functions.js";
-import type { FunctionType } from "#compiler/program/function-type.js";
-import type { TableRef } from "#compiler/program/refs.js";
-import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { ModuleBindings } from "#compiler/program/bindings.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
 import type { ValueUseEmitter } from "#ir/node.js";
@@ -32,10 +29,7 @@ export type ValueEmitterContext = Readonly<{
   locals: readonly number[];
   // External id -> the Wasm local supplied by the embedding.
   externalLocals: ReadonlyMap<ExternalValueId, number>;
-  functionIndex(target: FunctionDefinition): number;
-  typeIndex(type: FunctionType): number;
-  tableIndex(table: TableRef): number;
-  resourceIndex(resource: ResourceRef): number;
+  bindings: ModuleBindings;
 }>;
 
 // Executes a placement plan mechanically. Mutable state records only which
@@ -70,10 +64,7 @@ export class ValueEmitter implements ValueUseEmitter {
     this.#operationTarget = {
       body: context.body,
       cellLocal: (cell) => this.#cellLocal(cell),
-      resourceIndex: (resource) => context.resourceIndex(resource),
-      functionIndex: (target) => context.functionIndex(target),
-      typeIndex: (type) => context.typeIndex(type),
-      tableIndex: (table) => context.tableIndex(table)
+      bindings: context.bindings
     };
     this.#valueContext = {
       body: context.body,

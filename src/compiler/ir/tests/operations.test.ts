@@ -36,6 +36,7 @@ import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js"
 import { CellRef } from "#compiler/refs/cell.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
+import { createModuleBindings } from "#compiler/program/bindings.js";
 import { functionRef, tableRef } from "#compiler/program/refs.js";
 
 test("operation owners atomically construct complete occurrences", () => {
@@ -299,14 +300,14 @@ test("call targets are structurally polymorphic", () => {
     references: { functions: [], types: [type], tables: [table] },
     emitCall(context) {
       context.body.callIndirect(
-        context.typeIndex(type),
-        context.tableIndex(table)
+        context.bindings.typeIndex(type),
+        context.bindings.tableIndex(table)
       );
     },
     emitReturnCall(context) {
       context.body.returnCallIndirect(
-        context.typeIndex(type),
-        context.tableIndex(table)
+        context.bindings.typeIndex(type),
+        context.bindings.tableIndex(table)
       );
     }
   } satisfies CallTarget;
@@ -347,18 +348,12 @@ test("indirect invocations own their selector, effects, and emission", () => {
   operation.emit({
     body,
     cellLocal: () => 0,
-    resourceIndex: () => 0,
-    functionIndex: () => {
-      throw new Error("indirect call requested a direct function index");
-    },
-    typeIndex(candidate) {
-      strictEqual(candidate, type);
-      return 8;
-    },
-    tableIndex(candidate) {
-      strictEqual(candidate, table);
-      return 9;
-    }
+    bindings: createModuleBindings({
+      functionDefinitions: new Map(),
+      types: new Map([[type, 8]]),
+      tables: new Map([[table, 9]]),
+      resources: new Map()
+    })
   }, {
     emitUse(value) {
       uses.push(value);
@@ -418,19 +413,12 @@ test("resource and cell emission call their definition-specific target services"
       strictEqual(candidate, cell);
       return 2;
     },
-    resourceIndex(candidate) {
-      strictEqual(candidate, resource);
-      return 3;
-    },
-    functionIndex: () => {
-      throw new Error("non-call operation requested a function index");
-    },
-    typeIndex: () => {
-      throw new Error("non-call operation requested a type index");
-    },
-    tableIndex: () => {
-      throw new Error("non-call operation requested a table index");
-    }
+    bindings: createModuleBindings({
+      functionDefinitions: new Map(),
+      types: new Map(),
+      tables: new Map(),
+      resources: new Map([[resource, 3]])
+    })
   };
   const uses: ValueId[] = [];
   const values = {
@@ -464,13 +452,14 @@ function operationTarget(
   return {
     body,
     cellLocal: () => 0,
-    resourceIndex: () => 0,
-    functionIndex(candidate) {
-      strictEqual(candidate, expectedFunction);
-      return 7;
-    },
-    typeIndex: () => 0,
-    tableIndex: () => 0
+    bindings: createModuleBindings({
+      functionDefinitions: expectedFunction === undefined
+        ? new Map()
+        : new Map([[expectedFunction, 7]]),
+      types: new Map(),
+      tables: new Map(),
+      resources: new Map()
+    })
   };
 }
 

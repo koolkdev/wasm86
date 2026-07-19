@@ -29,6 +29,7 @@ import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
+import { createModuleBindings } from "#compiler/program/bindings.js";
 import { functionRef, tableRef } from "#compiler/program/refs.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import type { Body } from "#ir/block.js";
@@ -402,14 +403,12 @@ test("an indirect invocation return emits arguments, selector, and return_call_i
 
   control.emit({
     ...rawControlTarget(body),
-    typeIndex(candidate) {
-      strictEqual(candidate, type);
-      return 5;
-    },
-    tableIndex(candidate) {
-      strictEqual(candidate, table);
-      return 6;
-    }
+    bindings: createModuleBindings({
+      functionDefinitions: new Map(),
+      types: new Map([[type, 5]]),
+      tables: new Map([[table, 6]]),
+      resources: new Map()
+    })
   }, {
     emitUse(value) {
       uses.push(value);
@@ -543,12 +542,14 @@ function rawControlTarget(
 ): ControlEmitTarget {
   return {
     body,
-    functionIndex(candidate) {
-      strictEqual(candidate, expectedFunction);
-      return 7;
-    },
-    typeIndex: unsupported,
-    tableIndex: unsupported,
+    bindings: createModuleBindings({
+      functionDefinitions: expectedFunction === undefined
+        ? new Map()
+        : new Map([[expectedFunction, 7]]),
+      types: new Map(),
+      tables: new Map(),
+      resources: new Map()
+    }),
     bodyCompletes: () => false,
     emitCaptures: unsupported,
     emitBody: unsupported,

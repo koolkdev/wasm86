@@ -3,7 +3,7 @@ import type { EncodedWasmFunctionBody } from "#compiler/encoder/function-body.js
 import { wasmValueType } from "#compiler/encoder/types.js";
 import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/program/function-type.js";
-import type { LegacyEffects, LegacyFunctionBindings } from "#compiler/program/legacy-body.js";
+import type { LegacyEffects, LegacyFunctionBodyContext } from "#compiler/program/legacy-body.js";
 import {
   exportRef,
   functionRef,
@@ -94,7 +94,7 @@ export function buildInterpreterProgram(): BuiltInterpreterProgram {
     tables: [],
     irBlocks: [],
     effects: legacyInterpreterEffects,
-    build: (bindings) => adapter.build(bindings)
+    build: (context) => adapter.build(context)
   });
   declarations.builder.exportFunction({
     ref: exportRef("interpreter.run-export"),
@@ -187,20 +187,15 @@ function declareRmDecodeHelpers(
       tables: [],
       irBlocks: [],
       effects: legacyInterpreterEffects,
-      build: (bindings) => {
-        const cpuStateMemoryIndex = bindings.resources.get(program.cpuState);
-        const guestMemoryIndex = bindings.resources.get(program.guestMemory);
-        const base = bindings.globals.get(program.rmGlobals.base);
-        const offset = bindings.globals.get(program.rmGlobals.offset);
-        const cursor = bindings.globals.get(program.rmGlobals.cursor);
+      build: (context) => {
+        const cpuStateMemoryIndex = context.bindings.resourceIndex(program.cpuState);
+        const base = context.globals.get(program.rmGlobals.base);
+        const offset = context.globals.get(program.rmGlobals.offset);
+        const cursor = context.globals.get(program.rmGlobals.cursor);
 
         assert(
           cpuStateMemoryIndex === wasmMemoryIndex.cpuState,
           `unexpected resolved interpreter CPU-state memory index: ${String(cpuStateMemoryIndex)}`
-        );
-        assert(
-          guestMemoryIndex !== undefined,
-          "missing resolved interpreter guest-memory resource"
         );
         assert(base !== undefined, "missing resolved interpreter R/M base global");
         assert(offset !== undefined, "missing resolved interpreter R/M offset global");
@@ -208,7 +203,7 @@ function declareRmDecodeHelpers(
         return encodeRmDecodeHelperBody(
           opcodeLength,
           { base, offset, cursor },
-          bindings.resources
+          context.bindings
         );
       }
     });
@@ -237,27 +232,22 @@ class DeclaredDependencyLegacyRootAdapter {
     };
   }
 
-  build(bindings: LegacyFunctionBindings): EncodedWasmFunctionBody {
-    const cpuStateMemoryIndex = bindings.resources.get(this.#options.cpuState);
-    const guestMemoryIndex = bindings.resources.get(this.#options.guestMemory);
-    const base = bindings.globals.get(this.#options.rmGlobals.base);
-    const offset = bindings.globals.get(this.#options.rmGlobals.offset);
-    const cursor = bindings.globals.get(this.#options.rmGlobals.cursor);
+  build(context: LegacyFunctionBodyContext): EncodedWasmFunctionBody {
+    const cpuStateMemoryIndex = context.bindings.resourceIndex(this.#options.cpuState);
+    const base = context.globals.get(this.#options.rmGlobals.base);
+    const offset = context.globals.get(this.#options.rmGlobals.offset);
+    const cursor = context.globals.get(this.#options.rmGlobals.cursor);
 
     assert(
       cpuStateMemoryIndex === wasmMemoryIndex.cpuState,
       `unexpected resolved interpreter CPU-state memory index: ${String(cpuStateMemoryIndex)}`
-    );
-    assert(
-      guestMemoryIndex !== undefined,
-      "missing resolved interpreter guest-memory resource"
     );
     assert(base !== undefined, "missing resolved interpreter R/M base global");
     assert(offset !== undefined, "missing resolved interpreter R/M offset global");
     assert(cursor !== undefined, "missing resolved interpreter R/M cursor global");
 
     const rmFunctions = this.#options.rmFunctions.map((binding): ResolvedRmDecodeFunction => {
-      const functionIndex = bindings.functions.get(binding.ref);
+      const functionIndex = context.functions.get(binding.ref);
 
       assert(
         functionIndex !== undefined,
@@ -268,12 +258,7 @@ class DeclaredDependencyLegacyRootAdapter {
     const emittedHandlers: InterpreterHandler[] = [];
     const body = encodeRunLoopBody(
       new RmDecodeHelpers(rmFunctions, { base, offset, cursor }),
-      {
-        functionIndices: bindings.definitionIndices,
-        typeIndices: bindings.typeIndices,
-        tableIndices: bindings.tables,
-        resourceIndices: bindings.resources
-      },
+      context.bindings,
       emittedHandlers
     );
 
