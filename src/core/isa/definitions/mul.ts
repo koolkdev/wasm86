@@ -1,4 +1,4 @@
-import { form, imm, mnemonic, modrmReg, modrmRm } from "./dsl.js";
+import { form, imm, mnemonic, modrmReg, modrmRm } from "../dsl.js";
 import {
   imulImplicitSemantic,
   imulRegRmImmSemantic,

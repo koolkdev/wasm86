@@ -11,7 +11,7 @@ import {
   type Reg3,
   type RegOperandType,
   type RmOperandType
-} from "#core/instructions/spec.js";
+} from "#core/isa/spec.js";
 import { registerAlias, registerAliasByIndex } from "#core/registers.js";
 import {
   operandSizeOverridePrefixByte,

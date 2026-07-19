@@ -1,4 +1,4 @@
-import { CONDITION_CODE_DESCRIPTORS } from "#core/instructions/condition-codes.js";
+import { CONDITION_CODE_DESCRIPTORS } from "#core/isa/condition-codes.js";
 import {
   form,
   imm,
@@ -10,7 +10,7 @@ import {
   moffs,
   opcodePlusReg,
   opReg
-} from "./dsl.js";
+} from "../dsl.js";
 import {
   cmovSemantic,
   movSemantic,

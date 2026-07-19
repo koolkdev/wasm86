@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { formatPlaceholders } from "#core/format.js";
 import { X86_32_CORE } from "#core/index.js";
-import { imm, modrmReg, modrmRm, opReg } from "#core/instructions/dsl.js";
+import { imm, modrmReg, modrmRm, opReg } from "#core/isa/dsl.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
 import {
   expandOpcodePath,
@@ -16,7 +16,7 @@ import {
   type OpcodePathPart,
   type OperandSizePrefixMode,
   type Reg3
-} from "#core/instructions/spec.js";
+} from "#core/isa/spec.js";
 import type { RepeatPrefix } from "#core/prefixes.js";
 
 const semantics: SemanticTemplate = () => {};

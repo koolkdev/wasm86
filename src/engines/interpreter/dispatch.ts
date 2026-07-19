@@ -11,7 +11,7 @@ import type {
   OperandSpec,
   Reg3,
   RmOperandType
-} from "#core/instructions/spec.js";
+} from "#core/isa/spec.js";
 import { prefixFlagMask } from "#core/decoder/prefix-flags.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { segmentRegisters } from "#core/types.js";

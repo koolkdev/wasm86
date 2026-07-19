@@ -1,23 +1,23 @@
-import { defineIsa } from "./instructions/dsl.js";
-import { ADC, ADD, AND, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR } from "./instructions/alu.js";
-import { AAA, AAD, AAM, AAS, DAA, DAS } from "./instructions/bcd-ascii.js";
-import { BSF, BSR, BT, BTC, BTR, BTS } from "./instructions/bits.js";
-import { BSWAP } from "./instructions/byte-swap.js";
-import { CMPXCHG, CMPXCHG8B, XADD } from "./instructions/compare-exchange.js";
-import { CALL, ENTER, JCC, JECXZ, JMP, LOOP, LOOPE, LOOPNE, RET } from "./instructions/control.js";
-import { CMP, TEST } from "./instructions/cmp-test.js";
-import { DIV, IDIV } from "./instructions/div.js";
-import { CLC, CLD, CMC, LAHF, SAHF, STC, STD, XLAT } from "./instructions/flags.js";
-import { LEA } from "./instructions/lea.js";
-import { INT, INT3, INTO, NOP, WAIT } from "./instructions/misc.js";
-import { CMOVCC, MOV, MOVSX, MOVZX } from "./instructions/mov.js";
-import { IMUL, MUL } from "./instructions/mul.js";
-import { SETCC } from "./instructions/setcc.js";
-import { RCL, RCR, ROL, ROR, SAR, SHL, SHLD, SHR, SHRD } from "./instructions/shift.js";
-import { CBW, CDQ, CWD, CWDE } from "./instructions/sign-extend.js";
-import { LEAVE, POP, POPA, POPAD, POPF, POPFD, PUSH, PUSHA, PUSHAD, PUSHF, PUSHFD } from "./instructions/stack.js";
-import { CMPS, LODS, MOVS, SCAS, STOS } from "./instructions/strings.js";
-import { XCHG } from "./instructions/xchg.js";
+import { defineIsa } from "./isa/dsl.js";
+import { ADC, ADD, AND, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR } from "./isa/definitions/alu.js";
+import { AAA, AAD, AAM, AAS, DAA, DAS } from "./isa/definitions/bcd-ascii.js";
+import { BSF, BSR, BT, BTC, BTR, BTS } from "./isa/definitions/bits.js";
+import { BSWAP } from "./isa/definitions/byte-swap.js";
+import { CMPXCHG, CMPXCHG8B, XADD } from "./isa/definitions/compare-exchange.js";
+import { CALL, ENTER, JCC, JECXZ, JMP, LOOP, LOOPE, LOOPNE, RET } from "./isa/definitions/control.js";
+import { CMP, TEST } from "./isa/definitions/cmp-test.js";
+import { DIV, IDIV } from "./isa/definitions/div.js";
+import { CLC, CLD, CMC, LAHF, SAHF, STC, STD, XLAT } from "./isa/definitions/flags.js";
+import { LEA } from "./isa/definitions/lea.js";
+import { INT, INT3, INTO, NOP, WAIT } from "./isa/definitions/misc.js";
+import { CMOVCC, MOV, MOVSX, MOVZX } from "./isa/definitions/mov.js";
+import { IMUL, MUL } from "./isa/definitions/mul.js";
+import { SETCC } from "./isa/definitions/setcc.js";
+import { RCL, RCR, ROL, ROR, SAR, SHL, SHLD, SHR, SHRD } from "./isa/definitions/shift.js";
+import { CBW, CDQ, CWD, CWDE } from "./isa/definitions/sign-extend.js";
+import { LEAVE, POP, POPA, POPAD, POPF, POPFD, PUSH, PUSHA, PUSHAD, PUSHF, PUSHFD } from "./isa/definitions/stack.js";
+import { CMPS, LODS, MOVS, SCAS, STOS } from "./isa/definitions/strings.js";
+import { XCHG } from "./isa/definitions/xchg.js";
 
 export const X86_32_CORE = defineIsa({
   name: "x86-32-core",

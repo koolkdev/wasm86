@@ -1,4 +1,4 @@
-import { form, mnemonic, modrmReg, modrmRm } from "./dsl.js";
+import { form, mnemonic, modrmReg, modrmRm } from "../dsl.js";
 import {
   cmpxchg8bSemantic,
   cmpxchgSemantic,

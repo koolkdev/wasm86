@@ -1,9 +1,9 @@
 import {
   CONDITION_CODE_DESCRIPTORS,
   type ConditionCodeDescriptor
-} from "#core/instructions/condition-codes.js";
-import { form, imm, mnemonic, modrmRm, rel } from "./dsl.js";
-import type { InstructionForm, InstructionMnemonic } from "./spec.js";
+} from "#core/isa/condition-codes.js";
+import { form, imm, mnemonic, modrmRm, rel } from "../dsl.js";
+import type { InstructionForm, InstructionMnemonic } from "../spec.js";
 import {
   callSemantic,
   enterSemantic,

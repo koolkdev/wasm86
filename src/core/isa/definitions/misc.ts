@@ -1,4 +1,4 @@
-import { form, imm, mnemonic, modrmRm } from "./dsl.js";
+import { form, imm, mnemonic, modrmRm } from "../dsl.js";
 import { int3Semantic, intoSemantic, intSemantic, nopSemantic } from "#core/semantics/misc.js";
 
 export const NOP = mnemonic("nop", [

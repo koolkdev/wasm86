@@ -1,4 +1,4 @@
-import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm } from "./dsl.js";
+import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm } from "../dsl.js";
 import { cmpSemantic } from "#core/semantics/cmp.js";
 import { testSemantic } from "#core/semantics/test.js";
 

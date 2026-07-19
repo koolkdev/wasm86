@@ -15,7 +15,7 @@ import {
   type OperandBinding
 } from "#core/instruction/bindings.js";
 import type { ExternalValueId } from "#compiler/ir/values/types.js";
-import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#core/instructions/spec.js";
+import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#core/isa/spec.js";
 import {
   defaultSegmentIndexForBaseIndex,
   dsSegmentIndex,

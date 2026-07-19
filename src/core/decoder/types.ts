@@ -1,5 +1,5 @@
 import type { MemOperand, OperandWidth, RegisterAlias, SegmentRegister } from "#core/types.js";
-import type { InstructionSpec, ImmediateExtension } from "#core/instructions/spec.js";
+import type { InstructionSpec, ImmediateExtension } from "#core/isa/spec.js";
 
 export type IsaOperandBinding =
   | Readonly<{ kind: "reg"; alias: RegisterAlias }>

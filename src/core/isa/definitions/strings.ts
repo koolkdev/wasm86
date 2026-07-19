@@ -1,4 +1,4 @@
-import { form, implicitMem, mnemonic } from "./dsl.js";
+import { form, implicitMem, mnemonic } from "../dsl.js";
 import {
   cmpsSemantic,
   lodsSemantic,

@@ -1,4 +1,4 @@
-import type { InstructionPrefixes } from "#core/instructions/spec.js";
+import type { InstructionPrefixes } from "#core/isa/spec.js";
 
 export const prefixFlagBits = {
   operandSizeOverride: 1 << 0,

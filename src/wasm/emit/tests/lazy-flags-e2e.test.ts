@@ -10,7 +10,7 @@ import { coreStateFields } from "#core/state/layout.js";
 import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#core/flags/conditions.js";
 import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
-import { CONDITION_CODE_DESCRIPTORS } from "#core/instructions/condition-codes.js";
+import { CONDITION_CODE_DESCRIPTORS } from "#core/isa/condition-codes.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#core/flags/definitions.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import { widthMask, type OperandWidth } from "#core/types.js";

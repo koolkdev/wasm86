@@ -1,4 +1,4 @@
-import { form, mnemonic } from "./dsl.js";
+import { form, mnemonic } from "../dsl.js";
 import {
   accumulatorSignExtendSemantic,
   highAccumulatorSignExtendSemantic

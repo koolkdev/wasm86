@@ -12,13 +12,13 @@ import {
   moffs,
   opcodePlusReg,
   opReg
-} from "#core/instructions/dsl.js";
+} from "#core/isa/dsl.js";
 import {
   expandInstructionSpec,
   expandOpcodePath,
   instructionReadsModRm,
   type InstructionSpec
-} from "#core/instructions/spec.js";
+} from "#core/isa/spec.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
 
 const semantics: SemanticTemplate = () => {};

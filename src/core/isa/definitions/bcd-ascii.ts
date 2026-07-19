@@ -1,4 +1,4 @@
-import { form, imm, mnemonic } from "./dsl.js";
+import { form, imm, mnemonic } from "../dsl.js";
 import {
   aaaSemantic,
   aadSemantic,

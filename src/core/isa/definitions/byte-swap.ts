@@ -1,4 +1,4 @@
-import { form, mnemonic, opcodePlusReg, opReg } from "./dsl.js";
+import { form, mnemonic, opcodePlusReg, opReg } from "../dsl.js";
 import { bswapSemantic } from "#core/semantics/byte-swap.js";
 
 export const BSWAP = mnemonic("bswap", [

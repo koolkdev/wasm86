@@ -1,5 +1,5 @@
-import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm } from "./dsl.js";
-import type { InstructionMnemonic } from "./spec.js";
+import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm } from "../dsl.js";
+import type { InstructionMnemonic } from "../spec.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
 import { rotateSemantic, type RotateOp } from "#core/semantics/rotate.js";
 import {

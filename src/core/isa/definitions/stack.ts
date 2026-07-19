@@ -1,4 +1,4 @@
-import { form, imm, implicitSreg, mnemonic, modrmRm, opcodePlusReg, opReg } from "./dsl.js";
+import { form, imm, implicitSreg, mnemonic, modrmRm, opcodePlusReg, opReg } from "../dsl.js";
 import {
   leaveSemantic,
   popadSemantic,
