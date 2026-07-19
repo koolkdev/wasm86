@@ -20,7 +20,7 @@ import { assertPageFaultException } from "#cpu/tests/stop-fixtures.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { instantiateFunctionBody } from "./harness.js";
 import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import { BodyBuilder } from "#ir/body-builder.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import { stateRead as stateReadOperation } from "#compiler/ir/operations/state.js";
 import { resourceRead } from "#compiler/ir/operations/resource.js";
 import {
@@ -56,7 +56,7 @@ function dispatchFragment(targetEip: number): IrBlock {
 // visible.
 function decodeReadFragment(k: number): DecodeReadFragment {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const eipValue = builder.operation(stateReadOperation.create({ slot: eipChannel }));
   const address = values.binary("add", eipValue, values.const(k));
   const byteLength = values.const(1);

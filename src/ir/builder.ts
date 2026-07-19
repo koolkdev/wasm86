@@ -46,7 +46,7 @@ import { SemanticScopeStack } from "./builder/scope.js";
 import { emitSegmentLoad, type SegmentMode } from "./builder/segments.js";
 import { State } from "./builder/state/index.js";
 import { StateWriteLog } from "./builder/state/write-log.js";
-import { BodyBuilder } from "./body-builder.js";
+import { RegionBuilder } from "./region-builder.js";
 import type { IrBlock } from "./block.js";
 import { type StateChannel } from "./slots.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -109,7 +109,7 @@ export function externalInstructionLocation(
 
 class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
   readonly #values: ValueTable;
-  readonly #body: BodyBuilder;
+  readonly #body: RegionBuilder;
   readonly #scopes: SemanticScopeStack;
   readonly #state: State;
   readonly #operands: OperandResolver;
@@ -128,7 +128,7 @@ class IrBlockBuilderImpl implements SemanticsBuilder, SemanticBuildContext {
     values = new ValueTable()
   ) {
     this.#values = values;
-    this.#body = new BodyBuilder(this.#values);
+    this.#body = new RegionBuilder(this.#values);
     this.#scopes = new SemanticScopeStack(this.#body);
     this.#state = new State(this.#values, () => this.#scopes.current.body, stateWriteLog);
     this.#operands = new OperandResolver(this.#values, this.#state, () => this.#scopes.current.operands);

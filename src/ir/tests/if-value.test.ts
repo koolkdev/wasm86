@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import type { Action } from "#ir/actions.js";
 import { stateRead } from "#compiler/ir/operations/state.js";
-import { BodyBuilder } from "#ir/body-builder.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import { actionOutput } from "#ir/traverse.js";
@@ -14,7 +14,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 
 test("ifValue joins its arm results into one output", () => {
   const values = new ValueTable();
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
   const condition = values.external(0);
   let thenResult!: ValueId;
   let elseResult!: ValueId;
@@ -46,7 +46,7 @@ test("ifValue joins its arm results into one output", () => {
 
 test("ifValue ignores an unreachable arm when joining bounds", () => {
   const values = new ValueTable();
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
   const output = body.ifValue(
     values.external(0),
     (then) => then.values.const(0),

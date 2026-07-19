@@ -6,7 +6,7 @@ import {
   bodyCompletes
 } from "../actions.js";
 import type { Body } from "../block.js";
-import { BodyBuilder, type BuildBody } from "../body-builder.js";
+import { RegionBuilder, type BuildBody } from "../region-builder.js";
 import {
   channelCovers,
   dedupeDisjointChannels,
@@ -25,12 +25,12 @@ import type { StateWriteLog } from "./state/write-log.js";
 export type IfOutcome = "continues" | "completes";
 
 type CompletingArm = Readonly<{
-  body: BodyBuilder;
+  body: RegionBuilder;
   outcome: "completes";
 }>;
 
 type ContinuingArm = Readonly<{
-  body: BodyBuilder;
+  body: RegionBuilder;
   outcome: "continues";
   writtenChannels: readonly StateChannel[];
   memoryMayBeWritten: boolean;
@@ -97,7 +97,7 @@ export class ControlEmitter {
   }
 
   runLoopBody<T>(
-    bodyBuilder: BodyBuilder,
+    bodyBuilder: RegionBuilder,
     body: LoopBody,
     finish: (condition: ValueId) => T,
     memory: LoopMemoryOps = this.#host
@@ -118,7 +118,7 @@ export class ControlEmitter {
   }
 
   #emitOneArmedIf(
-    parent: BodyBuilder,
+    parent: RegionBuilder,
     condition: ValueId,
     thenArm: BuiltArm,
     hint?: BranchHint
@@ -141,7 +141,7 @@ export class ControlEmitter {
   }
 
   #emitTwoArmedIf(
-    parent: BodyBuilder,
+    parent: RegionBuilder,
     condition: ValueId,
     thenArm: BuiltArm,
     elseArm: BuiltArm,
@@ -219,7 +219,7 @@ export class ControlEmitter {
     return body.build();
   }
 
-  #flushDirtyChannelsInto(body: BodyBuilder, channels: readonly StateChannel[]): boolean {
+  #flushDirtyChannelsInto(body: RegionBuilder, channels: readonly StateChannel[]): boolean {
     let emitted = false;
 
     for (const channel of channels) {

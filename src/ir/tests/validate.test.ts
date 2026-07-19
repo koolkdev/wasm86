@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { maxSwitchMatch, type Action, type SwitchAction } from "#ir/actions.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { BodyBuilder } from "#ir/body-builder.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
@@ -837,7 +837,7 @@ test("a loop with a dword carried cell and an aligned continue validates", () =>
 test("a cell read before its seed is rejected", () => {
   const values = new ValueTable();
   const seed = values.const(7);
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const cell = builder.cell(seed);
 
   builder.read(cell);
@@ -862,7 +862,7 @@ test("a cell read before its seed is rejected", () => {
 test("a cell cannot be seeded more than once", () => {
   const values = new ValueTable();
   const seed = values.const(7);
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const cell = builder.cell(seed);
 
   builder.operation(
@@ -879,7 +879,7 @@ test("a cell cannot be seeded more than once", () => {
 test("a cell access without any seed is rejected", () => {
   const values = new ValueTable();
   const target = values.const(7);
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const cell = builder.cell(target);
 
   builder.read(cell);
@@ -897,14 +897,14 @@ test("a cell access without any seed is rejected", () => {
 test("a cell from another root is rejected", () => {
   const values = new ValueTable();
   const seed = values.const(7);
-  const source = new BodyBuilder(values);
+  const source = new RegionBuilder(values);
   const foreign = source.cell(seed);
 
   source.read(foreign);
   const foreignRead = source.build().actions[1];
 
   ok(foreignRead !== undefined);
-  const target = new BodyBuilder(values);
+  const target = new RegionBuilder(values);
 
   target.cell(seed);
   target.push(foreignRead);
@@ -920,7 +920,7 @@ test("a cell declared in one sibling body cannot be used in another", () => {
   const values = new ValueTable();
   const condition = values.external(0);
   const seed = values.const(7);
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   let cell!: CellRef;
 
   builder.if(
@@ -948,7 +948,7 @@ test("a child cell cannot escape to its parent body", () => {
   const values = new ValueTable();
   const condition = values.external(0);
   const seed = values.const(7);
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   let cell!: CellRef;
 
   builder.if(condition, (then) => {
@@ -968,7 +968,7 @@ test("a cell declared outside a loop can be written in a nested loop arm", () =>
   const condition = values.external(0);
   const seed = values.const(7);
   const update = values.const(6);
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const cell = builder.cell(seed);
 
   builder.loop([], (loop) => {
@@ -1000,7 +1000,7 @@ test("a hand-assembled body declares cell scope by its seed action alone", () =>
 
 test("a hand-assembled nested body may use an ancestor cell", () => {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const seed = values.const(7);
   const cell = builder.cell(seed);
   const rawChild: Body = {

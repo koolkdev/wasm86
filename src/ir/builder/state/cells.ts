@@ -11,7 +11,7 @@ import {
 } from "../../slots.js";
 import { type ValueId, type WidthBounds } from "#compiler/ir/values/types.js";
 import type { StateWriteAction } from "../../actions.js";
-import type { BodyBuilder } from "../../body-builder.js";
+import type { RegionBuilder } from "../../region-builder.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
 import type { StateWriteObserver } from "./write-log.js";
 
@@ -28,12 +28,12 @@ type StateCellsSnapshot = Readonly<{
 // pending buffer holds the transactional writes, and this store owns clean
 // reads for exact-keyed cells.
 export class StateCells {
-  readonly #currentBody: () => BodyBuilder;
+  readonly #currentBody: () => RegionBuilder;
   readonly #buffer = new PendingBuffer<StateCell>();
   readonly #inputReads = new Map<StateCell, ValueId>();
   readonly #writeObserver: StateWriteObserver | undefined;
 
-  constructor(currentBody: () => BodyBuilder, writeObserver?: StateWriteObserver) {
+  constructor(currentBody: () => RegionBuilder, writeObserver?: StateWriteObserver) {
     this.#currentBody = currentBody;
     this.#writeObserver = writeObserver;
   }

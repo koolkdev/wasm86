@@ -13,8 +13,8 @@ import { joinWidthBounds } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId, WidthBounds } from "#compiler/ir/values/types.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 
-export type BuildBody = (b: BodyBuilder) => void;
-export type BuildResult = (b: BodyBuilder) => ValueId;
+export type BuildBody = (b: RegionBuilder) => void;
+export type BuildResult = (b: RegionBuilder) => ValueId;
 export type BodyActionSink = Readonly<{
   push(action: Action): void;
   actions(): readonly Action[];
@@ -31,7 +31,7 @@ export type IfValueOptions = Readonly<{
   hint?: BranchHint;
 }>;
 
-export class BodyBuilder {
+export class RegionBuilder {
   readonly #sink: BodyActionSink;
 
   constructor(
@@ -41,8 +41,8 @@ export class BodyBuilder {
     this.#sink = sink;
   }
 
-  child(sink: BodyActionSink = new BufferedBodyActionSink()): BodyBuilder {
-    return new BodyBuilder(this.values, sink);
+  child(sink: BodyActionSink = new BufferedBodyActionSink()): RegionBuilder {
+    return new RegionBuilder(this.values, sink);
   }
 
   cell(seed: ValueId): CellRef {
@@ -245,9 +245,9 @@ class BufferedBodyActionSink implements BodyActionSink {
   }
 }
 
-export function buildIrBlock(build: (b: BodyBuilder) => ValueId | void): IrBlock {
+export function buildIrBlock(build: (b: RegionBuilder) => ValueId | void): IrBlock {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const result = build(builder);
 
   return { values, body: builder.build(result ?? undefined) };

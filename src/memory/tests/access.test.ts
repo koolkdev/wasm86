@@ -8,7 +8,7 @@ import { test } from "node:test";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { OpAction } from "#ir/actions.js";
-import { BodyBuilder } from "#ir/body-builder.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import { MemoryAccessBuilder } from "#memory/access.js";
 import { guestMemoryResource } from "#memory/resource.js";
 
@@ -23,7 +23,7 @@ type ResourceAction<Kind extends Operation["kind"]> = OpAction & Readonly<{
 
 test("the Memory access builder expands one WRITE access into generic RMW operations", () => {
   const values = new ValueTable();
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
   const memory = new MemoryAccessBuilder({
     values,
     currentBody: () => body
@@ -73,7 +73,7 @@ test("the Memory access builder expands one WRITE access into generic RMW operat
 
 test("the Memory access builder gives constant instruction fetches absolute ranges", () => {
   const values = new ValueTable();
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
   const memory = new MemoryAccessBuilder({
     values,
     currentBody: () => body
@@ -101,7 +101,7 @@ test("the Memory access builder gives constant instruction fetches absolute rang
 });
 
 function resourceActions<Kind extends Operation["kind"]>(
-  body: BodyBuilder,
+  body: RegionBuilder,
   kind: Kind
 ): readonly ResourceAction<Kind>[] {
   return body.build().actions.filter(

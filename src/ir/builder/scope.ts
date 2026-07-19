@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { BodyBuilder } from "../body-builder.js";
+import type { RegionBuilder } from "../region-builder.js";
 import { OperandScope } from "./operands.js";
 
 export type SemanticScopeKind = "root" | "arm" | "loop";
@@ -9,7 +9,7 @@ export type SemanticScopeOutcome<T> =
   | Readonly<{ kind: "complete" }>;
 
 export class SemanticBodyScope {
-  readonly body: BodyBuilder;
+  readonly body: RegionBuilder;
   readonly kind: SemanticScopeKind;
   readonly operands: OperandScope;
   readonly #parent: SemanticBodyScope | undefined;
@@ -18,7 +18,7 @@ export class SemanticBodyScope {
   #terminated = false;
   #wroteMemory: boolean;
 
-  constructor(body: BodyBuilder, kind: SemanticScopeKind, parent?: SemanticBodyScope) {
+  constructor(body: RegionBuilder, kind: SemanticScopeKind, parent?: SemanticBodyScope) {
     this.body = body;
     this.kind = kind;
     this.#parent = parent;
@@ -87,7 +87,7 @@ export class SemanticScopeStack {
   readonly root: SemanticBodyScope;
   #current: SemanticBodyScope;
 
-  constructor(rootBody: BodyBuilder) {
+  constructor(rootBody: RegionBuilder) {
     this.root = new SemanticBodyScope(rootBody, "root");
     this.#current = this.root;
   }
@@ -98,7 +98,7 @@ export class SemanticScopeStack {
 
   enter<T>(
     kind: Exclude<SemanticScopeKind, "root">,
-    body: BodyBuilder,
+    body: RegionBuilder,
     build: (scope: SemanticBodyScope) => T
   ): T {
     const parent = this.#current;

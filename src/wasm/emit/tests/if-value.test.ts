@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
-import { BodyBuilder } from "#ir/body-builder.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#ir/slots.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -19,7 +19,7 @@ import {
 
 test("ifValue selects one arm result and preserves its hint", async () => {
   const values = new ValueTable();
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
   const output = body.ifValue(
     values.external(0),
     (then) => then.operation(stateRead.create({ slot: gprChannel("ebx") })),
@@ -48,7 +48,7 @@ test("ifValue selects one arm result and preserves its hint", async () => {
 
 test("a dead ifValue output preserves an impossible selected arm", async () => {
   const values = new ValueTable();
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
 
   body.ifValue(
     values.external(0),
@@ -65,7 +65,7 @@ test("a dead ifValue output preserves an impossible selected arm", async () => {
 
 test("a shared unreachable result traps in either selected arm", async () => {
   const values = new ValueTable();
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
 
   body.ifValue(
     values.external(0),
@@ -82,7 +82,7 @@ test("a shared unreachable result traps in either selected arm", async () => {
 
 test("an unselected ifValue arm does not evaluate a trapping result", async () => {
   const values = new ValueTable();
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
   const output = body.ifValue(
     values.external(0),
     (then) => then.values.binary("div_u", then.values.external(1), then.values.external(2)),

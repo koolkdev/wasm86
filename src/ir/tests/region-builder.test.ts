@@ -17,7 +17,7 @@ import {
   stateRead as stateReadOperation,
   stateWrite as stateWriteOperation
 } from "#compiler/ir/operations/state.js";
-import { BodyBuilder, buildIrBlock, type BodyActionSink } from "#ir/body-builder.js";
+import { RegionBuilder, buildIrBlock, type BodyActionSink } from "#ir/region-builder.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
@@ -28,8 +28,8 @@ import { stateRead, stateWrite, statusFlagCall } from "#ir/tests/storage-op-help
 
 test("operation derives the output and its bounds from the definition", () => {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
-  const resource = resourceRef("test.body-builder-resource");
+  const builder = new RegionBuilder(values);
+  const resource = resourceRef("test.region-builder-resource");
   const address = values.const(0);
   const source: ResourceByteOperand = {
     effect: {
@@ -61,7 +61,7 @@ test("operation derives the output and its bounds from the definition", () => {
 
 test("one operation API handles value and effect definitions", () => {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const value = values.const(0);
 
   strictEqual(builder.operation(stateWriteOperation.create({ slot: eipChannel, value })), undefined);
@@ -70,7 +70,7 @@ test("one operation API handles value and effect definitions", () => {
 
 test("call validates typed arguments and allocates its declared result", () => {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const target = statusFlagResolvers.get("ZF");
   const args = [values.const(0), values.const(1), values.const(2), values.const(3)] as const;
   const [output] = builder.call(target, args);
@@ -89,7 +89,7 @@ test("call validates typed arguments and allocates its declared result", () => {
 
 test("cell APIs seed typed cells and preserve lexical access in child bodies", () => {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const seed = values.const64(7n);
   const cell = builder.cell(seed);
   let read!: ValueId;
@@ -116,7 +116,7 @@ test("cell APIs seed typed cells and preserve lexical access in child bodies", (
 
 test("validation rejects writes whose value type differs from the cell", () => {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const cell = builder.cell(values.const(1));
 
   builder.write(cell, values.const64(2n));
@@ -130,13 +130,13 @@ test("validation rejects writes whose value type differs from the cell", () => {
 
 test("validation rejects a cell access transplanted away from its seed", () => {
   const values = new ValueTable();
-  const source = new BodyBuilder(values);
+  const source = new RegionBuilder(values);
   const cell = source.cell(values.const(1));
 
   source.read(cell);
 
   const sourceActions = source.build().actions;
-  const target = new BodyBuilder(values);
+  const target = new RegionBuilder(values);
 
   // Moving only the read leaves its declaring seed behind in another tree.
   target.push(sourceActions[1]!);
@@ -152,12 +152,12 @@ test("a transplanted seed carries its cell's scope with it", () => {
   // Scope is where the seed is: relocating the whole seed+use sequence into
   // another root is structurally sound, with no stale metadata to desync.
   const values = new ValueTable();
-  const source = new BodyBuilder(values);
+  const source = new RegionBuilder(values);
   const cell = source.cell(values.const(1));
 
   source.read(cell);
 
-  const target = new BodyBuilder(values);
+  const target = new RegionBuilder(values);
 
   target.extend(source.build().actions);
   target.finish({ kind: "dispatch", targetEip: values.const(0) });
@@ -167,7 +167,7 @@ test("a transplanted seed carries its cell's scope with it", () => {
 
 test("effect, push, and extend append actions without outputs", () => {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const prebuilt = stateWrite(eipChannel, values.const(4));
   const other = stateWrite(eipChannel, values.const(8));
 
@@ -198,7 +198,7 @@ test("custom action sinks can divert emitted top-level actions", () => {
       return this.bodyActions;
     }
   }();
-  const builder = new BodyBuilder(values, sink);
+  const builder = new RegionBuilder(values, sink);
   const read = builder.operation(stateReadOperation.create({ slot: eipChannel }));
 
   builder.operation(stateWriteOperation.create({ slot: eipChannel, value: values.const(4) }));
@@ -211,7 +211,7 @@ test("custom action sinks can divert emitted top-level actions", () => {
 
 test("if builds hinted then and else bodies against child builders", () => {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const condition = values.external(0);
   const exitResult = values.const64(0n);
 
@@ -242,7 +242,7 @@ test("if builds hinted then and else bodies against child builders", () => {
 
 test("switch builds every arm before allocating the shared output", () => {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const selector = values.external(0);
   const args = [values.const(0), values.const(1), values.const(2), values.const(3)] as const;
   let armResult!: ValueId;
@@ -285,7 +285,7 @@ test("switch builds every arm before allocating the shared output", () => {
 
 test("switch derives its output bounds from reachable arms", () => {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const output = builder.switch(
     values.external(0),
     [{ match: 0, build: (arm) => arm.values.unreachable() }],

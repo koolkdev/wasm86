@@ -4,7 +4,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { Action } from "./actions.js";
 import type { Body } from "./block.js";
-import { BodyBuilder } from "./body-builder.js";
+import { RegionBuilder } from "./region-builder.js";
 
 export type IrFunction = Readonly<{
   type: FunctionType;
@@ -15,7 +15,7 @@ export type IrFunction = Readonly<{
 
 export class FunctionBuilder {
   readonly values = new ValueTable();
-  readonly body = new BodyBuilder(this.values);
+  readonly region = new RegionBuilder(this.values);
   readonly parameters: readonly ValueId[];
   readonly #type: FunctionType;
   #finished = false;
@@ -32,7 +32,7 @@ export class FunctionBuilder {
   }
 
   return(results: readonly ValueId[]): void {
-    this.body.return(results);
+    this.region.return(results);
   }
 
   finish(): IrFunction {
@@ -41,7 +41,7 @@ export class FunctionBuilder {
     return {
       type: this.#type,
       parameters: [...this.parameters],
-      body: snapshotBody(this.body.build()),
+      body: snapshotBody(this.region.build()),
       values: this.values.fork()
     };
   }

@@ -1,7 +1,7 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { BodyBuilder } from "#ir/body-builder.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import { StateCells, type StatePathKind } from "#ir/builder/state/cells.js";
 import { GprState, type GprReadOptions } from "#ir/builder/state/gpr.js";
 import { SegmentState } from "#ir/builder/state/segments.js";
@@ -42,7 +42,7 @@ type PendingHarness = Readonly<{
 
 function createHarness(): Harness {
   const values = new ValueTable();
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
   const actions = body.build().actions as Action[];
   const currentBody = () => body;
   const cells = new StateCells(currentBody);

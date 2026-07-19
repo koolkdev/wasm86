@@ -8,7 +8,7 @@ import type {
   IntegerWidth,
   ValueId
 } from "#compiler/ir/values/types.js";
-import type { BodyBuilder } from "#ir/body-builder.js";
+import type { RegionBuilder } from "#ir/region-builder.js";
 import {
   flatMemoryAccess,
   flatMemoryOperand
@@ -36,7 +36,7 @@ export type MemoryAccess<
 
 type MemoryAccessBuilderOptions = Readonly<{
   values: ValueTable;
-  currentBody(): Pick<BodyBuilder, "operation">;
+  currentBody(): Pick<RegionBuilder, "operation">;
 }>;
 
 type MemoryReadOptions = Readonly<{
@@ -45,7 +45,7 @@ type MemoryReadOptions = Readonly<{
 
 export class MemoryAccessBuilder {
   readonly #values: ValueTable;
-  readonly #currentBody: () => Pick<BodyBuilder, "operation">;
+  readonly #currentBody: () => Pick<RegionBuilder, "operation">;
 
   constructor(options: MemoryAccessBuilderOptions) {
     this.#values = options.values;

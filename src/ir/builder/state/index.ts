@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { StateWriteAction } from "../../actions.js";
-import type { BodyBuilder } from "../../body-builder.js";
+import type { RegionBuilder } from "../../region-builder.js";
 import {
   type StateChannel
 } from "../../slots.js";
@@ -35,7 +35,7 @@ export class State {
   readonly segments: SegmentState;
   readonly eip: EipState;
   readonly instructionCount: InstructionCountState;
-  constructor(values: ValueTable, currentBody: () => BodyBuilder, writeObserver?: StateWriteObserver) {
+  constructor(values: ValueTable, currentBody: () => RegionBuilder, writeObserver?: StateWriteObserver) {
     this.#writeObserver = writeObserver;
     this.#cells = new StateCells(currentBody, writeObserver);
 

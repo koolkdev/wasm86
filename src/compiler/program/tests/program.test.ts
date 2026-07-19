@@ -27,7 +27,7 @@ import {
   type ResourceEffect,
   type ResourceRef
 } from "#compiler/ir/resource.js";
-import { buildIrBlock } from "#ir/body-builder.js";
+import { buildIrBlock } from "#ir/region-builder.js";
 import type { FunctionBuilder } from "#ir/function.js";
 import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
 import {
@@ -136,7 +136,7 @@ test("functions call typed peers and execute through program encoding", async ()
     signature,
     effects: noEffects
   }, (fn) => {
-    const result = fn.body.call(callee, [])[0];
+    const result = fn.region.call(callee, [])[0];
 
     if (result === undefined) {
       throw new Error("missing call result");
@@ -205,11 +205,11 @@ test("defined resource operations resolve memory index two", async () => {
   }, (fn) => {
     const address = fn.values.const(6);
 
-    fn.body.operation(resourceWrite.create({
+    fn.region.operation(resourceWrite.create({
       destination: byteOperand(resource, range, address, 6, 16),
       value: fn.values.const(0x1234)
     }));
-    const read = fn.body.operation(resourceRead.create({
+    const read = fn.region.operation(resourceRead.create({
       source: byteOperand(resource, range, address, 6, 16)
     }));
     fn.return([read]);
@@ -372,7 +372,7 @@ test("program closure omits dead resource reads", () => {
     signature,
     effects: { reads: [byteAccess], writes: [] }
   }, (fn) => {
-    fn.body.operation(resourceRead.create({
+    fn.region.operation(resourceRead.create({
       source: byteOperand(readResource, range, fn.values.const(0), 0, 8)
     }));
     fn.return([fn.values.const(7)]);
@@ -403,7 +403,7 @@ test("program validation rejects unknown effects and undeclared live resource us
       signature,
       effects: noEffects
     }, (fn) => {
-      fn.return([fn.body.operation(resourceRead.create({
+      fn.return([fn.region.operation(resourceRead.create({
         source: byteOperand(resource, byteAccess.range, fn.values.const(0), 0, 8)
       }))]);
     });
@@ -494,7 +494,7 @@ test("an effectful function call stays single and conditional inside its selecte
     if (value === undefined) {
       throw new Error("missing value parameter");
     }
-    fn.body.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
+    fn.region.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
     fn.return([]);
   });
   const caller = program.defineFunction({
@@ -507,7 +507,7 @@ test("an effectful function call stays single and conditional inside its selecte
     if (condition === undefined) {
       throw new Error("missing condition parameter");
     }
-    fn.body.if(condition, (thenBody) => {
+    fn.region.if(condition, (thenBody) => {
       thenBody.call(callee, [fn.values.const(42)]);
     });
     fn.return([fn.values.const(7)]);
@@ -600,7 +600,7 @@ test("function declarations carry conservative transitive effects", () => {
     if (value === undefined) {
       throw new Error("missing root parameter");
     }
-    fn.body.call(middle, [value]);
+    fn.region.call(middle, [value]);
     fn.return([]);
   });
   middle = program.defineFunction({ ref: middleRef, signature, effects }, (fn) => {
@@ -609,7 +609,7 @@ test("function declarations carry conservative transitive effects", () => {
     if (value === undefined) {
       throw new Error("missing middle parameter");
     }
-    fn.body.call(leaf, [value]);
+    fn.region.call(leaf, [value]);
     fn.return([]);
   });
   leaf = program.defineFunction({ ref: leafRef, signature, effects }, (fn) => {
@@ -618,7 +618,7 @@ test("function declarations carry conservative transitive effects", () => {
     if (value === undefined) {
       throw new Error("missing leaf parameter");
     }
-    fn.body.operation(stateWrite.create({ slot: eax, value }));
+    fn.region.operation(stateWrite.create({ slot: eax, value }));
     fn.return([]);
   });
 
@@ -645,7 +645,7 @@ test("function effect declarations must cover their bodies", () => {
     if (value === undefined) {
       throw new Error("missing value parameter");
     }
-    fn.body.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
+    fn.region.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
     fn.return([]);
   });
 
@@ -672,7 +672,7 @@ test("callers must cover the effects declared by their call targets", () => {
     if (value === undefined) {
       throw new Error("missing value parameter");
     }
-    fn.body.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
+    fn.region.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
     fn.return([]);
   });
   program.defineFunction({
@@ -685,7 +685,7 @@ test("callers must cover the effects declared by their call targets", () => {
     if (value === undefined) {
       throw new Error("missing value parameter");
     }
-    fn.body.call(callee, [value]);
+    fn.region.call(callee, [value]);
     fn.return([]);
   });
 
@@ -718,7 +718,7 @@ test("dynamic effect declarations preserve their access width and segment field"
       if (value === undefined) {
         throw new Error("missing value parameter");
       }
-      fn.body.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
+      fn.region.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
       fn.return([]);
     });
 
@@ -741,7 +741,7 @@ test("dynamic effect declarations preserve their access width and segment field"
         writes: []
       }
     }, (fn) => {
-      const selector = fn.body.operation(stateRead.create({ slot: segmentSelectorChannel("ds") }));
+      const selector = fn.region.operation(stateRead.create({ slot: segmentSelectorChannel("ds") }));
 
       fn.return([selector]);
     });
@@ -774,7 +774,7 @@ test("calls enforce their declared function contracts", () => {
       signature: callerSignature,
       effects: noEffects
     }, (fn) => {
-      fn.body.call(callee, []);
+      fn.region.call(callee, []);
       fn.return([]);
     });
 
@@ -959,7 +959,7 @@ test("closed functions do not retain their mutable factory builders", () => {
   }
   const valueCount = fn.body.values.size();
 
-  rawBuilder.body.return([]);
+  rawBuilder.region.return([]);
   rawBuilder.values.const(0x1234_5678);
   strictEqual(fn.body.body.actions.length, 1);
   strictEqual(fn.body.values.size(), valueCount);
@@ -1568,7 +1568,7 @@ test("program closure includes only function calls that must execute", () => {
     build: (key, fn) => {
       builds.push(key);
       if (key === 2) {
-        const result = fn.body.call(family.get(3), [])[0];
+        const result = fn.region.call(family.get(3), [])[0];
 
         if (result === undefined) {
           throw new Error("missing transitive generated result");

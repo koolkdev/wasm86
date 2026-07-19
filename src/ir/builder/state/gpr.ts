@@ -8,7 +8,7 @@ import {
 import {
   type ValueId } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
-import type { BodyBuilder } from "../../body-builder.js";
+import type { RegionBuilder } from "../../region-builder.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
 import type { StateWriteObserver } from "./write-log.js";
 
@@ -27,14 +27,14 @@ type GprStateSnapshot = Readonly<{
 // unrestorable-store tracking are GPR-specific and live here.
 export class GprState {
   readonly #values: ValueTable;
-  readonly #currentBody: () => BodyBuilder;
+  readonly #currentBody: () => RegionBuilder;
   readonly #buffer = new PendingBuffer<GprChannel>();
   readonly #reads = new Map<GprChannel, ValueId>();
   readonly #signedReads = new Map<GprChannel, ValueId>();
   readonly #writeObserver: StateWriteObserver | undefined;
   #unrestorableStore = false;
 
-  constructor(values: ValueTable, currentBody: () => BodyBuilder, writeObserver?: StateWriteObserver) {
+  constructor(values: ValueTable, currentBody: () => RegionBuilder, writeObserver?: StateWriteObserver) {
     this.#values = values;
     this.#currentBody = currentBody;
     this.#writeObserver = writeObserver;

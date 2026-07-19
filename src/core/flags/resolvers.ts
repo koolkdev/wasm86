@@ -3,7 +3,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { FunctionFamily } from "#compiler/program/functions.js";
 import type { FunctionBuilder } from "#ir/function.js";
-import type { SwitchArm } from "#ir/body-builder.js";
+import type { SwitchArm } from "#ir/region-builder.js";
 import { valueTableFlagOps } from "#ir/flag-value-ops.js";
 import type { OperandWidth } from "#core/types.js";
 import type { X86StatusFlag } from "./definitions.js";
@@ -30,7 +30,7 @@ function buildStatusFlagResolver(flag: X86StatusFlag, fn: FunctionBuilder): void
   assert(lazyB !== undefined, "status-flag resolver is missing its lazy B parameter");
   assert(concreteValue !== undefined, "status-flag resolver is missing its concrete parameter");
 
-  const result = fn.body.switch(
+  const result = fn.region.switch(
     lazyKind,
     [
       concreteArm(concreteValue),

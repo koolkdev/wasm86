@@ -26,7 +26,7 @@ import type { CpuException } from "#core/exceptions.js";
 import type { IfBody, SemanticBranchHint } from "#core/semantics/builder.js";
 import { type StateChannel, type StateSlot } from "../slots.js";
 import type { Action, LoopCarriedCell, OpAction } from "../actions.js";
-import { BodyBuilder, type BodyActionSink } from "../body-builder.js";
+import { RegionBuilder, type BodyActionSink } from "../region-builder.js";
 import type { OperandResolver } from "./operands.js";
 import type { State } from "./state/index.js";
 import { StateLoopScope } from "./state/loop-scope.js";
@@ -44,17 +44,17 @@ export type LoopMemoryOps = Pick<SemanticOps, "memoryRead" | "memoryWrite">;
 
 export type LoopBuilderContext = Readonly<{
   state: State;
-  parent: BodyBuilder;
+  parent: RegionBuilder;
 }>;
 
 // One loop under construction: the carried cells, entry-hoisted actions, the
 // body's action sink, and the accesses the scope polices.
 export class LoopBuilder {
-  readonly #parent: BodyBuilder;
+  readonly #parent: RegionBuilder;
   readonly #cells: readonly LoopCell[];
   readonly #scope: StateLoopScope;
   readonly #bodySink: LoopBodySink;
-  readonly #body: BodyBuilder;
+  readonly #body: RegionBuilder;
 
   private constructor(
     context: LoopBuilderContext,
@@ -68,7 +68,7 @@ export class LoopBuilder {
     this.#body = context.parent.child(this.#bodySink);
   }
 
-  get body(): BodyBuilder {
+  get body(): RegionBuilder {
     return this.#body;
   }
 

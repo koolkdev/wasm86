@@ -24,7 +24,7 @@ import { assertLazyFlagState, readWasmCpuStateChannel, writeWasmCpuStateSnapshot
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import { BodyBuilder } from "#ir/body-builder.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import { flatMemoryAccess } from "#memory/flat.js";
 
 // One emitted handler body per op+width, with the register indices arriving
@@ -303,7 +303,7 @@ test("a dynamic memory check evaluates each semantic operand once", async () => 
   const values = new ValueTable();
   const address = values.external(0);
   const byteLength = values.external(1);
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
   const fault = flatMemoryAccess(
     values,
     { start: address, byteLength },
@@ -334,7 +334,7 @@ test("nested dynamic memory checks compose through the value graph", async () =>
   const innerAddress = values.external(0);
   const innerByteLength = values.external(1);
   const outerByteLength = values.external(2);
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
   const innerFault = flatMemoryAccess(
     values,
     { start: innerAddress, byteLength: innerByteLength },

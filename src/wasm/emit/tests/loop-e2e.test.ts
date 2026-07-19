@@ -5,7 +5,7 @@ import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/buil
 import { memBinding, staticMemSegment } from "#ir/operands.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Action } from "#ir/actions.js";
-import { BodyBuilder } from "#ir/body-builder.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { repMovsSemantic } from "#core/semantics/strings.js";
@@ -342,7 +342,7 @@ test("an outer capture survives nested loops and both back edges", async () => {
 // capture-before-overwrite ordering.
 test("cell locals carry loop state and survive to post-loop reads", async () => {
   const values = new ValueTable();
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
   const nSeed = values.addActionOutput();
 
   body.push(stateRead(nSeed, gprChannel("ecx")));

@@ -6,7 +6,7 @@ import { encodeJitModule } from "#engines/jit/module.js";
 import { compileActionWasmBlockHandle } from "#engines/jit/block-handle.js";
 import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
-import { BodyBuilder } from "#ir/body-builder.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { gprChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
@@ -460,7 +460,7 @@ function isEaxWordSlot(slot: StateSlot): boolean {
 
 function syntheticBlock(withResolver: boolean): IrBlock {
   const values = new ValueTable();
-  const builder = new BodyBuilder(values);
+  const builder = new RegionBuilder(values);
   const stored = withResolver
     ? builder.call(statusFlagResolvers.get("ZF"), [
         values.const(lazyFlagsKindByte(LAZY_FLAGS_KIND.NONE, 0)),

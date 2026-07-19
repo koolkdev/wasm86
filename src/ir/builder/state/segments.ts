@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import { stateRead } from "#compiler/ir/operations/state.js";
 import type { OperandWidth, SegmentRegister } from "#core/types.js";
-import type { BodyBuilder } from "../../body-builder.js";
+import type { RegionBuilder } from "../../region-builder.js";
 import { segmentBaseChannel, type SegmentChannel } from "../../slots.js";
 import { type ValueId } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
@@ -20,13 +20,13 @@ type SegmentStateSnapshot = Readonly<{
 export class SegmentState {
   readonly #values: ValueTable;
   readonly #cells: StateCells;
-  readonly #currentBody: () => BodyBuilder;
+  readonly #currentBody: () => RegionBuilder;
   readonly #dynamicBases = new Map<number, ValueId>();
 
   constructor(
     values: ValueTable,
     cells: StateCells,
-    currentBody: () => BodyBuilder
+    currentBody: () => RegionBuilder
   ) {
     this.#values = values;
     this.#cells = cells;

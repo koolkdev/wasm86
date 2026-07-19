@@ -4,7 +4,7 @@ import { buildException } from "#cpu/exit.js";
 import { pageFault, pageFaultErrorCode } from "#core/exceptions.js";
 import type { ExternalValueId } from "#ir/operands.js";
 import { eipChannel } from "#ir/slots.js";
-import { BodyBuilder } from "#ir/body-builder.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -35,7 +35,7 @@ export type DecodeCursor =
   | Readonly<{ kind: "local"; local: number }>;
 
 class DecodeFragment {
-  readonly #builder = new BodyBuilder(new ValueTable());
+  readonly #builder = new RegionBuilder(new ValueTable());
   readonly #memory = new MemoryAccessBuilder({
     values: this.#builder.values,
     currentBody: () => this.#builder

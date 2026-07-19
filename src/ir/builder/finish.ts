@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { CpuException } from "#core/exceptions.js";
-import type { BodyBuilder } from "../body-builder.js";
+import type { RegionBuilder } from "../region-builder.js";
 import type { Finish, StateWriteAction } from "../actions.js";
 import type { StatePathKind } from "./state/pending-buffer.js";
 import type { State } from "./state/index.js";
@@ -26,7 +26,7 @@ export class FinishEmitter {
     this.#values = values;
   }
 
-  finishBody(body: BodyBuilder, finish: Finish, path: StatePathKind): void {
+  finishBody(body: RegionBuilder, finish: Finish, path: StatePathKind): void {
     this.#finishBodyWith(body, finish, this.#state.flushesForPath(path));
   }
 
@@ -41,7 +41,7 @@ export class FinishEmitter {
     );
   }
 
-  dispatch(body: BodyBuilder, targetEip: ValueId): void {
+  dispatch(body: RegionBuilder, targetEip: ValueId): void {
     assert(!this.#state.eip.has(), "dispatch requires the pending eip to be consumed");
     this.#finishBodyWith(
       body,
@@ -67,7 +67,7 @@ export class FinishEmitter {
     );
   }
 
-  #finishBodyWith(body: BodyBuilder, finish: Finish, flushes: readonly StateWriteAction[]): void {
+  #finishBodyWith(body: RegionBuilder, finish: Finish, flushes: readonly StateWriteAction[]): void {
     for (const action of flushes) {
       body.push(action);
     }

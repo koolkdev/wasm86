@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { Action, StateWriteAction } from "#ir/actions.js";
-import { BodyBuilder } from "#ir/body-builder.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import { State } from "#ir/builder/state/index.js";
 import type { StatusFlagState } from "#ir/builder/state/status-flags.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#ir/lazy-flags.js";
@@ -30,7 +30,7 @@ type Harness = Readonly<{
 
 function createHarness(): Harness {
   const values = new ValueTable();
-  const body = new BodyBuilder(values);
+  const body = new RegionBuilder(values);
   const actions = body.build().actions as Action[];
   const state = new State(values, () => body);
 

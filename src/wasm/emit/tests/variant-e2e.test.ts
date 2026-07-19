@@ -12,7 +12,7 @@ import {
   createVariantLayout,
   variantSet
 } from "#compiler/layout/variant.js";
-import { buildIrBlock } from "#ir/body-builder.js";
+import { buildIrBlock } from "#ir/region-builder.js";
 import { instantiateIrBlock } from "./harness.js";
 
 test("generated and host encoders share one resolved variant codec", async () => {

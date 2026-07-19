@@ -11,7 +11,7 @@ import {
 } from "#core/flags/values.js";
 import { statusFlagResolvers } from "#core/flags/resolvers.js";
 import type { CompareOperator } from "#compiler/ir/values/comparison.js";
-import type { BodyBuilder, SwitchArm } from "../../body-builder.js";
+import type { RegionBuilder, SwitchArm } from "../../region-builder.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "../../lazy-flags.js";
 import { valueTableFlagOps } from "../../flag-value-ops.js";
 import {
@@ -61,7 +61,7 @@ type LazyConditionCaseSpec = Readonly<{
 export class StatusFlagState {
   readonly #values: ValueTable;
   readonly #cells: StateCells;
-  readonly #currentBody: () => BodyBuilder;
+  readonly #currentBody: () => RegionBuilder;
   readonly #writeObserver: StateWriteObserver | undefined;
   readonly #sources: SimpleFlagSource<ValueId>[] = [];
   readonly #current = initialStatusFlagState();
@@ -71,7 +71,7 @@ export class StatusFlagState {
   constructor(
     values: ValueTable,
     cells: StateCells,
-    currentBody: () => BodyBuilder,
+    currentBody: () => RegionBuilder,
     writeObserver?: StateWriteObserver
   ) {
     this.#values = values;
@@ -369,7 +369,7 @@ export class StatusFlagState {
   }
 
   #lazyConditionDefault(
-    body: BodyBuilder,
+    body: RegionBuilder,
     expr: FlagBoolExpr,
     record: LazyFlagRecordValues
   ): ValueId {
@@ -451,7 +451,7 @@ export class StatusFlagState {
   }
 
   #callStatusFlagResolver(
-    body: BodyBuilder,
+    body: RegionBuilder,
     flag: X86StatusFlag,
     record: LazyFlagRecordValues
   ): ValueId {
