@@ -20,7 +20,7 @@ import {
 import { RegionBuilder, buildIrBlock, type BodyActionSink } from "#ir/region-builder.js";
 import { eipChannel, gprChannel } from "#ir/slots.js";
 import { validateIrBlock } from "#ir/validate.js";
-import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
+import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { statusFlagResolvers } from "#core/flags/resolvers.js";
@@ -57,6 +57,45 @@ test("operation derives the output and its bounds from the definition", () => {
     }]
   });
   deepStrictEqual(values.widthBounds(read), fitsUnsigned(8));
+});
+
+test("resource read modes reach operation construction", () => {
+  const values = new ValueTable();
+  const builder = new RegionBuilder(values);
+  const resource = resourceRef("test.region-builder-refined-resource");
+  const source: ResourceByteOperand = {
+    effect: {
+      space: "resource",
+      resource,
+      range: {
+        basis: { kind: "resource" },
+        slice: { byteOffset: 0, byteLength: 1 }
+      }
+    },
+    address: { base: values.const(0), displacement: 0 },
+    width: 8
+  };
+
+  const signed = builder.operation(resourceRead.create({
+    source,
+    mode: { kind: "signed" }
+  }));
+  const bounded = builder.operation(resourceRead.create({
+    source,
+    mode: {
+      kind: "unsigned",
+      bounds: fitsUnsigned(1)
+    }
+  }));
+
+  const [signedAction, boundedAction] = builder.build().actions;
+
+  ok(signedAction?.kind === "op" && signedAction.op.kind === "resource.read");
+  ok(boundedAction?.kind === "op" && boundedAction.op.kind === "resource.read");
+  strictEqual(signedAction.op.signed, true);
+  strictEqual(boundedAction.op.signed, undefined);
+  deepStrictEqual(values.widthBounds(signed), signExtended(8));
+  deepStrictEqual(values.widthBounds(bounded), fitsUnsigned(1));
 });
 
 test("one operation API handles value and effect definitions", () => {

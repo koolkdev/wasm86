@@ -1,6 +1,7 @@
 import type {
   IntegerWidth,
-  ValueId
+  ValueId,
+  WidthBounds
 } from "#compiler/ir/values/types.js";
 
 declare const resourceRefBrand: unique symbol;
@@ -67,3 +68,9 @@ export type ResourceByteOperand = Readonly<{
   }>;
   width: IntegerWidth;
 }>;
+
+// Result interpretation for a resource read. Omitting the mode means an
+// unsigned read bounded only by the transfer width.
+export type ResourceReadMode =
+  | Readonly<{ kind: "signed" }>
+  | Readonly<{ kind: "unsigned"; bounds?: WidthBounds }>;

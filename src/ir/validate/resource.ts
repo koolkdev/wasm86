@@ -32,9 +32,11 @@ export function validateResourceOperation(
   validateResourceEffect(operation.effect, label);
 
   if (operation.effect.range.slice !== undefined) {
+    const transferByteLength = operation.width / 8;
+
     assert(
-      operation.effect.range.slice.byteLength === operation.width / 8,
-      `${label} exact range byte length ${operation.effect.range.slice.byteLength} must match ${operation.width}-bit transfer`
+      operation.effect.range.slice.byteLength >= transferByteLength,
+      `${label} range byte length ${operation.effect.range.slice.byteLength} must contain its ${operation.width}-bit transfer`
     );
   }
 
@@ -130,18 +132,51 @@ function assertReadBounds(
   signed: boolean,
   label: string
 ): void {
-  if (width === 32) {
-    assert(actual === undefined, `${label} 32-bit result must be unbounded`);
+  const mechanical = width === 32
+    ? undefined
+    : signed
+      ? signExtended(width)
+      : fitsUnsigned(width);
+
+  if (signed) {
+    assert(
+      actual !== undefined &&
+        mechanical !== undefined &&
+        actual.unsignedBits === mechanical.unsignedBits &&
+        actual.signedBits === mechanical.signedBits,
+      `${label} signed result bounds must match its mechanical load bounds`
+    );
     return;
   }
 
-  const expected = signed ? signExtended(width) : fitsUnsigned(width);
+  if (actual === undefined) {
+    assert(
+      mechanical === undefined,
+      `${label} result is missing its mechanical load bounds`
+    );
+    return;
+  }
+
+  assertValidBounds(actual, label);
+  const containing = mechanical ?? { unsignedBits: 32, signedBits: 32 };
 
   assert(
-    actual !== undefined &&
-      actual.unsignedBits === expected.unsignedBits &&
-      actual.signedBits === expected.signedBits,
-    `${label} result has bounds inconsistent with its transfer width and signedness`
+    actual.unsignedBits <= containing.unsignedBits &&
+      actual.signedBits <= containing.signedBits,
+    `${label} result bounds exceed its mechanical load bounds`
+  );
+}
+
+function assertValidBounds(bounds: WidthBounds, label: string): void {
+  assert(
+    Number.isInteger(bounds.unsignedBits) &&
+      bounds.unsignedBits >= 0 &&
+      bounds.unsignedBits <= 32 &&
+      Number.isInteger(bounds.signedBits) &&
+      bounds.signedBits >= 0 &&
+      bounds.signedBits <= 32 &&
+      bounds.signedBits <= bounds.unsignedBits + 1,
+    `${label} result bounds are malformed`
   );
 }
 

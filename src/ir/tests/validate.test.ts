@@ -242,7 +242,7 @@ test("valid narrow signed resource read and write nodes validate", () => {
   };
   const read = resourceRead.create({
     source: resourceOperand(range, address, 4, 16),
-    signed: true
+    mode: { kind: "signed" }
   });
   const write = resourceWrite.create({
     destination: resourceOperand(range, address, 4, 16),
@@ -286,19 +286,18 @@ test("resource operation validation rejects invalid width and signedness", () =>
   {
     const values = new ValueTable();
     const address = values.const(0);
-    const operation = resourceRead.create({
-      source: resourceOperand(
-        { basis: { kind: "resource" } },
-        address,
-        0,
-        32
-      ),
-      signed: true
-    });
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, operation)),
-      /signedness is valid only for a narrow read/
+      () => resourceRead.create({
+        source: resourceOperand(
+          { basis: { kind: "resource" } },
+          address,
+          0,
+          32
+        ),
+        mode: { kind: "signed" }
+      }),
+      /32-bit resource read has no signed extension/
     );
   }
 
@@ -405,7 +404,7 @@ test("resource operation validation rejects invalid byte slices", () => {
   }
 });
 
-test("resource operation validation rejects a slice that disagrees with transfer width", () => {
+test("resource operation validation rejects a slice smaller than its transfer", () => {
   const values = new ValueTable();
   const address = values.const(0);
   const operation = resourceRead.create({
@@ -422,8 +421,26 @@ test("resource operation validation rejects a slice that disagrees with transfer
 
   throws(
     () => validateIrBlock(blockWithResourceOperation(values, operation)),
-    /exact range byte length 1 must match 32-bit transfer/
+    /range byte length 1 must contain its 32-bit transfer/
   );
+});
+
+test("resource operation validation accepts a containing conservative slice", () => {
+  const values = new ValueTable();
+  const address = values.const(0);
+  const operation = resourceRead.create({
+    source: resourceOperand(
+      {
+        basis: { kind: "resource" },
+        slice: { byteOffset: 8, byteLength: 32 }
+      },
+      address,
+      8,
+      32
+    )
+  });
+
+  doesNotThrow(() => validateIrBlock(blockWithResourceOperation(values, operation)));
 });
 
 test("resource operation validation rejects incoherent retained effects", () => {
@@ -578,16 +595,16 @@ test("resource operation validation rejects incoherent retained results", () => 
         0,
         8
       ),
-      signed: true
+      mode: { kind: "signed" }
     });
     const forged = {
       ...read,
-      result: { type: "i32", bounds: fitsUnsigned(8) }
+      result: { type: "i32", bounds: fitsUnsigned(7) }
     } as ResourceOperation;
 
     throws(
       () => validateIrBlock(blockWithResourceOperation(values, forged)),
-      /result has bounds inconsistent with its transfer width and signedness/
+      /signed result bounds must match its mechanical load bounds/
     );
   }
 
@@ -614,6 +631,61 @@ test("resource operation validation rejects incoherent retained results", () => 
       /must not have a result/
     );
   }
+});
+
+test("unsigned resource read bounds may refine within mechanical bounds", () => {
+  const validValues = new ValueTable();
+  const validAddress = validValues.const(0);
+  const valid = resourceRead.create({
+    source: resourceOperand(
+      { basis: { kind: "resource" } },
+      validAddress,
+      0,
+      8
+    ),
+    mode: { kind: "unsigned", bounds: fitsUnsigned(1) }
+  });
+
+  doesNotThrow(
+    () => validateIrBlock(blockWithResourceOperation(validValues, valid))
+  );
+
+  const wideValues = new ValueTable();
+  const wideAddress = wideValues.const(0);
+  const tooWide = resourceRead.create({
+    source: resourceOperand(
+      { basis: { kind: "resource" } },
+      wideAddress,
+      0,
+      8
+    ),
+    mode: { kind: "unsigned", bounds: fitsUnsigned(16) }
+  });
+
+  throws(
+    () => validateIrBlock(blockWithResourceOperation(wideValues, tooWide)),
+    /result bounds exceed its mechanical load bounds/
+  );
+
+  const malformedValues = new ValueTable();
+  const malformedAddress = malformedValues.const(0);
+  const malformed = resourceRead.create({
+    source: resourceOperand(
+      { basis: { kind: "resource" } },
+      malformedAddress,
+      0,
+      8
+    ),
+    mode: {
+      kind: "unsigned",
+      bounds: { unsignedBits: -1, signedBits: 0 }
+    }
+  });
+
+  throws(
+    () => validateIrBlock(blockWithResourceOperation(malformedValues, malformed)),
+    /result bounds are malformed/
+  );
 });
 
 test("a root dispatch EIP write is rejected", () => {

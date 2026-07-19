@@ -74,7 +74,7 @@ export class MemoryAccessBuilder {
     const signed = options.signed === true && width !== 32;
 
     return this.#currentBody().operation(
-      resourceRead.create(signed ? { source, signed: true } : { source })
+      resourceRead.create(signed ? { source, mode: { kind: "signed" } } : { source })
     );
   }
 

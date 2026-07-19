@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
@@ -230,7 +230,7 @@ test("resource definitions retain identities, ranges, and indexed memory facts",
   const value = valueId(51);
   const read = resourceRead.create({
     source: byteOperand(resource, range, address, 6, 16),
-    signed: true
+    mode: { kind: "signed" }
   });
   const write = resourceWrite.create({
     destination: byteOperand(resource, range, address, 6, 16),
@@ -282,6 +282,40 @@ test("resource definitions retain identities, ranges, and indexed memory facts",
   body.drop();
   emitOperation(target, emitter, write);
   deepStrictEqual(body.finish().references.memoryIndices, [3]);
+});
+
+test("resource-read modes derive their result bounds", () => {
+  const resource = resourceRef("test.refined-read");
+  const source = byteOperand(
+    resource,
+    { basis: { kind: "resource" }, slice: { byteOffset: 0, byteLength: 1 } },
+    valueId(0),
+    0,
+    8
+  );
+
+  deepStrictEqual(resourceRead.create({ source }).result, {
+    type: "i32",
+    bounds: fitsUnsigned(8)
+  });
+  deepStrictEqual(
+    resourceRead.create({
+      source,
+      mode: { kind: "unsigned", bounds: fitsUnsigned(1) }
+    }).result,
+    { type: "i32", bounds: fitsUnsigned(1) }
+  );
+  deepStrictEqual(
+    resourceRead.create({ source, mode: { kind: "signed" } }).result,
+    { type: "i32", bounds: signExtended(8) }
+  );
+  throws(
+    () => resourceRead.create({
+      source: { ...source, width: 32 },
+      mode: { kind: "signed" }
+    }),
+    /32-bit resource read has no signed extension/
+  );
 });
 
 function byteOperand(

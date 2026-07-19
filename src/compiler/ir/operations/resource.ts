@@ -1,11 +1,13 @@
+import { assert } from "#common/assert.js";
 import type { WasmMemoryImmediate } from "#compiler/encoder/memory.js";
 import {
   type ResourceByteOperand,
-  type ResourceEffect
+  type ResourceEffect,
+  type ResourceReadMode
 } from "#compiler/ir/resource.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { IntegerWidth } from "#compiler/ir/values/types.js";
+import type { IntegerWidth, WidthBounds } from "#compiler/ir/values/types.js";
 import type {
   OperationDefinition,
   OperationNode,
@@ -21,7 +23,7 @@ type ResourceReadData = Readonly<{
 
 type ResourceReadCreateArgs = Readonly<{
   source: ResourceByteOperand;
-  signed?: true;
+  mode?: ResourceReadMode;
 }>;
 
 type ResourceReadOperation = OperationNode<
@@ -37,14 +39,31 @@ export const resourceRead: OperationDefinition<
   kind: "resource.read",
 
   create(op) {
+    const mode = op.mode;
+
+    assert(
+      mode === undefined || mode.kind === "signed" || mode.kind === "unsigned",
+      "unknown resource read mode"
+    );
+    assert(
+      mode?.kind !== "signed" || op.source.width !== 32,
+      "a 32-bit resource read has no signed extension"
+    );
+    const signed = mode?.kind === "signed";
+    const bounds = mode?.kind === "unsigned" ? mode.bounds : undefined;
+
     return {
       kind: "resource.read",
       effect: op.source.effect,
       displacement: op.source.address.displacement,
       width: op.source.width,
-      ...(op.signed === true ? { signed: true } : {}),
+      ...(signed ? { signed: true } : {}),
       inputs: [{ value: op.source.address.base, type: "i32" }],
-      result: readResult(op.source.width, op.signed === true),
+      result: readResult(
+        op.source.width,
+        signed,
+        bounds
+      ),
       effects: {
         reads: [op.source.effect],
         writes: []
@@ -148,7 +167,14 @@ export type ResourceOperation =
 
 const i32Result: OperationResult = { type: "i32" };
 
-function readResult(width: IntegerWidth, signed: boolean): OperationResult {
+function readResult(
+  width: IntegerWidth,
+  signed: boolean,
+  refinement: WidthBounds | undefined
+): OperationResult {
+  if (refinement !== undefined) {
+    return { type: "i32", bounds: refinement };
+  }
   if (width === 32) {
     return i32Result;
   }

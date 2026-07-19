@@ -76,7 +76,7 @@ export function memoryRead(
           address: { base: addressId, displacement: 0 },
           width
         },
-        signed: true
+        mode: { kind: "signed" }
       })
     : resourceReadOperation.create({
         source: {
