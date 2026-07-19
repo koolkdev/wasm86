@@ -1,7 +1,8 @@
-import { strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { decodeBytes, mem, ok, testDecodeFixtures } from "./helpers.js";
+import { invalidOpcode } from "#core/exceptions.js";
+import { cpuException, decodeBytes, mem, ok, startAddress, testDecodeFixtures } from "./helpers.js";
 
 testDecodeFixtures([
   {
@@ -196,21 +197,17 @@ test("segment override on stos is ignored by the fixed ES destination", () => {
 });
 
 test("repne movs stays unsupported because that bucket is absent", () => {
-  const decoded = decodeBytes([0xf2, 0xa4]);
+  const decoded = cpuException(decodeBytes([0xf2, 0xa4]));
 
-  strictEqual(decoded.kind, "unsupported");
-  if (decoded.kind === "unsupported") {
-    strictEqual(decoded.unsupportedByte, 0xf2);
-    strictEqual(decoded.length, 2);
-  }
+  deepStrictEqual(decoded.exception, invalidOpcode());
+  strictEqual(decoded.instructionStart, startAddress);
+  deepStrictEqual(decoded.raw, [0xf2, 0xa4]);
 });
 
 test("rep on a non-rep opcode stays unsupported after prefix scanning", () => {
-  const decoded = decodeBytes([0xf3, 0x90]);
+  const decoded = cpuException(decodeBytes([0xf3, 0x90]));
 
-  strictEqual(decoded.kind, "unsupported");
-  if (decoded.kind === "unsupported") {
-    strictEqual(decoded.unsupportedByte, 0xf3);
-    strictEqual(decoded.length, 2);
-  }
+  deepStrictEqual(decoded.exception, invalidOpcode());
+  strictEqual(decoded.instructionStart, startAddress);
+  deepStrictEqual(decoded.raw, [0xf3, 0x90]);
 });

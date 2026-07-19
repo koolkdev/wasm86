@@ -142,10 +142,24 @@ const fixtures: readonly DecoderFixture[] = [
     id: "mov.r32_rm32"
   },
   {
+    name: "mov eax, [ebx-1] through disp32",
+    bytes: [0x8b, 0x83, 0xff, 0xff, 0xff, 0xff],
+    mnemonic: "mov",
+    operands: [reg32("eax"), mem32({ base: "ebx", scale: 1, disp: -1 })],
+    id: "mov.r32_rm32"
+  },
+  {
     name: "mov eax, [0x00402000]",
     bytes: [0x8b, 0x05, 0x00, 0x20, 0x40, 0x00],
     mnemonic: "mov",
     operands: [reg32("eax"), mem32({ scale: 1, disp: 0x0040_2000 })],
+    id: "mov.r32_rm32"
+  },
+  {
+    name: "mov eax, [0x80000000] through base-less disp32",
+    bytes: [0x8b, 0x05, 0x00, 0x00, 0x00, 0x80],
+    mnemonic: "mov",
+    operands: [reg32("eax"), mem32({ scale: 1, disp: 0x8000_0000 })],
     id: "mov.r32_rm32"
   },
   {
@@ -209,6 +223,27 @@ const fixtures: readonly DecoderFixture[] = [
     bytes: [0x8b, 0x04, 0x88],
     mnemonic: "mov",
     operands: [reg32("eax"), mem32({ base: "eax", index: "ecx", scale: 4, disp: 0 })],
+    id: "mov.r32_rm32"
+  },
+  {
+    name: "mov eax, [eax + ecx*2]",
+    bytes: [0x8b, 0x04, 0x48],
+    mnemonic: "mov",
+    operands: [reg32("eax"), mem32({ base: "eax", index: "ecx", scale: 2, disp: 0 })],
+    id: "mov.r32_rm32"
+  },
+  {
+    name: "mov eax, [eax + ecx*8]",
+    bytes: [0x8b, 0x04, 0xc8],
+    mnemonic: "mov",
+    operands: [reg32("eax"), mem32({ base: "eax", index: "ecx", scale: 8, disp: 0 })],
+    id: "mov.r32_rm32"
+  },
+  {
+    name: "mov eax, [eax] with an encoded no-index scale",
+    bytes: [0x8b, 0x04, 0xe0],
+    mnemonic: "mov",
+    operands: [reg32("eax"), mem32({ base: "eax", scale: 1, disp: 0 })],
     id: "mov.r32_rm32"
   },
   {

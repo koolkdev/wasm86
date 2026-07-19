@@ -14,8 +14,7 @@ import type { InstructionStateChannel } from "#core/instruction/state/channels.j
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
-import { ByteArrayDecodeReader } from "#core/decoder/tests/helpers.js";
-import { decodeIsaBlock, type IsaDecodedBlock } from "#core/decoder/decode-block.js";
+import { decodeJitBlock, type JitDecodedBlock } from "#engines/jit/decode-block.js";
 import { invalidOpcode, pageFault } from "#core/exceptions.js";
 import {
   readWasmCpuStateSnapshot,
@@ -39,6 +38,7 @@ import { buildExit } from "#cpu/exit.js";
 import { trapExit } from "#core/exits.js";
 import { cpuStatusFlagResolvers } from "#cpu/state.js";
 import { x86Flags } from "#core/flags/definitions.js";
+import { jitMemoryWithBytes } from "./decode-helpers.js";
 
 const startEip = 0x1000;
 
@@ -85,6 +85,21 @@ test("JIT program closure rejects an undeclared external link", () => {
   );
 });
 
+test("raw JIT rejects a decode-time CPU exception after decoded instructions", () => {
+  const block = decodeBlock([0x40, 0x62]);
+  const memories = createTestWasmMemories();
+
+  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["inc.r32"]);
+  strictEqual(block.terminator.kind, "cpuException");
+  throws(
+    () => compileActionWasmBlockHandle([block], {
+      cpuStateMemory: memories.cpuStateMemory,
+      guestMemory: memories.guestMemory
+    }),
+    /raw JIT cannot lower decode-time UD at 0x1001/
+  );
+});
+
 test("JIT program validates external link layouts before declaration", () => {
   const targetEip = startEip + 0x100;
   const blocks = [{ entryEip: startEip, ir: syntheticDispatchBlock(targetEip) }];
@@ -107,7 +122,11 @@ test("JIT program validates external link layouts before declaration", () => {
 
 test("a repeated add compiles to one eax read and one eax write", () => {
   // add eax, 1; add eax, 1.
-  const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
+  const block = buildIrBlock(decodeBlock(
+    [0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01],
+    startEip,
+    2
+  ).instructions);
   const nodes = entryActions(block);
 
   strictEqual(nodes.filter((action) =>
@@ -120,7 +139,11 @@ test("a repeated add compiles to one eax read and one eax write", () => {
 
 test("cross-instruction dead flag writes are absent and Core commits EIP before dispatch", () => {
   // add eax, 1; add eax, 1.
-  const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
+  const block = buildIrBlock(decodeBlock(
+    [0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01],
+    startEip,
+    2
+  ).instructions);
   const nodes = entryActions(block);
   const flagWrites = nodes.filter((action) =>
     isStateWrite(action) && x86Flags.some((flag) =>
@@ -155,7 +178,11 @@ test("cross-instruction dead flag writes are absent and Core commits EIP before 
 test("a guard fault mid-block reports the faulting eip with earlier state flushed", () => {
   // inc eax; mov eax, [0xff0000] — beyond the one-page guest memory.
   const faultAddress = 0xff_0000;
-  const block = decodeBlock([0x40, 0x8b, 0x05, 0x00, 0x00, 0xff, 0x00]);
+  const block = decodeBlock(
+    [0x40, 0x8b, 0x05, 0x00, 0x00, 0xff, 0x00],
+    startEip,
+    2
+  );
   const memories = createTestWasmMemories();
   const handle = compileActionWasmBlockHandle([block], {
     cpuStateMemory: memories.cpuStateMemory,
@@ -182,7 +209,7 @@ test("a segment-register load exits from a compiled block before committing the 
   // mov es, ax; inc eax. The decoder does not know the segment load ends
   // the flat32 IR block, so action compilation must stop after the first
   // instruction.
-  const block = decodeBlock([0x8e, 0xc0, 0x40]);
+  const block = decodeBlock([0x8e, 0xc0, 0x40], startEip, 2);
   strictEqual(block.instructions.length, 2);
   const memories = createTestWasmMemories();
   const handle = compileActionWasmBlockHandle([block], {
@@ -428,7 +455,7 @@ test("into mid-block traps only on OF and otherwise falls through inside the blo
 
 test("a compiled MOV to CS raises invalid-opcode before segment-load handling", () => {
   // mov cs, ax.
-  const block = decodeBlock([0x8e, 0xc8]);
+  const block = decodeBlock([0x8e, 0xc8], startEip, 1);
   const memories = createTestWasmMemories();
   const stateView = new DataView(memories.cpuStateMemory.buffer);
   const handle = compileActionWasmBlockHandle([block], {
@@ -497,8 +524,16 @@ test("a dynamic jump returns the legacy transfer and resumes from flushed state"
   strictEqual(state.instructionCount, 1);
 });
 
-function decodeBlock(bytes: readonly number[], eip = startEip): IsaDecodedBlock {
-  return decodeIsaBlock(new ByteArrayDecodeReader(Uint8Array.from(bytes), eip), eip);
+function decodeBlock(
+  bytes: readonly number[],
+  eip = startEip,
+  maxInstructions?: number
+): JitDecodedBlock {
+  return decodeJitBlock(
+    jitMemoryWithBytes(bytes, eip),
+    eip,
+    maxInstructions === undefined ? {} : { maxInstructions }
+  );
 }
 
 function entryActions(block: IrBlock): readonly BodyNode[] {

@@ -1,5 +1,6 @@
 import type { MemOperand, OperandWidth, RegisterAlias, SegmentRegister } from "#core/types.js";
 import type { InstructionSpec, ImmediateExtension } from "#core/isa/spec.js";
+import type { CpuException } from "#core/exceptions.js";
 
 export type IsaOperandBinding =
   | Readonly<{ kind: "reg"; alias: RegisterAlias }>
@@ -28,12 +29,24 @@ export type IsaDecodedInstruction = Readonly<{
   raw: readonly number[];
 }>;
 
-export type IsaDecodeResult =
-  | Readonly<{ kind: "ok"; instruction: IsaDecodedInstruction }>
+export type IsaDecodeByteResult =
+  | Readonly<{ kind: "byte"; value: number }>
   | Readonly<{
-      kind: "unsupported";
-      address: number;
-      length: number;
-      raw: readonly number[];
-      unsupportedByte?: number;
+      kind: "cpuException";
+      exception: CpuException<number>;
     }>;
+
+export type IsaDecodeReader = Readonly<{
+  readU8(eip: number): IsaDecodeByteResult;
+}>;
+
+export type IsaDecodeExceptionResult = Readonly<{
+  kind: "cpuException";
+  exception: CpuException<number>;
+  instructionStart: number;
+  raw: readonly number[];
+}>;
+
+export type IsaDecodeResult =
+  | Readonly<{ kind: "instruction"; instruction: IsaDecodedInstruction }>
+  | IsaDecodeExceptionResult;

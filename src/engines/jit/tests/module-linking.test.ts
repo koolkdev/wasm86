@@ -1,8 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { decodeIsaBlock } from "#core/decoder/decode-block.js";
-import { ByteArrayDecodeReader } from "#core/decoder/tests/helpers.js";
+import { decodeJitBlock } from "#engines/jit/decode-block.js";
 import {
   assertLazyFlagState,
   readWasmCpuStateSnapshot,
@@ -11,6 +10,7 @@ import {
 } from "#test/support/cpu-state.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 import { compileActionWasmBlockHandle, type WasmBlockHandle } from "#engines/jit/block-handle.js";
+import { writeBackingBytes } from "#memory/bytes.js";
 
 const aEip = 0x1000;
 const bEip = 0x2000;
@@ -174,8 +174,21 @@ function compileBlock(fixture: ReturnType<typeof createLinkingFixture>, eip: num
 
   ok(source, `expected source bytes at 0x${eip.toString(16)}`);
 
-  const reader = new ByteArrayDecodeReader(source.bytes, source.eip);
-  const decoded = decodeIsaBlock(reader, eip, { maxInstructions: 1024 });
+  const firstFailingAddress = writeBackingBytes(
+    fixture.memories.guestMemory,
+    source.eip,
+    source.bytes
+  );
+
+  ok(
+    firstFailingAddress === undefined,
+    `source bytes exceed guest memory at 0x${firstFailingAddress?.toString(16)}`
+  );
+  const decoded = decodeJitBlock(
+    fixture.memories.guestMemory,
+    eip,
+    { maxInstructions: 1024 }
+  );
 
   return compileActionWasmBlockHandle([decoded], {
     cpuStateMemory: fixture.memories.cpuStateMemory,

@@ -7,6 +7,10 @@ import {
 } from "#compiler/layout/variant.js";
 
 export const coreExitFields = {
+  gpCode: new VariantFieldRef(
+    "core.exit.general-protection.error-code",
+    "u16"
+  ),
   pfAddress: new VariantFieldRef(
     "core.exit.page-fault.linear-address",
     "u32"
@@ -29,6 +33,9 @@ export const coreExitFields = {
 export const coreExits = {
   de: new VariantRef("core.exit.divide-error", []),
   ud: new VariantRef("core.exit.undefined-instruction", []),
+  gp: new VariantRef("core.exit.general-protection", [
+    coreExitFields.gpCode
+  ]),
   pf: new VariantRef("core.exit.page-fault", [
     coreExitFields.pfAddress,
     coreExitFields.pfCode
@@ -45,6 +52,7 @@ export const coreExits = {
 export const coreExitSet = variantSet("core.exit", [
   coreExits.de,
   coreExits.ud,
+  coreExits.gp,
   coreExits.pf,
   coreExits.trap,
   coreExits.segment
@@ -78,6 +86,16 @@ export function exceptionExit<TValue>(
       return { variant: coreExits.de, payload: [] };
     case "UD":
       return { variant: coreExits.ud, payload: [] };
+    case "GP":
+      return {
+        variant: coreExits.gp,
+        payload: [
+          {
+            field: coreExitFields.gpCode,
+            value: exception.errorCode
+          }
+        ]
+      };
     case "PF":
       return {
         variant: coreExits.pf,

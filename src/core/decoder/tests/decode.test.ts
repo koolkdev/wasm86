@@ -2,7 +2,8 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
-import { ByteArrayDecodeReader, decodeBytes, imm8, imm32, mem, mem32, ok, reg, reg32, signImm8, startAddress } from "./helpers.js";
+import { invalidOpcode } from "#core/exceptions.js";
+import { ByteArrayDecodeReader, cpuException, decodeBytes, imm8, imm32, mem, mem32, ok, reg, reg32, signImm8, startAddress } from "./helpers.js";
 
 test("decodes opcode-encoded register and imm32 operands", () => {
   const decoded = ok(decodeBytes([0xbb, 0x78, 0x56, 0x34, 0x12]));
@@ -140,25 +141,19 @@ test("uses ModRM match fields for slash-digit groups", () => {
 
 test("rejects unregistered grouped opcodes after ModRM.reg dispatch", () => {
   // F7 /1 remains unregistered in the current ISA subset.
-  const decoded = decodeBytes([0xf7, 0xc8]);
+  const decoded = cpuException(decodeBytes([0xf7, 0xc8]));
 
-  strictEqual(decoded.kind, "unsupported");
-  if (decoded.kind === "unsupported") {
-    strictEqual(decoded.length, 2);
-    deepStrictEqual(decoded.raw, [0xf7, 0xc8]);
-    strictEqual(decoded.unsupportedByte, 0xf7);
-  }
+  deepStrictEqual(decoded.exception, invalidOpcode());
+  strictEqual(decoded.instructionStart, startAddress);
+  deepStrictEqual(decoded.raw, [0xf7, 0xc8]);
 });
 
 test("cmpxchg8b register ModRM form is unsupported", () => {
-  const decoded = decodeBytes([0x0f, 0xc7, 0xc8]);
+  const decoded = cpuException(decodeBytes([0x0f, 0xc7, 0xc8]));
 
-  strictEqual(decoded.kind, "unsupported");
-  if (decoded.kind === "unsupported") {
-    strictEqual(decoded.length, 3);
-    deepStrictEqual(decoded.raw, [0x0f, 0xc7, 0xc8]);
-    strictEqual(decoded.unsupportedByte, 0x0f);
-  }
+  deepStrictEqual(decoded.exception, invalidOpcode());
+  strictEqual(decoded.instructionStart, startAddress);
+  deepStrictEqual(decoded.raw, [0x0f, 0xc7, 0xc8]);
 });
 
 test("decodes direct relative targets as absolute target operands", () => {
@@ -256,23 +251,17 @@ test("decodes ModRM memory operands with displacement", () => {
 
 test("rejects address-only m32 forms when ModRM encodes a register", () => {
   // 8D C3: LEA eax, ebx is invalid because LEA requires memory/address form.
-  const decoded = decodeBytes([0x8d, 0xc3]);
+  const decoded = cpuException(decodeBytes([0x8d, 0xc3]));
 
-  strictEqual(decoded.kind, "unsupported");
-  if (decoded.kind === "unsupported") {
-    strictEqual(decoded.length, 2);
-    deepStrictEqual(decoded.raw, [0x8d, 0xc3]);
-    strictEqual(decoded.unsupportedByte, 0x8d);
-  }
+  deepStrictEqual(decoded.exception, invalidOpcode());
+  strictEqual(decoded.instructionStart, startAddress);
+  deepStrictEqual(decoded.raw, [0x8d, 0xc3]);
 });
 
 test("reports unsupported opcode bytes", () => {
-  const decoded = decodeBytes([0x62]);
+  const decoded = cpuException(decodeBytes([0x62]));
 
-  strictEqual(decoded.kind, "unsupported");
-  if (decoded.kind === "unsupported") {
-    strictEqual(decoded.length, 1);
-    deepStrictEqual(decoded.raw, [0x62]);
-    strictEqual(decoded.unsupportedByte, 0x62);
-  }
+  deepStrictEqual(decoded.exception, invalidOpcode());
+  strictEqual(decoded.instructionStart, startAddress);
+  deepStrictEqual(decoded.raw, [0x62]);
 });

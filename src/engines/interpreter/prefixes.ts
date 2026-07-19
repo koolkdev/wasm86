@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import { prefixFlagBits } from "#core/decoder/prefix-flags.js";
+import { prefixFlagBits } from "#core/decoder/prefix-flags-legacy.js";
 import {
   operandSizeOverridePrefixByte,
   repnePrefixByte,

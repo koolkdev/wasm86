@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import type { IsaDecodedBlock } from "#core/decoder/decode-block.js";
 import { u32 } from "#core/numeric.js";
 import { wasmImport } from "#wasm/abi.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
@@ -21,6 +20,7 @@ import {
   transferByteLength,
   type LegacyTransfer
 } from "./legacy-transfer.js";
+import type { JitDecodedBlock } from "./decode-block.js";
 
 assert(
   exitLayout.tagOffset >= transferByteLength,
@@ -41,7 +41,7 @@ export type CompileWasmBlockHandleOptions = Readonly<{
 }>;
 
 export function compileActionWasmBlockHandle(
-  blocks: readonly IsaDecodedBlock[],
+  blocks: readonly JitDecodedBlock[],
   options: CompileWasmBlockHandleOptions
 ): WasmBlockHandle {
   assertCompilableBlocks(blocks);
@@ -60,20 +60,28 @@ export function compileActionWasmBlockHandle(
   return instantiateCompiledBlocks(blocks, bytes, moduleLinkTable, options);
 }
 
-function assertCompilableBlocks(blocks: readonly IsaDecodedBlock[]): void {
+function assertCompilableBlocks(blocks: readonly JitDecodedBlock[]): void {
   if (blocks.length === 0) {
     throw new UnsupportedWasmCodegenError("cannot compile empty block module");
   }
 
   for (const block of blocks) {
+    if (block.terminator.kind === "cpuException") {
+      throw new UnsupportedWasmCodegenError(
+        `raw JIT cannot lower decode-time ${block.terminator.exception.kind} at 0x${block.terminator.instructionStart.toString(16)}`
+      );
+    }
+
     if (block.instructions.length === 0) {
-      throw new UnsupportedWasmCodegenError(unsupportedBlockMessage(block));
+      throw new UnsupportedWasmCodegenError(
+        `cannot compile empty block at 0x${block.startEip.toString(16)}`
+      );
     }
   }
 }
 
 function instantiateCompiledBlocks(
-  blocks: readonly IsaDecodedBlock[],
+  blocks: readonly JitDecodedBlock[],
   bytes: Uint8Array<ArrayBuffer>,
   moduleLinkTable: JitModuleLinkTable | undefined,
   options: CompileWasmBlockHandleOptions
@@ -179,15 +187,4 @@ function readExportedFunction(instance: WebAssembly.Instance, name: string): () 
   }
 
   return value as () => unknown;
-}
-
-function unsupportedBlockMessage(block: IsaDecodedBlock): string {
-  switch (block.terminator.kind) {
-    case "unsupported":
-      return `unsupported x86 opcode at 0x${block.terminator.address.toString(16)}`;
-    case "decode-fault":
-      return `decode fault at 0x${block.terminator.fault.address.toString(16)}`;
-    default:
-      return `cannot compile empty block at 0x${block.startEip.toString(16)}`;
-  }
 }

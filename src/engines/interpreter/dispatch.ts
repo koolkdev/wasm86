@@ -4,7 +4,7 @@ import {
   type OpcodeDispatchCandidateSet,
   type OpcodeDispatchLeaf,
   type OpcodeDispatchNode
-} from "#core/decoder/opcode-dispatch.js";
+} from "#core/decoder/opcode-dispatch-legacy.js";
 import type {
   ExpandedInstructionSpec,
   MemOperandType,
@@ -12,7 +12,7 @@ import type {
   Reg3,
   RmOperandType
 } from "#core/isa/spec.js";
-import { prefixFlagMask } from "#core/decoder/prefix-flags.js";
+import { prefixFlagMask } from "#core/decoder/prefix-flags-legacy.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { segmentRegisters } from "#core/types.js";
 import { encodeVariant } from "#compiler/layout/variant-codec.js";

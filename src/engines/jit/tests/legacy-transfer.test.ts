@@ -7,7 +7,12 @@ import {
   segmentExit,
   trapExit
 } from "#core/exits.js";
-import { divideError, invalidOpcode, pageFault } from "#core/exceptions.js";
+import {
+  divideError,
+  generalProtection,
+  invalidOpcode,
+  pageFault
+} from "#core/exceptions.js";
 import { exitLayout } from "#cpu/exit.js";
 import {
   budgetExit,
@@ -55,6 +60,10 @@ test("legacy JIT transfers are disjoint from Cpu exits", () => {
     encodeVariant(
       exitLayout,
       exceptionExit(invalidOpcode<number>())
+    ),
+    encodeVariant(
+      exitLayout,
+      exceptionExit(generalProtection(0xffff))
     ),
     encodeVariant(
       exitLayout,

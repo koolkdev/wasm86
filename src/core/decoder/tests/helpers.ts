@@ -11,13 +11,14 @@ import {
   type SegmentRegister
 } from "#core/types.js";
 import { registerAlias } from "#core/registers.js";
-import {
-  truncatedInstructionFault,
-  IsaDecodeError,
-  type IsaDecodeReader
-} from "#core/decoder/reader.js";
-import type { IsaDecodedInstruction, IsaDecodeResult } from "#core/decoder/types.js";
-import type { IsaOperandBinding } from "#core/decoder/types.js";
+import type {
+  IsaDecodedInstruction,
+  IsaDecodeByteResult,
+  IsaDecodeExceptionResult,
+  IsaDecodeReader,
+  IsaDecodeResult,
+  IsaOperandBinding
+} from "#core/decoder/types.js";
 import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
 
 export const startAddress = 0x1000;
@@ -27,11 +28,21 @@ export function bytes(values: readonly number[]): Uint8Array<ArrayBuffer> {
 }
 
 export function ok(result: IsaDecodeResult): IsaDecodedInstruction {
-  if (result.kind !== "ok") {
-    throw new Error(`expected ISA decode success, got unsupported byte ${result.unsupportedByte}`);
+  if (result.kind !== "instruction") {
+    throw new Error(`expected ISA decode success, got ${result.exception.kind}`);
   }
 
   return result.instruction;
+}
+
+export function cpuException(
+  result: IsaDecodeResult
+): IsaDecodeExceptionResult {
+  if (result.kind !== "cpuException") {
+    throw new Error(`expected decode CPU exception, got instruction ${result.instruction.spec.id}`);
+  }
+
+  return result;
 }
 
 export function decodeBytes(values: readonly number[], address = startAddress): IsaDecodeResult {
@@ -45,21 +56,39 @@ export class ByteArrayDecodeReader implements IsaDecodeReader {
     this.#bytes = values instanceof Uint8Array ? values : Uint8Array.from(values);
   }
 
-  readU8(eip: number): number {
+  readU8(eip: number): IsaDecodeByteResult {
     const index = eip - this.baseAddress;
 
     if (!Number.isInteger(index) || index < 0 || index >= this.#bytes.length) {
-      throw new IsaDecodeError(truncatedInstructionFault(eip));
+      throw testReaderFailure(eip);
     }
 
     const value = this.#bytes[index];
 
     if (value === undefined) {
-      throw new IsaDecodeError(truncatedInstructionFault(eip));
+      throw testReaderFailure(eip);
     }
 
-    return value;
+    return { kind: "byte", value };
   }
+}
+
+export type TestReaderFailure = Readonly<{
+  kind: "testReaderFailure";
+  address: number;
+}>;
+
+export function testReaderFailure(address: number): TestReaderFailure {
+  return { kind: "testReaderFailure", address };
+}
+
+export function isTestReaderFailure(
+  error: unknown
+): error is TestReaderFailure {
+  return typeof error === "object" &&
+    error !== null &&
+    "kind" in error &&
+    error.kind === "testReaderFailure";
 }
 
 export type DecoderFixture = Readonly<{
@@ -78,8 +107,8 @@ export function testDecodeFixtures(fixtures: readonly DecoderFixture[]): void {
       const address = fixture.address ?? startAddress;
       const decoded = decodeBytes(fixture.bytes, address);
 
-      strictEqual(decoded.kind, "ok");
-      if (decoded.kind !== "ok") {
+      strictEqual(decoded.kind, "instruction");
+      if (decoded.kind !== "instruction") {
         return;
       }
 

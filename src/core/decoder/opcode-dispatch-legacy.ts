@@ -3,8 +3,7 @@ import {
   type ExpandedInstructionSpec,
   type Reg3
 } from "#core/isa/spec.js";
-import { prefixFlagBucketCount, prefixFlagsFor } from "./prefix-flags.js";
-import type { IsaDecodeReader } from "./reader.js";
+import { prefixFlagBucketCount, prefixFlagsFor } from "./prefix-flags-legacy.js";
 
 export type OpcodeDispatchCandidateSet = Readonly<{
   kind: "empty" | "noModRm" | "modRm";
@@ -21,10 +20,6 @@ export type OpcodeDispatchNode = Readonly<{
   leaf: OpcodeDispatchLeaf | undefined;
   next: readonly (OpcodeDispatchNode | undefined)[];
 }>;
-
-export type OpcodeLookup =
-  | Readonly<{ kind: "leaf"; leaf: OpcodeDispatchLeaf }>
-  | Readonly<{ kind: "unsupported"; length: number }>;
 
 type MutableOpcodeDispatchCandidateSet = {
   kind: "empty" | "noModRm" | "modRm";
@@ -73,28 +68,6 @@ export function buildOpcodeDispatch(
   }
 
   return root;
-}
-
-export function opcodeLeaf(
-  root: OpcodeDispatchNode,
-  reader: IsaDecodeReader,
-  eip: number
-): OpcodeLookup {
-  let node = root;
-
-  for (let cursor = eip, length = 1; ; cursor += 1, length += 1) {
-    const next = node.next[reader.readU8(cursor)];
-
-    if (next === undefined) {
-      return { kind: "unsupported", length };
-    }
-
-    if (next.leaf !== undefined) {
-      return { kind: "leaf", leaf: next.leaf };
-    }
-
-    node = next;
-  }
 }
 
 function opcodeDispatchNode(): MutableOpcodeDispatchNode {

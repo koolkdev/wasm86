@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import type { DynamicByteOriginRef } from "#compiler/ir/resource.js";
 import {
   resourceRead,
@@ -12,6 +13,8 @@ import {
   flatMemoryAccess,
   flatMemoryOperand
 } from "./flat.js";
+import { readBackingByte } from "./bytes.js";
+import { guestMemoryMinimumByteLength } from "./constants.js";
 
 export type LinearRange = Readonly<{
   start: ValueId;
@@ -56,13 +59,82 @@ export type MemoryAccessOperations = Readonly<{
   ): void;
 }>;
 
+export type HostMemoryByteAccess<
+  TIntent extends MemoryAccessIntent = MemoryAccessIntent
+> = Readonly<{
+  address: number;
+  intent: TIntent;
+}>;
+
+export type HostMemoryByteResolution<TIntent extends MemoryAccessIntent> =
+  | Readonly<{
+      kind: "access";
+      access: HostMemoryByteAccess<TIntent>;
+    }>
+  | Readonly<{
+      kind: "fault";
+      fault: Readonly<{
+        address: number;
+        intent: TIntent;
+      }>;
+    }>;
+
+export type HostMemoryAccessOperations = Readonly<{
+  resolveByte<TIntent extends MemoryAccessIntent>(
+    address: number,
+    intent: TIntent
+  ): HostMemoryByteResolution<TIntent>;
+  readByte(access: HostMemoryByteAccess): number;
+}>;
+
 export type MemoryAccessConstruction = Readonly<{
   bind(region: RegionBuilder): MemoryAccessOperations;
 }>;
 
-export const guestMemoryAccess: MemoryAccessConstruction = {
-  bind: (region) => new FlatMemoryAccessBuilder(region)
+export type MemoryModel = MemoryAccessConstruction & Readonly<{
+  bindHost(memory: WebAssembly.Memory): HostMemoryAccessOperations;
+}>;
+
+export const guestMemoryAccess: MemoryModel = {
+  bind: (region) => new FlatMemoryAccessBuilder(region),
+  bindHost: (memory) => new FlatHostMemoryAccess(memory)
 };
+
+class FlatHostMemoryAccess implements HostMemoryAccessOperations {
+  readonly #memory: WebAssembly.Memory;
+
+  constructor(memory: WebAssembly.Memory) {
+    assert(
+      memory.buffer.byteLength >= guestMemoryMinimumByteLength,
+      "guest memory is shorter than the flat address-space binding"
+    );
+    this.#memory = memory;
+  }
+
+  resolveByte<TIntent extends MemoryAccessIntent>(
+    address: number,
+    intent: TIntent
+  ): HostMemoryByteResolution<TIntent> {
+    assert(
+      Number.isInteger(address) && address >= 0 && address <= 0xffff_ffff,
+      `memory address must be u32, got ${address}`
+    );
+
+    return address < guestMemoryMinimumByteLength
+      ? { kind: "access", access: { address, intent } }
+      : { kind: "fault", fault: { address, intent } };
+  }
+
+  readByte(access: HostMemoryByteAccess): number {
+    const value = readBackingByte(this.#memory, access.address);
+
+    assert(
+      value !== undefined,
+      `resolved memory byte is absent at 0x${access.address.toString(16)}`
+    );
+    return value;
+  }
+}
 
 class FlatMemoryAccessBuilder implements MemoryAccessOperations {
   readonly #region: RegionBuilder;

@@ -1,564 +1,444 @@
+import { assert } from "#common/assert.js";
+import {
+  generalProtection,
+  invalidOpcode,
+  type CpuException
+} from "#core/exceptions.js";
 import { u32 } from "#core/numeric.js";
-import { X86_32_CORE } from "#core/index.js";
-import {
-  expandInstructionSpec,
-  instructionReadsModRm,
-  type ExpandedInstructionSpec,
-  type MemOperandType,
-  type ModRmMatch,
-  type OperandSizePrefixMode,
-  type OperandSpec,
-  type Reg3,
-  type RegOperandType,
-  type RmOperandType
-} from "#core/isa/spec.js";
-import { registerAlias, registerAliasByIndex } from "#core/registers.js";
-import {
-  operandSizeOverridePrefixByte,
-  repnePrefixByte,
-  repPrefixByte,
-  segmentOverridePrefixSegments,
-  type RepeatPrefix
-} from "#core/prefixes.js";
-import { defaultSegmentForBase } from "#core/segments.js";
-import { segmentRegisters, type MemOperand, type MemoryOperandWidth, type OperandWidth, type SegmentRegister } from "#core/types.js";
-import { signedImm8, signedImm32 } from "./immediate.js";
-import { decodeModRmAddressing, rm32ModRmByteLengthAt, type ModRmRm } from "./modrm.js";
-import { buildOpcodeDispatch, opcodeLeaf, type OpcodeDispatchLeaf } from "./opcode-dispatch.js";
-import { prefixFlagsFor } from "./prefix-flags.js";
-import {
-  instructionTooLongFault,
-  IsaDecodeError,
-  readAvailableBytes,
-  readRawBytes,
-  readU16LE,
-  readU32LE,
-  type IsaDecodeReader
-} from "./reader.js";
-import type { IsaDecodedInstruction, IsaDecodeResult, IsaOperandBinding } from "./types.js";
+import { registerAliasByIndex } from "#core/registers.js";
+import type {
+  EffectiveAddress,
+  MemOperand,
+  SegmentRegister
+} from "#core/types.js";
+import { X86_32_DECODE_MODEL } from "./model/index.js";
+import type {
+  AddressBase,
+  DecodeOperand,
+  EncodedValue,
+  InstructionForm,
+  OpcodeLeaf,
+  PrefixEffect,
+  SegmentSelection
+} from "./model/types.js";
+import type {
+  IsaDecodedInstruction,
+  IsaDecodeReader,
+  IsaDecodeResult,
+  IsaOperandBinding
+} from "./types.js";
 
-type DecodedModRm = Readonly<{
-  mod: Reg3;
-  regField: Reg3;
-  rmField: Reg3;
-  rm: ModRmRm;
-  byteLength: number;
+type SelectedForm = Readonly<{
+  form: InstructionForm;
+  modRmByte: number | undefined;
 }>;
 
-type CandidateDecode =
-  | Readonly<{ kind: "match"; instruction: IsaDecodedInstruction }>
-  | Readonly<{ kind: "skip" }>
-  | Readonly<{ kind: "unsupported"; length: number }>;
+type DecodedRm =
+  | Readonly<{ kind: "reg"; index: number }>
+  | Readonly<{ kind: "mem"; address: EffectiveAddress }>;
 
-type DispatchedCandidates = Readonly<{
-  candidates: readonly ExpandedInstructionSpec[];
-  modrm: DecodedModRm | undefined;
-  unsupportedLength: number;
-}>;
+class CpuExceptionSignal {
+  constructor(readonly exception: CpuException<number>) {
+  }
+}
 
-const EXPANDED_INSTRUCTIONS: readonly ExpandedInstructionSpec[] =
-  X86_32_CORE.instructions.flatMap((spec) => expandInstructionSpec(spec));
-const OPCODE_DISPATCH_ROOT = buildOpcodeDispatch(EXPANDED_INSTRUCTIONS);
-const instructionLengthLimit = X86_32_CORE.instructionLengthLimit;
+class IsaDecodeCursor {
+  readonly #raw: number[] = [];
+
+  constructor(
+    private readonly source: IsaDecodeReader,
+    readonly instructionStart: number
+  ) {}
+
+  get offset(): number {
+    return this.#raw.length;
+  }
+
+  readByte(relativeOffset: number): number {
+    assert(
+      Number.isInteger(relativeOffset) && relativeOffset >= 0,
+      `invalid instruction byte offset: ${relativeOffset}`
+    );
+
+    if (relativeOffset >= X86_32_DECODE_MODEL.instructionLengthLimit) {
+      throw new CpuExceptionSignal(generalProtection(0));
+    }
+
+    const cached = this.#raw[relativeOffset];
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    assert(
+      relativeOffset === this.#raw.length,
+      `instruction decoder skipped byte offset ${this.#raw.length} before ${relativeOffset}`
+    );
+    const fetched = this.source.readU8(u32(this.instructionStart + relativeOffset));
+
+    if (fetched.kind === "cpuException") {
+      throw new CpuExceptionSignal(fetched.exception);
+    }
+    const value = fetched.value;
+
+    assert(
+      Number.isInteger(value) && value >= 0 && value <= 0xff,
+      `instruction byte out of range at offset ${relativeOffset}: ${value}`
+    );
+    this.#raw.push(value);
+    return value;
+  }
+
+  snapshotRaw(): readonly number[] {
+    return this.#raw.slice();
+  }
+}
 
 export function decodeIsaInstructionFromReader(
   reader: IsaDecodeReader,
   address: number
 ): IsaDecodeResult {
-  return new InstructionDecoder(reader, address).decode();
+  return decodeIsaInstruction(new IsaDecodeCursor(reader, address));
 }
 
-class InstructionDecoder {
-  private readonly reader: IsaDecodeReader;
-  private operandSize: OperandSizePrefixMode = "default";
-  private repPrefix: RepeatPrefix | undefined;
-  private segmentOverride: SegmentRegister | undefined;
-  private prefixByteLength = 0;
-
-  constructor(private readonly source: IsaDecodeReader, private readonly address: number) {
-    this.reader = { readU8: (eip) => this.readU8(eip) };
-  }
-
-  decode(): IsaDecodeResult {
-    this.decodePrefixes();
-
-    if (this.prefixByteLength >= instructionLengthLimit) {
-      return this.unsupported(this.prefixByteLength);
-    }
-
-    const opcodeAddress = this.address + this.prefixByteLength;
-    const lookup = opcodeLeaf(OPCODE_DISPATCH_ROOT, this.reader, opcodeAddress);
-
-    if (lookup.kind === "unsupported") {
-      return this.unsupported(this.prefixByteLength + lookup.length);
-    }
-
-    const dispatched = this.dispatchCandidates(opcodeAddress, lookup.leaf);
-
-    for (const expanded of dispatched.candidates) {
-      const decoded = this.decodeCandidate(opcodeAddress, expanded, dispatched.modrm);
-
-      if (decoded.kind === "match") {
-        return { kind: "ok", instruction: decoded.instruction };
-      }
-
-      if (decoded.kind === "unsupported") {
-        return this.unsupported(decoded.length);
-      }
-    }
-
-    return this.unsupported(dispatched.unsupportedLength);
-  }
-
-  private decodePrefixes(): void {
-    while (
-      this.prefixByteLength < instructionLengthLimit &&
-      this.consumePrefix(this.readU8(this.address + this.prefixByteLength))
-    ) {}
-  }
-
-  private consumePrefix(value: number): boolean {
-    if (value === operandSizeOverridePrefixByte) {
-      this.operandSize = "override";
-      return this.consumePrefixByte();
-    }
-
-    if (value === repPrefixByte) {
-      this.repPrefix = "rep";
-      return this.consumePrefixByte();
-    }
-
-    if (value === repnePrefixByte) {
-      this.repPrefix = "repne";
-      return this.consumePrefixByte();
-    }
-
-    const segment = segmentOverridePrefixSegments.get(value);
-
-    if (segment === undefined) {
-      return false;
-    }
-
-    this.segmentOverride = segment;
-    return this.consumePrefixByte();
-  }
-
-  private consumePrefixByte(): true {
-    this.prefixByteLength += 1;
-    return true;
-  }
-
-  private decodeCandidate(
-    opcodeAddress: number,
-    expanded: ExpandedInstructionSpec,
-    dispatchedModRm: DecodedModRm | undefined
-  ): CandidateDecode {
-    const spec = expanded.spec;
-    let cursor = opcodeAddress + expanded.opcode.length;
-
-    const modrm = instructionReadsModRm(spec) ? dispatchedModRm ?? this.decodeModRm(cursor) : undefined;
-
-    if (modrm !== undefined) {
-      if (!InstructionDecoder.modRmMatches(spec.modrm?.match, modrm)) {
-        return { kind: "skip" };
-      }
-
-      cursor += modrm.byteLength;
-    }
-
-    const operands: IsaOperandBinding[] = [];
-
-    for (const operand of spec.operands ?? []) {
-      const decoded = this.decodeOperand(cursor, expanded, modrm, operand);
-
-      if (decoded.kind === "unsupported") {
-        return { kind: "unsupported", length: cursor - this.address };
-      }
-
-      operands.push(decoded.binding);
-      cursor = decoded.cursor;
-    }
-
-    const length = cursor - this.address;
-    this.assertInstructionLength(cursor);
-
-    return {
-      kind: "match",
-      instruction: {
-        spec,
-        address: this.address,
-        length,
-        nextEip: u32(this.address + length),
-        operands,
-        raw: readRawBytes(this.reader, this.address, cursor)
-      }
-    };
-  }
-
-  private decodeOperand(
-    cursor: number,
-    expanded: ExpandedInstructionSpec,
-    modrm: DecodedModRm | undefined,
-    operand: OperandSpec
-  ):
-    | Readonly<{ kind: "ok"; binding: IsaOperandBinding; cursor: number }>
-    | Readonly<{ kind: "unsupported" }> {
-    switch (operand.kind) {
-      case "modrm.reg":
-        return modrm === undefined
-          ? { kind: "unsupported" }
-          : {
-            kind: "ok",
-            binding: InstructionDecoder.registerBinding(InstructionDecoder.registerOperandWidth(operand.type), modrm.regField),
-            cursor
-          };
-      case "modrm.sreg": {
-        const binding = modrm === undefined ? undefined : InstructionDecoder.segmentBinding(modrm.regField);
-
-        return binding === undefined ? { kind: "unsupported" } : { kind: "ok", binding, cursor };
-      }
-      case "modrm.rm":
-        if (modrm === undefined) {
-          return { kind: "unsupported" };
-        }
-
-        return this.decodeModRmRmOperand(modrm.rm, operand, cursor);
-      case "opcode.reg":
-        return expanded.opcodeLowBits === undefined
-          ? { kind: "unsupported" }
-          : {
-            kind: "ok",
-            binding: InstructionDecoder.registerBinding(
-              InstructionDecoder.registerOperandWidth(operand.type),
-              expanded.opcodeLowBits
-            ),
-            cursor
-          };
-      case "implicit.reg":
-        return { kind: "ok", binding: { kind: "reg", alias: registerAlias(operand.reg) }, cursor };
-      case "implicit.sreg":
-        return { kind: "ok", binding: { kind: "segment", reg: operand.reg }, cursor };
-      case "implicit.mem":
-        return {
-          kind: "ok",
-          binding: ({
-            kind: "mem",
-            accessWidth: operand.width,
-            segment: operand.segment ?? this.segmentOverride ?? defaultSegmentForBase(operand.base),
-            base: operand.base,
-            index: undefined,
-            scale: 1,
-            disp: operand.disp
-          } satisfies MemOperand),
-          cursor
-        };
-      case "moffs":
-        return {
-          kind: "ok",
-          binding: {
-            kind: "mem",
-            accessWidth: operand.width,
-            segment: this.segmentOverride ?? "ds",
-            base: undefined,
-            index: undefined,
-            scale: 1,
-            disp: readU32LE(this.reader, cursor)
-          },
-          cursor: cursor + 4
-        };
-      case "imm": {
-        const immediate = InstructionDecoder.readImmediate(this.reader, cursor, operand.width, operand.extension);
-        const semanticWidth = operand.semanticWidth ?? operand.width;
-
-        return {
-          kind: "ok",
-          binding: immediate.extension === undefined
-            ? { kind: "imm", value: immediate.value, encodedWidth: operand.width, semanticWidth }
-            : {
-              kind: "imm",
-              value: immediate.value,
-              encodedWidth: operand.width,
-              semanticWidth,
-              extension: immediate.extension
-            },
-          cursor: cursor + immediate.byteLength
-        };
-      }
-      case "rel": {
-        const relative = InstructionDecoder.readRelative(this.reader, cursor, operand.width);
-        const nextEip = u32(cursor + relative.byteLength);
-
-        return {
-          kind: "ok",
-          binding: {
-            kind: "relTarget",
-            width: operand.width,
-            displacement: relative.displacement,
-            target: InstructionDecoder.relativeTarget(nextEip, relative.displacement, operand.width)
-          },
-          cursor: cursor + relative.byteLength
-        };
-      }
-    }
-  }
-
-  private decodeModRm(address: number): DecodedModRm {
-    const value = this.reader.readU8(address);
-    const decoded = decodeModRmAddressing(this.reader, address);
-
-    return {
-      mod: InstructionDecoder.reg3(value >>> 6),
-      regField: InstructionDecoder.reg3(value >>> 3),
-      rmField: InstructionDecoder.reg3(value),
-      rm: decoded.rm,
-      byteLength: rm32ModRmByteLengthAt(this.reader, address)
-    };
-  }
-
-  private decodeModRmRmOperand(
-    rm: ModRmRm,
-    operand: Extract<OperandSpec, { kind: "modrm.rm" }>,
-    cursor: number
-  ): Readonly<{ kind: "ok"; binding: IsaOperandBinding; cursor: number }> | Readonly<{ kind: "unsupported" }> {
-    switch (rm.kind) {
-      case "reg":
-        return InstructionDecoder.isMemoryOnlyOperand(operand.type)
-          ? { kind: "unsupported" }
-          : {
-            kind: "ok",
-            binding: InstructionDecoder.registerBinding(InstructionDecoder.rmRegisterWidth(operand.type), rm.index),
-            cursor
-          };
-      case "mem":
-        return {
-          kind: "ok",
-          binding: {
-            kind: "mem",
-            accessWidth: InstructionDecoder.rmMemoryWidth(operand.type),
-            ...rm.address,
-            segment: this.segmentOverride ?? rm.address.segment
-          } satisfies MemOperand,
-          cursor
-        };
-    }
-  }
-
-  private unsupported(length: number): IsaDecodeResult {
-    this.assertInstructionLength(this.address + length);
-    return InstructionDecoder.unsupported(this.reader, this.address, length);
-  }
-
-  private readU8(eip: number): number {
-    const offset = eip - this.address;
-
-    if (offset >= instructionLengthLimit) {
-      this.throwInstructionTooLong();
-    }
-
-    return this.source.readU8(eip);
-  }
-
-  private assertInstructionLength(end: number): void {
-    if (end - this.address > instructionLengthLimit) {
-      this.throwInstructionTooLong();
-    }
-  }
-
-  private throwInstructionTooLong(): never {
-    throw new IsaDecodeError(
-      instructionTooLongFault(
-        this.address,
-        instructionLengthLimit,
-        readAvailableBytes(this.source, this.address, instructionLengthLimit)
-      )
-    );
-  }
-
-  private dispatchCandidates(opcodeAddress: number, leaf: OpcodeDispatchLeaf): DispatchedCandidates {
-    const candidates = leaf.prefixFlags[prefixFlagsFor({
-      operandSize: this.operandSize,
-      ...(this.repPrefix === undefined ? {} : { rep: this.repPrefix })
-    })];
-
-    if (candidates === undefined) {
+function decodeIsaInstruction(cursor: IsaDecodeCursor): IsaDecodeResult {
+  try {
+    return new NumericDecodeEvaluator(cursor).decode();
+  } catch (error: unknown) {
+    if (error instanceof CpuExceptionSignal) {
       return {
-        candidates: [],
-        modrm: undefined,
-        unsupportedLength: this.prefixByteLength + leaf.opcodeLength
+        kind: "cpuException",
+        exception: error.exception,
+        instructionStart: cursor.instructionStart,
+        raw: cursor.snapshotRaw()
       };
     }
 
+    throw error;
+  }
+}
+
+class NumericDecodeEvaluator {
+  private prefixFlags = 0;
+  private segmentOverride: SegmentRegister | undefined;
+
+  constructor(private readonly cursor: IsaDecodeCursor) {}
+
+  decode(): IsaDecodeResult {
+    const opcodeOffset = this.decodePrefixes();
+    const leaf = this.lookupOpcode(opcodeOffset);
+
+    if (leaf === undefined) {
+      return this.invalidOpcode();
+    }
+
+    const selected = this.selectForm(leaf, opcodeOffset);
+
+    if (selected === undefined) {
+      return this.invalidOpcode();
+    }
+
+    return {
+      kind: "instruction",
+      instruction: this.decodeInstruction(selected)
+    };
+  }
+
+  private decodePrefixes(): number {
+    for (;;) {
+      const offset = this.cursor.offset;
+      const value = this.cursor.readByte(offset);
+      const effect = X86_32_DECODE_MODEL.prefixes.byByte[value];
+
+      if (effect === undefined) {
+        return offset;
+      }
+
+      this.applyPrefix(effect);
+    }
+  }
+
+  private applyPrefix(effect: PrefixEffect): void {
+    const { flagBits } = X86_32_DECODE_MODEL.prefixes;
+
+    switch (effect.kind) {
+      case "operandSize":
+        this.prefixFlags |= flagBits.operandSizeOverride;
+        return;
+      case "repeat":
+        this.prefixFlags &= ~(flagBits.rep | flagBits.repne);
+        this.prefixFlags |= effect.value === "rep"
+          ? flagBits.rep
+          : flagBits.repne;
+        return;
+      case "segment":
+        this.segmentOverride = effect.value;
+        return;
+    }
+  }
+
+  private lookupOpcode(opcodeOffset: number): OpcodeLeaf | undefined {
+    let node = X86_32_DECODE_MODEL.opcodeRoot;
+
+    for (let depth = 0; ; depth += 1) {
+      const byte = this.cursor.readByte(opcodeOffset + depth);
+      const next = node.next[byte];
+
+      if (next === undefined) {
+        return undefined;
+      }
+
+      if (next.leaf !== undefined) {
+        return next.leaf;
+      }
+
+      node = next;
+    }
+  }
+
+  private selectForm(
+    leaf: OpcodeLeaf,
+    opcodeOffset: number
+  ): SelectedForm | undefined {
+    const prefixIndex = this.prefixFlags & X86_32_DECODE_MODEL.prefixes.flagMask;
+    const candidates = leaf.byPrefix[prefixIndex];
+
+    assert(candidates !== undefined, `missing prefix bucket ${prefixIndex}`);
+
     switch (candidates.kind) {
       case "empty":
-        return {
-          candidates: [],
-          modrm: undefined,
-          unsupportedLength: this.prefixByteLength + leaf.opcodeLength
-        };
-      case "noModRm":
-        return {
-          candidates: candidates.noModRmCandidates,
-          modrm: undefined,
-          unsupportedLength: this.prefixByteLength + leaf.opcodeLength
-        };
+        return undefined;
+      case "plain":
+        return { form: candidates.form, modRmByte: undefined };
       case "modRm": {
-        const modrm = this.decodeModRm(opcodeAddress + leaf.opcodeLength);
+        const modRmOffset = opcodeOffset + leaf.opcodeLength;
+        const modRmByte = this.cursor.readByte(modRmOffset);
+        const form = candidates.byByte[modRmByte];
 
-        return {
-          candidates: candidates.modRmByReg[modrm.regField] ?? [],
-          modrm,
-          unsupportedLength: this.prefixByteLength + leaf.opcodeLength + modrm.byteLength
-        };
+        return form === undefined ? undefined : { form, modRmByte };
       }
     }
   }
 
-  private static modRmMatches(match: ModRmMatch | undefined, modrm: DecodedModRm): boolean {
-    return (
-      InstructionDecoder.reg3Matches(match?.mod, modrm.mod) &&
-      InstructionDecoder.reg3Matches(match?.reg, modrm.regField) &&
-      InstructionDecoder.reg3Matches(match?.rm, modrm.rmField)
+  private decodeInstruction(selected: SelectedForm): IsaDecodedInstruction {
+    const decodedRm = selected.modRmByte === undefined
+      ? undefined
+      : this.decodeRm(selected.modRmByte);
+    const operands = selected.form.operands.map((operand) =>
+      this.decodeOperand(selected.form, operand, selected.modRmByte, decodedRm)
     );
+    const length = this.cursor.offset;
+
+    return {
+      spec: selected.form.instruction,
+      address: this.cursor.instructionStart,
+      length,
+      nextEip: u32(this.cursor.instructionStart + length),
+      operands,
+      raw: this.cursor.snapshotRaw()
+    };
   }
 
-  private static reg3Matches(expected: Reg3 | undefined, actual: Reg3): boolean {
-    return expected === undefined || expected === actual;
-  }
+  private decodeRm(modRmByte: number): DecodedRm {
+    const mod = modRmByte >>> 6;
+    const rm = modRmByte & 0b111;
+    const mode = X86_32_DECODE_MODEL.addressForms.modes[mod];
 
-  private static readImmediate(
-    reader: IsaDecodeReader,
-    address: number,
-    width: 8 | 16 | 32,
-    extension: "sign" | undefined
-  ): Readonly<{ value: number; byteLength: number; extension?: "sign" }> {
-    switch (width) {
-      case 8: {
-        const value = reader.readU8(address);
-        const extended = extension === "sign" ? u32(signedImm8(value)) : value;
+    assert(mode !== undefined, `missing ModRM mode ${mod}`);
 
-        return extension === undefined
-          ? { value: extended, byteLength: 1 }
-          : { value: extended, byteLength: 1, extension };
-      }
-      case 16: {
-        const value = readU16LE(reader, address);
-        const extended = extension === "sign" && (value & 0x8000) !== 0 ? u32(value - 0x1_0000) : value;
-
-        return extension === undefined
-          ? { value: extended, byteLength: 2 }
-          : { value: extended, byteLength: 2, extension };
-      }
-      case 32:
-        return { value: readU32LE(reader, address), byteLength: 4 };
+    if (mode.kind === "register") {
+      return { kind: "reg", index: rm };
     }
+
+    const address = mode.rm[rm];
+
+    assert(address !== undefined, `missing ModRM R/M case ${mod}:${rm}`);
+
+    if (address.kind === "base") {
+      return {
+        kind: "mem",
+        address: this.decodeEffectiveAddress(address.address, undefined, 1)
+      };
+    }
+
+    const sib = this.cursor.readByte(this.cursor.offset);
+    const scaleField = sib >>> 6;
+    const indexField = (sib >>> 3) & 0b111;
+    const baseField = sib & 0b111;
+    const base = address.bases[baseField];
+    const index = X86_32_DECODE_MODEL.addressForms.sibIndexes[indexField];
+    const encodedScale = X86_32_DECODE_MODEL.addressForms.sibScales[scaleField];
+
+    assert(base !== undefined, `missing SIB base case ${baseField}`);
+    assert(encodedScale !== undefined, `missing SIB scale case ${scaleField}`);
+    return {
+      kind: "mem",
+      address: this.decodeEffectiveAddress(
+        base,
+        index,
+        index === undefined ? 1 : encodedScale
+      )
+    };
   }
 
-  private static readRelative(
-    reader: IsaDecodeReader,
-    address: number,
-    width: 8 | 16 | 32
-  ): Readonly<{ displacement: number; byteLength: number }> {
-    switch (width) {
-      case 8:
-        return { displacement: signedImm8(reader.readU8(address)), byteLength: 1 };
-      case 16: {
-        const value = readU16LE(reader, address);
+  private decodeEffectiveAddress(
+    address: AddressBase,
+    index: EffectiveAddress["index"],
+    scale: EffectiveAddress["scale"]
+  ): EffectiveAddress {
+    return {
+      segment: address.defaultSegment,
+      base: address.base,
+      index,
+      scale,
+      disp: this.readDisplacement(address)
+    };
+  }
+
+  private readDisplacement(address: AddressBase): number {
+    if (address.displacement.byteLength === 0) {
+      return 0;
+    }
+
+    return this.readEncodedValue({
+      byteLength: address.displacement.byteLength,
+      signed: address.displacement.signed
+    });
+  }
+
+  private decodeOperand(
+    form: InstructionForm,
+    operand: DecodeOperand,
+    modRmByte: number | undefined,
+    decodedRm: DecodedRm | undefined
+  ): IsaOperandBinding {
+    switch (operand.kind) {
+      case "modrm.reg":
+        assert(modRmByte !== undefined, `${form.id} has no ModRM byte for reg operand`);
+        return {
+          kind: "reg",
+          alias: registerAliasByIndex(operand.width, (modRmByte >>> 3) & 0b111)
+        };
+      case "modrm.sreg": {
+        assert(modRmByte !== undefined, `${form.id} has no ModRM byte for segment operand`);
+        const reg = operand.registers[(modRmByte >>> 3) & 0b111];
+
+        assert(reg !== undefined, `${form.id} selected an invalid segment register`);
+        return { kind: "segment", reg };
+      }
+      case "modrm.rm":
+        assert(decodedRm !== undefined, `${form.id} has no decoded R/M operand`);
+
+        if (decodedRm.kind === "reg") {
+          assert(
+            operand.form === "registerOrMemory",
+            `${form.id} selected a register for a memory-only operand`
+          );
+          return {
+            kind: "reg",
+            alias: registerAliasByIndex(operand.registerWidth, decodedRm.index)
+          };
+        }
 
         return {
-          displacement: (value & 0x8000) === 0 ? value : value - 0x1_0000,
-          byteLength: 2
+          kind: "mem",
+          accessWidth: operand.memoryWidth,
+          ...decodedRm.address,
+          segment: this.segmentOverride ?? decodedRm.address.segment
+        } satisfies MemOperand;
+      case "opcode.reg":
+        assert(form.opcodeLowBits !== undefined, `${form.id} has no opcode register bits`);
+        return {
+          kind: "reg",
+          alias: registerAliasByIndex(operand.width, form.opcodeLowBits)
+        };
+      case "implicit.reg":
+        return { kind: "reg", alias: operand.alias };
+      case "implicit.sreg":
+        return { kind: "segment", reg: operand.reg };
+      case "implicit.mem":
+        return {
+          kind: "mem",
+          accessWidth: operand.accessWidth,
+          segment: this.selectSegment(operand.segment),
+          base: operand.base,
+          index: undefined,
+          scale: 1,
+          disp: operand.disp
+        } satisfies MemOperand;
+      case "moffs":
+        return {
+          kind: "mem",
+          accessWidth: operand.accessWidth,
+          segment: this.selectSegment(operand.segment),
+          base: undefined,
+          index: undefined,
+          scale: 1,
+          disp: this.readEncodedValue(operand.address)
+        } satisfies MemOperand;
+      case "immediate": {
+        const rawValue = this.readEncodedValue(operand.value);
+        const value = operand.extension === "sign" ? u32(rawValue) : rawValue;
+        const binding = {
+          kind: "imm" as const,
+          value,
+          encodedWidth: operand.encodedWidth,
+          semanticWidth: operand.semanticWidth
+        };
+
+        return operand.extension === "none"
+          ? binding
+          : { ...binding, extension: operand.extension };
+      }
+      case "relative": {
+        const displacement = this.readEncodedValue(operand.displacement);
+        const nextEip = u32(this.cursor.instructionStart + this.cursor.offset);
+        const target = u32(nextEip + displacement);
+
+        return {
+          kind: "relTarget",
+          width: operand.width,
+          displacement,
+          target: operand.width === 16 ? target & 0xffff : target
         };
       }
-      case 32:
-        return { displacement: signedImm32(readU32LE(reader, address)), byteLength: 4 };
     }
   }
 
-  private static relativeTarget(nextEip: number, displacement: number, width: 8 | 16 | 32): number {
-    const target = u32(nextEip + displacement);
-
-    return width === 16 ? target & 0xffff : target;
-  }
-
-  private static registerBinding(width: OperandWidth, index: number): IsaOperandBinding {
-    return { kind: "reg", alias: registerAliasByIndex(width, index) };
-  }
-
-  private static segmentBinding(index: number): IsaOperandBinding | undefined {
-    const reg = segmentRegisters[index];
-
-    return reg === undefined ? undefined : { kind: "segment", reg };
-  }
-
-  private static registerOperandWidth(type: RegOperandType): OperandWidth {
-    switch (type) {
-      case "r8":
-        return 8;
-      case "r16":
-        return 16;
-      case "r32":
-        return 32;
+  private selectSegment(selection: SegmentSelection): SegmentRegister {
+    switch (selection.kind) {
+      case "fixed":
+        return selection.segment;
+      case "overrideOrDefault":
+        return this.segmentOverride ?? selection.defaultSegment;
     }
   }
 
-  private static rmRegisterWidth(type: RmOperandType): OperandWidth {
-    switch (type) {
-      case "rm8":
-        return 8;
-      case "rm16":
-        return 16;
-      case "rm32":
-      case "r32_m16":
-        return 32;
+  private readEncodedValue(encoded: EncodedValue): number {
+    let value = 0;
+
+    for (let index = 0; index < encoded.byteLength; index += 1) {
+      value += this.cursor.readByte(this.cursor.offset) * 2 ** (index * 8);
     }
+
+    value = u32(value);
+
+    if (!encoded.signed) {
+      return value;
+    }
+
+    const bits = encoded.byteLength * 8;
+    const sign = 2 ** (bits - 1);
+
+    return value < sign ? value : value - 2 ** bits;
   }
 
-  private static rmMemoryWidth(type: RmOperandType | MemOperandType): MemoryOperandWidth {
-    switch (type) {
-      case "rm8":
-      case "m8":
-        return 8;
-      case "rm16":
-      case "m16":
-      case "r32_m16":
-        return 16;
-      case "rm32":
-      case "m32":
-        return 32;
-      case "m64":
-        return 64;
-    }
-  }
-
-  private static isMemoryOnlyOperand(type: RmOperandType | MemOperandType): type is MemOperandType {
-    switch (type) {
-      case "m8":
-      case "m16":
-      case "m32":
-      case "m64":
-        return true;
-      case "rm8":
-      case "rm16":
-      case "rm32":
-      case "r32_m16":
-        return false;
-    }
-  }
-
-  private static unsupported(reader: IsaDecodeReader, address: number, length: number): IsaDecodeResult {
-    const raw = readRawBytes(reader, address, address + length);
-    const unsupportedByte = raw[0];
-    const result = {
-      kind: "unsupported" as const,
-      address,
-      length,
-      raw
+  private invalidOpcode(): IsaDecodeResult {
+    return {
+      kind: "cpuException",
+      exception: invalidOpcode(),
+      instructionStart: this.cursor.instructionStart,
+      raw: this.cursor.snapshotRaw()
     };
-
-    return unsupportedByte === undefined ? result : { ...result, unsupportedByte };
-  }
-
-  private static reg3(value: number): Reg3 {
-    return (value & 0b111) as Reg3;
   }
 }

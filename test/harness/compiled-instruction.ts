@@ -11,13 +11,12 @@ import {
   functionRef,
   signatureRef
 } from "#compiler/program/refs.js";
-import { decodeIsaBlock } from "#core/decoder/decode-block.js";
-import {
-  truncatedInstructionFault,
-  IsaDecodeError,
-  type IsaDecodeReader
-} from "#core/decoder/reader.js";
-import type { IsaDecodedInstruction } from "#core/decoder/types.js";
+import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
+import type {
+  IsaDecodedInstruction,
+  IsaDecodeByteResult,
+  IsaDecodeReader
+} from "#core/decoder/types.js";
 import {
   createInstructionBuilder,
   staticInstructionLocation
@@ -86,10 +85,7 @@ export async function runCompiledInstructions(
   input: RunCompiledInstructionsInput
 ): Promise<CompiledInstructionResult> {
   const instructionAddress = input.initialState?.eip ?? startAddress;
-  const block = decodeIsaBlock(
-    new FiniteInstructionReader(input.bytes, instructionAddress),
-    instructionAddress
-  );
+  const instructions = decodeInstructionBytes(input.bytes, instructionAddress);
   const memories = createTestWasmMemories();
 
   for (const patch of input.memoryPatches ?? []) {
@@ -108,9 +104,9 @@ export async function runCompiledInstructions(
     eip: instructionAddress
   });
 
-  ok(block.instructions.length > 0, "compiled instruction input decoded no instructions");
+  ok(instructions.length > 0, "compiled instruction input decoded no instructions");
   const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeProgram(buildInstructionProgram(block.instructions))),
+    await WebAssembly.compile(encodeProgram(buildInstructionProgram(instructions))),
     {
       [wasmImport.namespace]: {
         [wasmImport.cpuStateMemoryName]: memories.cpuStateMemory,
@@ -239,16 +235,44 @@ class FiniteInstructionReader implements IsaDecodeReader {
     this.#bytes = Uint8Array.from(bytes);
   }
 
-  readU8(address: number): number {
+  readU8(address: number): IsaDecodeByteResult {
     const index = address - this.baseAddress;
     const value = this.#bytes[index];
 
-    if (!Number.isInteger(index) || index < 0 || value === undefined) {
-      throw new IsaDecodeError(truncatedInstructionFault(address));
-    }
+    ok(
+      Number.isInteger(index) && index >= 0 && value !== undefined,
+      `compiled instruction fixture has no byte at 0x${address.toString(16)}`
+    );
 
-    return value;
+    return { kind: "byte", value };
   }
+}
+
+function decodeInstructionBytes(
+  bytes: readonly number[],
+  start: number
+): readonly IsaDecodedInstruction[] {
+  const reader = new FiniteInstructionReader(bytes, start);
+  const instructions: IsaDecodedInstruction[] = [];
+  let consumed = 0;
+  let address = start;
+
+  while (consumed < bytes.length) {
+    const decoded = decodeIsaInstructionFromReader(reader, address);
+
+    ok(
+      decoded.kind === "instruction",
+      decoded.kind === "cpuException"
+        ? `compiled instruction input produced ${decoded.exception.kind}`
+        : "compiled instruction input produced an unknown decode result"
+    );
+    instructions.push(decoded.instruction);
+    consumed += decoded.instruction.length;
+    address = decoded.instruction.nextEip;
+  }
+
+  ok(consumed === bytes.length, "compiled instruction input ended inside a decoded instruction");
+  return instructions;
 }
 
 function readMemoryRange(

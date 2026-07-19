@@ -1,112 +1,232 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { IsaDecodeError } from "#core/decoder/reader.js";
+import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
+import type {
+  IsaDecodeByteResult,
+  IsaDecodeReader
+} from "#core/decoder/types.js";
+import {
+  PageFaultErrorCode,
+  generalProtection,
+  invalidOpcode,
+  pageFault
+} from "#core/exceptions.js";
 import { X86_32_CORE } from "#core/index.js";
-import { decodeBytes, startAddress } from "./helpers.js";
+import {
+  ByteArrayDecodeReader,
+  cpuException,
+  decodeBytes,
+  isTestReaderFailure,
+  ok,
+  startAddress
+} from "./helpers.js";
 
 const instructionLengthLimit = X86_32_CORE.instructionLengthLimit;
 
-test("reports unsupported opcode without throwing", () => {
-  const decoded = decodeBytes([0x62]);
+test("an undefined opcode produces UD at its first decisive byte", () => {
+  const reader = new TrackingDecodeReader([0x62, 0x90, 0x90]);
+  const decoded = cpuException(
+    decodeIsaInstructionFromReader(reader, startAddress)
+  );
 
-  strictEqual(decoded.kind, "unsupported");
-  if (decoded.kind === "unsupported") {
-    strictEqual(decoded.address, startAddress);
-    strictEqual(decoded.length, 1);
-    strictEqual(decoded.unsupportedByte, 0x62);
-    deepStrictEqual(decoded.raw, [0x62]);
-  }
+  deepStrictEqual(decoded.exception, invalidOpcode());
+  strictEqual(decoded.instructionStart, startAddress);
+  deepStrictEqual(decoded.raw, [0x62]);
+  deepStrictEqual(reader.requests, [startAddress]);
 });
 
-test("reports unsupported opcode after prefix without throwing", () => {
-  const decoded = decodeBytes([0x66, 0x62]);
+test("an undefined opcode after prefixes records the consumed evidence", () => {
+  const decoded = cpuException(decodeBytes([0x66, 0x62]));
 
-  strictEqual(decoded.kind, "unsupported");
-  if (decoded.kind === "unsupported") {
-    strictEqual(decoded.length, 2);
-    strictEqual(decoded.unsupportedByte, 0x66);
-    deepStrictEqual(decoded.raw, [0x66, 0x62]);
-  }
+  deepStrictEqual(decoded.exception, invalidOpcode());
+  strictEqual(decoded.instructionStart, startAddress);
+  deepStrictEqual(decoded.raw, [0x66, 0x62]);
 });
 
-test("truncated mov imm32 reports decode fault", () => {
-  assertDecodeFault([0xb8, 0x01, 0x02]);
+test("reader-owned failures propagate unchanged", () => {
+  assertReaderFailure([0xb8, 0x01, 0x02], startAddress + 3);
+  assertReaderFailure([0x0f], startAddress + 1);
 });
 
-test("truncated opcode escape reports decode fault", () => {
-  assertDecodeFault([0x0f]);
-});
-
-test("reports unsupported segment-register ModRM indexes", () => {
-  for (const opcode of [0x8c, 0x8e]) {
-    const decoded = decodeBytes([opcode, 0xf0]);
-
-    strictEqual(decoded.kind, "unsupported");
-    if (decoded.kind === "unsupported") {
-      strictEqual(decoded.length, 2);
-      strictEqual(decoded.unsupportedByte, opcode);
+test("unrelated RangeError failures are not classified as CPU exceptions", () => {
+  const failure = new RangeError("unrelated reader failure");
+  const reader: IsaDecodeReader = {
+    readU8: () => {
+      throw failure;
     }
+  };
+
+  throws(
+    () => decodeIsaInstructionFromReader(reader, startAddress),
+    (error: unknown) => error === failure
+  );
+});
+
+test("a reader CPU exception retains the bytes admitted before its fault", () => {
+  const requests: number[] = [];
+  const exception = pageFault(
+    startAddress + 1,
+    PageFaultErrorCode.INSTRUCTION_FETCH
+  );
+  const reader: IsaDecodeReader = {
+    readU8(address) {
+      requests.push(address);
+      return address === startAddress
+        ? { kind: "byte", value: 0xb8 }
+        : { kind: "cpuException", exception };
+    }
+  };
+  const decoded = cpuException(
+    decodeIsaInstructionFromReader(reader, startAddress)
+  );
+
+  deepStrictEqual(decoded.exception, exception);
+  strictEqual(decoded.instructionStart, startAddress);
+  deepStrictEqual(decoded.raw, [0xb8]);
+  deepStrictEqual(requests, [startAddress, startAddress + 1]);
+});
+
+test("invalid segment-register ModRM indexes produce UD", () => {
+  for (const opcode of [0x8c, 0x8e]) {
+    const decoded = cpuException(decodeBytes([opcode, 0xf0]));
+
+    deepStrictEqual(decoded.exception, invalidOpcode());
+    strictEqual(decoded.instructionStart, startAddress);
+    deepStrictEqual(decoded.raw, [opcode, 0xf0]);
   }
 });
 
-test("accepts a maximum length prefixed instruction", () => {
-  const bytes = [...new Array<number>(12).fill(0x66), 0xb8, 0x34, 0x12];
-  const decoded = decodeBytes(bytes);
+test("an invalid ModRM group does not demand its address tail", () => {
+  // F7 /1 is undefined. rm=101 would require a disp32 if the form matched.
+  const reader = new TrackingDecodeReader([0xf7, 0x0d]);
+  const decoded = cpuException(
+    decodeIsaInstructionFromReader(reader, startAddress)
+  );
 
-  strictEqual(decoded.kind, "ok");
-  if (decoded.kind === "ok") {
-    strictEqual(decoded.instruction.length, instructionLengthLimit);
-    strictEqual(decoded.instruction.nextEip, startAddress + instructionLengthLimit);
-    deepStrictEqual(decoded.instruction.raw, bytes);
+  deepStrictEqual(decoded.exception, invalidOpcode());
+  deepStrictEqual(decoded.raw, [0xf7, 0x0d]);
+  deepStrictEqual(reader.requests, addresses(2));
+});
+
+test("a maximum-length prefixed instruction remains valid", () => {
+  const values = [...new Array<number>(12).fill(0x66), 0xb8, 0x34, 0x12];
+  const decoded = ok(decodeBytes(values));
+
+  strictEqual(decoded.length, instructionLengthLimit);
+  strictEqual(decoded.nextEip, startAddress + instructionLengthLimit);
+  deepStrictEqual(decoded.raw, values);
+});
+
+test("fourteen prefixes plus a one-byte opcode is a valid 15-byte instruction", () => {
+  const values = [...new Array<number>(14).fill(0x66), 0x90];
+  const reader = new TrackingDecodeReader(values);
+  const decoded = ok(decodeIsaInstructionFromReader(reader, startAddress));
+
+  strictEqual(decoded.length, instructionLengthLimit);
+  deepStrictEqual(decoded.raw, values);
+  deepStrictEqual(reader.requests, addresses(instructionLengthLimit));
+});
+
+test("fifteen prefixes produce GP(0) without requesting byte 16", () => {
+  const values = [
+    ...new Array<number>(instructionLengthLimit).fill(0x66),
+    0x90
+  ];
+  const reader = new TrackingDecodeReader(values);
+  const decoded = cpuException(
+    decodeIsaInstructionFromReader(reader, startAddress)
+  );
+
+  deepStrictEqual(decoded.exception, generalProtection(0));
+  strictEqual(decoded.instructionStart, startAddress);
+  deepStrictEqual(decoded.raw, values.slice(0, instructionLengthLimit));
+  deepStrictEqual(reader.requests, addresses(instructionLengthLimit));
+});
+
+test("long immediate, ModRM, and opcode tails use the same GP admission", () => {
+  const cases = [
+    [...new Array<number>(13).fill(0x66), 0xb8, 0x34, 0x12],
+    [...new Array<number>(14).fill(0x64), 0x8b, 0x03],
+    [...new Array<number>(14).fill(0x66), 0x0f, 0x90],
+    [...new Array<number>(11).fill(0x64), 0x8b, 0x84, 0x00, 0x11, 0x22]
+  ];
+
+  for (const values of cases) {
+    const reader = new TrackingDecodeReader(values);
+    const decoded = cpuException(
+      decodeIsaInstructionFromReader(reader, startAddress)
+    );
+
+    deepStrictEqual(decoded.exception, generalProtection(0));
+    strictEqual(decoded.instructionStart, startAddress);
+    deepStrictEqual(decoded.raw, values.slice(0, instructionLengthLimit));
+    deepStrictEqual(reader.requests, addresses(instructionLengthLimit));
   }
 });
 
-test("reports an all-prefix instruction at the length limit as unsupported", () => {
-  const bytes = new Array<number>(instructionLengthLimit).fill(0x66);
-  const decoded = decodeBytes(bytes);
+test("each admitted instruction byte is observed at most once", () => {
+  const values = [0x8b, 0x84, 0x88, 0x10, 0x00, 0x00, 0x00];
+  const reader = new TrackingDecodeReader(values);
+  const decoded = ok(decodeIsaInstructionFromReader(reader, startAddress));
 
-  strictEqual(decoded.kind, "unsupported");
-  if (decoded.kind === "unsupported") {
-    strictEqual(decoded.length, instructionLengthLimit);
-    strictEqual(decoded.unsupportedByte, 0x66);
-    deepStrictEqual(decoded.raw, bytes);
-  }
+  deepStrictEqual(decoded.raw, values);
+  deepStrictEqual(reader.requests, addresses(values.length));
 });
 
-test("overlong instructions report instruction-too-long decode faults", () => {
-  assertInstructionTooLong([...new Array<number>(13).fill(0x66), 0xb8, 0x34, 0x12]);
-  assertInstructionTooLong([...new Array<number>(14).fill(0x64), 0x8b, 0x03]);
-  assertInstructionTooLong([...new Array<number>(14).fill(0x66), 0x0f, 0x90]);
+test("instruction-byte addresses wrap as u32", () => {
+  const wrappedStart = 0xffff_ffff;
+  const requests: number[] = [];
+  const reader: IsaDecodeReader = {
+    readU8(address) {
+      requests.push(address);
+
+      if (address === wrappedStart) {
+        return { kind: "byte", value: 0x66 };
+      }
+      if (address === 0) {
+        return { kind: "byte", value: 0x90 };
+      }
+
+      throw new Error(`unexpected wrapped decode address: ${address}`);
+    }
+  };
+  const decoded = ok(decodeIsaInstructionFromReader(reader, wrappedStart));
+
+  strictEqual(decoded.length, 2);
+  strictEqual(decoded.nextEip, 1);
+  deepStrictEqual(decoded.raw, [0x66, 0x90]);
+  deepStrictEqual(requests, [wrappedStart, 0]);
 });
 
-function assertDecodeFault(values: readonly number[]): void {
+function assertReaderFailure(values: readonly number[], missingAddress: number): void {
   throws(
     () => decodeBytes(values),
     (error: unknown) => {
-      if (!(error instanceof IsaDecodeError)) {
+      if (!isTestReaderFailure(error)) {
         return false;
       }
 
-      strictEqual(error.fault.reason, "truncated");
+      strictEqual(error.address, missingAddress);
       return true;
     }
   );
 }
 
-function assertInstructionTooLong(values: readonly number[]): void {
-  throws(
-    () => decodeBytes(values),
-    (error: unknown) => {
-      if (!(error instanceof IsaDecodeError)) {
-        return false;
-      }
+function addresses(count: number): readonly number[] {
+  return Array.from({ length: count }, (_, offset) => startAddress + offset);
+}
 
-      strictEqual(error.fault.reason, "instructionTooLong");
-      strictEqual(error.fault.address, startAddress);
-      strictEqual(error.fault.offset, instructionLengthLimit);
-      deepStrictEqual(error.fault.raw, values.slice(0, instructionLengthLimit));
-      return true;
-    }
-  );
+class TrackingDecodeReader implements IsaDecodeReader {
+  readonly requests: number[] = [];
+  readonly #source: ByteArrayDecodeReader;
+
+  constructor(values: readonly number[]) {
+    this.#source = new ByteArrayDecodeReader(values, startAddress);
+  }
+
+  readU8(address: number): IsaDecodeByteResult {
+    this.requests.push(address);
+    return this.#source.readU8(address);
+  }
 }

@@ -20,7 +20,7 @@ import {
   cpuState,
   cpuStatusFlagResolvers
 } from "#cpu/state.js";
-import type { OpcodeDispatchNode } from "#core/decoder/opcode-dispatch.js";
+import type { OpcodeDispatchNode } from "#core/decoder/opcode-dispatch-legacy.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
 import { statusFlagResolverType } from "#core/flags/lazy/resolvers.js";
 import { wasmBlockExportName, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";

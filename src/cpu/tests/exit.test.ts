@@ -1,4 +1,4 @@
-import { deepStrictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import type { RunStop } from "#cpu/cpu.js";
@@ -9,7 +9,13 @@ import {
   segmentExit,
   trapExit
 } from "#core/exits.js";
-import { divideError, invalidOpcode, pageFault } from "#core/exceptions.js";
+import {
+  CpuExceptionVector,
+  divideError,
+  generalProtection,
+  invalidOpcode,
+  pageFault
+} from "#core/exceptions.js";
 import {
   budgetExit,
   missExit
@@ -52,6 +58,11 @@ const validExits: readonly Readonly<{
     stop: { kind: "cpuException", exception: invalidOpcode() }
   },
   {
+    name: "general-protection",
+    exit: exceptionExit(generalProtection(0x1234)),
+    stop: { kind: "cpuException", exception: generalProtection(0x1234) }
+  },
+  {
     name: "page-fault",
     exit: exceptionExit(pageFault(0xffff_fffc, 0x8001)),
     stop: {
@@ -60,6 +71,10 @@ const validExits: readonly Readonly<{
     }
   }
 ];
+
+test("general-protection uses architectural vector 13", () => {
+  strictEqual(CpuExceptionVector.GP, 13);
+});
 
 for (const fixture of validExits) {
   test(`Cpu exit decoder classifies ${fixture.name}`, () => {

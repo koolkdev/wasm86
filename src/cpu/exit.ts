@@ -14,6 +14,7 @@ import {
 } from "#core/exits.js";
 import {
   divideError,
+  generalProtection,
   invalidOpcode,
   pageFault
 } from "#core/exceptions.js";
@@ -72,6 +73,12 @@ export function decodeExit(encoded: bigint): RunStop {
   }
   if (result.variant === coreExits.ud) {
     return { kind: "cpuException", exception: invalidOpcode() };
+  }
+  if (result.variant === coreExits.gp) {
+    return {
+      kind: "cpuException",
+      exception: generalProtection(result.value(coreExitFields.gpCode))
+    };
   }
   if (result.variant === coreExits.pf) {
     return {
