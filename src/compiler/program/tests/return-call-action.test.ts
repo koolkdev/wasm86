@@ -61,7 +61,7 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
   const signature = signatureRef("test.return-call-action-signature");
   const family = new FunctionFamily<number>({
     type,
-    effects: noEffects,
+    effects: () => noEffects,
     id: (key) => `test.return-call-action-target-${key}`,
     build: (_key, fn) => {
       const argument = fn.parameters[0];

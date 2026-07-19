@@ -17,7 +17,7 @@ export const statusFlagResolverType = functionType(
 
 export const statusFlagResolvers = new FunctionFamily<X86StatusFlag>({
   type: statusFlagResolverType,
-  effects: { reads: [], writes: [] },
+  effects: () => ({ reads: [], writes: [] }),
   id: (flag) => `core.flags.resolve.${flag}`,
   build: (flag, fn) => buildStatusFlagResolver(flag, fn)
 });

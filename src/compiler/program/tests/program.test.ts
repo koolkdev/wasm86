@@ -1563,7 +1563,7 @@ test("program closure includes only function calls that must execute", () => {
 
   family = new FunctionFamily<number>({
     type: generatedType,
-    effects: noEffects,
+    effects: () => noEffects,
     id: (key) => `test.generated.${key}`,
     build: (key, fn) => {
       builds.push(key);
@@ -1630,7 +1630,7 @@ test("generated and declared functions share one identity namespace", () => {
   let generatedBuilt = false;
   const family = new FunctionFamily<number>({
     type: generatedType,
-    effects: noEffects,
+    effects: () => noEffects,
     id: () => collisionId,
     build: (_key, fn) => {
       generatedBuilt = true;

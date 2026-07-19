@@ -42,7 +42,7 @@ export class FunctionDefinition {
 
 export type FunctionFamilyDefinition<TKey> = Readonly<{
   type: FunctionType;
-  effects: StorageEffects;
+  effects(key: TKey): StorageEffects;
   id(key: TKey): string;
   build(key: TKey, fn: FunctionBuilder, self: FunctionDefinition): void;
 }>;
@@ -67,7 +67,7 @@ export class FunctionFamily<TKey> {
     const definition = new FunctionDefinition({
       ref: functionRef(this.#definition.id(key)),
       type: this.#definition.type,
-      effects: this.#definition.effects,
+      effects: this.#definition.effects(key),
       owner: undefined,
       build: (fn, self) => this.#definition.build(key, fn, self)
     });
