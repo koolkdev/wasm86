@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import type { ExternalValueId } from "#ir/operands.js";
 import {
   actionCompletes,
   bodyFinal,
@@ -10,7 +9,7 @@ import {
   type SwitchCase
 } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
+import type { ExternalValueId, ValueId } from "#compiler/ir/values/types.js";
 import {
   placeBody,
   type BodyPlacement

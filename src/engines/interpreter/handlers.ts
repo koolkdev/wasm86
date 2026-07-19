@@ -11,9 +11,9 @@ import {
   segmentBinding,
   segmentDynamicBinding,
   staticMemSegment,
-  type ExternalValueId,
   type OperandBinding
 } from "#ir/operands.js";
+import type { ExternalValueId } from "#compiler/ir/values/types.js";
 import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#core/instructions/spec.js";
 import {
   defaultSegmentIndexForBaseIndex,

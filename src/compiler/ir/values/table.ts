@@ -1,6 +1,5 @@
 import { assert } from "#common/assert.js";
 import type { OperandWidth } from "#core/types.js";
-import type { ExternalValueId } from "#ir/operands.js";
 import { binaryValue, type BinaryOperator } from "./binary.js";
 import type { ValueBuilder } from "./builder.js";
 import {
@@ -31,6 +30,7 @@ import { extendValue } from "./extend.js";
 import { truncateValue } from "./truncate.js";
 import { valueId } from "./id.js";
 import {
+  type ExternalValueId,
   type ValueId,
   type ValueInput,
   type ValueType,

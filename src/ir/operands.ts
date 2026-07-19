@@ -1,7 +1,7 @@
 import type { EffectiveAddress, RegName, SegmentRegister } from "#core/types.js";
+import type { ExternalValueId } from "#compiler/ir/values/types.js";
 import { gprChannel, segmentSelectorChannel, type GprChannel, type SegmentChannel } from "./slots.js";
 
-export type ExternalValueId = number;
 export type EffectiveAddressTerms = Omit<EffectiveAddress, "segment">;
 
 // Each storage family has a static form and a runtime-bound form whose

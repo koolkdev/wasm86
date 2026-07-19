@@ -14,11 +14,10 @@ import type {
   OperationValueEmitter
 } from "#compiler/ir/operations/definition.js";
 import type { ValueEmitContext } from "#compiler/ir/values/definition.js";
-import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
+import type { ExternalValueId, ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { PlacementIndex } from "#compiler/placement/index.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
-import type { ExternalValueId } from "#ir/operands.js";
 import type { CallAction, ReturnCallAction } from "#ir/actions.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";

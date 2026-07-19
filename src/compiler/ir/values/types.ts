@@ -1,6 +1,7 @@
 declare const valueBrand: unique symbol;
 
-export type ValueId = number & { readonly [valueBrand]: "x86-semantic-value" };
+export type ValueId = number & { readonly [valueBrand]: "compiler-value" };
+export type ExternalValueId = number;
 export type ValueType = "i32" | "i64";
 export type IntegerWidth = 8 | 16 | 32;
 

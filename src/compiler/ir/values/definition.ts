@@ -1,7 +1,7 @@
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { OperandWidth } from "#core/types.js";
-import type { ExternalValueId } from "#ir/operands.js";
 import type {
+  ExternalValueId,
   ValueId,
   ValueInput,
   ValueType,
