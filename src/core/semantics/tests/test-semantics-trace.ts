@@ -1,7 +1,14 @@
+import { assert } from "#common/assert.js";
 import { isX86StatusFlag, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#core/flags/definitions.js";
-import { pageFaultErrorCode, type CpuException } from "#core/exceptions.js";
+import {
+  pageFault,
+  pageFaultErrorCode,
+  type CpuException
+} from "#core/exceptions.js";
 import { operand, reg } from "#core/semantics/refs.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
+import type { SimpleFlagSource } from "#core/flags/lazy/sources.js";
+import type { StatusFlagValues } from "#core/flags/values.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import { DynamicByteOriginRef } from "#compiler/ir/resource.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
@@ -11,25 +18,23 @@ import type {
 } from "#memory/access.js";
 import type {
   SemanticsBuilder,
-  GetOptions,
   IfBody,
   LoopBody,
   LoopSemanticsBuilder,
   SemanticBranchHint,
-  SemanticBuildContext,
-  SemanticOperandInfo,
-  SemanticOperandInput,
-  SemanticOperandStorageKind,
+  SemanticMemoryOps,
+  SemanticReadOptions,
+  SemanticUpdate,
   SemanticVar,
   SemanticTemplate,
-  SimpleFlagSource,
-  StatusFlagValues
+  SemanticWriteOptions
 } from "#core/semantics/builder.js";
 import type {
   MemRef,
   OperandInput,
   OperandRef,
   RegRef,
+  SegmentRef,
   StorageInput,
   TargetInput,
   Value,
@@ -48,25 +53,36 @@ export type SemanticTrace = Readonly<{
   def(input: ValueInput): string;
 }>;
 
+export type SemanticTraceOperandStorageKind = "reg" | "mem" | "imm" | "relTarget";
+
+export type SemanticTraceOperandInfo = Readonly<{
+  storage: SemanticTraceOperandStorageKind;
+  segment?:
+    | Readonly<{ kind: "static"; reg: SegmentRegister }>
+    | Readonly<{ kind: "dynamic"; index: ValueInput }>;
+}>;
+
 export function buildSemanticTrace(
   template: SemanticTemplate,
-  operandInfo: readonly SemanticOperandInfo[] = []
+  operandInfo: readonly SemanticTraceOperandInfo[] = []
 ): SemanticTrace {
   const builder = new TraceBuilder(operandInfo);
 
-  template(builder, builder.values, builder);
+  template(builder, builder.values);
   return builder.finish();
 }
 
-export function operands(...storage: SemanticOperandStorageKind[]): readonly SemanticOperandInfo[] {
+export function operands(
+  ...storage: SemanticTraceOperandStorageKind[]
+): readonly SemanticTraceOperandInfo[] {
   return storage.map((entry) => ({ storage: entry }));
 }
 
-export function regOperands(count: number): readonly SemanticOperandInfo[] {
+export function regOperands(count: number): readonly SemanticTraceOperandInfo[] {
   return Array.from({ length: count }, () => ({ storage: "reg" as const }));
 }
 
-export function segmentOperand(reg: SegmentRegister): SemanticOperandInfo {
+export function segmentOperand(reg: SegmentRegister): SemanticTraceOperandInfo {
   return { storage: "reg", segment: { kind: "static", reg } };
 }
 
@@ -94,12 +110,12 @@ function statusFlagValues(flags: StatusFlagValues): StatusFlagValues {
   };
 }
 
-class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBuildContext {
+class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder {
   readonly #events: string[] = [];
   readonly #defs: string[] = [];
   readonly #flagWrites: StatusFlagValues[] = [];
   readonly #pendingStatusFlags = new Map<X86StatusFlag, ValueInput>();
-  readonly #operandInfo: readonly SemanticOperandInfo[];
+  readonly #operandInfo: readonly SemanticTraceOperandInfo[];
   readonly #constValues = new Map<number, Value>();
   readonly #const64Values = new Map<bigint, Value>();
   readonly #inlineValues = new Map<Value, string>();
@@ -127,12 +143,19 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     extend64: (width, value, signed) => this.#extend64(width, value, signed)
   };
 
-  constructor(operandInfo: readonly SemanticOperandInfo[]) {
+  constructor(operandInfo: readonly SemanticTraceOperandInfo[]) {
     this.#operandInfo = operandInfo;
   }
 
   operand(index: number): OperandRef {
     return operand(index);
+  }
+
+  segment(operandRef: OperandInput): SegmentRef {
+    const segment = this.#operand(operandRef).segment;
+
+    assert(segment !== undefined, "operand is not a segment register");
+    return segment;
   }
 
   #const(value: number): Value {
@@ -193,23 +216,70 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     return reg(regInput);
   }
 
-  mem(segment: SegmentRegister, offset: ValueInput): MemRef {
-    const memory: MemRef = {
-      segment: { kind: "static", reg: segment },
-      offset
-    };
+  readonly memory: SemanticMemoryOps = {
+    reference: (segment, offset) => {
+      const reference: MemRef = {
+        segment: { kind: "static", reg: segment },
+        offset
+      };
 
-    this.#memoryDescriptions.set(memory, `segment(${segment}, ${this.#value(offset)})`);
-    return memory;
-  }
+      this.#memoryDescriptions.set(
+        reference,
+        `segment(${segment}, ${this.#value(offset)})`
+      );
+      return reference;
+    },
+    operand: (operandRef, addressOffset) => {
+      const reference = this.#describedMemory(`operand(${this.#storage(operandRef)})`);
 
-  operandMem(operandRef: OperandInput, displacement?: ValueInput): MemRef {
-    const memory = this.#describedMemory(`operand(${this.#storage(operandRef)})`);
+      return addressOffset === undefined
+        ? reference
+        : this.#describedMemory(
+          `offset(${this.#memory(reference)}, ${this.#value(addressOffset)})`
+        );
+    },
+    access: (options) => {
+      const access = this.memory.resolve(options);
 
-    return displacement === undefined
-      ? memory
-      : this.#describedMemory(`offset(${this.#memory(memory)}, ${this.#value(displacement)})`);
-  }
+      this.#faultMemoryAccess(access);
+      return access;
+    },
+    resolve: ({ reference, byteLength, intent }) => {
+      const id = this.#nextMemoryAccessId++;
+      const linearAddress = (-id - 1) as Value;
+
+      this.#inlineValues.set(linearAddress, `r${id}`);
+      const valid = this.#alloc(`valid(${this.#value(linearAddress)}.${intent})`);
+      const faulted = this.#alloc(`not(${this.#value(valid)})`);
+      const access: MemoryAccess<typeof intent> = {
+        range: { start: linearAddress, byteLength },
+        origin: new DynamicByteOriginRef(),
+        faulted,
+        fault: { address: linearAddress, intent }
+      };
+
+      this.#emit(
+        `resolve ${this.#value(linearAddress)} = ${this.#memory(reference)}:${this.#value(byteLength)}`
+      );
+      return access;
+    },
+    read: (access, options) => {
+      const byteOffset = options.byteOffset ?? this.values.const(0);
+      const out = this.#alloc(
+        `read ${this.#access(access)}+${this.#value(byteOffset)}:${options.width}${options.signed === true ? ":signed" : ""}`
+      );
+
+      this.#emit(`${this.#value(out)} = ${this.#definition(out)}`);
+      return out;
+    },
+    write: (access, options) => {
+      const byteOffset = options.byteOffset ?? this.values.const(0);
+
+      this.#emit(
+        `write ${this.#access(access)}+${this.#value(byteOffset)}:${options.width} <- ${this.#value(options.value)}`
+      );
+    }
+  };
 
   var(seed: ValueInput): SemanticVar {
     const label = this.#nextCellLabel++;
@@ -220,77 +290,58 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
     return variable;
   }
 
-  operandInfo(operandInput: SemanticOperandInput): SemanticOperandInfo {
-    const index = operandInput.index;
-    const info = this.#operandInfo[index];
+  read(source: StorageInput, options: SemanticReadOptions): Value {
+    if (source.kind === "operand" && this.#operand(source).storage === "mem") {
+      const width = options.memory?.width ?? options.width;
+      const reference = this.memory.operand(source, options.memory?.addressOffset?.());
+      const access = this.memory.access({
+        reference,
+        byteLength: this.values.const(width / 8),
+        intent: "read"
+      });
 
-    if (info === undefined) {
-      throw new Error(`missing semantic operand metadata for operand ${index}`);
+      return this.memory.read(
+        access,
+        options.signed === true
+          ? { width, signed: true }
+          : { width }
+      );
     }
 
-    return info;
-  }
-
-  get(source: StorageInput, accessWidth: OperandWidth = 32, options: GetOptions = {}): Value {
     const out = this.#alloc(
-      `get ${this.#storage(source)}:${accessWidth}${options.signed === true ? ":signed" : ""}`
+      `get ${this.#storage(source)}:${options.width}${options.signed === true ? ":signed" : ""}`
     );
 
     this.#emit(`${this.#value(out)} = ${this.#definition(out)}`);
     return out;
   }
 
-  set(target: StorageInput, value: ValueInput, accessWidth: OperandWidth = 32): void {
-    this.#emit(`set ${this.#storage(target)}:${accessWidth} <- ${this.#value(value)}`);
+  write(target: StorageInput, value: ValueInput, options: SemanticWriteOptions): void {
+    this.update(target, options).write(this, value);
   }
 
-  memoryResolve<TIntent extends MemoryDataAccessIntent>(
-    memory: MemRef,
-    byteLength: ValueInput,
-    intent: TIntent
-  ): MemoryAccess<TIntent> {
-    const id = this.#nextMemoryAccessId++;
-    const linearAddress = (-id - 1) as Value;
+  update(target: StorageInput, options: SemanticWriteOptions): SemanticUpdate {
+    if (target.kind === "operand" && this.#operand(target).storage === "mem") {
+      const width = options.memory?.width ?? options.width;
+      const reference = this.memory.operand(target, options.memory?.addressOffset?.());
+      const access = this.memory.access({
+        reference,
+        byteLength: this.values.const(width / 8),
+        intent: "write"
+      });
 
-    this.#inlineValues.set(linearAddress, `r${id}`);
-    const valid = this.#alloc(`valid(${this.#value(linearAddress)}.${intent})`);
-    const invalid = this.#alloc(`not(${this.#value(valid)})`);
-    const access: MemoryAccess<TIntent> = {
-      range: { start: linearAddress, byteLength },
-      origin: new DynamicByteOriginRef(),
-      invalid,
-      fault: { address: linearAddress, intent }
+      return {
+        read: (region) => region.memory.read(access, { width }),
+        write: (region, value) => region.memory.write(access, { width, value })
+      };
+    }
+
+    return {
+      read: (region) => region.read(target, { width: options.width }),
+      write: (_region, value) => {
+        this.#emit(`set ${this.#storage(target)}:${options.width} <- ${this.#value(value)}`);
+      }
     };
-
-    this.#emit(
-      `resolve ${this.#value(linearAddress)} = ${this.#memory(memory)}:${this.#value(byteLength)}`
-    );
-    return access;
-  }
-
-  memoryRead(
-    access: MemoryAccess,
-    byteOffset: ValueInput,
-    width: OperandWidth,
-    options: GetOptions = {}
-  ): Value {
-    const out = this.#alloc(
-      `read ${this.#access(access)}+${this.#value(byteOffset)}:${width}${options.signed === true ? ":signed" : ""}`
-    );
-
-    this.#emit(`${this.#value(out)} = ${this.#definition(out)}`);
-    return out;
-  }
-
-  memoryWrite(
-    access: MemoryAccess<"write">,
-    byteOffset: ValueInput,
-    value: ValueInput,
-    width: OperandWidth
-  ): void {
-    this.#emit(
-      `write ${this.#access(access)}+${this.#value(byteOffset)}:${width} <- ${this.#value(value)}`
-    );
   }
 
   address(operandRef: OperandInput): Value {
@@ -424,11 +475,14 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
   cpuException(exception: CpuException<ValueInput>): void {
     if (exception.kind === "PF") {
       const resolvedAddress = this.#inlineValues.get(exception.linearAddress);
+      const resolvedErrorCode = this.#inlineValues.get(exception.errorCode);
 
-      if (resolvedAddress !== undefined) {
+      if (resolvedAddress !== undefined && resolvedErrorCode !== undefined) {
         this.#emitTerminator(
           `cpuException ${exception.kind} ${resolvedAddress}.${
-            exception.errorCode === pageFaultErrorCode("dataWrite") ? "write" : "read"
+            resolvedErrorCode === `${pageFaultErrorCode("dataWrite")}`
+              ? "write"
+              : "read"
           }`
         );
         return;
@@ -512,6 +566,25 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder, SemanticBu
 
     this.#memoryDescriptions.set(memory, description);
     return memory;
+  }
+
+  #operand(operandRef: OperandRef): SemanticTraceOperandInfo {
+    return this.#operandInfo[operandRef.index] ?? { storage: "reg" };
+  }
+
+  #faultMemoryAccess(access: MemoryAccess<MemoryDataAccessIntent>): void {
+    this.if(
+      access.faulted,
+      (failure) => failure.cpuException(
+        pageFault(
+          access.fault.address,
+          this.values.const(pageFaultErrorCode(
+            access.fault.intent === "write" ? "dataWrite" : "dataRead"
+          ))
+        )
+      ),
+      "unlikely"
+    );
   }
 
   #memory(memory: MemRef): string {

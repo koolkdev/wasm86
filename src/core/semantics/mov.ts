@@ -1,117 +1,96 @@
-import type { ConditionCode } from "#core/flags/conditions.js";
-import { invalidOpcode } from "#core/exceptions.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
+import { invalidOpcode } from "#core/exceptions.js";
+import type { ConditionCode } from "#core/flags/conditions.js";
 import { segmentRegisterIndex } from "#core/segments.js";
-import type { SemanticOperandInfo, SemanticTemplate } from "#core/semantics/builder.js";
+import type { SemanticTemplate } from "#core/semantics/builder.js";
+import type { SegmentRef, Value } from "#core/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
-import type { Value } from "./refs.js";
-import {
-  readStorage,
-  resolveStorageRead,
-  resolveStorageReadWrite,
-  resolveStorageWrite,
-  writeStorage
-} from "./memory.js";
 
 export function movSemantic(width: OperandWidth = 32): SemanticTemplate {
-  return (s, v, context) => {
+  return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
+    const value = s.read(src, { width });
 
-    const srcStorage = resolveStorageRead(s, v, context, src, width);
-    const value = readStorage(s, v, srcStorage, width);
-
-    const dstStorage = resolveStorageWrite(s, v, context, dst, width);
-
-    writeStorage(s, v, dstStorage, value, width);
+    s.write(dst, value, { width });
   };
 }
 
 export function movSregSemantic(registerWidth: Extract<OperandWidth, 16 | 32>): SemanticTemplate {
-  return (s, v, context) => {
+  return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-    const width = context.operandInfo(dst).storage === "mem" ? 16 : registerWidth;
+    const value = s.read(src, { width: registerWidth });
 
-    const srcStorage = resolveStorageRead(s, v, context, src, width);
-    const value = readStorage(s, v, srcStorage, width);
-
-    const dstStorage = resolveStorageWrite(s, v, context, dst, width);
-
-    writeStorage(s, v, dstStorage, value, width);
+    s.write(dst, value, { width: registerWidth, memory: { width: 16 } });
   };
 }
 
 export function movToSregSemantic(): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-    const csLoad = segmentTargetIsCs(v, context.operandInfo(dst));
+    const csLoad = segmentTargetIsCs(v, s.segment(dst));
 
     if (csLoad !== undefined) {
-      s.if(csLoad, (then) => then.cpuException(invalidOpcode()), "unlikely");
+      s.if(
+        csLoad,
+        (failure) => failure.cpuException(invalidOpcode()),
+        "unlikely"
+      );
     }
 
-    const srcStorage = resolveStorageRead(s, v, context, src, 16);
-
-    s.set(dst, readStorage(s, v, srcStorage, 16), 16);
+    s.write(dst, s.read(src, { width: 16 }), { width: 16 });
   };
 }
 
-function segmentTargetIsCs(v: ValueBuilder, info: SemanticOperandInfo): Value | undefined {
-  if (info.segment === undefined) {
-    return undefined;
-  }
-
-  switch (info.segment.kind) {
+function segmentTargetIsCs(
+  v: ValueBuilder,
+  segment: SegmentRef
+): Value | undefined {
+  switch (segment.kind) {
     case "static":
-      return info.segment.reg === "cs" ? v.const(1) : undefined;
+      return segment.reg === "cs" ? v.const(1) : undefined;
     case "dynamic":
-      return v.compare(32, "eq", info.segment.index, v.const(segmentRegisterIndex("cs")));
+      return v.compare(
+        32,
+        "eq",
+        segment.index,
+        v.const(segmentRegisterIndex("cs"))
+      );
   }
 }
 
 export function movzxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {
-  return (s, v, context) => {
+  return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
+    const value = s.read(src, { width: sourceWidth });
 
-    const srcStorage = resolveStorageRead(s, v, context, src, sourceWidth);
-    const value = readStorage(s, v, srcStorage, sourceWidth);
-
-    const dstStorage = resolveStorageWrite(s, v, context, dst, destinationWidth);
-
-    writeStorage(s, v, dstStorage, value, destinationWidth);
+    s.write(dst, value, { width: destinationWidth });
   };
 }
 
 export function movsxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {
-  return (s, v, context) => {
+  return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
+    const value = s.read(src, { width: sourceWidth, signed: true });
 
-    const srcStorage = resolveStorageRead(s, v, context, src, sourceWidth);
-    const value = readStorage(s, v, srcStorage, sourceWidth, { signed: true });
-
-    const dstStorage = resolveStorageWrite(s, v, context, dst, destinationWidth);
-
-    writeStorage(s, v, dstStorage, value, destinationWidth);
+    s.write(dst, value, { width: destinationWidth });
   };
 }
 
 export function cmovSemantic(cc: ConditionCode, width: OperandWidth = 32): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-
-    const srcStorage = resolveStorageRead(s, v, context, src, width);
-    const dstStorage = resolveStorageReadWrite(s, v, context, dst, width);
-
-    const value = readStorage(s, v, srcStorage, width);
+    const value = s.read(src, { width });
+    const destination = s.update(dst, { width });
     const condition = s.condition(cc);
-    const fallback = readStorage(s, v, dstStorage, width);
+    const fallback = destination.read(s);
     const selected = v.select(condition, value, fallback);
 
-    writeStorage(s, v, dstStorage, selected, width);
+    destination.write(s, selected);
   };
 }

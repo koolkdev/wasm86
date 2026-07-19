@@ -1,7 +1,7 @@
 export type CpuException<T> =
   | Readonly<{ kind: "DE" }>
   | Readonly<{ kind: "UD" }>
-  | Readonly<{ kind: "PF"; linearAddress: T; errorCode: number }>;
+  | Readonly<{ kind: "PF"; linearAddress: T; errorCode: T }>;
 
 export const CpuExceptionVector = {
   DE: 0,
@@ -29,7 +29,7 @@ export function invalidOpcode<T = never>(): CpuException<T> {
   return { kind: "UD" };
 }
 
-export function pageFault<T>(linearAddress: T, errorCode: number): CpuException<T> {
+export function pageFault<T>(linearAddress: T, errorCode: T): CpuException<T> {
   return { kind: "PF", linearAddress, errorCode };
 }
 

@@ -24,27 +24,27 @@ test("machine rounds x86-page-aligned sizes to WebAssembly pages", () => {
 
 test("machine creates one Cpu with writable default state", () => {
   const machine = createMachine({ memoryByteLength: 0x1000 });
-  const { state } = machine.cpu;
+  const { core, flags } = machine.cpu.state;
 
-  strictEqual(state.eip, 0);
-  strictEqual(state.readReg32("eax"), 0);
-  strictEqual(state.readFlag("CF"), false);
+  strictEqual(core.eip, 0);
+  strictEqual(core.readReg32("eax"), 0);
+  strictEqual(flags.readFlag("CF"), false);
 
-  state.eip = 0x1000;
-  state.writeReg32("eax", 0x1234_5678);
-  state.writeSegmentSelector("fs", 0x30);
-  state.writeSegmentBase("fs", 0x8000_0000);
-  state.writeSegmentLimit("fs", 0xffff_ffff);
-  state.writeSegmentAccess("fs", 0x00c0_00fb);
-  state.writeFlag("CF", true);
+  core.eip = 0x1000;
+  core.writeReg32("eax", 0x1234_5678);
+  core.writeSegmentSelector("fs", 0x30);
+  core.writeSegmentBase("fs", 0x8000_0000);
+  core.writeSegmentLimit("fs", 0xffff_ffff);
+  core.writeSegmentAccess("fs", 0x00c0_00fb);
+  flags.writeFlag("CF", true);
 
-  strictEqual(state.eip, 0x1000);
-  strictEqual(state.readReg32("eax"), 0x1234_5678);
-  strictEqual(state.readSegmentSelector("fs"), 0x30);
-  strictEqual(state.readSegmentBase("fs"), 0x8000_0000);
-  strictEqual(state.readSegmentLimit("fs"), 0xffff_ffff);
-  strictEqual(state.readSegmentAccess("fs"), 0x00c0_00fb);
-  strictEqual(state.readFlag("CF"), true);
+  strictEqual(core.eip, 0x1000);
+  strictEqual(core.readReg32("eax"), 0x1234_5678);
+  strictEqual(core.readSegmentSelector("fs"), 0x30);
+  strictEqual(core.readSegmentBase("fs"), 0x8000_0000);
+  strictEqual(core.readSegmentLimit("fs"), 0xffff_ffff);
+  strictEqual(core.readSegmentAccess("fs"), 0x00c0_00fb);
+  strictEqual(flags.readFlag("CF"), true);
 });
 
 test("machine requires a positive x86-page-aligned size", () => {

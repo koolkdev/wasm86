@@ -1,9 +1,11 @@
 import { deepStrictEqual, ok as assertOk, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { immBinding, regBinding, type OperandBinding } from "#ir/operands.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
+import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { immBinding, regBinding, type OperandBinding } from "#core/instruction/bindings.js";
+import { gprChannel } from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
 import {
   readWasmCpuStateChannel,
   readWasmCpuStateSnapshot,
@@ -41,7 +43,7 @@ test("decoded ROL uses CL low byte and preserves non-rotate flags", async () => 
 
   assertCompleted(run());
   strictEqual(readRegister(stateView, "ebx"), 0x2345_6781);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), {
     ...preservedFlags,
     CF: 1,
@@ -62,7 +64,7 @@ test("decoded ROR word keeps high destination bits untouched", async () => {
 
   assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 0xaaaa_8000);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), {
     ...preservedFlags,
     CF: 1,
@@ -83,7 +85,7 @@ test("decoded RCL byte rotates through old carry", async () => {
 
   assertCompleted(run());
   strictEqual(readRegister(stateView, "ebx"), 0xaaaa_0001);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), {
     ...preservedFlags,
     CF: 0,
@@ -104,7 +106,7 @@ test("decoded RCR dword rotates through old carry", async () => {
 
   assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 0x8000_0000);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), {
     ...preservedFlags,
     CF: 0,
@@ -113,9 +115,9 @@ test("decoded RCR dword rotates through old carry", async () => {
 });
 
 function blockOf(instruction: IsaDecodedInstruction) {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
+  builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
   return builder.finish();
 }
 

@@ -8,13 +8,15 @@ import type {
 } from "#compiler/placement/model.js";
 import { planPlacement } from "#compiler/placement/plan.js";
 import { validatePlacement } from "#compiler/placement/validate.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { gprChannel } from "#ir/slots.js";
-import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import {
+  compilerTestValues,
+  resourceReadAction,
+  resourceWriteAction
+} from "#ir/tests/storage-op-helpers.js";
 
 test("accepts condition-frontier and earlier-frontier captures", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const quotient = values.binary(
     "div_u",
     values.external(0),
@@ -22,10 +24,10 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
   );
   const adjusted = values.binary("add", quotient, values.const(1));
   const firstThen: Body = {
-    actions: [stateWrite(gprChannel("eax"), adjusted)]
+    actions: [resourceWriteAction(values, 0, adjusted)]
   };
   const firstElse: Body = {
-    actions: [stateWrite(gprChannel("ebx"), adjusted)]
+    actions: [resourceWriteAction(values, 1, adjusted)]
   };
   const block: IrBlock = {
     values,
@@ -43,7 +45,7 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
 
   doesNotThrow(() => validatePlacement(block, analysis, plan));
 
-  const laterValues = new ValueTable();
+  const laterValues = compilerTestValues();
   const earlierQuotient = laterValues.binary(
     "div_u",
     laterValues.external(0),
@@ -56,16 +58,16 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
   );
   const condition = laterValues.external(2);
   const laterThen: Body = {
-    actions: [stateWrite(gprChannel("eax"), laterAdjusted)]
+    actions: [resourceWriteAction(laterValues, 0, laterAdjusted)]
   };
   const laterElse: Body = {
-    actions: [stateWrite(gprChannel("ebx"), laterAdjusted)]
+    actions: [resourceWriteAction(laterValues, 1, laterAdjusted)]
   };
   const laterBlock: IrBlock = {
     values: laterValues,
     body: {
       actions: [
-        stateWrite(gprChannel("ecx"), earlierQuotient),
+        resourceWriteAction(laterValues, 2, earlierQuotient),
         {
           kind: "if",
           condition,
@@ -82,7 +84,7 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
 });
 
 test("rejects a raw trapping value hoisted above sibling arms", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const condition = values.external(0);
   const quotient = values.binary(
     "div_u",
@@ -90,10 +92,10 @@ test("rejects a raw trapping value hoisted above sibling arms", () => {
     values.external(2)
   );
   const thenBody: Body = {
-    actions: [stateWrite(gprChannel("eax"), quotient)]
+    actions: [resourceWriteAction(values, 0, quotient)]
   };
   const elseBody: Body = {
-    actions: [stateWrite(gprChannel("ebx"), quotient)]
+    actions: [resourceWriteAction(values, 1, quotient)]
   };
   const block: IrBlock = {
     values,
@@ -122,11 +124,11 @@ test("rejects a raw trapping value hoisted above sibling arms", () => {
 });
 
 test("rejects at-use placement without a direct demand", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const condition = values.external(0);
   const quotient = values.binary("div_u", values.external(1), values.external(2));
-  const thenBody: Body = { actions: [stateWrite(gprChannel("eax"), quotient)] };
-  const elseBody: Body = { actions: [stateWrite(gprChannel("ebx"), quotient)] };
+  const thenBody: Body = { actions: [resourceWriteAction(values, 0, quotient)] };
+  const elseBody: Body = { actions: [resourceWriteAction(values, 1, quotient)] };
   const block: IrBlock = {
     values,
     body: { actions: [{ kind: "if", condition, thenBody, elseBody }] }
@@ -150,15 +152,15 @@ test("rejects at-use placement without a direct demand", () => {
 });
 
 test("rejects a producer anchor before its authored definition", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const output = values.addActionOutput();
   const block: IrBlock = {
     values,
     body: {
       actions: [
-        stateWrite(gprChannel("ecx"), values.const(0)),
-        stateRead(output, gprChannel("eax")),
-        stateWrite(gprChannel("ebx"), output)
+        resourceWriteAction(values, 2, values.const(0)),
+        resourceReadAction(values, output, 0),
+        resourceWriteAction(values, 1, output)
       ]
     }
   };
@@ -183,20 +185,20 @@ test("rejects a producer anchor before its authored definition", () => {
 });
 
 test("rejects an anchor that does not dominate every selected use", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const condition = values.external(0);
   const output = values.addActionOutput();
   const thenBody: Body = {
-    actions: [stateWrite(gprChannel("eax"), output)]
+    actions: [resourceWriteAction(values, 0, output)]
   };
   const elseBody: Body = {
-    actions: [stateWrite(gprChannel("ebx"), output)]
+    actions: [resourceWriteAction(values, 1, output)]
   };
   const block: IrBlock = {
     values,
     body: {
       actions: [
-        stateRead(output, gprChannel("ecx")),
+        resourceReadAction(values, output, 2),
         { kind: "if", condition, thenBody, elseBody }
       ]
     }
@@ -221,15 +223,15 @@ test("rejects an anchor that does not dominate every selected use", () => {
 });
 
 test("rejects producer movement across an alias but accepts a live snapshot", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const output = values.addActionOutput();
   const block: IrBlock = {
     values,
     body: {
       actions: [
-        stateRead(output, gprChannel("eax")),
-        stateWrite(gprChannel("eax"), values.const(7)),
-        stateWrite(gprChannel("ebx"), output)
+        resourceReadAction(values, output, 0),
+        resourceWriteAction(values, 0, values.const(7)),
+        resourceWriteAction(values, 1, output)
       ]
     }
   };
@@ -256,19 +258,19 @@ test("rejects producer movement across an alias but accepts a live snapshot", ()
 });
 
 test("rejects overlapping value lifetimes assigned to one local", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const first = values.addActionOutput();
   const second = values.addActionOutput();
   const block: IrBlock = {
     values,
     body: {
       actions: [
-        stateRead(first, gprChannel("eax")),
-        stateRead(second, gprChannel("edx")),
-        stateWrite(gprChannel("ebx"), first),
-        stateWrite(gprChannel("ecx"), second),
-        stateWrite(gprChannel("esi"), first),
-        stateWrite(gprChannel("edi"), second)
+        resourceReadAction(values, first, 0),
+        resourceReadAction(values, second, 3),
+        resourceWriteAction(values, 1, first),
+        resourceWriteAction(values, 2, second),
+        resourceWriteAction(values, 4, first),
+        resourceWriteAction(values, 5, second)
       ]
     }
   };
@@ -285,15 +287,15 @@ test("rejects overlapping value lifetimes assigned to one local", () => {
 });
 
 test("keeps an outer capture live through repeated loop uses", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const outer = values.addActionOutput();
   const inner = values.addActionOutput();
   const loopBody: Body = {
     actions: [
-      stateWrite(gprChannel("ebx"), outer),
-      stateRead(inner, gprChannel("ecx")),
-      stateWrite(gprChannel("edx"), inner),
-      stateWrite(gprChannel("esi"), inner),
+      resourceWriteAction(values, 1, outer),
+      resourceReadAction(values, inner, 2),
+      resourceWriteAction(values, 3, inner),
+      resourceWriteAction(values, 4, inner),
       { kind: "loopContinue", updates: [] }
     ]
   };
@@ -301,7 +303,7 @@ test("keeps an outer capture live through repeated loop uses", () => {
     values,
     body: {
       actions: [
-        stateRead(outer, gprChannel("eax")),
+        resourceReadAction(values, outer, 0),
         { kind: "loop", carried: [], body: loopBody }
       ]
     }
@@ -321,12 +323,12 @@ test("keeps an outer capture live through repeated loop uses", () => {
 });
 
 test("rejects hoisting a loop-dependent recipe to the preheader", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const loopInput = values.addLoopInput();
   const current = values.binary("add", loopInput, values.const(1));
   const loopBody: Body = {
     actions: [
-      stateWrite(gprChannel("eax"), current),
+      resourceWriteAction(values, 0, current),
       { kind: "loopContinue", updates: [loopInput] }
     ]
   };
@@ -335,7 +337,7 @@ test("rejects hoisting a loop-dependent recipe to the preheader", () => {
     body: {
       actions: [{
         kind: "loop",
-        carried: [{ channel: gprChannel("eax"), seed: values.const(0), loopInput }],
+        carried: [{ seed: values.const(0), loopInput }],
         body: loopBody
       }]
     }
@@ -361,11 +363,11 @@ test("rejects hoisting a loop-dependent recipe to the preheader", () => {
 });
 
 test("accepts leaving a loop-invariant recipe at its use", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const invariant = values.binary("add", values.external(0), values.const(1));
   const loopBody: Body = {
     actions: [
-      stateWrite(gprChannel("eax"), invariant),
+      resourceWriteAction(values, 0, invariant),
       { kind: "loopContinue", updates: [] }
     ]
   };

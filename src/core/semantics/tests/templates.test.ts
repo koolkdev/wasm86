@@ -224,14 +224,14 @@ test("cmps compares source minus destination before stepping both pointers", () 
     "if %3",
     "cpuException PF r0.read",
     "ifEnd",
+    "%4 = read r0.read+0:16",
     "resolve r1 = operand(op1):2",
-    "if %5",
+    "if %7",
     "cpuException PF r1.read",
     "ifEnd",
-    "%6 = read r0.read+0:16",
     "%8 = read r1.read+0:16"
   ]);
-  ok(trace.events.includes("flagSource sub:16 left=%7 right=%9 result=%11"));
+  ok(trace.events.includes("flagSource sub:16 left=%5 right=%9 result=%11"));
   ok(trace.events.includes("set esi:32 <- %13"));
   ok(trace.events.includes("set edi:32 <- %15"));
 });
@@ -268,13 +268,13 @@ test("stos, lods, and scas use accumulator widths and one pointer step", () => {
 
   deepStrictEqual(scas.events.slice(0, 8), [
     "%0 = flag DF",
+    "%2 = get eax:32",
     "resolve r0 = operand(op0):4",
-    "if %3",
+    "if %5",
     "cpuException PF r0.read",
     "ifEnd",
-    "%4 = get eax:32",
     "%6 = read r0.read+0:32",
-    "flagSource sub:32 left=%5 right=%7 result=%9"
+    "flagSource sub:32 left=%3 right=%7 result=%9"
   ]);
   ok(scas.events.includes("set edi:32 <- %11"));
 });
@@ -515,7 +515,7 @@ test("bit-test register forms write only CF and mask the bit offset", () => {
   const trace = buildSemanticTrace(bitTestSemantic("bt", 32, "reg"), regOperands(2));
 
   deepStrictEqual(trace.events, [
-    "%0 = get op1:32",
+    "%0 = get op1:32:signed",
     "%2 = get op0:32",
     "flag CF <- %5",
     "next"
@@ -524,6 +524,8 @@ test("bit-test register forms write only CF and mask the bit offset", () => {
   strictEqual(trace.defs[3], "truncate32(%2)");
   strictEqual(trace.defs[4], "shr_u(%3, %1)");
   strictEqual(trace.defs[5], "and(%4, 1)");
+  strictEqual(trace.defs.some((definition) => definition.startsWith("shr_s(")), false);
+  strictEqual(trace.defs.some((definition) => definition.startsWith("shl(")), false);
   deepStrictEqual(directFlagWrites(trace), ["CF"]);
   strictEqual(trace.events.some((event) => event.startsWith("set ")), false);
 });
@@ -533,7 +535,7 @@ test("bit-string memory forms offset the logical ref and select access intent", 
 
   deepStrictEqual(trace.events, [
     "%0 = get op1:32:signed",
-    "resolve r0 = offset(operand(op0), %2):4",
+    "resolve r0 = offset(operand(op0), %3):4",
     "if %5",
     "cpuException PF r0.write",
     "ifEnd",
@@ -542,14 +544,14 @@ test("bit-string memory forms offset the logical ref and select access intent", 
     "write r0.write+0:32 <- %13",
     "next"
   ]);
-  strictEqual(trace.defs[1], "shr_s(%0, 5)");
-  strictEqual(trace.defs[2], "shl(%1, 2)");
-  strictEqual(trace.defs[3], "and(%0, 31)");
+  strictEqual(trace.defs[1], "and(%0, 31)");
+  strictEqual(trace.defs[2], "shr_s(%0, 5)");
+  strictEqual(trace.defs[3], "shl(%2, 2)");
   strictEqual(memoryResolveEvents(trace).length, 1);
 
   const readOnly = buildSemanticTrace(bitTestSemantic("bt", 32, "reg"), operands("mem", "reg"));
 
-  strictEqual(readOnly.events[1], "resolve r0 = offset(operand(op0), %2):4");
+  strictEqual(readOnly.events[1], "resolve r0 = offset(operand(op0), %3):4");
   ok(readOnly.events.includes("cpuException PF r0.read"));
   ok(readOnly.events.includes("%6 = read r0.read+0:32"));
   strictEqual(readOnly.events.some((event) => event.startsWith("write ")), false);

@@ -4,24 +4,23 @@ import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticTemplate, SemanticsBuilder } from "#core/semantics/builder.js";
 import type { Value, ValueInput } from "#core/semantics/refs.js";
 import { writeAddFlags, writeStatusFlagValues } from "./flag-writes.js";
-import { semanticFlagOps } from "./flag-value-ops.js";
 
 export function daaSemantic(): SemanticTemplate {
   return (s, v) => {
-    const oldAl = s.get(s.reg("al"), 8);
+    const oldAl = s.read(s.reg("al"), { width: 8 });
     const lowAdjust = decimalLowAdjust(s, v, oldAl);
     const highAdjust = v.binary("or", v.compare(8, "gt_u", oldAl, v.const(0x99)), s.readFlag("CF"));
     const afterLowAdjust = addSelectedByte(v, oldAl, lowAdjust, 0x06);
     const result = addSelectedByte(v, afterLowAdjust, highAdjust, 0x60);
 
-    s.set(s.reg("al"), result, 8);
+    s.write(s.reg("al"), result, { width: 8 });
     writeAdjustFlags(s, v, result, { highAdjust, lowAdjust });
   };
 }
 
 export function dasSemantic(): SemanticTemplate {
   return (s, v) => {
-    const oldAl = s.get(s.reg("al"), 8);
+    const oldAl = s.read(s.reg("al"), { width: 8 });
     const lowAdjust = decimalLowAdjust(s, v, oldAl);
     const highAdjust = v.binary("or", v.compare(8, "gt_u", oldAl, v.const(0x99)), s.readFlag("CF"));
     const lowBorrow = v.binary("and", lowAdjust, v.compare(8, "lt_u", oldAl, v.const(0x06)));
@@ -29,7 +28,7 @@ export function dasSemantic(): SemanticTemplate {
     const afterLowAdjust = subSelectedByte(v, oldAl, lowAdjust, 0x06);
     const result = subSelectedByte(v, afterLowAdjust, highAdjust, 0x60);
 
-    s.set(s.reg("al"), result, 8);
+    s.write(s.reg("al"), result, { width: 8 });
     writeAdjustFlags(s, v, result, { highAdjust: carryAdjust, lowAdjust });
   };
 }
@@ -48,8 +47,8 @@ export function aasSemantic(): SemanticTemplate {
 
 export function aamSemantic(): SemanticTemplate {
   return (s, v) => {
-    const base = s.get(s.operand(0), 8);
-    const oldAl = s.get(s.reg("al"), 8);
+    const base = s.read(s.operand(0), { width: 8 });
+    const oldAl = s.read(s.reg("al"), { width: 8 });
 
     s.if(
       v.compare(8, "eq", base, v.const(0)),
@@ -60,29 +59,29 @@ export function aamSemantic(): SemanticTemplate {
     const quotient = v.binary("div_u", oldAl, base);
     const remainder = v.binary("rem_u", oldAl, base);
 
-    s.set(s.reg("ah"), quotient, 8);
-    s.set(s.reg("al"), remainder, 8);
+    s.write(s.reg("ah"), quotient, { width: 8 });
+    s.write(s.reg("al"), remainder, { width: 8 });
     writeAdjustFlags(s, v, remainder);
   };
 }
 
 export function aadSemantic(): SemanticTemplate {
   return (s, v) => {
-    const base = s.get(s.operand(0), 8);
-    const oldAl = s.get(s.reg("al"), 8);
-    const oldAh = s.get(s.reg("ah"), 8);
+    const base = s.read(s.operand(0), { width: 8 });
+    const oldAl = s.read(s.reg("al"), { width: 8 });
+    const oldAh = s.read(s.reg("ah"), { width: 8 });
     const addend = v.binary("mul", oldAh, base);
     const result = v.truncate(8, v.binary("add", oldAl, addend));
 
-    s.set(s.reg("al"), result, 8);
-    s.set(s.reg("ah"), v.const(0), 8);
+    s.write(s.reg("al"), result, { width: 8 });
+    s.write(s.reg("ah"), v.const(0), { width: 8 });
     writeAddFlags(s, v, { width: 8, left: oldAl, right: addend, result });
   };
 }
 
 function asciiAdjust(s: SemanticsBuilder, v: ValueBuilder, op: "add" | "sub"): void {
-  const oldAx = s.get(s.reg("ax"), 16);
-  const oldAl = s.get(s.reg("al"), 8);
+  const oldAx = s.read(s.reg("ax"), { width: 16 });
+  const oldAl = s.read(s.reg("al"), { width: 8 });
   const adjust = decimalLowAdjust(s, v, oldAl);
   const adjustedAx = v.truncate(
     16,
@@ -93,7 +92,7 @@ function asciiAdjust(s: SemanticsBuilder, v: ValueBuilder, op: "add" | "sub"): v
   const resultAl = v.binary("and", adjustedAx, v.const(0x0f));
   const resultAx = v.binary("and", adjustedAx, v.const(0xff0f));
 
-  s.set(s.reg("ax"), resultAx, 16);
+  s.write(s.reg("ax"), resultAx, { width: 16 });
   writeAdjustFlags(s, v, resultAl, { lowAdjust: adjust });
 }
 
@@ -125,7 +124,7 @@ function writeAdjustFlags(
   const highAdjust = adjust?.highAdjust ?? lowAdjust;
 
   writeStatusFlagValues(s, {
-    ...zspValues(semanticFlagOps(v), { width: 8, result }),
+    ...zspValues(v, { width: 8, result }),
     CF: highAdjust,
     AF: lowAdjust,
     // OF is architecturally undefined; choose zero as observed.

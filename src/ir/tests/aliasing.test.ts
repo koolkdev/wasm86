@@ -1,85 +1,83 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { actionMayWriteStateSlot, effectsOf, mayAlias } from "#ir/aliasing.js";
 import type { StorageAccess } from "#compiler/ir/effects.js";
 import {
-  eipChannel,
-  flagChannel,
-  gprChannel,
-  lazyFlagsAChannel,
-  lazyFlagsKindChannel,
-  segmentAccessChannel,
-  segmentBaseChannel,
-  segmentLimitChannel,
-  segmentSelectorChannel
-} from "#ir/slots.js";
-import type { StateSlot } from "#ir/slots.js";
+  resourceRead,
+  resourceWrite
+} from "#compiler/ir/operations/resource.js";
 import {
-  statusFlagCall,
-  stateRead,
-  stateWrite
-} from "#ir/tests/storage-op-helpers.js";
+  DynamicByteOriginRef,
+  resourceRef,
+  type ByteRange,
+  type ResourceRef
+} from "#compiler/ir/resource.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { CellRef } from "#compiler/refs/cell.js";
-import { resourceRef } from "#compiler/ir/resource.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef } from "#compiler/program/refs.js";
 import { functionType } from "#compiler/program/function-type.js";
+import { functionRef } from "#compiler/program/refs.js";
+import { CellRef } from "#compiler/refs/cell.js";
+import type { Action, OpAction } from "#ir/actions.js";
+import { covers, effectsOf, mayAlias } from "#ir/aliasing.js";
 
-const resourceBytes: StorageAccess = {
-  space: "resource",
-  resource: resourceRef("test.aliasing-resource"),
-  range: { basis: { kind: "resource" } }
-};
+const firstResource = resourceRef("test.aliasing.first");
+const secondResource = resourceRef("test.aliasing.second");
 const firstCell = new CellRef("i32");
 const secondCell = new CellRef("i32");
 
-function cellSlot(cell: CellRef): StorageAccess {
-  return { space: "cell", cell };
+function effect(resource: ResourceRef, range: ByteRange): StorageAccess {
+  return { space: "resource", resource, range };
 }
 
-function state(slot: StateSlot): StorageAccess {
-  return { space: "state", slot };
+function absolute(byteOffset: number, byteLength: number): ByteRange {
+  return {
+    basis: { kind: "resource" },
+    slice: { byteOffset, byteLength }
+  };
 }
 
-function dynamicGpr(index: number, byteLength: 1 | 2 | 4 = 4): StateSlot {
-  return { kind: "gprDynamic", index: valueId(index), byteLength };
+function readAction(range: ByteRange, output = 1): OpAction {
+  return {
+    kind: "op",
+    output: valueId(output),
+    op: resourceRead.create({
+      source: {
+        effect: { space: "resource", resource: firstResource, range },
+        address: { base: valueId(0), displacement: 0 },
+        width: 8
+      }
+    })
+  };
 }
 
-function dynamicSegmentBase(index: number): StateSlot {
-  return { kind: "segmentDynamic", index: valueId(index), field: "base" };
+function writeAction(range: ByteRange, value = 1): OpAction {
+  return {
+    kind: "op",
+    op: resourceWrite.create({
+      destination: {
+        effect: { space: "resource", resource: firstResource, range },
+        address: { base: valueId(0), displacement: 0 },
+        width: 8
+      },
+      value: valueId(value)
+    })
+  };
 }
 
-function dynamicSegmentSelector(index: number): StateSlot {
-  return { kind: "segmentDynamic", index: valueId(index), field: "selector" };
-}
+test("effects derive from generic operations and nested control", () => {
+  const first = absolute(0, 1);
+  const second = absolute(4, 1);
+  const action: Action = {
+    kind: "if",
+    condition: valueId(0),
+    thenBody: { actions: [readAction(first), writeAction(second)] },
+    elseBody: { actions: [writeAction(first)] }
+  };
 
-function dynamicSegmentLimit(index: number): StateSlot {
-  return { kind: "segmentDynamic", index: valueId(index), field: "limit" };
-}
-
-function dynamicSegmentAccess(index: number): StateSlot {
-  return { kind: "segmentDynamic", index: valueId(index), field: "access" };
-}
-
-test("effects derive from action kind and slot", () => {
-  deepStrictEqual(effectsOf(stateRead(0, gprChannel("eax"))), {
-    reads: [state(gprChannel("eax"))],
-    writes: []
-  });
-  deepStrictEqual(effectsOf(stateWrite(flagChannel("ZF"), 0)), {
-    reads: [],
-    writes: [state(flagChannel("ZF"))]
-  });
-  deepStrictEqual(effectsOf(stateWrite(dynamicGpr(3), 0)), {
-    reads: [],
-    writes: [state(dynamicGpr(3))]
-  });
-  deepStrictEqual(effectsOf(statusFlagCall(4, "ZF", 0, 1, 2, 3)), {
-    reads: [],
-    writes: []
+  deepStrictEqual(effectsOf(action), {
+    reads: [effect(firstResource, first)],
+    writes: [effect(firstResource, second), effect(firstResource, first)]
   });
 });
 
@@ -87,7 +85,12 @@ test("control flow and finishes touch no data directly", () => {
   const values = new ValueTable();
 
   deepStrictEqual(
-    effectsOf({ kind: "if", condition: valueId(0), thenBody: { actions: [] }, elseBody: { actions: [] } }),
+    effectsOf({
+      kind: "if",
+      condition: valueId(0),
+      thenBody: { actions: [] },
+      elseBody: { actions: [] }
+    }),
     { reads: [], writes: [] }
   );
   deepStrictEqual(
@@ -100,11 +103,10 @@ test("control flow and finishes touch no data directly", () => {
   );
 });
 
-test("call effects come from their function definition", () => {
-  const effects = {
-    reads: [state(gprChannel("eax"))],
-    writes: [state(gprChannel("ebx"))]
-  } as const;
+test("direct-call effects come from their function definition", () => {
+  const read = effect(firstResource, absolute(0, 4));
+  const write = effect(firstResource, absolute(8, 4));
+  const effects = { reads: [read], writes: [write] } as const;
   const target = new FunctionDefinition({
     ref: functionRef("test.aliasing-call"),
     type: functionType([], []),
@@ -112,137 +114,65 @@ test("call effects come from their function definition", () => {
     owner: undefined,
     build: () => {}
   });
-  const action = { kind: "call", target, arguments: [], outputs: [] } as const;
 
-  deepStrictEqual(effectsOf(action), effects);
-  strictEqual(actionMayWriteStateSlot(action, gprChannel("ebx")), true);
-  strictEqual(actionMayWriteStateSlot(action, gprChannel("eax")), false);
+  deepStrictEqual(
+    effectsOf({ kind: "call", target, arguments: [], outputs: [] }),
+    effects
+  );
+  deepStrictEqual(
+    effectsOf({ kind: "returnCall", target, arguments: [] }),
+    effects
+  );
 });
 
-test("if effects aggregate nested body effects", () => {
-  const action = {
-    kind: "if",
-    condition: valueId(0),
-    thenBody: { actions: [stateRead(1, gprChannel("eax")), stateWrite(gprChannel("ebx"), 1)] },
-    elseBody: { actions: [stateWrite(flagChannel("CF"), 2)] }
-  } as const;
-
-  deepStrictEqual(effectsOf(action), {
-    reads: [state(gprChannel("eax"))],
-    writes: [state(gprChannel("ebx")), state(flagChannel("CF"))]
-  });
-  strictEqual(actionMayWriteStateSlot(action, gprChannel("ebx")), true);
-  strictEqual(actionMayWriteStateSlot(action, gprChannel("eax")), false);
-});
-
-test("cell identities alias exactly themselves and no resource domain", () => {
-  const first = cellSlot(firstCell);
-  const second = cellSlot(secondCell);
-  const foreign: StorageAccess = {
-    space: "cell",
-    cell: new CellRef("i32")
-  };
+test("cell identities alias only themselves and never resources", () => {
+  const first: StorageAccess = { space: "cell", cell: firstCell };
+  const second: StorageAccess = { space: "cell", cell: secondCell };
+  const bytes = effect(firstResource, { basis: { kind: "resource" } });
 
   strictEqual(mayAlias(first, first), true);
   strictEqual(mayAlias(first, second), false);
-  strictEqual(mayAlias(first, foreign), false);
-  strictEqual(mayAlias(first, state(gprChannel("eax"))), false);
-  strictEqual(mayAlias(first, resourceBytes), false);
-  strictEqual(mayAlias(resourceBytes, first), false);
+  strictEqual(mayAlias(first, bytes), false);
+  strictEqual(mayAlias(bytes, first), false);
+  strictEqual(covers(first, first), true);
+  strictEqual(covers(first, second), false);
 });
 
-test("static channels alias iff their byte ranges intersect", () => {
-  strictEqual(mayAlias(state(gprChannel("eax")), state(gprChannel("ax"))), true);
-  strictEqual(mayAlias(cellSlot(firstCell), cellSlot(firstCell)), true);
-  strictEqual(mayAlias(cellSlot(firstCell), cellSlot(secondCell)), false);
-  strictEqual(mayAlias(cellSlot(firstCell), resourceBytes), false);
-  strictEqual(mayAlias(state(gprChannel("eax")), cellSlot(firstCell)), false);
-  strictEqual(mayAlias(state(gprChannel("al")), state(gprChannel("ah"))), false);
-  strictEqual(mayAlias(state(gprChannel("eax")), state(gprChannel("ebx"))), false);
-  strictEqual(mayAlias(state(flagChannel("ZF")), state(flagChannel("ZF"))), true);
-  strictEqual(mayAlias(state(flagChannel("ZF")), state(gprChannel("eax"))), false);
-  strictEqual(mayAlias(state(lazyFlagsKindChannel), state(lazyFlagsKindChannel)), true);
-  strictEqual(mayAlias(state(lazyFlagsKindChannel), state(lazyFlagsAChannel)), false);
-  strictEqual(mayAlias(state(lazyFlagsKindChannel), state(flagChannel("ZF"))), false);
-  strictEqual(mayAlias(state(segmentSelectorChannel("fs")), state(segmentSelectorChannel("fs"))), true);
-  strictEqual(mayAlias(state(segmentSelectorChannel("fs")), state(segmentBaseChannel("fs"))), false);
-  strictEqual(mayAlias(state(segmentBaseChannel("fs")), state(segmentBaseChannel("gs"))), false);
-  strictEqual(mayAlias(state(segmentLimitChannel("fs")), state(segmentLimitChannel("fs"))), true);
-  strictEqual(mayAlias(state(segmentLimitChannel("fs")), state(segmentLimitChannel("gs"))), false);
-  strictEqual(mayAlias(state(segmentLimitChannel("fs")), state(segmentAccessChannel("fs"))), false);
+test("absolute resource slices use interval overlap and containment", () => {
+  const whole = effect(firstResource, { basis: { kind: "resource" } });
+  const outer = effect(firstResource, absolute(4, 8));
+  const inner = effect(firstResource, absolute(6, 2));
+  const touching = effect(firstResource, absolute(12, 2));
+  const foreign = effect(secondResource, absolute(6, 2));
+
+  strictEqual(mayAlias(outer, inner), true);
+  strictEqual(mayAlias(inner, outer), true);
+  strictEqual(mayAlias(outer, touching), false);
+  strictEqual(mayAlias(outer, foreign), false);
+  strictEqual(covers(outer, inner), true);
+  strictEqual(covers(inner, outer), false);
+  strictEqual(covers(whole, outer), true);
+  strictEqual(covers(outer, whole), false);
 });
 
-test("a dynamic GPR slot may-aliases every GPR word and never exact cells", () => {
-  strictEqual(mayAlias(state(dynamicGpr(0)), state(gprChannel("eax"))), true);
-  strictEqual(mayAlias(state(gprChannel("bl")), state(dynamicGpr(0))), true);
-  strictEqual(mayAlias(state(dynamicGpr(0)), state(dynamicGpr(1))), true);
-  strictEqual(mayAlias(state(dynamicGpr(0, 1)), state(gprChannel("esi"))), true);
-  strictEqual(mayAlias(state(dynamicGpr(0)), state(flagChannel("ZF"))), false);
-  strictEqual(mayAlias(state(flagChannel("CF")), state(dynamicGpr(0))), false);
-  strictEqual(mayAlias(state(dynamicGpr(0)), state(lazyFlagsKindChannel)), false);
-  strictEqual(mayAlias(state(lazyFlagsKindChannel), state(dynamicGpr(0))), false);
-  strictEqual(mayAlias(state(dynamicGpr(0)), state(eipChannel)), false);
-  strictEqual(mayAlias(state(eipChannel), state(dynamicGpr(0))), false);
-  strictEqual(mayAlias(state(dynamicGpr(0)), state(segmentSelectorChannel("fs"))), false);
-  strictEqual(mayAlias(state(segmentBaseChannel("fs")), state(dynamicGpr(0))), false);
-});
+test("dynamic bases compare exactly when shared and conservatively otherwise", () => {
+  const origin = new DynamicByteOriginRef();
+  const otherOrigin = new DynamicByteOriginRef();
+  const first = effect(firstResource, {
+    basis: { kind: "dynamic", origin },
+    slice: { byteOffset: 0, byteLength: 4 }
+  });
+  const disjoint = effect(firstResource, {
+    basis: { kind: "dynamic", origin },
+    slice: { byteOffset: 8, byteLength: 4 }
+  });
+  const unknown = effect(firstResource, {
+    basis: { kind: "dynamic", origin: otherOrigin },
+    slice: { byteOffset: 8, byteLength: 4 }
+  });
 
-test("a dynamic segment slot may-aliases segment channels for the same field", () => {
-  strictEqual(mayAlias(state(dynamicSegmentBase(0)), state(segmentBaseChannel("fs"))), true);
-  strictEqual(mayAlias(state(segmentBaseChannel("gs")), state(dynamicSegmentBase(0))), true);
-  strictEqual(mayAlias(state(dynamicSegmentBase(0)), state(dynamicSegmentBase(1))), true);
-  strictEqual(mayAlias(state(dynamicSegmentSelector(0)), state(segmentSelectorChannel("fs"))), true);
-  strictEqual(mayAlias(state(segmentSelectorChannel("gs")), state(dynamicSegmentSelector(0))), true);
-  strictEqual(mayAlias(state(dynamicSegmentSelector(0)), state(dynamicSegmentSelector(1))), true);
-  strictEqual(mayAlias(state(dynamicSegmentBase(0)), state(segmentSelectorChannel("fs"))), false);
-  strictEqual(mayAlias(state(segmentSelectorChannel("fs")), state(dynamicSegmentBase(0))), false);
-  strictEqual(mayAlias(state(dynamicSegmentSelector(0)), state(segmentBaseChannel("fs"))), false);
-  strictEqual(mayAlias(state(segmentBaseChannel("fs")), state(dynamicSegmentSelector(0))), false);
-  strictEqual(mayAlias(state(dynamicSegmentSelector(0)), state(dynamicSegmentBase(0))), false);
-  strictEqual(mayAlias(state(dynamicSegmentLimit(0)), state(segmentLimitChannel("fs"))), true);
-  strictEqual(mayAlias(state(segmentLimitChannel("gs")), state(dynamicSegmentLimit(0))), true);
-  strictEqual(mayAlias(state(dynamicSegmentLimit(0)), state(dynamicSegmentLimit(1))), true);
-  strictEqual(mayAlias(state(dynamicSegmentAccess(0)), state(segmentAccessChannel("fs"))), true);
-  strictEqual(mayAlias(state(segmentAccessChannel("gs")), state(dynamicSegmentAccess(0))), true);
-  strictEqual(mayAlias(state(dynamicSegmentAccess(0)), state(dynamicSegmentAccess(1))), true);
-  strictEqual(mayAlias(state(dynamicSegmentLimit(0)), state(segmentAccessChannel("fs"))), false);
-  strictEqual(mayAlias(state(segmentAccessChannel("fs")), state(dynamicSegmentLimit(0))), false);
-  strictEqual(mayAlias(state(dynamicSegmentAccess(0)), state(segmentLimitChannel("fs"))), false);
-  strictEqual(mayAlias(state(segmentLimitChannel("fs")), state(dynamicSegmentAccess(0))), false);
-  strictEqual(mayAlias(state(dynamicSegmentBase(0)), state(gprChannel("eax"))), false);
-  strictEqual(mayAlias(state(gprChannel("eax")), state(dynamicSegmentBase(0))), false);
-});
-
-test("action writes include raw state slots", () => {
-  strictEqual(
-    actionMayWriteStateSlot(stateWrite(gprChannel("eax"), 0), gprChannel("ax")),
-    true
-  );
-  strictEqual(
-    actionMayWriteStateSlot(stateWrite(flagChannel("ZF"), 0), flagChannel("ZF")),
-    true
-  );
-  strictEqual(
-    actionMayWriteStateSlot(stateWrite(flagChannel("ZF"), 0), flagChannel("CF")),
-    false
-  );
-  strictEqual(
-    actionMayWriteStateSlot(stateWrite(lazyFlagsKindChannel, 0), lazyFlagsKindChannel),
-    true
-  );
-  strictEqual(
-    actionMayWriteStateSlot(stateWrite(lazyFlagsKindChannel, 0), lazyFlagsAChannel),
-    false
-  );
-  strictEqual(
-    actionMayWriteStateSlot(
-      stateWrite(segmentSelectorChannel("fs"), 0),
-      segmentBaseChannel("fs")
-    ),
-    false
-  );
-  strictEqual(
-    actionMayWriteStateSlot(stateWrite(flagChannel("ZF"), 0), gprChannel("eax")),
-    false
-  );
+  strictEqual(mayAlias(first, disjoint), false);
+  strictEqual(mayAlias(first, unknown), true);
+  strictEqual(covers(first, disjoint), false);
+  strictEqual(covers(first, unknown), false);
 });

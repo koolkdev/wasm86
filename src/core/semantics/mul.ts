@@ -2,7 +2,6 @@ import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticTemplate, SemanticsBuilder } from "#core/semantics/builder.js";
 import type { StorageInput, Value } from "#core/semantics/refs.js";
 import type { OperandWidth, RegName } from "#core/types.js";
-import { readStorage, resolveStorageRead } from "./memory.js";
 
 type MultiplyKind = "signed" | "unsigned";
 type MultiplyProduct = Readonly<{ full: Value; low: Value; high: Value; overflow: Value }>;
@@ -16,13 +15,10 @@ export function imulImplicitSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 function implicitMultiplySemantic(kind: MultiplyKind, width: OperandWidth): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const src = s.operand(0);
-
-    const srcStorage = resolveStorageRead(s, v, context, src, width);
-
-    const right = readStorage(s, v, srcStorage, width);
-    const left = s.get(s.reg(accumulatorForWidth(width)), width);
+    const right = s.read(src, { width });
+    const left = s.read(s.reg(accumulatorForWidth(width)), { width });
     const product = multiplyProduct(v, kind, width, left, right);
 
     writeImplicitProduct(s, v, width, product);
@@ -31,28 +27,22 @@ function implicitMultiplySemantic(kind: MultiplyKind, width: OperandWidth): Sema
 }
 
 export function imulRegRmSemantic(width: OperandWidth): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-
-    const srcStorage = resolveStorageRead(s, v, context, src, width);
-
-    const srcValue = readStorage(s, v, srcStorage, width);
-    const dstValue = s.get(dst, width);
+    const srcValue = s.read(src, { width });
+    const dstValue = s.read(dst, { width });
 
     writeImulResult(s, v, width, dst, dstValue, srcValue);
   };
 }
 
 export function imulRegRmImmSemantic(width: OperandWidth): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-
-    const srcStorage = resolveStorageRead(s, v, context, src, width);
-
-    const srcValue = readStorage(s, v, srcStorage, width);
-    const immValue = s.get(s.operand(2), width);
+    const srcValue = s.read(src, { width });
+    const immValue = s.read(s.operand(2), { width });
 
     writeImulResult(s, v, width, dst, srcValue, immValue);
   };
@@ -69,21 +59,21 @@ function writeImulResult(
   const product = multiplyProduct(v, "signed", width, left, right);
 
   writeMultiplyFlags(s, v, product.overflow);
-  s.set(dst, product.low, width);
+  s.write(dst, product.low, { width });
 }
 
 function writeImplicitProduct(s: SemanticsBuilder, v: ValueBuilder, width: OperandWidth, product: MultiplyProduct): void {
   switch (width) {
     case 8:
-      s.set(s.reg("ax"), v.truncate(16, product.full), 16);
+      s.write(s.reg("ax"), v.truncate(16, product.full), { width: 16 });
       return;
     case 16:
-      s.set(s.reg("ax"), product.low, 16);
-      s.set(s.reg("dx"), product.high, 16);
+      s.write(s.reg("ax"), product.low, { width: 16 });
+      s.write(s.reg("dx"), product.high, { width: 16 });
       return;
     case 32:
-      s.set(s.reg("eax"), product.low, 32);
-      s.set(s.reg("edx"), product.high, 32);
+      s.write(s.reg("eax"), product.low, { width: 32 });
+      s.write(s.reg("edx"), product.high, { width: 32 });
       return;
   }
 }

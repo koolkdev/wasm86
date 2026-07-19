@@ -8,23 +8,58 @@ import {
 import { test } from "node:test";
 
 import type { Action } from "#ir/actions.js";
-import { resourceRead } from "#compiler/ir/operations/resource.js";
+import {
+  resourceRead,
+  resourceWrite
+} from "#compiler/ir/operations/resource.js";
 import {
   resourceRef,
   type ResourceByteOperand
 } from "#compiler/ir/resource.js";
-import {
-  stateRead as stateReadOperation,
-  stateWrite as stateWriteOperation
-} from "#compiler/ir/operations/state.js";
 import { RegionBuilder, buildIrBlock, type BodyActionSink } from "#ir/region-builder.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { statusFlagResolvers } from "#core/flags/resolvers.js";
-import { stateRead, stateWrite, statusFlagCall } from "#ir/tests/storage-op-helpers.js";
+import { functionType } from "#compiler/program/function-type.js";
+import { FunctionDefinition } from "#compiler/program/functions.js";
+import { functionRef } from "#compiler/program/refs.js";
+import {
+  compilerTestResourceEffect,
+  resourceReadAction,
+  resourceWriteAction
+} from "#ir/tests/storage-op-helpers.js";
+
+function readOperation(values: ValueTable, region = 0) {
+  return resourceRead.create({
+    source: {
+      effect: compilerTestResourceEffect(region),
+      address: { base: values.const(0), displacement: region * 4 },
+      width: 32
+    }
+  });
+}
+
+function writeOperation(values: ValueTable, value: ValueId, region = 0) {
+  return resourceWrite.create({
+    destination: {
+      effect: compilerTestResourceEffect(region),
+      address: { base: values.const(0), displacement: region * 4 },
+      width: 32
+    },
+    value
+  });
+}
+
+function testCallTarget(id: string): FunctionDefinition {
+  return new FunctionDefinition({
+    ref: functionRef(id),
+    type: functionType(["i32", "i32", "i32", "i32"], ["i32"]),
+    effects: { reads: [], writes: [] },
+    owner: undefined,
+    build: () => {}
+  });
+}
 
 test("operation derives the output and its bounds from the definition", () => {
   const values = new ValueTable();
@@ -103,20 +138,25 @@ test("one operation API handles value and effect definitions", () => {
   const builder = new RegionBuilder(values);
   const value = values.const(0);
 
-  strictEqual(builder.operation(stateWriteOperation.create({ slot: eipChannel, value })), undefined);
-  strictEqual(builder.operation(stateReadOperation.create({ slot: eipChannel })), value + 1);
+  strictEqual(builder.operation(writeOperation(values, value)), undefined);
+  strictEqual(builder.operation(readOperation(values)), value + 1);
 });
 
 test("call validates typed arguments and allocates its declared result", () => {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
-  const target = statusFlagResolvers.get("ZF");
+  const target = testCallTarget("test.region-builder.call-target");
   const args = [values.const(0), values.const(1), values.const(2), values.const(3)] as const;
   const [output] = builder.call(target, args);
 
   ok(output !== undefined, "expected status-flag call result");
   deepStrictEqual(builder.build(), {
-    actions: [statusFlagCall(output, "ZF", ...args)]
+    actions: [{
+      kind: "call",
+      target,
+      arguments: args.map((value) => ({ value, type: "i32" as const })),
+      outputs: [output]
+    }]
   });
   deepStrictEqual(values.node(output), { kind: "actionOutput", type: "i32" });
   throws(() => builder.call(target, args.slice(1)), /expects 4 arguments, got 3/);
@@ -207,14 +247,14 @@ test("a transplanted seed carries its cell's scope with it", () => {
 test("effect, push, and extend append actions without outputs", () => {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
-  const prebuilt = stateWrite(eipChannel, values.const(4));
-  const other = stateWrite(eipChannel, values.const(8));
+  const prebuilt = resourceWriteAction(values, 0, values.const(4));
+  const other = resourceWriteAction(values, 0, values.const(8));
 
-  builder.operation(stateWriteOperation.create({ slot: eipChannel, value: values.const(0) }));
+  builder.operation(writeOperation(values, values.const(0)));
   builder.push(prebuilt);
   builder.extend([other]);
   deepStrictEqual(builder.build(), {
-    actions: [stateWrite(eipChannel, values.const(0)), prebuilt, other]
+    actions: [resourceWriteAction(values, 0, values.const(0)), prebuilt, other]
   });
 });
 
@@ -225,7 +265,7 @@ test("custom action sinks can divert emitted top-level actions", () => {
     readonly diverted: Action[] = [];
 
     push(action: Action): void {
-      if (action.kind === "op" && action.op.kind === "state.read") {
+      if (action.kind === "op" && action.op.kind === "resource.read") {
         this.diverted.push(action);
         return;
       }
@@ -238,13 +278,13 @@ test("custom action sinks can divert emitted top-level actions", () => {
     }
   }();
   const builder = new RegionBuilder(values, sink);
-  const read = builder.operation(stateReadOperation.create({ slot: eipChannel }));
+  const read = builder.operation(readOperation(values));
 
-  builder.operation(stateWriteOperation.create({ slot: eipChannel, value: values.const(4) }));
+  builder.operation(writeOperation(values, values.const(4)));
 
-  deepStrictEqual(sink.diverted, [stateRead(read, eipChannel)]);
+  deepStrictEqual(sink.diverted, [resourceReadAction(values, read, 0)]);
   deepStrictEqual(builder.build(), {
-    actions: [stateWrite(eipChannel, values.const(4))]
+    actions: [resourceWriteAction(values, 0, values.const(4))]
   });
 });
 
@@ -257,7 +297,7 @@ test("if builds hinted then and else bodies against child builders", () => {
   builder.if(
     condition,
     (then) => then.operation(
-      stateWriteOperation.create({ slot: eipChannel, value: then.values.const(4) })
+      writeOperation(then.values, then.values.const(4))
     ),
     {
       hint: "unlikely",
@@ -270,7 +310,7 @@ test("if builds hinted then and else bodies against child builders", () => {
         kind: "if",
         condition,
         hint: "unlikely",
-        thenBody: { actions: [stateWrite(eipChannel, values.const(4))] },
+        thenBody: { actions: [resourceWriteAction(values, 0, values.const(4))] },
         elseBody: {
           actions: [{ kind: "finish", finish: { kind: "exit", result: exitResult } }]
         }
@@ -284,6 +324,7 @@ test("switch builds every arm before allocating the shared output", () => {
   const builder = new RegionBuilder(values);
   const selector = values.external(0);
   const args = [values.const(0), values.const(1), values.const(2), values.const(3)] as const;
+  const target = testCallTarget("test.region-builder.switch-call-target");
   let armResult!: ValueId;
   let defaultResult!: ValueId;
   const output = builder.switch(
@@ -291,7 +332,7 @@ test("switch builds every arm before allocating the shared output", () => {
     [{
       match: 3,
       build: (arm) => {
-        const [result] = arm.call(statusFlagResolvers.get("ZF"), args);
+        const [result] = arm.call(target, args);
 
         ok(result !== undefined, "expected call result");
         return (armResult = result);
@@ -312,7 +353,12 @@ test("switch builds every arm before allocating the shared output", () => {
         cases: [{
           match: 3,
           body: {
-            actions: [statusFlagCall(armResult, "ZF", ...args)],
+            actions: [{
+              kind: "call",
+              target,
+              arguments: args.map((value) => ({ value, type: "i32" as const })),
+              outputs: [armResult]
+            }],
             result: armResult
           }
         }],
@@ -338,7 +384,7 @@ test("loop bodies take the back edge through loopContinue and validate", () => {
   const block = buildIrBlock((b) => {
     const input = b.values.addLoopInput();
 
-    b.loop([{ channel: gprChannel("ecx"), seed: b.values.const(3), loopInput: input }], (body) => {
+    b.loop([{ seed: b.values.const(3), loopInput: input }], (body) => {
       const next = body.values.binary("sub", input, body.values.const(1));
 
       body.if(body.values.compare(32, "ne", next, body.values.const(0)), (taken) => taken.loopContinue([next]));
@@ -352,7 +398,7 @@ test("loop bodies take the back edge through loopContinue and validate", () => {
 test("buildIrBlock forwards a returned value as the root body result", () => {
   let eip!: ValueId;
   const block = buildIrBlock(
-    (b) => (eip = b.operation(stateReadOperation.create({ slot: eipChannel })))
+    (b) => (eip = b.operation(readOperation(b.values)))
   );
 
   strictEqual(block.body.result, eip);
@@ -360,7 +406,7 @@ test("buildIrBlock forwards a returned value as the root body result", () => {
 
 test("buildIrBlock leaves the root result unset for void callbacks", () => {
   const block = buildIrBlock((b) => {
-    b.operation(stateWriteOperation.create({ slot: eipChannel, value: b.values.const(0) }));
+    b.operation(writeOperation(b.values, b.values.const(0)));
   });
 
   strictEqual(block.body.result, undefined);

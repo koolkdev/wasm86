@@ -101,7 +101,6 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
   try {
     const valueEmitter = new ValueEmitter({
       body,
-      scratch: context.scratch,
       values: block.values,
       analysis,
       plan,

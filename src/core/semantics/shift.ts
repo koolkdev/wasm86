@@ -6,7 +6,6 @@ import type {
 import type { Value } from "#core/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
 import { writeShiftFlags } from "./flag-writes.js";
-import { readStorage, resolveStorageReadWrite, writeStorage } from "./memory.js";
 
 export type ShiftOp = "shl" | "shr" | "sar";
 export type DoubleShiftOp = "shld" | "shrd";
@@ -18,19 +17,17 @@ export function shiftSemantic(
   width: OperandWidth,
   countSource: ShiftCountSource
 ): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
-
-    const dstStorage = resolveStorageReadWrite(s, v, context, dst, width);
-
-    const value = v.truncate(width, readStorage(s, v, dstStorage, width));
+    const destination = s.update(dst, { width });
+    const value = v.truncate(width, destination.read(s));
     const rawCount = readShiftCount(s, v, countSource);
     const count = v.binary("and", rawCount, v.const(0x1f));
     const shiftedResult = v.truncate(width, shiftResult(v, op, width, value, count));
     const result = v.select(v.compare(32, "ne", count, v.const(0)), shiftedResult, value);
 
     writeShiftFlags(s, v, { op, width, value, count, result });
-    writeStorage(s, v, dstStorage, result, width);
+    destination.write(s, result);
   };
 }
 
@@ -39,21 +36,19 @@ export function doubleShiftSemantic(
   width: Extract<OperandWidth, 16 | 32>,
   countSource: DoubleShiftCountSource
 ): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-
-    const dstStorage = resolveStorageReadWrite(s, v, context, dst, width);
-
-    const value = v.truncate(width, readStorage(s, v, dstStorage, width));
-    const source = v.truncate(width, s.get(src, width));
+    const destination = s.update(dst, { width });
+    const value = v.truncate(width, destination.read(s));
+    const source = v.truncate(width, s.read(src, { width }));
     const rawCount = readDoubleShiftCount(s, countSource);
     const count = v.binary("and", rawCount, v.const(0x1f));
     const shiftedResult = v.truncate(width, doubleShiftResult(v, op, width, value, source, count));
     const result = v.select(v.compare(32, "ne", count, v.const(0)), shiftedResult, value);
 
     writeShiftFlags(s, v, { op, width, value, count, result });
-    writeStorage(s, v, dstStorage, result, width);
+    destination.write(s, result);
   };
 }
 
@@ -62,18 +57,18 @@ export function readShiftCount(s: SemanticsBuilder, v: ValueBuilder, countSource
     case "one":
       return v.const(1);
     case "cl":
-      return s.get(s.reg("cl"), 8);
+      return s.read(s.reg("cl"), { width: 8 });
     case "imm8":
-      return s.get(s.operand(1), 8);
+      return s.read(s.operand(1), { width: 8 });
   }
 }
 
 function readDoubleShiftCount(s: SemanticsBuilder, countSource: DoubleShiftCountSource): Value {
   switch (countSource) {
     case "cl":
-      return s.get(s.reg("cl"), 8);
+      return s.read(s.reg("cl"), { width: 8 });
     case "imm8":
-      return s.get(s.operand(2), 8);
+      return s.read(s.operand(2), { width: 8 });
   }
 }
 

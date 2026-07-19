@@ -1,9 +1,11 @@
 import { deepStrictEqual, ok as assertOk, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { immBinding, regBinding, type OperandBinding } from "#ir/operands.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
+import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { immBinding, regBinding, type OperandBinding } from "#core/instruction/bindings.js";
+import { gprChannel } from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
 import { decodeBytes, ok as decoded } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
@@ -46,18 +48,18 @@ for (const entry of [
   { name: "i32 min times minus one differs", width: 32, left: 0x8000_0000, right: -1, truncatedDiffers: 1 }
 ] as const satisfies readonly SignedProductTruncationCase[]) {
   test(`signed product truncation lowering: ${entry.name}`, async () => {
-    const builder = createIrBlockBuilder();
+    const builder = createLegacyInstructionBlock();
     const template: SemanticTemplate = (s, v) => {
-      const left = v.extend64(entry.width, s.get(s.reg("eax"), 32), true);
-      const right = v.extend64(entry.width, s.get(s.reg("ebx"), 32), true);
+      const left = v.extend64(entry.width, s.read(s.reg("eax"), { width: 32 }), true);
+      const right = v.extend64(entry.width, s.read(s.reg("ebx"), { width: 32 }), true);
       const fullProduct = v.binary64("mul", left, right);
       const truncatedProduct = v.extend64(entry.width, v.truncate64(entry.width, fullProduct), true);
       const truncatedDiffers = v.compare64("ne", fullProduct, truncatedProduct);
 
-      s.set(s.reg("edx"), truncatedDiffers, 32);
+      s.write(s.reg("edx"), truncatedDiffers, { width: 32 });
     };
 
-    builder.addInstruction(template, [], loc(0x1000, 0x1001));
+    builder.add(template, [], loc(0x1000, 0x1001));
 
     const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -68,16 +70,12 @@ for (const entry of [
 }
 
 test("i32 multiply lowers to wasm i32.mul", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
   const template: SemanticTemplate = (s, v) => {
-    s.set(
-      s.reg("edx"),
-      v.binary("mul", s.get(s.reg("eax"), 32), s.get(s.reg("ebx"), 32)),
-      32
-    );
+    s.write(s.reg("edx"), v.binary("mul", s.read(s.reg("eax"), { width: 32 }), s.read(s.reg("ebx"), { width: 32 })), { width: 32 });
   };
 
-  builder.addInstruction(template, [], loc(0x1000, 0x1001));
+  builder.add(template, [], loc(0x1000, 0x1001));
 
   const block = builder.finish();
   const body = irBlockBody(block).bytes;
@@ -92,17 +90,17 @@ test("i32 multiply lowers to wasm i32.mul", async () => {
 });
 
 test("unsigned dword product high-half lowering uses i64 shift", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
   const template: SemanticTemplate = (s, v) => {
-    const left = v.extend64(32, s.get(s.reg("eax"), 32), false);
-    const right = v.extend64(32, s.get(s.reg("ebx"), 32), false);
+    const left = v.extend64(32, s.read(s.reg("eax"), { width: 32 }), false);
+    const right = v.extend64(32, s.read(s.reg("ebx"), { width: 32 }), false);
     const fullProduct = v.binary64("mul", left, right);
     const high = v.truncate64(32, v.binary64("shr_u", fullProduct, v.extend64(32, v.const(32), false)));
 
-    s.set(s.reg("edx"), high, 32);
+    s.write(s.reg("edx"), high, { width: 32 });
   };
 
-  builder.addInstruction(template, [], loc(0x1000, 0x1001));
+  builder.add(template, [], loc(0x1000, 0x1001));
 
   const block = builder.finish();
   const body = irBlockBody(block).bytes;
@@ -134,7 +132,7 @@ test("decoded imul lowers through i64 product and writes explicit flags", async 
 
   assertCompleted(run());
   strictEqual(readRegister(stateView, "ecx"), 0x8000_0000);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), {
     CF: 1,
     PF: 1,
@@ -166,7 +164,7 @@ test("decoded implicit mul lowers through unsigned i64 product and writes EDX:EA
   assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 0xffff_fffe);
   strictEqual(readRegister(stateView, "edx"), 1);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), {
     CF: 1,
     PF: 1,
@@ -179,10 +177,10 @@ test("decoded implicit mul lowers through unsigned i64 product and writes EDX:EA
 });
 
 function blockOf(instructions: readonly IsaDecodedInstruction[]) {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
   for (const instruction of instructions) {
-    builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
+    builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
   }
 
   return builder.finish();

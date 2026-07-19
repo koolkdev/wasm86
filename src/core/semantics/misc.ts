@@ -6,7 +6,7 @@ export function nopSemantic(): SemanticTemplate {
 
 export function intSemantic(): SemanticTemplate {
   return (s) => {
-    s.hostTrap(s.get(s.operand(0)));
+    s.hostTrap(s.read(s.operand(0), { width: 32 }));
   };
 }
 

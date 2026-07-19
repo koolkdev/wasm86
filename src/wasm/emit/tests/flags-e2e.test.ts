@@ -1,18 +1,20 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
-import { regBinding, type OperandBinding } from "#ir/operands.js";
-import { eipChannel, gprChannel, lazyFlagsKindChannel } from "#ir/slots.js";
+import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { regBinding, type OperandBinding } from "#core/instruction/bindings.js";
+import { gprChannel } from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
 import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
-import { flagStateFields, LAZY_FLAGS_KIND } from "#core/flags/state.js";
+import { flagStateFields } from "#core/flags/layout.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
+import { cpuState } from "#cpu/state.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { reg32, type Reg32 } from "#core/types.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
-import { executionStateLayout } from "#ir/state-layout.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   assertLazyFlagState,
@@ -23,10 +25,9 @@ import {
 import { wasmBodyMemoryAccesses } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { aluReference, type AluFlags, type AluOp } from "./reference.js";
-import { isStateWrite } from "#ir/tests/storage-op-helpers.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
-const lazyFlagsKindStateOffset = executionStateLayout.field(flagStateFields.lazyKind).offset;
+const lazyFlagsKindStateOffset = cpuState.layout.field(flagStateFields.lazyKind).offset;
 
 // ALU r32 forms through the action pipeline, checked against reference.ts.
 
@@ -74,9 +75,9 @@ for (const aluCase of aluCases) {
       };
       const reference = aluReference(aluCase.op, 32, pair.left, pair.right, aluCase.carryIn ?? 0);
 
-      const builder = createIrBlockBuilder();
+      const builder = createLegacyInstructionBlock();
 
-      builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
+      builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
 
       const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -121,29 +122,15 @@ test("two adds in one block store one lazy add record, with the second add's sou
   // stores observably carry the second instruction's values.
   const first = ok(decodeBytes([0x01, 0xcb]));
   const second = ok(decodeBytes([0x01, 0xcb], first.nextEip));
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(first.spec.semantics, bindingsFor(first), loc(first.address, first.nextEip));
-  builder.addInstruction(second.spec.semantics, bindingsFor(second), loc(second.address, second.nextEip));
+  builder.add(first.spec.semantics, bindingsFor(first), loc(first.address, first.nextEip));
+  builder.add(second.spec.semantics, bindingsFor(second), loc(second.address, second.nextEip));
 
   const block = builder.finish();
-
-  // Dead flag writes collapse in the contract: one lazy ADD record for the
-  // final source, with no explicit status flag stores.
-  const flagWrites = block.body.actions.flatMap(
-    (action) => isStateWrite(action) && action.op.slot.kind === "flag" ? [action.op.slot.flag] : []
-  );
-
-  strictEqual(flagWrites.length, 0);
-  strictEqual(new Set(flagWrites).size, 0);
-  strictEqual(
-    block.body.actions.filter((action) => isStateWrite(action) && action.op.slot === lazyFlagsKindChannel).length,
-    1
-  );
-
-  // ...and in the encoding: one lazy kind byte byte store.
   const body = irBlockBody(block).bytes;
 
+  // Dead writes collapse to one encoded lazy-kind store for the final source.
   strictEqual(
     wasmBodyMemoryAccesses(body).filter(
       (access) =>
@@ -186,7 +173,7 @@ function assertState(
     strictEqual(readWasmCpuStateChannel(stateView, gprChannel(name)), expected.regs[name] ?? 0, `${label} ${name}`);
   }
 
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), expected.eip, `${label} eip`);
 
   for (const flag of x86StatusFlags) {
     strictEqual(readWasmCpuFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);

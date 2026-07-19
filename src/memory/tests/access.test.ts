@@ -9,7 +9,7 @@ import type { Operation } from "#compiler/ir/operations/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { OpAction } from "#ir/actions.js";
 import { RegionBuilder } from "#ir/region-builder.js";
-import { MemoryAccessBuilder } from "#memory/access.js";
+import { guestMemoryAccess } from "#memory/access.js";
 import { guestMemoryResource } from "#memory/resource.js";
 
 type OperationOf<Kind extends Operation["kind"]> = Extract<
@@ -21,13 +21,10 @@ type ResourceAction<Kind extends Operation["kind"]> = OpAction & Readonly<{
   op: OperationOf<Kind>;
 }>;
 
-test("the Memory access builder expands one WRITE access into generic RMW operations", () => {
+test("Memory access construction expands one WRITE access into generic RMW operations", () => {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
-  const memory = new MemoryAccessBuilder({
-    values,
-    currentBody: () => body
-  });
+  const memory = guestMemoryAccess.bind(body);
   const start = values.external(0);
   const byteLength = values.const(8);
   const access = memory.resolve({ start, byteLength }, "write");
@@ -71,13 +68,10 @@ test("the Memory access builder expands one WRITE access into generic RMW operat
   });
 });
 
-test("the Memory access builder gives constant instruction fetches absolute ranges", () => {
+test("Memory access construction gives constant instruction fetches absolute ranges", () => {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
-  const memory = new MemoryAccessBuilder({
-    values,
-    currentBody: () => body
-  });
+  const memory = guestMemoryAccess.bind(body);
   const access = memory.resolve(
     { start: values.const(0x2000), byteLength: values.const(4) },
     "instructionFetch"
@@ -98,6 +92,21 @@ test("the Memory access builder gives constant instruction fetches absolute rang
     address: access.range.start,
     intent: "instructionFetch"
   });
+});
+
+test("a parent-created access emits through the child region that consumes it", () => {
+  const values = new ValueTable();
+  const parent = new RegionBuilder(values);
+  const child = parent.child();
+  const access = guestMemoryAccess.bind(parent).resolve(
+    { start: values.external(0), byteLength: values.const(4) },
+    "read"
+  );
+
+  guestMemoryAccess.bind(child).read(access, values.const(0), 32);
+
+  strictEqual(parent.build().actions.length, 0);
+  strictEqual(resourceActions(child, "resource.read").length, 1);
 });
 
 function resourceActions<Kind extends Operation["kind"]>(

@@ -80,15 +80,15 @@ function writeInitialState(
   machine: Machine,
   initialState: InstructionFixtureInitialState
 ): void {
-  const { state } = machine.cpu;
+  const { core, flags } = machine.cpu.state;
 
-  state.eip = initialState.eip;
+  core.eip = initialState.eip;
 
   for (const register of reg32) {
     const value = initialState[register];
 
     if (value !== undefined) {
-      state.writeReg32(register, value);
+      core.writeReg32(register, value);
     }
   }
 
@@ -96,7 +96,7 @@ function writeInitialState(
     const value = initialState[flag];
 
     if (value !== undefined) {
-      state.writeFlag(flag, value !== 0);
+      flags.writeFlag(flag, value !== 0);
     }
   }
 
@@ -105,14 +105,14 @@ function writeInitialState(
     const selector = initialState[selectorField];
 
     if (selector !== undefined) {
-      state.writeSegmentSelector(segment, selector);
+      core.writeSegmentSelector(segment, selector);
     }
 
     const baseField = `${segment}Base` as const;
     const base = initialState[baseField];
 
     if (base !== undefined) {
-      state.writeSegmentBase(segment, base);
+      core.writeSegmentBase(segment, base);
     }
   }
 }
@@ -122,9 +122,10 @@ function assertStateFields(
   machine: Machine
 ): void {
   const { state } = machine.cpu;
+  const { core, flags } = state;
   const expected = fixture.expected.state;
 
-  assertExpectedScalar(fixture, expected, "eip", state.eip);
+  assertExpectedScalar(fixture, expected, "eip", core.eip);
   assertExpectedScalar(
     fixture,
     expected,
@@ -137,7 +138,7 @@ function assertStateFields(
       fixture,
       expected,
       register,
-      state.readReg32(register)
+      core.readReg32(register)
     );
   }
 
@@ -146,7 +147,7 @@ function assertStateFields(
       fixture,
       expected,
       flag,
-      state.readFlag(flag) ? 1 : 0
+      flags.readFlag(flag) ? 1 : 0
     );
   }
 
@@ -156,7 +157,7 @@ function assertStateFields(
       fixture,
       expected,
       selectorField,
-      state.readSegmentSelector(segment)
+      core.readSegmentSelector(segment)
     );
 
     const baseField = `${segment}Base` as const;
@@ -164,7 +165,7 @@ function assertStateFields(
       fixture,
       expected,
       baseField,
-      state.readSegmentBase(segment)
+      core.readSegmentBase(segment)
     );
   }
 }

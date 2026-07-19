@@ -1,5 +1,6 @@
 import { assert } from "#common/assert.js";
-import { createIrBlockBuilder, externalInstructionLocation } from "#ir/builder.js";
+import { externalInstructionLocation } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
 import {
   immExternalBinding,
   dynamicMemSegment,
@@ -12,7 +13,7 @@ import {
   segmentDynamicBinding,
   staticMemSegment,
   type OperandBinding
-} from "#ir/operands.js";
+} from "#core/instruction/bindings.js";
 import type { ExternalValueId } from "#compiler/ir/values/types.js";
 import type { ExpandedInstructionSpec, OperandSpec, RegOperandType } from "#core/instructions/spec.js";
 import {
@@ -94,11 +95,11 @@ export function emitInstructionHandler(
 
       emitNextEip(context, emittedOperands.cursor, handlerScratch.nextEip);
 
-      const builder = createIrBlockBuilder({ segmentMode: "flat32" });
+      const builder = createLegacyInstructionBlock({ segmentMode: "flat32" });
 
       // The location's eip is what fault paths commit; prefix cases rebase the
       // eip local, so the location binds the saved instruction start.
-      builder.addInstruction(
+      builder.add(
         instruction.spec.semantics,
         emittedOperands.bindings,
         externalInstructionLocation(

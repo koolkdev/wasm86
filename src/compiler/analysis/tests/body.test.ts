@@ -3,31 +3,31 @@ import { test } from "node:test";
 
 import { analyzeBody } from "#compiler/analysis/analyze.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { Action } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { gprChannel } from "#ir/slots.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/program/refs.js";
 import {
+  compilerTestResourceEffect,
+  compilerTestValues,
   memoryRead,
   memoryWrite,
-  stateRead,
-  stateWrite
+  resourceReadAction,
+  resourceWriteAction
 } from "#ir/tests/storage-op-helpers.js";
 
 const noEffects: StorageEffects = { reads: [], writes: [] };
 
 test("sites form one dense preorder and expose body geometry", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const condition = values.external(0);
   const written = values.const(7);
   const loopSeed = values.const(0);
   const loopInput = values.addLoopInput();
-  const nestedWrite = stateWrite(gprChannel("ebx"), written);
+  const nestedWrite = resourceWriteAction(values, 1, written);
   const thenBody: Body = { actions: [nestedWrite] };
   const loopBody: Body = {
     actions: [{ kind: "loopContinue", updates: [loopInput] }]
@@ -35,7 +35,7 @@ test("sites form one dense preorder and expose body geometry", () => {
   const ifAction = { kind: "if", condition, thenBody } as const;
   const loopAction = {
     kind: "loop",
-    carried: [{ channel: gprChannel("eax"), seed: loopSeed, loopInput }],
+    carried: [{ seed: loopSeed, loopInput }],
     body: loopBody
   } as const;
   const body: Body = { actions: [ifAction, loopAction] };
@@ -77,11 +77,11 @@ test("sites form one dense preorder and expose body geometry", () => {
 });
 
 test("dead producer chains stay dead", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const base = values.addActionOutput();
   const address = values.binary("add", base, values.const(4));
   const byteLength = values.const(4);
-  const readBase = stateRead(base, gprChannel("eax"));
+  const readBase = resourceReadAction(values, base, 0);
   const analysis = analyzeBody({
     values,
     body: { actions: [readBase] }
@@ -96,12 +96,12 @@ test("dead producer chains stay dead", () => {
 });
 
 test("semantic producer inputs are charged once however often the output is used", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const address = values.external(0);
   const loaded = values.addActionOutput();
   const read = memoryRead(loaded, address, 32);
-  const firstWrite = stateWrite(gprChannel("eax"), loaded);
-  const secondWrite = stateWrite(gprChannel("ebx"), loaded);
+  const firstWrite = resourceWriteAction(values, 0, loaded);
+  const secondWrite = resourceWriteAction(values, 1, loaded);
   const analysis = analyzeBody({
     values,
     body: { actions: [read, firstWrite, secondWrite] }
@@ -115,7 +115,7 @@ test("semantic producer inputs are charged once however often the output is used
 });
 
 test("each semantic operation input contributes one use", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const stored = values.external(0);
   const address = values.external(1);
   const write = memoryWrite(address, stored, 32);
@@ -135,16 +135,16 @@ test("each semantic operation input contributes one use", () => {
 });
 
 test("compound dependency edges are charged once per live recipe", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const read = values.addActionOutput();
   const doubled = values.binary("add", read, read);
   const analysis = analyzeBody({
     values,
     body: {
       actions: [
-        stateRead(read, gprChannel("eax")),
-        stateWrite(gprChannel("ebx"), doubled),
-        stateWrite(gprChannel("ecx"), doubled)
+        resourceReadAction(values, read, 0),
+        resourceWriteAction(values, 1, doubled),
+        resourceWriteAction(values, 2, doubled)
       ]
     }
   });
@@ -154,7 +154,7 @@ test("compound dependency edges are charged once per live recipe", () => {
 });
 
 test("selected-body uses count separately while their shared recipe runs once", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const condition = values.external(0);
   const read = values.addActionOutput();
   const one = values.const(1);
@@ -163,12 +163,12 @@ test("selected-body uses count separately while their shared recipe runs once", 
     values,
     body: {
       actions: [
-        stateRead(read, gprChannel("eax")),
+        resourceReadAction(values, read, 0),
         {
           kind: "if",
           condition,
-          thenBody: { actions: [stateWrite(gprChannel("ebx"), sum)] },
-          elseBody: { actions: [stateWrite(gprChannel("ecx"), sum)] }
+          thenBody: { actions: [resourceWriteAction(values, 1, sum)] },
+          elseBody: { actions: [resourceWriteAction(values, 2, sum)] }
         }
       ]
     }
@@ -181,19 +181,19 @@ test("selected-body uses count separately while their shared recipe runs once", 
 });
 
 test("a use authored in a loop counts once, independent of runtime iterations", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const output = values.addActionOutput();
   const analysis = analyzeBody({
     values,
     body: {
       actions: [
-        stateRead(output, gprChannel("eax")),
+        resourceReadAction(values, output, 0),
         {
           kind: "loop",
           carried: [],
           body: {
             actions: [
-              stateWrite(gprChannel("ebx"), output),
+              resourceWriteAction(values, 1, output),
               { kind: "loopContinue", updates: [] }
             ]
           }
@@ -206,7 +206,7 @@ test("a use authored in a loop counts once, independent of runtime iterations", 
 });
 
 test("action, control, loop, and finish operands seed liveness", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const mutated = values.const(11);
   const condition = values.external(0);
   const nestedMutation = values.const(12);
@@ -216,17 +216,17 @@ test("action, control, loop, and finish operands seed liveness", () => {
   const loopUpdate = values.binary("add", loopInput, increment);
   const finishResult = values.const64(14n);
   const actions: readonly Action[] = [
-    stateWrite(gprChannel("eax"), mutated),
+    resourceWriteAction(values, 0, mutated),
     {
       kind: "if",
       condition,
       thenBody: {
-        actions: [stateWrite(gprChannel("ebx"), nestedMutation)]
+        actions: [resourceWriteAction(values, 1, nestedMutation)]
       }
     },
     {
       kind: "loop",
-      carried: [{ channel: gprChannel("ecx"), seed: loopSeed, loopInput }],
+      carried: [{ seed: loopSeed, loopInput }],
       body: {
         actions: [{ kind: "loopContinue", updates: [loopUpdate] }]
       }
@@ -256,7 +256,7 @@ test("action, control, loop, and finish operands seed liveness", () => {
 });
 
 test("an unreachable arm result executes even when its join is dead", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const condition = values.external(0);
   const safeResult = values.const(7);
   const unreachableResult = values.unreachable();
@@ -299,12 +299,12 @@ test("an unreachable arm result executes even when its join is dead", () => {
 });
 
 test("a switch retains arm recipes exactly when its output is live", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const selector = values.external(0);
   const read = values.addActionOutput();
   const one = values.const(1);
   const firstResult = values.binary("add", read, one);
-  const defaultResult = values.const(0);
+  const defaultResult = values.const(2);
   const output = values.addActionOutput();
   const block: IrBlock = {
     values,
@@ -316,7 +316,7 @@ test("a switch retains arm recipes exactly when its output is live", () => {
         cases: [{
           match: 0,
           body: {
-            actions: [stateRead(read, gprChannel("eax"))],
+            actions: [resourceReadAction(values, read, 0)],
             result: firstResult
           }
         }],
@@ -342,7 +342,7 @@ test("a switch retains arm recipes exactly when its output is live", () => {
 });
 
 test("export roots preserve order and use the terminal boundary", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const first = values.addActionOutput();
   const second = values.addActionOutput();
   const exitResult = values.const64(0n);
@@ -355,8 +355,8 @@ test("export roots preserve order and use the terminal boundary", () => {
   } as const;
   const body: Body = {
     actions: [
-      stateRead(first, gprChannel("eax")),
-      stateRead(second, gprChannel("ebx")),
+      resourceReadAction(values, first, 0),
+      resourceReadAction(values, second, 1),
       finish
     ]
   };
@@ -373,7 +373,7 @@ test("export roots preserve order and use the terminal boundary", () => {
 });
 
 test("pure call execution follows result liveness", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const first = values.addActionOutput(fitsUnsigned(1));
   const second = values.addActionOutput(fitsUnsigned(1));
   const dead = values.addActionOutput(fitsUnsigned(1));
@@ -406,9 +406,9 @@ test("pure call execution follows result liveness", () => {
     body: {
       actions: [
         firstCall,
-        stateWrite(gprChannel("eax"), first),
+        resourceWriteAction(values, 0, first),
         secondCall,
-        stateWrite(gprChannel("ebx"), second),
+        resourceWriteAction(values, 1, second),
         deadCall
       ]
     }
@@ -426,13 +426,13 @@ test("pure call execution follows result liveness", () => {
 });
 
 test("effectful calls remain live even when their result is unused", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const argument = values.external(0);
   const output = values.addActionOutput();
   const target = new FunctionDefinition({
     ref: functionRef("tests.analysis.effectful-call"),
     type: functionType(["i32"], ["i32"]),
-    effects: { reads: [], writes: [{ space: "state", slot: gprChannel("eax") }] },
+    effects: { reads: [], writes: [compilerTestResourceEffect(0)] },
     owner: undefined,
     build: () => {}
   });
@@ -450,7 +450,7 @@ test("effectful calls remain live even when their result is unused", () => {
 });
 
 test("queries reject unknown values, sites, and bodies", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const analysis = analyzeBody({ values, body: { actions: [] } });
   const unknownValue = 99 as ValueId;
   const foreignBody: Body = { actions: [] };

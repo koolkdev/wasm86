@@ -17,13 +17,6 @@ import type { IrFunction } from "./function.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import type { CellRef } from "#compiler/refs/cell.js";
-import {
-  channelCovers,
-  channelsOverlap,
-  isDynamicSlot,
-  type StateChannel,
-  type StateSlot
-} from "./slots.js";
 import { actionOperands } from "./traverse.js";
 import { unboundedWidthBounds } from "#compiler/ir/values/width-bounds.js";
 import { valueId } from "#compiler/ir/values/id.js";
@@ -56,7 +49,6 @@ type BodyValidationContext = Readonly<{
   path: string;
   ownerOutput: ValueId | undefined;
   enclosingLoop: LoopAction | undefined;
-  hasPriorEipWrite: boolean;
 }>;
 
 type FunctionValidation = Readonly<{
@@ -65,10 +57,8 @@ type FunctionValidation = Readonly<{
   results: readonly ValueType[];
 }>;
 
-// Structural checks: bodies terminate consistently, nested bodies are closed
-// where their owner requires it, and dispatch targets are real values. A
-// dispatch completion owns the architectural EIP commit, so state writes on
-// the same path must not also flush EIP.
+// Structural checks: bodies terminate consistently and nested bodies are
+// closed where their owner requires it.
 export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions = {}): void {
   new IrValidator(block, undefined).validate(options);
 }
@@ -106,8 +96,7 @@ class IrValidator {
     this.#validateBody(this.#block.body, {
       path: "body",
       ownerOutput: undefined,
-      enclosingLoop: undefined,
-      hasPriorEipWrite: false
+      enclosingLoop: undefined
     });
     this.#validateBoundaryOutputs(options.exportedOutputs ?? []);
 
@@ -334,8 +323,6 @@ class IrValidator {
   #validateBody(body: Body, context: BodyValidationContext): void {
     this.#validateBodyResult(body, context);
 
-    let hasPriorEipWrite = context.hasPriorEipWrite;
-
     for (const [actionIndex, action] of body.actions.entries()) {
       const site = {
         body,
@@ -343,7 +330,7 @@ class IrValidator {
         path: `${context.path}.${action.kind}[${actionIndex}]`
       };
 
-      this.#validateAction(action, site, context, hasPriorEipWrite);
+      this.#validateAction(action, site, context);
 
       if (actionCompletes(action)) {
         assert(
@@ -352,8 +339,7 @@ class IrValidator {
         );
       }
 
-      this.#validateNestedBodies(action, site, context, hasPriorEipWrite);
-      hasPriorEipWrite ||= actionWritesEip(action);
+      this.#validateNestedBodies(action, site, context);
     }
 
     if (body.result !== undefined) {
@@ -398,17 +384,13 @@ class IrValidator {
   #validateAction(
     action: Action,
     site: ActionSite,
-    context: BodyValidationContext,
-    hasPriorEipWrite: boolean
+    context: BodyValidationContext
   ): void {
     if (action.kind === "op") {
       const operation = action.op;
 
       validateOpAction(this.#block, action, operation);
       this.#validateCellAccess(action, site);
-      if (context.enclosingLoop !== undefined) {
-        validateLoopStateAccess(operation, context.enclosingLoop, site.path);
-      }
 
       for (const input of operation.inputs) {
         const actualType = this.#block.values.valueType(input.value);
@@ -436,7 +418,6 @@ class IrValidator {
         validateSwitchCases(action, site.path);
         return;
       case "loop":
-        validateLoopChannels(action, site.path);
         return;
       case "loopContinue":
         assert(
@@ -450,9 +431,7 @@ class IrValidator {
         return;
       case "finish":
         assert(this.#function === undefined, `${site.path} uses a block finish in a function`);
-        if (action.finish.kind === "dispatch") {
-          assert(!hasPriorEipWrite, `${context.path} dispatch path must not flush EIP state`);
-        } else {
+        if (action.finish.kind === "exit") {
           assert(
             this.#block.values.valueType(action.finish.result) === "i64",
             `${site.path} exit result must be i64`
@@ -519,23 +498,20 @@ class IrValidator {
   #validateNestedBodies(
     action: Action,
     site: ActionSite,
-    context: BodyValidationContext,
-    hasPriorEipWrite: boolean
+    context: BodyValidationContext
   ): void {
     switch (action.kind) {
       case "if":
         this.#validateBody(action.thenBody, {
           path: `${site.path}.thenBody`,
           ownerOutput: action.output,
-          enclosingLoop: context.enclosingLoop,
-          hasPriorEipWrite
+          enclosingLoop: context.enclosingLoop
         });
         if (action.elseBody !== undefined) {
           this.#validateBody(action.elseBody, {
             path: `${site.path}.elseBody`,
             ownerOutput: action.output,
-            enclosingLoop: context.enclosingLoop,
-            hasPriorEipWrite
+            enclosingLoop: context.enclosingLoop
           });
         }
         return;
@@ -544,23 +520,20 @@ class IrValidator {
           this.#validateBody(switchCase.body, {
             path: `${site.path}.case[${caseIndex}]`,
             ownerOutput: action.output,
-            enclosingLoop: context.enclosingLoop,
-            hasPriorEipWrite
+            enclosingLoop: context.enclosingLoop
           });
         }
         this.#validateBody(action.defaultBody, {
           path: `${site.path}.default`,
           ownerOutput: action.output,
-          enclosingLoop: context.enclosingLoop,
-          hasPriorEipWrite
+          enclosingLoop: context.enclosingLoop
         });
         return;
       case "loop":
         this.#validateBody(action.body, {
           path: `${site.path}.body`,
           ownerOutput: undefined,
-          enclosingLoop: action,
-          hasPriorEipWrite
+          enclosingLoop: action
         });
         return;
       case "op":
@@ -780,70 +753,6 @@ class IrValidator {
   }
 }
 
-// A loop may carry nothing: a body advancing only semantic cells keeps all its
-// cross-iteration state in cell locals.
-function validateLoopChannels(action: LoopAction, path: string): void {
-  for (const cell of action.carried) {
-    assertCarriableChannel(cell.channel, path);
-  }
-}
-
-// The state layer carries channels it can seed, read, and flush through
-// exact accesses. GPR carries may be narrow, but loop bodies must touch them
-// through the exact same alias.
-function assertCarriableChannel(channel: StateChannel, path: string): void {
-  switch (channel.kind) {
-    case "gpr":
-      return;
-    case "instructionCount":
-    case "lazyFlags":
-      return;
-    case "flag":
-    case "segment":
-    case "eip":
-      assert(false, `${path} carries an unsupported ${channel.kind} channel`);
-  }
-}
-
-function validateLoopStateAccess(operation: Operation, loop: LoopAction, path: string): void {
-  for (const read of operation.effects.reads) {
-    if (read.space === "state") {
-      validateLoopStateSlotAccess(read.slot, "read", loop, path);
-    }
-  }
-
-  for (const write of operation.effects.writes) {
-    if (write.space === "state") {
-      validateLoopStateSlotAccess(write.slot, "write", loop, path);
-    }
-  }
-}
-
-function validateLoopStateSlotAccess(
-  slot: StateSlot,
-  access: "read" | "write",
-  loop: LoopAction,
-  path: string
-): void {
-  const carriedChannels = loop.carried.map((cell) => cell.channel);
-
-  if (isDynamicSlot(slot)) {
-    assert(
-      slot.kind !== "gprDynamic" || carriedChannels.every((channel) => channel.kind !== "gpr"),
-      `${path} loop body ${access} uses a dynamic GPR slot with carried GPR state`
-    );
-    return;
-  }
-
-  for (const carried of carriedChannels) {
-    assert(
-      !channelsOverlap(carried, slot) ||
-        (channelCovers(carried, slot) && channelCovers(slot, carried)),
-      `${path} loop body ${access} partially overlaps a carried channel`
-    );
-  }
-}
-
 function validateSwitchCases(action: SwitchAction, path: string): void {
   const seen = new Set<number>();
 
@@ -911,11 +820,5 @@ function assertKnownAction(action: Action): void {
       kind === "finish" ||
       kind === "return",
     `unknown IR action kind ${String(kind)}`
-  );
-}
-
-function actionWritesEip(action: Action): boolean {
-  return action.kind === "op" && action.op.effects.writes.some(
-    (write) => write.space === "state" && write.slot.kind === "eip"
   );
 }

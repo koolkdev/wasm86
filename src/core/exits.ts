@@ -1,4 +1,5 @@
 import type { VariantValue } from "#compiler/layout/variant-codec.js";
+import type { CpuException } from "#core/exceptions.js";
 import {
   VariantFieldRef,
   VariantRef,
@@ -49,27 +50,6 @@ export const coreExitSet = variantSet("core.exit", [
   coreExits.segment
 ]);
 
-export function deExit(): VariantValue<never> {
-  return { variant: coreExits.de, payload: [] };
-}
-
-export function udExit(): VariantValue<never> {
-  return { variant: coreExits.ud, payload: [] };
-}
-
-export function pfExit<TValue>(
-  linearAddress: TValue,
-  errorCode: TValue
-): VariantValue<TValue> {
-  return {
-    variant: coreExits.pf,
-    payload: [
-      { field: coreExitFields.pfAddress, value: linearAddress },
-      { field: coreExitFields.pfCode, value: errorCode }
-    ]
-  };
-}
-
 export function trapExit<TValue>(vector: TValue): VariantValue<TValue> {
   return {
     variant: coreExits.trap,
@@ -88,4 +68,29 @@ export function segmentExit<TValue>(
       { field: coreExitFields.selector, value: selector }
     ]
   };
+}
+
+export function exceptionExit<TValue>(
+  exception: CpuException<TValue>
+): VariantValue<TValue> {
+  switch (exception.kind) {
+    case "DE":
+      return { variant: coreExits.de, payload: [] };
+    case "UD":
+      return { variant: coreExits.ud, payload: [] };
+    case "PF":
+      return {
+        variant: coreExits.pf,
+        payload: [
+          {
+            field: coreExitFields.pfAddress,
+            value: exception.linearAddress
+          },
+          {
+            field: coreExitFields.pfCode,
+            value: exception.errorCode
+          }
+        ]
+      };
+  }
 }

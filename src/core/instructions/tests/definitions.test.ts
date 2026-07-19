@@ -8,7 +8,8 @@ import { expandInstructionSpec, type InstructionSpec } from "#core/instructions/
 import {
   buildSemanticTrace,
   operands,
-  regOperands
+  regOperands,
+  segmentOperand
 } from "#core/semantics/tests/test-semantics-trace.js";
 
 test("x86-32 core registers the initial instruction surface", () => {
@@ -262,7 +263,10 @@ test("mov segment-register forms use Sreg ModRM operands", () => {
   deepStrictEqual(toSegmentOperandSize.prefixes, { operandSize: "override" });
   deepStrictEqual(toSegmentOperandSize.opcode, [0x8e]);
   deepStrictEqual(toSegmentOperandSize.operands, toSegment.operands);
-  deepStrictEqual(buildSemanticTrace(semanticsOf(toSegment), operands("reg", "reg")).events, [
+  deepStrictEqual(buildSemanticTrace(
+    semanticsOf(toSegment),
+    [segmentOperand("ds"), { storage: "reg" }]
+  ).events, [
     "%0 = get op1:16",
     "set op0:16 <- %0",
     "next"

@@ -1,25 +1,19 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, staticInstructionLocation as loc, type IrBlockBuilder } from "#ir/builder.js";
-import { immBinding, regBinding } from "#ir/operands.js";
-import {
-  eipChannel, gprChannel, lazyFlagsBChannel, lazyFlagsKindChannel, type StateSlot
-} from "#ir/slots.js";
-import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
-import type { Action } from "#ir/actions.js";
-import type { IrBlock } from "#ir/block.js";
-import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
+import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock, type LegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { immBinding, regBinding } from "#core/instruction/bindings.js";
+import { gprChannel } from "#core/state/channels.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
 import type { RegName } from "#core/types.js";
-import { LAZY_FLAGS_KIND } from "#core/flags/state.js";
-import { coreStateFields } from "#core/state/fields.js";
+import { coreStateFields } from "#core/state/layout.js";
+import { cpuState } from "#cpu/state.js";
 import { aluSemantic } from "#core/semantics/alu.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#core/semantics/mov.js";
 import { xchgSemantic } from "#core/semantics/xchg.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
-import { executionStateLayout } from "#ir/state-layout.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   assertLazyFlagState,
@@ -29,27 +23,14 @@ import {
 } from "#test/support/cpu-state.js";
 import { wasmBodyMemoryAccesses, wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
-import { isStateRead, isStateWrite, stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
-const eaxStateOffset = executionStateLayout.array(coreStateFields.gprs).offset;
+const eaxStateOffset = cpuState.layout.array(coreStateFields.gprs).offset;
 
-// The stage's end-to-end slice: semantics -> IrBlockBuilder -> emit ->
+// The stage's end-to-end slice: semantics -> LegacyInstructionBlock -> emit ->
 // instantiate -> run -> assert cpu state memory through the host view.
 
 function readRegister(view: DataView, name: RegName): number {
   return readWasmCpuStateChannel(view, gprChannel(name));
-}
-
-function entryActions(block: IrBlock): readonly Action[] {
-  return block.body.actions;
-}
-
-function touchedGprSlots(block: IrBlock): StateSlot[] {
-  return entryActions(block).flatMap((action) =>
-    (isStateRead(action) || isStateWrite(action)) && action.op.slot.kind === "gpr"
-      ? [action.op.slot]
-      : []
-  );
 }
 
 function assertCompleted(exit: bigint): void {
@@ -57,21 +38,21 @@ function assertCompleted(exit: bigint): void {
 }
 
 test("mov r32, imm32 sets the register bytes and eip and falls through", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], loc(0x401000, 0x401005));
+  builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], loc(0x401000, 0x401005));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
   assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 0x12345678);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), 0x401005);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), 0x401005);
 });
 
 test("mov r32, r32 copies the source register and leaves it intact", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1000, 0x1002));
+  builder.add(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -79,13 +60,13 @@ test("mov r32, r32 copies the source register and leaves it intact", async () =>
   assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 0xcafe1234);
   strictEqual(readRegister(stateView, "ebx"), 0xcafe1234);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), 0x1002);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), 0x1002);
 });
 
 test("ordinary state writes leave lazy flag metadata untouched", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1000, 0x1002));
+  builder.add(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -102,49 +83,14 @@ test("ordinary state writes leave lazy flag metadata untouched", async () => {
   strictEqual(readWasmCpuStateField(stateView, "lazyFlagsB"), 0x3333_4444);
 });
 
-test("generic state actions load and store the lazy flags kind byte channel", async () => {
-  const values = new ValueTable();
-  const oldKindByte = values.addActionOutput(fitsUnsigned(8));
-  const newKindByteValue = lazyFlagsKindByte(LAZY_FLAGS_KIND.ADD, 16);
-  const newKindByte = values.const(newKindByteValue);
-  const block: IrBlock = {
-    body: {
-      actions: [
-        stateRead(oldKindByte, lazyFlagsKindChannel),
-        stateWrite(lazyFlagsBChannel, oldKindByte),
-        stateWrite(lazyFlagsKindChannel, newKindByte)
-      ]
-    },
-    values
-  };
-  const { stateView, run } = await instantiateIrBlock(block);
-
-  writeWasmCpuStateSnapshot(stateView, {
-    lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, 32),
-    lazyFlagsB: 0x3333_4444
-  });
-
-  assertCompleted(run());
-  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsKind"), newKindByteValue);
-  strictEqual(readWasmCpuStateField(stateView, "lazyFlagsB"), lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, 32));
-});
-
 test("chained movs forward one read to both destinations", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
   const mov = movSemantic(32);
 
-  builder.addInstruction(mov, [regBinding("ebx"), regBinding("eax")], loc(0x1000, 0x1002));
-  builder.addInstruction(mov, [regBinding("ecx"), regBinding("ebx")], loc(0x1002, 0x1004));
+  builder.add(mov, [regBinding("ebx"), regBinding("eax")], loc(0x1000, 0x1002));
+  builder.add(mov, [regBinding("ecx"), regBinding("ebx")], loc(0x1002, 0x1004));
 
   const block = builder.finish();
-
-  // The second mov forwards the first read instead of reading ebx.
-  strictEqual(
-    entryActions(block).filter(
-      (action) => isStateRead(action) && action.op.slot.kind === "gpr"
-    ).length,
-    1
-  );
 
   const { stateView, run } = await instantiateIrBlock(block);
 
@@ -152,13 +98,13 @@ test("chained movs forward one read to both destinations", async () => {
   assertCompleted(run());
   strictEqual(readRegister(stateView, "ebx"), 0xdeadbeef);
   strictEqual(readRegister(stateView, "ecx"), 0xdeadbeef);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), 0x1004);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), 0x1004);
 });
 
 test("xchg eax, ebx swaps the registers", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(xchgSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1002));
+  builder.add(xchgSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -171,9 +117,9 @@ test("xchg eax, ebx swaps the registers", async () => {
 });
 
 test("xchg eax, eax emits no register-state Wasm access", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(xchgSemantic(32), [regBinding("eax"), regBinding("eax")], loc(0x1000, 0x1001));
+  builder.add(xchgSemantic(32), [regBinding("eax"), regBinding("eax")], loc(0x1000, 0x1001));
 
   const block = builder.finish();
   const body = irBlockBody(block).bytes;
@@ -192,14 +138,14 @@ test("xchg eax, eax emits no register-state Wasm access", async () => {
   writeWasmCpuStateSnapshot(stateView, { eax: 0x11111111 });
   assertCompleted(run());
   strictEqual(readRegister(stateView, "eax"), 0x11111111);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), 0x1001);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), 0x1001);
 });
 
 test("a mov before the xchg observes the pre-swap value", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(movSemantic(32), [regBinding("ecx"), regBinding("eax")], loc(0x1000, 0x1002));
-  builder.addInstruction(xchgSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1002, 0x1004));
+  builder.add(movSemantic(32), [regBinding("ecx"), regBinding("eax")], loc(0x1000, 0x1002));
+  builder.add(xchgSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1002, 0x1004));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -211,10 +157,10 @@ test("a mov before the xchg observes the pre-swap value", async () => {
 });
 
 test("a byte write merges into the full register through cpu state memory", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(movSemantic(8), [regBinding("al"), immBinding(0x9a)], loc(0x1000, 0x1002));
-  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1002, 0x1004));
+  builder.add(movSemantic(8), [regBinding("al"), immBinding(0x9a)], loc(0x1000, 0x1002));
+  builder.add(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1002, 0x1004));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -225,9 +171,9 @@ test("a byte write merges into the full register through cpu state memory", asyn
 });
 
 test("a 16-bit immediate store leaves the upper register half intact", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(movSemantic(16), [regBinding("ax"), immBinding(0xbeef)], loc(0x1000, 0x1004));
+  builder.add(movSemantic(16), [regBinding("ax"), immBinding(0xbeef)], loc(0x1000, 0x1004));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -237,9 +183,9 @@ test("a 16-bit immediate store leaves the upper register half intact", async () 
 });
 
 test("movzx r32, r8 zero-extends the high byte through an offset load", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(movzxSemantic(8, 32), [regBinding("ebx"), regBinding("ah")], loc(0x1000, 0x1003));
+  builder.add(movzxSemantic(8, 32), [regBinding("ebx"), regBinding("ah")], loc(0x1000, 0x1003));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -249,10 +195,10 @@ test("movzx r32, r8 zero-extends the high byte through an offset load", async ()
 });
 
 test("movsx r32, r8/r16 sign-extends through marked loads", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(movsxSemantic(8, 32), [regBinding("ebx"), regBinding("ah")], loc(0x1000, 0x1003));
-  builder.addInstruction(movsxSemantic(16, 32), [regBinding("ecx"), regBinding("ax")], loc(0x1003, 0x1006));
+  builder.add(movsxSemantic(8, 32), [regBinding("ebx"), regBinding("ah")], loc(0x1000, 0x1003));
+  builder.add(movsxSemantic(16, 32), [regBinding("ecx"), regBinding("ax")], loc(0x1003, 0x1006));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
@@ -263,14 +209,11 @@ test("movsx r32, r8/r16 sign-extends through marked loads", async () => {
 });
 
 test("add al, imm8 stays on the byte channel with byte-wide flags", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(aluSemantic("add", 8), [regBinding("al"), immBinding(0x70)], loc(0x1000, 0x1002));
+  builder.add(aluSemantic("add", 8), [regBinding("al"), immBinding(0x70)], loc(0x1000, 0x1002));
 
   const block = builder.finish();
-
-  // Register access never widens to eax.
-  deepStrictEqual(touchedGprSlots(block), [gprChannel("al"), gprChannel("al")]);
 
   const { stateView, run } = await instantiateIrBlock(block);
 
@@ -282,13 +225,11 @@ test("add al, imm8 stays on the byte channel with byte-wide flags", async () => 
 });
 
 test("add ax, imm16 stays on the word channel", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(aluSemantic("add", 16), [regBinding("ax"), immBinding(0x2001)], loc(0x1000, 0x1004));
+  builder.add(aluSemantic("add", 16), [regBinding("ax"), immBinding(0x2001)], loc(0x1000, 0x1004));
 
   const block = builder.finish();
-
-  deepStrictEqual(touchedGprSlots(block), [gprChannel("ax"), gprChannel("ax")]);
 
   const { stateView, run } = await instantiateIrBlock(block);
 
@@ -300,24 +241,13 @@ test("add ax, imm16 stays on the word channel", async () => {
 });
 
 test("mov ah and mov al merge through memory for a final 32-bit read", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(movSemantic(8), [regBinding("ah"), immBinding(0xab)], loc(0x1000, 0x1002));
-  builder.addInstruction(movSemantic(8), [regBinding("al"), immBinding(0xcd)], loc(0x1002, 0x1004));
-  builder.addInstruction(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1004, 0x1006));
+  builder.add(movSemantic(8), [regBinding("ah"), immBinding(0xab)], loc(0x1000, 0x1002));
+  builder.add(movSemantic(8), [regBinding("al"), immBinding(0xcd)], loc(0x1002, 0x1004));
+  builder.add(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1004, 0x1006));
 
   const block = builder.finish();
-
-  // Pure moves: every flushed register value is a constant or read leaf —
-  // no bit algebra on the register path.
-  for (const action of entryActions(block)) {
-    if (isStateWrite(action) && action.op.slot.kind === "gpr") {
-      ok(
-        ["const", "actionOutput"].includes(block.values.node(action.op.value).kind),
-        "register writes carry leaves"
-      );
-    }
-  }
 
   const { stateView, run } = await instantiateIrBlock(block);
 
@@ -328,15 +258,15 @@ test("mov ah and mov al merge through memory for a final 32-bit read", async () 
 });
 
 test("zero compares encode as eqz", () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
   const logicConditionTemplate: SemanticTemplate = (s, v) => {
-    const result = v.binary("xor", s.get(s.reg("eax"), 32), v.const(5));
+    const result = v.binary("xor", s.read(s.reg("eax"), { width: 32 }), v.const(5));
 
     s.writeStatusFlagsSource({ kind: "logic", width: 32, result });
-    s.set(s.reg("ebx"), v.select(s.condition("E"), v.const(1), v.const(0)), 32);
+    s.write(s.reg("ebx"), v.select(s.condition("E"), v.const(1), v.const(0)), { width: 32 });
   };
 
-  builder.addInstruction(logicConditionTemplate, [], loc(0x1000, 0x1003));
+  builder.add(logicConditionTemplate, [], loc(0x1000, 0x1003));
 
   const body = irBlockBody(builder.finish()).bytes;
   const opcodes = wasmBodyOpcodes(body);
@@ -348,14 +278,14 @@ test("zero compares encode as eqz", () => {
 test("a value used twice computes once and both uses observe it", async () => {
   // eax = ebx = eax + ebx: one shared add consumed by both stores.
   const sumIntoBoth: SemanticTemplate = (s, v) => {
-    const sum = v.binary("add", s.get(s.operand(0), 32), s.get(s.operand(1), 32));
+    const sum = v.binary("add", s.read(s.operand(0), { width: 32 }), s.read(s.operand(1), { width: 32 }));
 
-    s.set(s.operand(0), sum, 32);
-    s.set(s.operand(1), sum, 32);
+    s.write(s.operand(0), sum, { width: 32 });
+    s.write(s.operand(1), sum, { width: 32 });
   };
-  const builder: IrBlockBuilder = createIrBlockBuilder();
+  const builder: LegacyInstructionBlock = createLegacyInstructionBlock();
 
-  builder.addInstruction(sumIntoBoth, [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1003));
+  builder.add(sumIntoBoth, [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1003));
 
   const block = builder.finish();
   const body = irBlockBody(block).bytes;

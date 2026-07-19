@@ -1,7 +1,8 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
+import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
 import {
   immBinding,
   memBinding,
@@ -9,9 +10,10 @@ import {
   staticMemSegment,
   type EffectiveAddressTerms,
   type OperandBinding
-} from "#ir/operands.js";
+} from "#core/instruction/bindings.js";
 import { defaultSegmentForBase } from "#core/segments.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
+import { gprChannel } from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok as decodeOk, startAddress } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
@@ -955,10 +957,10 @@ test("a faulting pop [mem] restores esp to its pre-instruction value", async () 
 });
 
 function blockOf(instructions: readonly IsaDecodedInstruction[]): IrBlock {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
   for (const instruction of instructions) {
-    builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
+    builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
   }
 
   return builder.finish();
@@ -1031,7 +1033,7 @@ function assertState(
     strictEqual(readWasmCpuStateChannel(stateView, gprChannel(name)), expected.regs[name] ?? 0, `${label} ${name}`);
   }
 
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), expected.eip, `${label} eip`);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), expected.eip, `${label} eip`);
 
   for (const flag of x86StatusFlags) {
     strictEqual(readWasmCpuFlagByte(stateView, flag), expected.flags[flag], `${label} ${flag}`);

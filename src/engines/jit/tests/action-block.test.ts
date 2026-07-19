@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { buildIrBlock } from "#engines/jit/action-compiler.js";
@@ -8,22 +8,36 @@ import type { Action } from "#ir/actions.js";
 import type { IrBlock } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { gprChannel, lazyFlagsKindChannel, type StateSlot } from "#ir/slots.js";
+import { flagStateFields } from "#core/flags/layout.js";
+import type { InstructionStateChannel } from "#core/instruction/state/channels.js";
+import { gprChannel } from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { ByteArrayDecodeReader } from "#core/decoder/tests/helpers.js";
 import { decodeIsaBlock, type IsaDecodedBlock } from "#core/decoder/decode-block.js";
 import { invalidOpcode, pageFault } from "#core/exceptions.js";
-import { createWasmHostMemories } from "#wasm/host/memories.js";
-import { readWasmCpuState } from "#test/support/cpu-state.js";
+import {
+  readWasmCpuStateSnapshot,
+  writeWasmCpuStateSnapshot
+} from "#test/support/cpu-state.js";
+import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 import {
   extractOnlyWasmFunctionBody,
   wasmBodyOpcodes,
   wasmDefinedFunctionCount
 } from "#compiler/encoder/tests/body-opcodes.js";
-import { isStateRead, isStateWrite, stateWrite } from "#ir/tests/storage-op-helpers.js";
-import { buildTrap } from "#cpu/exit.js";
-import { statusFlagResolvers } from "#core/flags/resolvers.js";
-import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/state.js";
+import {
+  stateEffect,
+  stateWrite,
+  stateWriteValue,
+  isStateRead,
+  isStateWrite
+} from "#core/instruction/tests/state-actions.js";
+import { covers } from "#ir/aliasing.js";
+import { buildExit } from "#cpu/exit.js";
+import { trapExit } from "#core/exits.js";
+import { cpuStatusFlagResolvers } from "#cpu/state.js";
+import { x86Flags } from "#core/flags/definitions.js";
 
 const startEip = 0x1000;
 
@@ -95,45 +109,64 @@ test("a repeated add compiles to one eax read and one eax write", () => {
   const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
   const actions = entryActions(block);
 
-  strictEqual(actions.filter((action) => isStateRead(action) && isEaxWordSlot(action.op.slot)).length, 1);
-  strictEqual(actions.filter((action) => isStateWrite(action) && isEaxWordSlot(action.op.slot)).length, 1);
+  strictEqual(actions.filter((action) =>
+    isStateRead(action) && accessesChannel(block, action, gprChannel("eax"))
+  ).length, 1);
+  strictEqual(actions.filter((action) =>
+    isStateWrite(action) && accessesChannel(block, action, gprChannel("eax"))
+  ).length, 1);
 });
 
-test("cross-instruction dead flag writes are absent and dispatch owns EIP state", () => {
+test("cross-instruction dead flag writes are absent and Core commits EIP before dispatch", () => {
   // add eax, 1; add eax, 1.
   const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
   const actions = entryActions(block);
-  const flagWrites = actions.flatMap((action) =>
-    isStateWrite(action) && action.op.slot.kind === "flag" ? [action.op.slot.flag] : []
+  const flagWrites = actions.filter((action) =>
+    isStateWrite(action) && x86Flags.some((flag) =>
+      accessesChannel(block, action, flagStateFields.concrete[flag])
+    )
   );
   const lazyKindWrites = actions.filter(
-    (action) => isStateWrite(action) && action.op.slot === lazyFlagsKindChannel
+    (action) => isStateWrite(action) &&
+      accessesChannel(block, action, flagStateFields.lazyKind)
   );
 
   strictEqual(flagWrites.length, 0);
-  strictEqual(new Set(flagWrites).size, flagWrites.length);
   strictEqual(lazyKindWrites.length, 1);
-  strictEqual(actions.filter((action) => isStateWrite(action) && action.op.slot.kind === "eip").length, 0);
+  strictEqual(actions.filter((action) =>
+    isStateWrite(action) && accessesChannel(block, action, coreStateFields.eip)
+  ).length, 1);
   strictEqual(
     actions.filter((action) => action.kind === "finish" && action.finish.kind === "dispatch").length,
     1
   );
+  const finishIndex = actions.findIndex(
+    (action) => action.kind === "finish" && action.finish.kind === "dispatch"
+  );
+  const eipCommitIndex = actions.findIndex(
+    (action) => isStateWrite(action) && accessesChannel(block, action, coreStateFields.eip)
+  );
+
+  ok(eipCommitIndex >= 0);
+  ok(eipCommitIndex < finishIndex);
 });
 
 test("a guard fault mid-block reports the faulting eip with earlier state flushed", () => {
   // inc eax; mov eax, [0xff0000] — beyond the one-page guest memory.
   const faultAddress = 0xff_0000;
   const block = decodeBlock([0x40, 0x8b, 0x05, 0x00, 0x00, 0xff, 0x00]);
-  const memories = createWasmHostMemories();
+  const memories = createTestWasmMemories();
   const handle = compileActionWasmBlockHandle([block], {
     cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
 
-  memories.cpuState.load({ eip: startEip, eax: 5 });
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
+
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, eax: 5 });
 
   const run = handle.run();
-  const state = readWasmCpuState(memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, {
     kind: "cpuException",
@@ -150,13 +183,15 @@ test("a segment-register load exits from a compiled block before committing the 
   // instruction.
   const block = decodeBlock([0x8e, 0xc0, 0x40]);
   strictEqual(block.instructions.length, 2);
-  const memories = createWasmHostMemories();
+  const memories = createTestWasmMemories();
   const handle = compileActionWasmBlockHandle([block], {
     cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
 
-  memories.cpuState.load({
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
+
+  writeWasmCpuStateSnapshot(stateView, {
     eip: startEip,
     eax: 0x1234_5678,
     esSelector: 0x1111,
@@ -164,7 +199,7 @@ test("a segment-register load exits from a compiled block before committing the 
   });
 
   const run = handle.run();
-  const state = readWasmCpuState(memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, {
     kind: "segmentLoad",
@@ -179,15 +214,16 @@ test("a segment-register load exits from a compiled block before committing the 
 
 test("a compiled ENTER level 2 copies the display through semantic var loop cells", () => {
   const block = decodeBlock([0xc8, 0x04, 0x00, 0x02, 0xcd, 0x2e]);
-  const memories = createWasmHostMemories();
+  const memories = createTestWasmMemories();
   const guest = new DataView(memories.guestMemory.buffer);
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
   const handle = compileActionWasmBlockHandle([block], {
     cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
 
   guest.setUint32(0x17c, 0xaaaa_0001, true);
-  memories.cpuState.load({
+  writeWasmCpuStateSnapshot(stateView, {
     eip: startEip,
     esp: 0x120,
     ebp: 0x180,
@@ -195,7 +231,7 @@ test("a compiled ENTER level 2 copies the display through semantic var loop cell
   });
 
   const run = handle.run();
-  const state = readWasmCpuState(memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(state.ebp, 0x11c);
@@ -221,10 +257,11 @@ test("a not-taken forward jcc keeps pre-branch register pendings live inside the
   const branchIndex = actions.findIndex((action) => action.kind === "if");
   const ebxReadIndex = actions.findIndex(
     (action): action is Action =>
-      isStateRead(action) && action.op.slot === gprChannel("ebx")
+      isStateRead(action) && accessesChannel(ir, action, gprChannel("ebx"))
   );
   const ebxRead = actions[ebxReadIndex];
-  const memories = createWasmHostMemories();
+  const memories = createTestWasmMemories();
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
   const handle = compileActionWasmBlockHandle([block], {
     cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
@@ -248,25 +285,29 @@ test("a not-taken forward jcc keeps pre-branch register pendings live inside the
     throw new Error("expected ebx read after the branch");
   }
 
-  const ebxWrite = actions.find((action) => isStateWrite(action) && action.op.slot === gprChannel("ebx"));
+  const ebxWrite = actions.find((action) =>
+    isStateWrite(action) && accessesChannel(ir, action, gprChannel("ebx"))
+  );
 
   if (ebxWrite === undefined || !isStateWrite(ebxWrite)) {
     throw new Error("expected ebx write after the branch");
   }
 
   strictEqual(
-    actions.filter((action) => isStateWrite(action) && action.op.slot === gprChannel("eax")).length,
+    actions.filter((action) =>
+      isStateWrite(action) && accessesChannel(ir, action, gprChannel("eax"))
+    ).length,
     1
   );
   strictEqual(
-    ebxWrite.op.value,
+    stateWriteValue(ebxWrite),
     ir.values.binary("add", ebxRead.output, ir.values.const(7))
   );
 
-  memories.cpuState.load({ eip: startEip, ebx: 0x20, ecx: 1 });
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, ebx: 0x20, ecx: 1 });
 
   const run = handle.run();
-  const state = readWasmCpuState(memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(state.eax, 7);
@@ -294,16 +335,17 @@ test("a folded taken jecxz truncates the block and dispatches to its target", ()
   strictEqual(actions.some((action) => action.kind === "if"), false);
   strictEqual(actions.at(-1)?.kind, "finish");
 
-  const memories = createWasmHostMemories();
+  const memories = createTestWasmMemories();
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
   const handle = compileActionWasmBlockHandle([block], {
     cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
 
-  memories.cpuState.load({ eip: startEip, ebx: 0x20, ecx: 5 });
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, ebx: 0x20, ecx: 5 });
 
   const run = handle.run();
-  const state = readWasmCpuState(memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, { kind: "linkStub", targetEip });
   strictEqual(state.ebx, 0x20);
@@ -322,7 +364,8 @@ test("a backward jcc to the block entry self-links as a return_call tail loop", 
   const ir = buildIrBlock(block.instructions);
   const bytes = encodeJitModule([{ entryEip: startEip, ir }]);
   const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(bytes));
-  const memories = createWasmHostMemories();
+  const memories = createTestWasmMemories();
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
   const handle = compileActionWasmBlockHandle([block], {
     cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
@@ -330,10 +373,10 @@ test("a backward jcc to the block entry self-links as a return_call tail loop", 
 
   strictEqual(opcodes.includes(wasmOpcode.returnCall), true);
 
-  memories.cpuState.load({ eip: startEip, ecx: 3 });
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, ecx: 3 });
 
   const run = handle.run();
-  const state = readWasmCpuState(memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(state.ecx, 0);
@@ -349,16 +392,17 @@ test("into mid-block traps only on OF and otherwise falls through inside the blo
     0xbb, 0x02, 0x00, 0x00, 0x00,
     0xcd, 0x2e
   ]);
-  const memories = createWasmHostMemories();
+  const memories = createTestWasmMemories();
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
   const handle = compileActionWasmBlockHandle([block], {
     cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
 
-  memories.cpuState.load({ eip: startEip, OF: 0 });
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, OF: 0 });
 
   const clearRun = handle.run();
-  const clearState = readWasmCpuState(memories.cpuState);
+  const clearState = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(clearRun.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(clearState.eax, 1);
@@ -366,10 +410,10 @@ test("into mid-block traps only on OF and otherwise falls through inside the blo
   strictEqual(clearState.eip, startEip + 13);
   strictEqual(clearState.instructionCount, 4);
 
-  memories.cpuState.load({ eip: startEip, ebx: 0x55, OF: 1 });
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, ebx: 0x55, OF: 1 });
 
   const setRun = handle.run();
-  const setState = readWasmCpuState(memories.cpuState);
+  const setState = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(setRun.exit, { kind: "hostTrap", vector: 4 });
   strictEqual(setState.eax, 1);
@@ -381,13 +425,14 @@ test("into mid-block traps only on OF and otherwise falls through inside the blo
 test("a compiled MOV to CS raises invalid-opcode before segment-load handling", () => {
   // mov cs, ax.
   const block = decodeBlock([0x8e, 0xc8]);
-  const memories = createWasmHostMemories();
+  const memories = createTestWasmMemories();
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
   const handle = compileActionWasmBlockHandle([block], {
     cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
 
-  memories.cpuState.load({
+  writeWasmCpuStateSnapshot(stateView, {
     eip: startEip,
     eax: 0x1234_5678,
     csSelector: 0x1111,
@@ -395,7 +440,7 @@ test("a compiled MOV to CS raises invalid-opcode before segment-load handling", 
   });
 
   const run = handle.run();
-  const state = readWasmCpuState(memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, { kind: "cpuException", exception: invalidOpcode() });
   strictEqual(state.eax, 0x1234_5678);
@@ -410,16 +455,17 @@ test("a static jump to a block in the same module tail-calls it directly", () =>
   const first = decodeBlock([0x40, 0xe9, 0x0a, 0x00, 0x00, 0x00]);
   // inc eax; int 0x2e.
   const second = decodeBlock([0x40, 0xcd, 0x2e], targetEip);
-  const memories = createWasmHostMemories();
+  const memories = createTestWasmMemories();
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
   const handle = compileActionWasmBlockHandle([first, second], {
     cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
 
-  memories.cpuState.load({ eip: startEip, eax: 0 });
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, eax: 0 });
 
   const run = handle.run(startEip);
-  const state = readWasmCpuState(memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(state.eax, 2);
@@ -430,16 +476,17 @@ test("a static jump to a block in the same module tail-calls it directly", () =>
 test("a dynamic jump returns the legacy transfer and resumes from flushed state", () => {
   // jmp eax.
   const block = decodeBlock([0xff, 0xe0]);
-  const memories = createWasmHostMemories();
+  const memories = createTestWasmMemories();
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
   const handle = compileActionWasmBlockHandle([block], {
     cpuStateMemory: memories.cpuStateMemory,
     guestMemory: memories.guestMemory
   });
 
-  memories.cpuState.load({ eip: startEip, eax: 0x4000 });
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, eax: 0x4000 });
 
   const run = handle.run();
-  const state = readWasmCpuState(memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, { kind: "dynamicJump" });
   strictEqual(state.eip, 0x4000);
@@ -454,24 +501,15 @@ function entryActions(block: IrBlock): readonly Action[] {
   return block.body.actions;
 }
 
-function isEaxWordSlot(slot: StateSlot): boolean {
-  return slot.kind === "gpr" && slot.reg === "eax" && slot.byteOffsetInReg === 0 && slot.byteLength === 4;
-}
-
 function syntheticBlock(withResolver: boolean): IrBlock {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
   const stored = withResolver
-    ? builder.call(statusFlagResolvers.get("ZF"), [
-        values.const(lazyFlagsKindByte(LAZY_FLAGS_KIND.NONE, 0)),
-        values.const(0),
-        values.const(0),
-        values.const(1)
-      ])[0]!
+    ? builder.call(cpuStatusFlagResolvers.get("ZF"), [])[0]!
     : values.const(7);
-  const result = buildTrap(values, values.const(0));
+  const result = buildExit(values, trapExit(values.const(0)));
 
-  builder.push(stateWrite(gprChannel("eax"), stored));
+  builder.push(stateWrite(values, gprChannel("eax"), stored));
   builder.finish({ kind: "exit", result });
   return {
     body: builder.build(),
@@ -481,14 +519,31 @@ function syntheticBlock(withResolver: boolean): IrBlock {
 
 function syntheticDispatchBlock(targetEip: number): IrBlock {
   const values = new ValueTable();
+  const target = values.const(targetEip);
 
   return {
     body: {
-      actions: [{
-        kind: "finish",
-        finish: { kind: "dispatch", targetEip: values.const(targetEip) }
-      }]
+      actions: [
+        stateWrite(values, coreStateFields.eip, target),
+        {
+          kind: "finish",
+          finish: { kind: "dispatch", targetEip: target }
+        }
+      ]
     },
     values
   };
+}
+
+function accessesChannel(
+  block: IrBlock,
+  action: Extract<Action, { kind: "op" }>,
+  channel: InstructionStateChannel
+): boolean {
+  const expected = stateEffect(block.values, channel);
+  const actual = action.op.effects.reads[0] ?? action.op.effects.writes[0];
+
+  return actual !== undefined &&
+    covers(actual, expected) &&
+    covers(expected, actual);
 }

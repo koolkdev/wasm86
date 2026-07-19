@@ -2,9 +2,15 @@ import { ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import type { IrBlock } from "#ir/block.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
+import { RegionBuilder } from "#ir/region-builder.js";
+import { gprChannel } from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
+import { cpuStateAccess } from "#cpu/state.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import {
+  operandRead,
+  operandWrite
+} from "#ir/tests/storage-op-helpers.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { wasmBodyLocalCount, wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import {
@@ -18,6 +24,8 @@ import { instantiateIrBlock, irBlockBody, irBlockCompleted } from "./harness.js"
 
 test("a switch selects arms by match and falls back to the default", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.external(0);
   const first = values.const(11);
   const second = values.const(42);
@@ -37,7 +45,7 @@ test("a switch selects arms by match and falls back to the default", async () =>
           ],
           defaultBody: { actions: [], result: fallback }
         },
-        stateWrite(gprChannel("eax"), output)
+        operandWrite(state.gpr("eax"), output)
       ]
     }
   };
@@ -63,6 +71,8 @@ test("a switch selects arms by match and falls back to the default", async () =>
 
 test("sequential switch joins reuse one physical local", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.external(0);
   const firstCase = values.const(11);
   const firstFallback = values.const(12);
@@ -81,7 +91,7 @@ test("sequential switch joins reuse one physical local", async () => {
           cases: [{ match: 0, body: { actions: [], result: firstCase } }],
           defaultBody: { actions: [], result: firstFallback }
         },
-        stateWrite(gprChannel("eax"), firstOutput),
+        operandWrite(state.gpr("eax"), firstOutput),
         {
           kind: "switch",
           selector,
@@ -89,7 +99,7 @@ test("sequential switch joins reuse one physical local", async () => {
           cases: [{ match: 0, body: { actions: [], result: secondCase } }],
           defaultBody: { actions: [], result: secondFallback }
         },
-        stateWrite(gprChannel("ebx"), secondOutput)
+        operandWrite(state.gpr("ebx"), secondOutput)
       ]
     }
   };
@@ -110,6 +120,8 @@ test("sequential switch joins reuse one physical local", async () => {
 
 test("an impossible default lowers to unreachable and traps", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.external(0);
   const first = values.const(11);
   const impossible = values.unreachable();
@@ -125,7 +137,7 @@ test("an impossible default lowers to unreachable and traps", async () => {
           cases: [{ match: 0, body: { actions: [], result: first } }],
           defaultBody: { actions: [], result: impossible }
         },
-        stateWrite(gprChannel("eax"), output)
+        operandWrite(state.gpr("eax"), output)
       ]
     }
   };
@@ -138,6 +150,8 @@ test("an impossible default lowers to unreachable and traps", async () => {
 
 test("an arm-local compound over an arm-local read computes inside the arm", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.external(0);
   const read = values.addActionOutput();
   const formula = values.binary("add", read, values.const(1));
@@ -152,11 +166,14 @@ test("an arm-local compound over an arm-local read computes inside the arm", asy
           selector,
           output,
           cases: [
-            { match: 0, body: { actions: [stateRead(read, gprChannel("ebx"))], result: formula } }
+            {
+              match: 0,
+              body: { actions: [operandRead(read, state.gpr("ebx"))], result: formula }
+            }
           ],
           defaultBody: { actions: [], result: fallback }
         },
-        stateWrite(gprChannel("eax"), output)
+        operandWrite(state.gpr("eax"), output)
       ]
     }
   };
@@ -177,6 +194,8 @@ test("an arm-local compound over an arm-local read computes inside the arm", asy
 
 test("a parent compound consumed by two arms captures once before the switch", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.external(0);
   const shared = values.binary("add", values.external(1), values.const(5));
   const fallback = values.const(99);
@@ -195,7 +214,7 @@ test("a parent compound consumed by two arms captures once before the switch", a
           ],
           defaultBody: { actions: [], result: fallback }
         },
-        stateWrite(gprChannel("eax"), output)
+        operandWrite(state.gpr("eax"), output)
       ]
     }
   };
@@ -213,6 +232,8 @@ test("a parent compound consumed by two arms captures once before the switch", a
 
 test("a switch captures a state snapshot before the selected arm writes it", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.external(0);
   const snapshot = values.addActionOutput();
   const caseResult = values.const(10);
@@ -222,7 +243,7 @@ test("a switch captures a state snapshot before the selected arm writes it", asy
     values,
     body: {
       actions: [
-        stateRead(snapshot, gprChannel("eax")),
+        operandRead(snapshot, state.gpr("eax")),
         {
           kind: "switch",
           selector,
@@ -231,21 +252,21 @@ test("a switch captures a state snapshot before the selected arm writes it", asy
             match: 0,
             body: {
               actions: [
-                stateWrite(gprChannel("eax"), values.const(5)),
-                stateWrite(gprChannel("ebx"), snapshot)
+                operandWrite(state.gpr("eax"), values.const(5)),
+                operandWrite(state.gpr("ebx"), snapshot)
               ],
               result: caseResult
             }
           }],
           defaultBody: {
             actions: [
-              stateWrite(gprChannel("eax"), values.const(9)),
-              stateWrite(gprChannel("ecx"), snapshot)
+              operandWrite(state.gpr("eax"), values.const(9)),
+              operandWrite(state.gpr("ecx"), snapshot)
             ],
             result: defaultResult
           }
         },
-        stateWrite(gprChannel("edx"), output)
+        operandWrite(state.gpr("edx"), output)
       ]
     }
   };
@@ -270,6 +291,8 @@ test("a switch captures a state snapshot before the selected arm writes it", asy
 
 test("a dead switch output emits no arm values but keeps the impossible default", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.external(0);
   const read = values.addActionOutput();
   const readFormula = values.binary("add", read, values.const(1));
@@ -285,7 +308,10 @@ test("a dead switch output emits no arm values but keeps the impossible default"
           selector,
           output,
           cases: [
-            { match: 0, body: { actions: [stateRead(read, gprChannel("ebx"))], result: readFormula } },
+            {
+              match: 0,
+              body: { actions: [operandRead(read, state.gpr("ebx"))], result: readFormula }
+            },
             { match: 1, body: { actions: [], result: shared } }
           ],
           defaultBody: { actions: [], result: impossible }
@@ -311,6 +337,8 @@ test("a dead switch output emits no arm values but keeps the impossible default"
 
 test("a dispatch inside an arm escapes through the switch's labels", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.external(0);
   const condition = values.external(1);
   const target = values.const(0x2000);
@@ -335,6 +363,7 @@ test("a dispatch inside an arm escapes through the switch's labels", async () =>
                     condition,
                     thenBody: {
                       actions: [
+                        operandWrite(state.field(coreStateFields.eip), target),
                         { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
                       ]
                     }
@@ -346,7 +375,7 @@ test("a dispatch inside an arm escapes through the switch's labels", async () =>
           ],
           defaultBody: { actions: [], result: fallback }
         },
-        stateWrite(gprChannel("eax"), output)
+        operandWrite(state.gpr("eax"), output)
       ]
     }
   };
@@ -359,5 +388,5 @@ test("a dispatch inside an arm escapes through the switch's labels", async () =>
   // eax keeps its old value and eip carries the flushed target.
   strictEqual(run(0, 1), irBlockCompleted);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 7);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), 0x2000);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), 0x2000);
 });

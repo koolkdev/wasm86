@@ -3,13 +3,13 @@ import { strictEqual } from "node:assert";
 import {
   readWasmCpuStateSnapshot,
   readWasmCpuStateField,
+  wasmCpuStateFields,
   writeWasmCpuStateSnapshot,
   type WasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import type { RunStop } from "#cpu/cpu.js";
 import { decodeExit } from "#cpu/exit.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
-import { wasmCpuStateFields } from "#wasm/host/cpu-state.js";
 import { createGuestMemory } from "#wasm/tests/helpers.js";
 
 export type InterpreterModuleInstance = Readonly<{

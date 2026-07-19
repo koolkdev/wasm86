@@ -2,12 +2,15 @@ import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import type { IrBlock } from "#ir/block.js";
-import { gprChannel } from "#ir/slots.js";
-import { stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { RegionBuilder } from "#ir/region-builder.js";
+import { operandWrite } from "#ir/tests/storage-op-helpers.js";
+import { gprChannel } from "#core/state/channels.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
+import { wasmMemoryIndex } from "#wasm/abi.js";
+import { cpuState, cpuStateAccess } from "#cpu/state.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import {
@@ -23,6 +26,7 @@ import {
 
 test("a trapping value used only by a future then body stays in that body", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const condition = values.external(0);
   const quotient = values.binary("div_u", values.external(1), values.external(2));
   const block: IrBlock = {
@@ -31,7 +35,7 @@ test("a trapping value used only by a future then body stays in that body", asyn
       actions: [{
         kind: "if",
         condition,
-        thenBody: { actions: [stateWrite(gprChannel("eax"), quotient)] }
+        thenBody: { actions: [operandWrite(state.gpr("eax"), quotient)] }
       }]
     }
   };
@@ -48,6 +52,7 @@ test("a trapping value used only by a future then body stays in that body", asyn
 
 test("a transitively trapping wrapper used only by a future body stays in that body", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const condition = values.external(0);
   const quotient = values.binary("div_u", values.external(1), values.external(2));
   const wrapped = values.binary("add", quotient, values.const(1));
@@ -57,7 +62,7 @@ test("a transitively trapping wrapper used only by a future body stays in that b
       actions: [{
         kind: "if",
         condition,
-        thenBody: { actions: [stateWrite(gprChannel("eax"), wrapped)] }
+        thenBody: { actions: [operandWrite(state.gpr("eax"), wrapped)] }
       }]
     }
   };
@@ -75,6 +80,7 @@ test("a transitively trapping wrapper used only by a future body stays in that b
 test("trapping switch arm results evaluate only when selected", async () => {
   for (const trappingArm of ["case", "default"] as const) {
     const values = new ValueTable();
+    const state = cpuStateAccess.bind(new RegionBuilder(values));
     const selector = values.external(0);
     const quotient = values.binary("div_u", values.external(1), values.external(2));
     const safeResult = values.const(7);
@@ -96,7 +102,7 @@ test("trapping switch arm results evaluate only when selected", async () => {
               result: trappingArm === "default" ? quotient : safeResult
             }
           },
-          stateWrite(gprChannel("eax"), output)
+          operandWrite(state.gpr("eax"), output)
         ]
       }
     };
@@ -115,10 +121,11 @@ test("trapping switch arm results evaluate only when selected", async () => {
 
 test("a trapping value demanded directly by the current body still evaluates", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const quotient = values.binary("div_u", values.external(0), values.external(1));
   const block: IrBlock = {
     values,
-    body: { actions: [stateWrite(gprChannel("eax"), quotient)] }
+    body: { actions: [operandWrite(state.gpr("eax"), quotient)] }
   };
   const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
   const { stateView, run } = await instantiateIrBlock(block, 2);
@@ -131,6 +138,7 @@ test("a trapping value demanded directly by the current body still evaluates", a
 
 test("a trapping condition makes its selected wrapper safe to capture", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const quotient = values.binary("div_u", values.external(0), values.external(1));
   const wrapped = values.binary("add", quotient, values.const(1));
   const block: IrBlock = {
@@ -139,7 +147,7 @@ test("a trapping condition makes its selected wrapper safe to capture", async ()
       actions: [{
         kind: "if",
         condition: quotient,
-        thenBody: { actions: [stateWrite(gprChannel("eax"), wrapped)] }
+        thenBody: { actions: [operandWrite(state.gpr("eax"), wrapped)] }
       }]
     }
   };
@@ -158,6 +166,7 @@ test("a trapping condition makes its selected wrapper safe to capture", async ()
 
 test("both if arms share one wrapper captured after its trapping condition", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const quotient = values.binary("div_u", values.external(0), values.external(1));
   const wrapped = values.binary("add", quotient, values.const(1));
   const block: IrBlock = {
@@ -166,8 +175,8 @@ test("both if arms share one wrapper captured after its trapping condition", asy
       actions: [{
         kind: "if",
         condition: quotient,
-        thenBody: { actions: [stateWrite(gprChannel("eax"), wrapped)] },
-        elseBody: { actions: [stateWrite(gprChannel("ebx"), wrapped)] }
+        thenBody: { actions: [operandWrite(state.gpr("eax"), wrapped)] },
+        elseBody: { actions: [operandWrite(state.gpr("ebx"), wrapped)] }
       }]
     }
   };
@@ -189,6 +198,7 @@ test("both if arms share one wrapper captured after its trapping condition", asy
 
 test("captures after an unreachable structured operand still form valid Wasm", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const unreachable = values.unreachable();
   const wrapped = values.unary("eqz", unreachable);
   const block: IrBlock = {
@@ -197,8 +207,8 @@ test("captures after an unreachable structured operand still form valid Wasm", a
       actions: [{
         kind: "if",
         condition: unreachable,
-        thenBody: { actions: [stateWrite(gprChannel("eax"), wrapped)] },
-        elseBody: { actions: [stateWrite(gprChannel("ebx"), wrapped)] }
+        thenBody: { actions: [operandWrite(state.gpr("eax"), wrapped)] },
+        elseBody: { actions: [operandWrite(state.gpr("ebx"), wrapped)] }
       }]
     }
   };
@@ -210,6 +220,7 @@ test("captures after an unreachable structured operand still form valid Wasm", a
 
 test("switch arms share a wrapper captured after its trapping selector", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.binary(
     "div_u",
     values.external(0),
@@ -232,7 +243,7 @@ test("switch arms share a wrapper captured after its trapping selector", async (
           ],
           defaultBody: { actions: [], result: fallback }
         },
-        stateWrite(gprChannel("eax"), output)
+        operandWrite(state.gpr("eax"), output)
       ]
     }
   };
@@ -258,10 +269,11 @@ test("switch arms share a wrapper captured after its trapping selector", async (
 
 test("an exported trapping value evaluates at the fragment boundary", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const quotient = values.binary("div_u", values.external(0), values.external(1));
   const block: IrBlock = {
     values,
-    body: { actions: [stateWrite(gprChannel("eax"), values.const(5))] }
+    body: { actions: [operandWrite(state.gpr("eax"), values.const(5))] }
   };
   const body = new WasmFunctionBodyEncoder(2);
   const scratch = new WasmLocalScratchAllocator(body);
@@ -270,6 +282,9 @@ test("an exported trapping value evaluates at the fragment boundary", async () =
   emitActionFragment(block, {
     body,
     scratch,
+    resourceIndices: new Map([
+      [cpuState.resource, wasmMemoryIndex.cpuState]
+    ]),
     externalLocals: new Map([[0, 0], [1, 1]]),
     embedding: {
       fallthrough: { kind: "fallthrough" },

@@ -1,0 +1,727 @@
+import { deepStrictEqual, ok, strictEqual } from "node:assert";
+import { test } from "node:test";
+
+import type { Action } from "#ir/actions.js";
+import { RegionBuilder } from "#ir/region-builder.js";
+import { InstructionState } from "../state/state.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
+import {
+  flagStateFields,
+  type FlagStateField
+} from "#core/flags/layout.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import type { ConditionCode } from "#core/flags/conditions.js";
+import type { SimpleFlagSource } from "#core/flags/lazy/sources.js";
+import { simpleFlagSourceConditionOperators } from "#core/flags/lazy/sources.js";
+import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
+import { assertOnlyLazyRecord } from "./lazy-flags.js";
+import {
+  isStatusFlagCall,
+  resolvedStatusFlag,
+  statusFlagCall,
+  type StatusFlagCallAction
+} from "#ir/tests/storage-op-helpers.js";
+import { instructionCountField } from "#cpu/instruction-count.js";
+import {
+  cpuStateAccess,
+  cpuStatusFlagResolvers
+} from "#cpu/state.js";
+import { covers } from "#ir/aliasing.js";
+import {
+  stateEffect,
+  stateWriteValue,
+  isStateRead,
+  isStateWrite,
+  type StateWriteAction
+} from "./state-actions.js";
+
+type Harness = Readonly<{
+  values: ValueTable;
+  actions: Action[];
+  pending: Readonly<{
+    beginInstructionBoundary(): void;
+    flushesForPath(path: "fault" | "completed"): readonly Action[];
+  }>;
+  flags: TestStatusFlags;
+}>;
+
+type TestStatusFlags = Readonly<{
+  read(flag: X86StatusFlag): ValueId;
+  condition(cc: ConditionCode): ValueId;
+  write(flag: X86StatusFlag, value: ValueId): void;
+  writeSource(source: SimpleFlagSource): void;
+  resetToInputs(): void;
+}>;
+
+function stateWriteActions(actions: readonly Action[]): readonly StateWriteAction[] {
+  return actions.filter(isStateWrite);
+}
+
+function createHarness(): Harness {
+  const values = new ValueTable();
+  const body = new RegionBuilder(values);
+  const actions = body.build().actions as Action[];
+  const state = new InstructionState(
+    values,
+    cpuStateAccess,
+    cpuStatusFlagResolvers,
+    instructionCountField
+  );
+  const access = state.bind(body);
+  const context = { region: body, access };
+
+  return {
+    values,
+    actions,
+    pending: {
+      beginInstructionBoundary: () => state.beginInstructionBoundary(),
+      flushesForPath: (path) => state.flushesForPath(access, path)
+    },
+    flags: {
+      read: (flag) => state.statusFlags.read(context, flag),
+      condition: (cc) => state.statusFlags.condition(context, cc),
+      write: (flag, value) => state.statusFlags.write(context, flag, value),
+      writeSource: (source) => state.statusFlags.writeSource(source),
+      resetToInputs: () => state.statusFlags.resetToInputs()
+    }
+  };
+}
+
+function flagFlushEntries(
+  actions: readonly StateWriteAction[],
+  values: ValueTable
+): ReadonlyArray<Readonly<{ flag: X86StatusFlag; value: ValueId }>> {
+  return actions.flatMap((action) => {
+    const flag = x86StatusFlags.find((candidate) => effectsEqual(
+      action.op.effect,
+      stateEffect(values, flagStateFields.concrete[candidate])
+    ));
+
+    return flag === undefined
+      ? []
+      : [{ flag, value: stateWriteValue(action) }];
+  });
+}
+
+function flagFlushValue(
+  actions: readonly StateWriteAction[],
+  values: ValueTable,
+  flag: X86StatusFlag
+): ValueId | undefined {
+  return flagFlushEntries(actions, values).find((entry) => entry.flag === flag)?.value;
+}
+
+function assertFullExplicitFlush(
+  actions: readonly StateWriteAction[],
+  values: ValueTable
+): void {
+  deepStrictEqual(flagFlushEntries(actions, values).map((entry) => entry.flag), x86StatusFlags);
+  const kindWrite = actions.find((action) => effectsEqual(
+    action.op.effect,
+    stateEffect(values, flagStateFields.lazyKind)
+  ));
+
+  strictEqual(
+    kindWrite === undefined ? undefined : stateWriteValue(kindWrite),
+    values.const(0)
+  );
+  strictEqual(actions.length, x86StatusFlags.length + 1);
+}
+
+function resolverCall(actions: readonly Action[], flag: X86StatusFlag): StatusFlagCallAction | undefined {
+  return actions.find(
+    (action): action is StatusFlagCallAction =>
+      isStatusFlagCall(action) && resolvedStatusFlag(action) === flag
+  );
+}
+
+function resolvedFlagValue(actions: readonly Action[], flag: X86StatusFlag): ValueId | undefined {
+  return resolverCall(actions, flag)?.outputs[0];
+}
+
+function resolverCalls(actions: readonly Action[]): readonly StatusFlagCallAction[] {
+  return actions.filter(isStatusFlagCall);
+}
+
+function stateReadFields(
+  actions: readonly Action[],
+  values: ValueTable
+): readonly FlagStateField[] {
+  const candidates: readonly FlagStateField[] = [
+    flagStateFields.lazyKind,
+    flagStateFields.lazyA,
+    flagStateFields.lazyB,
+    ...x86StatusFlags.map((flag) => flagStateFields.concrete[flag])
+  ];
+
+  return actions.filter(isStateRead).map((action) => {
+    const channel = candidates.find((candidate) => effectsEqual(
+      action.op.effect,
+      stateEffect(values, candidate)
+    ));
+
+    if (channel === undefined) {
+      throw new Error("unrecognized execution-state read effect");
+    }
+    return channel;
+  });
+}
+
+function effectsEqual(
+  left: Parameters<typeof covers>[0],
+  right: Parameters<typeof covers>[1]
+): boolean {
+  return covers(left, right) && covers(right, left);
+}
+
+function assertResolverCall(
+  action: StatusFlagCallAction,
+  output: ValueId,
+  flag: X86StatusFlag
+): void {
+  deepStrictEqual(action, statusFlagCall(output, flag));
+}
+
+function switchActions(actions: readonly Action[]): Extract<Action, { kind: "switch" }>[] {
+  return actions.filter((action): action is Extract<Action, { kind: "switch" }> => action.kind === "switch");
+}
+
+test("new status flags start with no dirty pending entries", () => {
+  const { pending } = createHarness();
+
+  deepStrictEqual(stateWriteActions(pending.flushesForPath("fault")), []);
+  deepStrictEqual(stateWriteActions(pending.flushesForPath("completed")), []);
+});
+
+test("input status flags use a cached direct-state resolver call", () => {
+  const { values, actions, flags } = createHarness();
+  const first = flags.read("ZF");
+  const second = flags.read("ZF");
+
+  strictEqual(first, second);
+  deepStrictEqual(stateReadFields(actions, values), []);
+  const call = resolverCall(actions, "ZF");
+
+  ok(call !== undefined, "expected ZF resolver call");
+  assertResolverCall(call, first, "ZF");
+  strictEqual(actions.at(-1), call);
+  deepStrictEqual(values.node(first), { kind: "actionOutput", type: "i32" });
+});
+
+test("a direct-state resolver observes pending lazy fields without weakening fault rollback", () => {
+  const { values, actions, pending, flags } = createHarness();
+  const left = values.const(7);
+  const right = values.const(3);
+  const result = values.binary("sub", left, right);
+
+  pending.beginInstructionBoundary();
+  flags.writeSource({ kind: "sub", width: 32, left, right, result });
+  flags.resetToInputs();
+  const resolved = flags.read("ZF");
+  const reads = actions.filter(isStateRead);
+  const writes = stateWriteActions(actions);
+  const call = resolverCall(actions, "ZF");
+
+  deepStrictEqual(new Set(stateReadFields(reads, values)), new Set([
+    flagStateFields.lazyKind,
+    flagStateFields.lazyA,
+    flagStateFields.lazyB
+  ]));
+  assertOnlyLazyRecord(writes, values, {
+    kind: "SUB",
+    width: 32,
+    left,
+    right
+  });
+  ok(call !== undefined, "expected ZF resolver call");
+  assertResolverCall(call, resolved, "ZF");
+  strictEqual(actions.at(-1), call);
+  deepStrictEqual(stateWriteActions(pending.flushesForPath("completed")), []);
+
+  const faultWrites = stateWriteActions(pending.flushesForPath("fault"));
+
+  strictEqual(faultWrites.length, reads.length);
+  for (const read of reads) {
+    const restore = faultWrites.find((write) =>
+      effectsEqual(write.op.effect, read.op.effect)
+    );
+
+    ok(restore !== undefined, "expected a fault restore for each published field");
+    strictEqual(stateWriteValue(restore), read.output);
+  }
+});
+
+test("an arm-local resolver preserves rollback for carried lazy state", () => {
+  const values = new ValueTable();
+  const root = new RegionBuilder(values);
+  const state = new InstructionState(
+    values,
+    cpuStateAccess,
+    cpuStatusFlagResolvers,
+    instructionCountField
+  );
+  const before = {
+    kind: "sub" as const,
+    width: 32 as const,
+    left: values.const(10),
+    right: values.const(3)
+  };
+  const after = {
+    kind: "sub" as const,
+    width: 32 as const,
+    left: values.const(7),
+    right: values.const(5)
+  };
+
+  state.statusFlags.writeSource({
+    ...before,
+    result: values.binary("sub", before.left, before.right)
+  });
+  state.beginInstructionBoundary();
+  state.statusFlags.writeSource({
+    ...after,
+    result: values.binary("sub", after.left, after.right)
+  });
+  state.statusFlags.resetToInputs();
+
+  const selected = root.child();
+  const selectedAccess = state.bind(selected);
+  const resolved = state.enterScope(() => {
+    return state.statusFlags.read(
+      { region: selected, access: selectedAccess },
+      "ZF"
+    );
+  });
+  const selectedActions = selected.build().actions;
+  const call = resolverCall(selectedActions, "ZF");
+
+  assertOnlyLazyRecord(stateWriteActions(selectedActions), values, {
+    kind: "SUB",
+    width: after.width,
+    left: after.left,
+    right: after.right
+  });
+  ok(call !== undefined, "expected a selected-body ZF resolver call");
+  assertResolverCall(call, resolved, "ZF");
+
+  assertOnlyLazyRecord(
+    stateWriteActions(state.flushesForPath(state.bind(root), "completed")),
+    values,
+    {
+      kind: "SUB",
+      width: after.width,
+      left: after.left,
+      right: after.right
+    }
+  );
+  assertOnlyLazyRecord(
+    stateWriteActions(state.flushesForPath(state.bind(root), "fault")),
+    values,
+    {
+      kind: "SUB",
+      width: before.width,
+      left: before.left,
+      right: before.right
+    }
+  );
+});
+
+test("writing the current input status flag value is a no-op", () => {
+  const { pending, flags } = createHarness();
+  const zf = flags.read("ZF");
+
+  flags.write("ZF", zf);
+
+  deepStrictEqual(stateWriteActions(pending.flushesForPath("completed")), []);
+});
+
+test("a sub source commits a lazy runtime record", () => {
+  const { values, pending, flags } = createHarness();
+  const left = values.const(7);
+  const right = values.const(3);
+  const result = values.binary("sub", left, right);
+
+  flags.writeSource({ kind: "sub", width: 32, left, right, result });
+
+  const completedFlushes = stateWriteActions(pending.flushesForPath("completed"));
+
+  assertOnlyLazyRecord(completedFlushes, values, { kind: "SUB", width: 32, left, right });
+  strictEqual(
+    flagValue(flags, "ZF"),
+    values.compare(32, "eq", result, values.const(0))
+  );
+});
+
+test("writing the current source status flag value preserves the lazy source", () => {
+  const { values, pending, flags } = createHarness();
+  const left = values.const(7);
+  const right = values.const(3);
+  const result = values.binary("sub", left, right);
+
+  flags.writeSource({ kind: "sub", width: 32, left, right, result });
+  flags.write("ZF", flags.read("ZF"));
+
+  assertOnlyLazyRecord(stateWriteActions(pending.flushesForPath("completed")), values, { kind: "SUB", width: 32, left, right });
+});
+
+test("an add source commits a lazy runtime record", () => {
+  const { values, pending, flags } = createHarness();
+  const left = values.const(0xffff_ffff);
+  const right = values.const(1);
+  const result = values.binary("add", left, right);
+
+  flags.writeSource({ kind: "add", width: 32, left, right, result });
+
+  assertOnlyLazyRecord(stateWriteActions(pending.flushesForPath("completed")), values, { kind: "ADD", width: 32, left, right });
+  strictEqual(
+    flagValue(flags, "CF"),
+    values.compare(32, "lt_u", values.truncate(32, result), values.truncate(32, left))
+  );
+});
+
+test("sub lazy commits truncated narrow operands", () => {
+  const { values, pending, flags } = createHarness();
+  const left = values.const(0x1234_5678);
+  const right = values.const(0x8765_4321);
+  const result = values.binary("sub", left, right);
+
+  flags.writeSource({ kind: "sub", width: 16, left, right, result });
+
+  assertOnlyLazyRecord(stateWriteActions(pending.flushesForPath("completed")), values, { kind: "SUB", width: 16, left, right });
+});
+
+test("add lazy commits truncated narrow operands", () => {
+  const { values, pending, flags } = createHarness();
+  const left = values.const(0x1234_5678);
+  const right = values.const(0x8765_4321);
+  const result = values.binary("add", left, right);
+
+  flags.writeSource({ kind: "add", width: 8, left, right, result });
+
+  assertOnlyLazyRecord(stateWriteActions(pending.flushesForPath("completed")), values, { kind: "ADD", width: 8, left, right });
+});
+
+test("condition uses the current sub source directly", () => {
+  const { values, actions, flags } = createHarness();
+  const left = values.const(7);
+  const right = values.const(3);
+  const result = values.binary("sub", left, right);
+
+  flags.writeSource({ kind: "sub", width: 32, left, right, result });
+
+  strictEqual(flags.condition("E"), values.compare(32, "eq", left, right));
+  strictEqual(flags.condition("B"), values.compare(32, "lt_u", left, right));
+  strictEqual(flags.condition("L"), values.compare(32, "lt_s", left, right));
+  deepStrictEqual(actions, []);
+});
+
+test("input-backed compare-family condition builds a lazy SUB switch", () => {
+  const { values, actions, flags } = createHarness();
+  const condition = flags.condition("BE");
+  const switchAction = switchActions(actions)[0];
+
+  ok(switchAction !== undefined, "expected lazy condition switch");
+  strictEqual(condition, switchAction.output);
+  strictEqual(actions.length, 4);
+  const selectorRead = actions[0];
+
+  ok(
+    selectorRead !== undefined && isStateRead(selectorRead),
+    "expected lazy-kind state read"
+  );
+  strictEqual(selectorRead.output, switchAction.selector);
+  strictEqual(
+    effectsEqual(
+      selectorRead.op.effect,
+      stateEffect(values, flagStateFields.lazyKind)
+    ),
+    true
+  );
+  deepStrictEqual(
+    switchAction.cases.map((entry) => entry.match),
+    [8, 16, 32].map((width) => lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, width as 8 | 16 | 32))
+  );
+  const [kindRead, aRead, bRead] = actions.filter(isStateRead);
+
+  ok(kindRead !== undefined && aRead !== undefined && bRead !== undefined, "expected lazy record reads");
+  deepStrictEqual(stateReadFields([kindRead, aRead, bRead], values), [
+    flagStateFields.lazyKind,
+    flagStateFields.lazyA,
+    flagStateFields.lazyB
+  ]);
+
+  for (const [index, switchCase] of switchAction.cases.entries()) {
+    const width = [8, 16, 32][index] as 8 | 16 | 32;
+
+    deepStrictEqual(switchCase.body.actions, []);
+    strictEqual(
+      switchCase.body.result,
+      values.compare(width, "le_u", aRead.output, bRead.output)
+    );
+
+    const result = values.node(switchCase.body.result!);
+
+    ok(result.kind === "compare", "expected direct arm compare");
+    strictEqual(result.operator, "le_u");
+  }
+
+  const [carry, zero] = switchAction.defaultBody.actions;
+
+  ok(
+    carry !== undefined && isStatusFlagCall(carry) &&
+      zero !== undefined && isStatusFlagCall(zero),
+    "expected fallback flag resolution"
+  );
+  strictEqual(resolvedStatusFlag(carry), "CF");
+  strictEqual(resolvedStatusFlag(zero), "ZF");
+
+  const fallback = values.node(switchAction.defaultBody.result!);
+
+  ok(fallback.kind === "binary", "expected fallback CF | ZF expression");
+  strictEqual(fallback.operator, "or");
+});
+
+test("signed compare-family conditions sign-extend captured narrow lazy operands", () => {
+  const { values, actions, flags } = createHarness();
+
+  flags.condition("L");
+
+  const switchAction = switchActions(actions)[0];
+
+  ok(switchAction !== undefined, "expected lazy condition switch");
+  const [, aRead, bRead] = actions.filter(isStateRead);
+
+  ok(aRead !== undefined && bRead !== undefined, "expected captured lazy operands");
+
+  for (const [index, switchCase] of switchAction.cases.entries()) {
+    const width = [8, 16, 32][index] as 8 | 16 | 32;
+
+    deepStrictEqual(switchCase.body.actions, []);
+    strictEqual(
+      switchCase.body.result,
+      values.compare(width, "lt_s", aRead.output, bRead.output)
+    );
+
+    const result = values.node(switchCase.body.result!);
+
+    ok(result.kind === "compare", "expected direct arm compare");
+    strictEqual(result.operator, "lt_s");
+  }
+});
+
+test("input-backed equality condition builds lazy cases from one captured record", () => {
+  const { values, actions, flags } = createHarness();
+  const condition = flags.condition("E");
+  const switchAction = switchActions(actions)[0];
+
+  ok(switchAction !== undefined, "expected lazy condition switch");
+  strictEqual(condition, switchAction.output);
+  deepStrictEqual(switchAction.cases.map((entry) => entry.match), expectedLazyConditionCases("E"));
+  const [, aRead, bRead] = actions.filter(isStateRead);
+
+  ok(aRead !== undefined && bRead !== undefined, "expected captured lazy operands");
+  for (const switchCase of switchAction.cases) {
+    const kind = switchCase.match & 0b11;
+    const width = lazyWidth(switchCase.match);
+    const rightOperand: ValueId = kind === LAZY_FLAGS_KIND.LOGIC_RESULT
+      ? values.const(0)
+      : bRead.output;
+
+    deepStrictEqual(switchCase.body.actions, []);
+    strictEqual(switchCase.body.result, values.compare(width, "eq", aRead.output, rightOperand));
+  }
+});
+
+test("condition falls back to live flag backings after a direct flag write", () => {
+  const { values, actions, flags } = createHarness();
+  const left = values.const(7);
+  const right = values.const(3);
+  const result = values.binary("sub", left, right);
+  const zero = values.const(0);
+
+  flags.writeSource({ kind: "sub", width: 32, left, right, result });
+  flags.write("ZF", zero);
+
+  strictEqual(flags.condition("E"), zero);
+  strictEqual(
+    flags.condition("NE"),
+    values.compare(32, "eq", zero, zero)
+  );
+  deepStrictEqual(actions, []);
+});
+
+test("mixed pending and input condition combines pending values with resolver outputs", () => {
+  const { values, actions, flags } = createHarness();
+  const zf = values.const(1);
+
+  flags.write("ZF", zf);
+
+  const condition = flags.condition("BE");
+  const node = values.node(condition);
+
+  ok(node.kind === "binary", "expected BE condition to lower to CF | ZF");
+  strictEqual(node.operator, "or");
+  deepStrictEqual(values.node(node.a), { kind: "actionOutput", type: "i32" });
+  strictEqual(resolvedFlagValue(actions, "CF"), node.a);
+  strictEqual(node.b, zf);
+  strictEqual(switchActions(actions).length, 0);
+});
+
+test("non-compare-family input condition uses a typed resolver call", () => {
+  const { values, actions, flags } = createHarness();
+  const condition = flags.condition("S");
+
+  const call = resolverCall(actions, "SF");
+
+  ok(call !== undefined, "expected SF resolver call");
+  strictEqual(call.outputs[0], condition);
+  deepStrictEqual(stateReadFields(actions, values), []);
+  strictEqual(switchActions(actions).length, 0);
+});
+
+test("fault edge preserves a clean sub source while direct flag writes update completed fallback values", () => {
+  const { values, pending, flags } = createHarness();
+  const left = values.const(7);
+  const right = values.const(3);
+  const result = values.binary("sub", left, right);
+  const source = { kind: "sub", width: 32, left, right, result } as const;
+
+  flags.writeSource(source);
+  pending.beginInstructionBoundary();
+  flags.write("ZF", values.const(1));
+
+  const faultFlushes = stateWriteActions(pending.flushesForPath("fault"));
+  const completedFlushes = stateWriteActions(pending.flushesForPath("completed"));
+
+  assertOnlyLazyRecord(faultFlushes, values, { kind: "SUB", width: 32, left, right });
+  assertFullExplicitFlush(completedFlushes, values);
+  strictEqual(
+    flagFlushValue(completedFlushes, values, "ZF"),
+    values.const(1)
+  );
+});
+
+test("a logic source commits a lazy result record and resolves current values", () => {
+  const { values, pending, flags } = createHarness();
+  const result = values.const(0x80);
+  const truncated = values.truncate(8, result);
+  const zero = values.const(0);
+
+  flags.writeSource({ kind: "logic", width: 8, result });
+
+  strictEqual(flagValue(flags, "CF"), zero);
+  strictEqual(flagValue(flags, "AF"), zero);
+  strictEqual(flagValue(flags, "OF"), zero);
+  strictEqual(flagValue(flags, "ZF"), values.compare(32, "eq", truncated, zero));
+  strictEqual(flagValue(flags, "SF"), values.binary("shr_u", truncated, values.const(7)));
+
+  const completedFlushes = stateWriteActions(pending.flushesForPath("completed"));
+
+  assertOnlyLazyRecord(completedFlushes, values, { kind: "LOGIC_RESULT", width: 8, result });
+});
+
+test("direct status flag writes set explicit pending values", () => {
+  const { values, pending, flags } = createHarness();
+  const explicit = Object.fromEntries(
+    x86StatusFlags.map((flag, index) => [flag, values.const(index & 1)])
+  ) as Record<(typeof x86StatusFlags)[number], ValueId>;
+
+  for (const flag of x86StatusFlags) {
+    flags.write(flag, explicit[flag]);
+  }
+
+  for (const flag of x86StatusFlags) {
+    strictEqual(flagValue(flags, flag), explicit[flag]);
+  }
+
+  const completedFlushes = stateWriteActions(pending.flushesForPath("completed"));
+  const snapshotValues = flagFlushEntries(completedFlushes, values);
+
+  assertFullExplicitFlush(completedFlushes, values);
+  strictEqual(snapshotValues.length, x86StatusFlags.length);
+  strictEqual(snapshotValues.find((entry) => entry.flag === "ZF")?.value, explicit.ZF);
+});
+
+test("writeFlag updates one status flag while preserving other pending values", () => {
+  const { values, pending, flags } = createHarness();
+  const left = values.const(7);
+  const right = values.const(3);
+  const result = values.binary("sub", left, right);
+  const zf = values.const(1);
+
+  flags.writeSource({ kind: "sub", width: 32, left, right, result });
+  flags.write("ZF", zf);
+
+  strictEqual(flagValue(flags, "CF"), values.compare(32, "lt_u", left, right));
+  strictEqual(flagValue(flags, "ZF"), zf);
+
+  const completedFlushes = stateWriteActions(pending.flushesForPath("completed"));
+  const snapshotValues = flagFlushEntries(completedFlushes, values);
+
+  assertFullExplicitFlush(completedFlushes, values);
+  strictEqual(snapshotValues.length, x86StatusFlags.length);
+  strictEqual(snapshotValues.find((entry) => entry.flag === "ZF")?.value, zf);
+});
+
+test("a direct flag write from input state flushes a full explicit image from resolver calls", () => {
+  const { values, actions, pending, flags } = createHarness();
+  const zf = values.const(1);
+
+  flags.write("ZF", zf);
+
+  const completedFlushes = stateWriteActions(pending.flushesForPath("completed"));
+
+  assertFullExplicitFlush(completedFlushes, values);
+  strictEqual(flagFlushValue(completedFlushes, values, "ZF"), zf);
+
+  for (const flag of x86StatusFlags.filter((flag) => flag !== "ZF")) {
+    const value = flagFlushValue(completedFlushes, values, flag);
+
+    ok(value !== undefined, `expected ${flag} to be flushed`);
+    deepStrictEqual(values.node(value), { kind: "actionOutput", type: "i32" });
+    strictEqual(resolvedFlagValue(actions, flag), value);
+  }
+  deepStrictEqual(
+    resolverCalls(actions).map(resolvedStatusFlag),
+    x86StatusFlags
+  );
+  strictEqual(resolverCalls(actions).every((call) => call.arguments.length === 0), true);
+});
+
+function flagValue(flags: TestStatusFlags, flag: X86StatusFlag): ValueId {
+  return flags.read(flag);
+}
+
+function expectedLazyConditionCases(cc: ConditionCode): readonly number[] {
+  return ([8, 16, 32] as const).flatMap((width) => [
+    ...expectedLazyConditionCase(LAZY_FLAGS_KIND.ADD, width, simpleFlagSourceConditionOperators.add[cc] !== undefined),
+    ...expectedLazyConditionCase(LAZY_FLAGS_KIND.SUB, width, simpleFlagSourceConditionOperators.sub[cc] !== undefined),
+    ...expectedLazyConditionCase(
+      LAZY_FLAGS_KIND.LOGIC_RESULT,
+      width,
+      simpleFlagSourceConditionOperators.logic[cc] !== undefined
+    )
+  ]);
+}
+
+function expectedLazyConditionCase(
+  kind: (typeof LAZY_FLAGS_KIND)[keyof typeof LAZY_FLAGS_KIND],
+  width: 8 | 16 | 32,
+  supported: boolean
+): readonly number[] {
+  return supported ? [lazyFlagsKindByte(kind, width)] : [];
+}
+
+function lazyWidth(kindByte: number): 8 | 16 | 32 {
+  switch (kindByte >> 2) {
+    case 0:
+      return 8;
+    case 1:
+      return 16;
+    case 2:
+      return 32;
+    default:
+      throw new Error(`invalid lazy flag kind byte: ${kindByte}`);
+  }
+}

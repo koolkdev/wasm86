@@ -1,20 +1,13 @@
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   SemanticsBuilder,
+  SemanticOperandMemoryOptions,
+  SemanticUpdate,
   SemanticTemplate
 } from "#core/semantics/builder.js";
-import type { OperandRef, Value, ValueInput } from "#core/semantics/refs.js";
+import type { Value, ValueInput } from "#core/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#core/types.js";
 import { writeStatusFlagValues } from "./flag-writes.js";
-import {
-  readStorage,
-  resolveMemoryAccess,
-  resolveStorageRead,
-  resolveStorageReadWrite,
-  resolvedOperandStorage,
-  writeStorage,
-  type ResolvedStorageAccess
-} from "./memory.js";
 
 export type BitTestOp = "bt" | "bts" | "btr" | "btc";
 export type BitOffsetSource = "reg" | "imm8";
@@ -26,84 +19,76 @@ export function bitTestSemantic(
   width: BitFieldWidth,
   offsetSource: BitOffsetSource
 ): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
-    const dstStorage = resolvedOperandStorage(context, dst);
-
-    if (dstStorage === "mem" && offsetSource === "reg") {
-      bitStringMemorySemantic(s, v, op, width, dst);
-      return;
-    }
-
-    const bitIndex = simpleBitIndex(s, v, width, offsetSource);
+    const offset = readBitOffset(s, width, offsetSource);
+    const bitIndex = v.binary("and", offset, v.const(width - 1));
+    const memory = bitStringMemoryOptions(v, width, offsetSource, offset);
 
     if (op === "bt") {
-      const target = resolveStorageRead(s, v, context, dst, width);
-      const value = v.truncate(width, readStorage(s, v, target, width));
+      const value = v.truncate(
+        width,
+        s.read(dst, memory === undefined ? { width } : { width, memory })
+      );
 
       writeBitTestFlag(s, v, value, bitIndex);
       return;
     }
 
-    const target = resolveStorageReadWrite(s, v, context, dst, width);
-    const value = v.truncate(width, readStorage(s, v, target, width));
+    const target = s.update(
+      dst,
+      memory === undefined ? { width } : { width, memory }
+    );
+    const value = v.truncate(width, target.read(s));
 
     writeBitTestResult(s, v, op, width, target, value, bitIndex);
   };
 }
 
 export function bitScanSemantic(op: BitScanOp, width: BitFieldWidth): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    const sourceAccess = resolveStorageRead(s, v, context, src, width);
-
-    const source = v.truncate(width, readStorage(s, v, sourceAccess, width));
-    const oldDestination = s.get(dst, width);
+    const source = v.truncate(width, s.read(src, { width }));
+    const oldDestination = s.read(dst, { width });
     const sourceIsZero = v.compare(width, "eq", source, v.const(0));
     const scan = bitScanIndex(v, op, source);
     const scanOrZero = v.select(sourceIsZero, v.const(0), scan);
     const result = v.select(sourceIsZero, oldDestination, scan);
 
     writeBitScanFlags(s, v, sourceIsZero, scanOrZero);
-    s.set(dst, result, width);
+    s.write(dst, result, { width });
   };
 }
 
-function bitStringMemorySemantic(
+function readBitOffset(
   s: SemanticsBuilder,
-  v: ValueBuilder,
-  op: BitTestOp,
   width: BitFieldWidth,
-  dst: OperandRef
-): void {
-  const offset = s.get(s.operand(1), width, { signed: true });
-  const element = v.binary("shr_s", offset, v.const(elementShift(width)));
-  const byteOffset = v.binary("shl", element, v.const(byteShift(width)));
-  const memory = s.operandMem(dst, byteOffset);
-  const bitIndex = v.binary("and", offset, v.const(width - 1));
+  offsetSource: BitOffsetSource
+): Value {
+  return offsetSource === "reg"
+    ? s.read(s.operand(1), { width, signed: true })
+    : s.read(s.operand(1), { width: 8 });
+}
 
-  if (op === "bt") {
-    const access = resolveMemoryAccess(s, memory, v.const(width / 8), "read");
-    const value = v.truncate(width, s.memoryRead(access, v.const(0), width));
-
-    writeBitTestFlag(s, v, value, bitIndex);
-    return;
+function bitStringMemoryOptions(
+  v: ValueBuilder,
+  width: BitFieldWidth,
+  offsetSource: BitOffsetSource,
+  offset: Value
+): SemanticOperandMemoryOptions | undefined {
+  if (offsetSource !== "reg") {
+    return undefined;
   }
 
-  const access = resolveMemoryAccess(s, memory, v.const(width / 8), "write");
-  const value = v.truncate(width, s.memoryRead(access, v.const(0), width));
+  return {
+    addressOffset: () => {
+      const element = v.binary("shr_s", offset, v.const(elementShift(width)));
 
-  writeBitTestResult(
-    s,
-    v,
-    op,
-    width,
-    { kind: "memory", access },
-    value,
-    bitIndex
-  );
+      return v.binary("shl", element, v.const(byteShift(width)));
+    }
+  };
 }
 
 function writeBitTestResult(
@@ -111,13 +96,13 @@ function writeBitTestResult(
   v: ValueBuilder,
   op: Exclude<BitTestOp, "bt">,
   width: BitFieldWidth,
-  target: ResolvedStorageAccess<"write">,
+  target: SemanticUpdate,
   value: Value,
   bitIndex: Value
 ): void {
   writeBitTestFlag(s, v, value, bitIndex);
 
-  writeStorage(s, v, target, bitTestWriteResult(v, op, width, value, bitIndex), width);
+  target.write(s, bitTestWriteResult(v, op, width, value, bitIndex));
 }
 
 function writeBitTestFlag(
@@ -151,19 +136,6 @@ function bitTestWriteResult(
     case "btc":
       return v.truncate(width, v.binary("xor", value, mask));
   }
-}
-
-function simpleBitIndex(
-  s: SemanticsBuilder,
-  v: ValueBuilder,
-  width: BitFieldWidth,
-  offsetSource: BitOffsetSource
-): Value {
-  const raw = offsetSource === "reg"
-    ? s.get(s.operand(1), width)
-    : s.get(s.operand(1), 8);
-
-  return v.binary("and", raw, v.const(width - 1));
 }
 
 function bitScanIndex(v: ValueBuilder, op: BitScanOp, source: Value): Value {

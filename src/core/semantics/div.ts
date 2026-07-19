@@ -3,7 +3,6 @@ import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticTemplate, SemanticsBuilder } from "#core/semantics/builder.js";
 import type { Value } from "#core/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
-import { readStorage, resolveStorageRead } from "./memory.js";
 
 type DivideKind = "signed" | "unsigned";
 type DivideResult = Readonly<{ quotient: Value; remainder: Value }>;
@@ -18,12 +17,9 @@ export function idivImplicitSemantic(width: OperandWidth): SemanticTemplate {
 }
 
 function implicitDivideSemantic(kind: DivideKind, width: OperandWidth): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const src = s.operand(0);
-
-    const srcStorage = resolveStorageRead(s, v, context, src, width);
-
-    const divisor = readStorage(s, v, srcStorage, width, { signed: kind === "signed" });
+    const divisor = s.read(src, { width, signed: kind === "signed" });
     const result = kind === "signed"
       ? signedDivide(s, v, width, divisor)
       : unsignedDivide(s, v, width, divisor);
@@ -160,7 +156,7 @@ function narrowQuotientOverflows(
 function unsignedDividend(s: SemanticsBuilder, v: ValueBuilder, width: OperandWidth): UnsignedDividend {
   switch (width) {
     case 8: {
-      const ax = s.get(s.reg("ax"), 16);
+      const ax = s.read(s.reg("ax"), { width: 16 });
 
       return {
         high: v.binary("shr_u", ax, v.const(8)),
@@ -168,8 +164,8 @@ function unsignedDividend(s: SemanticsBuilder, v: ValueBuilder, width: OperandWi
       };
     }
     case 16: {
-      const low = s.get(s.reg("ax"), 16);
-      const high = s.get(s.reg("dx"), 16);
+      const low = s.read(s.reg("ax"), { width: 16 });
+      const high = s.read(s.reg("dx"), { width: 16 });
 
       return {
         high,
@@ -177,8 +173,8 @@ function unsignedDividend(s: SemanticsBuilder, v: ValueBuilder, width: OperandWi
       };
     }
     case 32: {
-      const low = s.get(s.reg("eax"), 32);
-      const high = s.get(s.reg("edx"), 32);
+      const low = s.read(s.reg("eax"), { width: 32 });
+      const high = s.read(s.reg("edx"), { width: 32 });
       const low64 = v.extend64(32, low, false);
       const high64 = v.extend64(32, high, false);
 
@@ -197,10 +193,10 @@ function signedNarrowDividend(
 ): Value {
   switch (width) {
     case 8:
-      return s.get(s.reg("ax"), 16, { signed: true });
+      return s.read(s.reg("ax"), { width: 16, signed: true });
     case 16: {
-      const low = s.get(s.reg("ax"), 16);
-      const high = s.get(s.reg("dx"), 16, { signed: true });
+      const low = s.read(s.reg("ax"), { width: 16 });
+      const high = s.read(s.reg("dx"), { width: 16, signed: true });
 
       return v.binary("or", v.binary("shl", high, v.const(16)), low);
     }
@@ -208,8 +204,8 @@ function signedNarrowDividend(
 }
 
 function signedDwordDividend(s: SemanticsBuilder, v: ValueBuilder): Value {
-  const low = s.get(s.reg("eax"), 32);
-  const high = s.get(s.reg("edx"), 32);
+  const low = s.read(s.reg("eax"), { width: 32 });
+  const high = s.read(s.reg("edx"), { width: 32 });
   const low64 = v.extend64(32, low, false);
   const high64 = v.extend64(32, high, true);
 
@@ -223,16 +219,16 @@ function writeDivideResult(
 ): void {
   switch (width) {
     case 8:
-      s.set(s.reg("al"), result.quotient, 8);
-      s.set(s.reg("ah"), result.remainder, 8);
+      s.write(s.reg("al"), result.quotient, { width: 8 });
+      s.write(s.reg("ah"), result.remainder, { width: 8 });
       return;
     case 16:
-      s.set(s.reg("ax"), result.quotient, 16);
-      s.set(s.reg("dx"), result.remainder, 16);
+      s.write(s.reg("ax"), result.quotient, { width: 16 });
+      s.write(s.reg("dx"), result.remainder, { width: 16 });
       return;
     case 32:
-      s.set(s.reg("eax"), result.quotient, 32);
-      s.set(s.reg("edx"), result.remainder, 32);
+      s.write(s.reg("eax"), result.quotient, { width: 32 });
+      s.write(s.reg("edx"), result.remainder, { width: 32 });
       return;
   }
 }

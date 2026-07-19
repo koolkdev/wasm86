@@ -1,14 +1,11 @@
 import type { ConditionCode } from "#core/flags/conditions.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
-import { resolveStorageWrite, writeStorage } from "./memory.js";
 
 export function setccSemantic(cc: ConditionCode): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
     const condition = s.condition(cc);
 
-    const dstStorage = resolveStorageWrite(s, v, context, dst, 8);
-
-    writeStorage(s, v, dstStorage, v.select(condition, v.const(1), v.const(0)), 8);
+    s.write(dst, v.select(condition, v.const(1), v.const(0)), { width: 8 });
   };
 }

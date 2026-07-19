@@ -1,10 +1,10 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
-import { gprChannel } from "#ir/slots.js";
+import { gprChannel } from "#core/state/channels.js";
+import { cpuStateAccess } from "#cpu/state.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { wasmBranchHint } from "#compiler/encoder/function-body.js";
 import {
@@ -20,14 +20,23 @@ import {
 test("ifValue selects one arm result and preserves its hint", async () => {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
+  const state = cpuStateAccess.bind(body);
   const output = body.ifValue(
     values.external(0),
-    (then) => then.operation(stateRead.create({ slot: gprChannel("ebx") })),
-    (otherwise) => otherwise.operation(stateRead.create({ slot: gprChannel("ecx") })),
+    (then) => {
+      const branchState = cpuStateAccess.bind(then);
+
+      return branchState.read(branchState.gpr("ebx"));
+    },
+    (otherwise) => {
+      const branchState = cpuStateAccess.bind(otherwise);
+
+      return branchState.read(branchState.gpr("ecx"));
+    },
     { hint: "unlikely" }
   );
 
-  body.operation(stateWrite.create({ slot: gprChannel("eax"), value: output }));
+  state.write(state.gpr("eax"), output);
 
   const block: IrBlock = { values, body: body.build() };
   const encoded = irBlockBody(block, 1);
@@ -83,13 +92,14 @@ test("a shared unreachable result traps in either selected arm", async () => {
 test("an unselected ifValue arm does not evaluate a trapping result", async () => {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
+  const state = cpuStateAccess.bind(body);
   const output = body.ifValue(
     values.external(0),
     (then) => then.values.binary("div_u", then.values.external(1), then.values.external(2)),
     (otherwise) => otherwise.values.const(7)
   );
 
-  body.operation(stateWrite.create({ slot: gprChannel("eax"), value: output }));
+  state.write(state.gpr("eax"), output);
 
   const block: IrBlock = { values, body: body.build() };
   const { stateView, run } = await instantiateIrBlock(block, 3);

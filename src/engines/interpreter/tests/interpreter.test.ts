@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { gprChannel } from "#ir/slots.js";
+import { gprChannel } from "#core/state/channels.js";
 import type { RegName } from "#core/types.js";
 import { fetchPageFaultStop, readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import {

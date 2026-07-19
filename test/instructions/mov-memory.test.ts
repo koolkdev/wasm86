@@ -471,7 +471,7 @@ async function assertFaultingMemoryCase(
 }
 
 function completion(targetEip: number): CompiledInstructionCompletion {
-  return { kind: "linkStub", targetEip };
+  return { kind: "completed", targetEip };
 }
 
 function pageFaultStop(address: number, errorCode: number): CompiledInstructionCompletion {

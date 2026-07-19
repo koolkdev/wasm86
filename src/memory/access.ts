@@ -1,9 +1,8 @@
+import type { DynamicByteOriginRef } from "#compiler/ir/resource.js";
 import {
   resourceRead,
   resourceWrite
 } from "#compiler/ir/operations/resource.js";
-import type { DynamicByteOriginRef } from "#compiler/ir/resource.js";
-import type { ValueTable } from "#compiler/ir/values/table.js";
 import type {
   IntegerWidth,
   ValueId
@@ -27,36 +26,56 @@ export type MemoryAccess<
 > = Readonly<{
   range: LinearRange;
   origin: DynamicByteOriginRef;
-  invalid: ValueId;
+  faulted: ValueId;
   fault: Readonly<{
     address: ValueId;
     intent: TIntent;
   }>;
 }>;
 
-type MemoryAccessBuilderOptions = Readonly<{
-  values: ValueTable;
-  currentBody(): Pick<RegionBuilder, "operation">;
-}>;
-
-type MemoryReadOptions = Readonly<{
+export type MemoryReadOptions = Readonly<{
   signed?: boolean;
 }>;
 
-export class MemoryAccessBuilder {
-  readonly #values: ValueTable;
-  readonly #currentBody: () => Pick<RegionBuilder, "operation">;
+export type MemoryAccessOperations = Readonly<{
+  resolve<TIntent extends MemoryAccessIntent>(
+    range: LinearRange,
+    intent: TIntent
+  ): MemoryAccess<TIntent>;
+  read(
+    access: MemoryAccess,
+    byteOffset: ValueId,
+    width: IntegerWidth,
+    options?: MemoryReadOptions
+  ): ValueId;
+  write(
+    access: MemoryAccess<"write">,
+    byteOffset: ValueId,
+    value: ValueId,
+    width: IntegerWidth
+  ): void;
+}>;
 
-  constructor(options: MemoryAccessBuilderOptions) {
-    this.#values = options.values;
-    this.#currentBody = options.currentBody;
+export type MemoryAccessConstruction = Readonly<{
+  bind(region: RegionBuilder): MemoryAccessOperations;
+}>;
+
+export const guestMemoryAccess: MemoryAccessConstruction = {
+  bind: (region) => new FlatMemoryAccessBuilder(region)
+};
+
+class FlatMemoryAccessBuilder implements MemoryAccessOperations {
+  readonly #region: RegionBuilder;
+
+  constructor(region: RegionBuilder) {
+    this.#region = region;
   }
 
   resolve<TIntent extends MemoryAccessIntent>(
     range: LinearRange,
     intent: TIntent
   ): MemoryAccess<TIntent> {
-    return flatMemoryAccess(this.#values, range, intent);
+    return flatMemoryAccess(this.#region.values, range, intent);
   }
 
   read(
@@ -65,17 +84,20 @@ export class MemoryAccessBuilder {
     width: IntegerWidth,
     options: MemoryReadOptions = {}
   ): ValueId {
+    const region = this.#region;
     const source = flatMemoryOperand(
-      this.#values,
+      region.values,
       access,
       byteOffset,
       width
     );
     const signed = options.signed === true && width !== 32;
 
-    return this.#currentBody().operation(
-      resourceRead.create(signed ? { source, mode: { kind: "signed" } } : { source })
-    );
+    return region.operation(resourceRead.create(
+      signed
+        ? { source, mode: { kind: "signed" } }
+        : { source }
+    ));
   }
 
   write(
@@ -84,15 +106,14 @@ export class MemoryAccessBuilder {
     value: ValueId,
     width: IntegerWidth
   ): void {
+    const region = this.#region;
     const destination = flatMemoryOperand(
-      this.#values,
+      region.values,
       access,
       byteOffset,
       width
     );
 
-    this.#currentBody().operation(
-      resourceWrite.create({ destination, value })
-    );
+    region.operation(resourceWrite.create({ destination, value }));
   }
 }

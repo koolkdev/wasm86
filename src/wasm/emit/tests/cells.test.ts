@@ -2,10 +2,10 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { ValueTable } from "#compiler/ir/values/table.js";
+import { cpuStateAccess } from "#cpu/state.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
-import { gprChannel } from "#ir/slots.js";
-import { stateWrite } from "#ir/tests/storage-op-helpers.js";
+import { gprChannel } from "#core/state/channels.js";
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateChannel
@@ -18,10 +18,11 @@ import {
 test("cell reads and writes execute through placement-owned storage", async () => {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
+  const state = cpuStateAccess.bind(body);
   const cell = body.cell(values.const(37));
   const output = body.read(cell);
 
-  body.push(stateWrite(gprChannel("eax"), output));
+  state.write(state.gpr("eax"), output);
   const block: IrBlock = { values, body: body.build() };
   const { run, stateView } = await instantiateIrBlock(block);
 
@@ -39,7 +40,9 @@ test("a cell read producer can realize in a nested body", async () => {
   const output = body.read(cell);
 
   body.if(condition, (then) => {
-    then.push(stateWrite(gprChannel("eax"), output));
+    const state = cpuStateAccess.bind(then);
+
+    state.write(state.gpr("eax"), output);
   });
   const block: IrBlock = { values, body: body.build() };
   const { run, stateView } = await instantiateIrBlock(block, 1);
@@ -51,6 +54,7 @@ test("a cell read producer can realize in a nested body", async () => {
 test("branch arms start from the incoming cell snapshot and join the selected write", async () => {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
+  const state = cpuStateAccess.bind(body);
   const condition = values.external(0);
   const cell = body.cell(values.const(11));
 
@@ -61,13 +65,15 @@ test("branch arms start from the incoming cell snapshot and join the selected wr
       elseBuild: (otherwise) => {
         const incoming = otherwise.read(cell);
 
-        otherwise.push(stateWrite(gprChannel("ebx"), incoming));
+        const branchState = cpuStateAccess.bind(otherwise);
+
+        branchState.write(branchState.gpr("ebx"), incoming);
       }
     }
   );
   const joined = body.read(cell);
 
-  body.push(stateWrite(gprChannel("eax"), joined));
+  state.write(state.gpr("eax"), joined);
   const block: IrBlock = { values, body: body.build() };
   const { run, stateView } = await instantiateIrBlock(block, 1);
 
@@ -85,13 +91,14 @@ test("branch arms start from the incoming cell snapshot and join the selected wr
 test("an i64 cell local preserves its value through i32 truncation", async () => {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
+  const state = cpuStateAccess.bind(body);
   const cell = body.cell(values.const64(1n));
 
   body.write(cell, values.const64(0x1234_5678_89ab_cdefn));
   const wide = body.read(cell);
   const low = values.truncate64(32, wide);
 
-  body.push(stateWrite(gprChannel("eax"), low));
+  state.write(state.gpr("eax"), low);
   const block: IrBlock = { values, body: body.build() };
   const { run, stateView } = await instantiateIrBlock(block);
 

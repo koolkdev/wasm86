@@ -1,17 +1,18 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { regDynamicBinding, immBinding, regBinding } from "#ir/operands.js";
+import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { regDynamicBinding, immBinding, regBinding } from "#core/instruction/bindings.js";
 import {
   gprChannel,
   segmentAccessChannel,
   segmentBaseChannel,
   segmentLimitChannel,
-  segmentSelectorChannel,
-  type SegmentChannelField,
-  type StateChannel
-} from "#ir/slots.js";
+  segmentSelectorChannel
+} from "#core/state/channels.js";
+import type { InstructionStateChannel } from "#core/instruction/state/channels.js";
+import type { SegmentStateField } from "#core/state/channels.js";
 import type { IrBlock } from "#ir/block.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -23,9 +24,10 @@ import { xchgSemantic } from "#core/semantics/xchg.js";
 import { assertLazyFlagState, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
-import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import { RegionBuilder } from "#ir/region-builder.js";
+import { operandRead, operandWrite } from "#ir/tests/storage-op-helpers.js";
 import { flatMemoryAccess } from "#memory/flat.js";
+import { cpuStateAccess } from "#cpu/state.js";
 
 // One emitted handler body per op+width, with the register indices arriving
 // as wasm params at run time.
@@ -38,7 +40,7 @@ function assertCompleted(exit: bigint): void {
   strictEqual(exit, irBlockCompleted);
 }
 
-function segmentChannel(reg: "es" | "fs" | "gs", field: SegmentChannelField): StateChannel {
+function segmentChannel(reg: "es" | "fs" | "gs", field: SegmentStateField): InstructionStateChannel {
   switch (field) {
     case "selector":
       return segmentSelectorChannel(reg);
@@ -52,9 +54,9 @@ function segmentChannel(reg: "es" | "fs" | "gs", field: SegmentChannelField): St
 }
 
 test("one add r/m32, r32 body serves several runtime register pairs", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
+  builder.add(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
 
@@ -79,9 +81,9 @@ test("one add r/m32, r32 body serves several runtime register pairs", async () =
 });
 
 test("dst == src reads the original value for the result and the flags", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
+  builder.add(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
 
@@ -99,10 +101,10 @@ test("dst == src reads the original value for the result and the flags", async (
 });
 
 test("a static read before a dynamic write to the same register keeps the old value", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(movSemantic(32), [regBinding("ecx"), regBinding("ebx")], loc(0x1000, 0x1002));
-  builder.addInstruction(movSemantic(32), [regDynamicBinding(0), immBinding(0x99)], loc(0x1002, 0x1008));
+  builder.add(movSemantic(32), [regBinding("ecx"), regBinding("ebx")], loc(0x1000, 0x1002));
+  builder.add(movSemantic(32), [regDynamicBinding(0), immBinding(0x99)], loc(0x1002, 0x1008));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 1);
 
@@ -112,10 +114,10 @@ test("a static read before a dynamic write to the same register keeps the old va
   strictEqual(readRegister(stateView, "ebx"), 0x99);
 });
 
-test("xchg r/mDyn, ebx swaps through the dynamic slot", async () => {
-  const builder = createIrBlockBuilder();
+test("xchg r/mDyn, ebx swaps through the dynamic register access", async () => {
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(xchgSemantic(32), [regDynamicBinding(0), regBinding("ebx")], loc(0x1000, 0x1002));
+  builder.add(xchgSemantic(32), [regDynamicBinding(0), regBinding("ebx")], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 1);
 
@@ -131,9 +133,9 @@ test("xchg r/mDyn, ebx swaps through the dynamic slot", async () => {
 });
 
 test("one add r/m8, r8 body serves low and high byte registers", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(aluSemantic("add", 8), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
+  builder.add(aluSemantic("add", 8), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
 
@@ -174,15 +176,18 @@ function modrmRegField(values: ValueTable, modrm: ValueId): ValueId {
 
 test("a computed index extracts the registers from a modrm-style external", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const modrm = values.external(0);
   const reg = modrmRegField(values, modrm);
   const rm = values.binary("and", modrm, values.const(7));
+  const source = state.dynamicGpr(reg, 32);
+  const destination = state.dynamicGpr(rm, 32);
   const loaded = values.addActionOutput();
   const block: IrBlock = {
     body: {
       actions: [
-        stateRead(loaded, { kind: "gprDynamic", index: reg, byteLength: 4 }),
-        stateWrite({ kind: "gprDynamic", index: rm, byteLength: 4 }, loaded)
+        operandRead(loaded, source),
+        operandWrite(destination, loaded)
       ]
     },
     values
@@ -199,15 +204,18 @@ test("a computed index extracts the registers from a modrm-style external", asyn
 
 test("a computed index drives byte access on both the read and the write path", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const modrm = values.external(0);
   const reg = modrmRegField(values, modrm);
   const rm = values.binary("and", modrm, values.const(7));
+  const source = state.dynamicGpr(reg, 8);
+  const destination = state.dynamicGpr(rm, 8);
   const loaded = values.addActionOutput(fitsUnsigned(8));
   const block: IrBlock = {
     body: {
       actions: [
-        stateRead(loaded, { kind: "gprDynamic", index: reg, byteLength: 1 }),
-        stateWrite({ kind: "gprDynamic", index: rm, byteLength: 1 }, loaded)
+        operandRead(loaded, source),
+        operandWrite(destination, loaded)
       ]
     },
     values
@@ -224,9 +232,9 @@ test("a computed index drives byte access on both the read and the write path", 
 });
 
 test("a 16-bit dynamic access touches two bytes of the indexed word", async () => {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(aluSemantic("add", 16), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
+  builder.add(aluSemantic("add", 16), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
 
   const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
 
@@ -238,18 +246,27 @@ test("a 16-bit dynamic access touches two bytes of the indexed word", async () =
   assertLazyFlagState(stateView, { kind: "ADD", width: 16, a: 0x8001, b: 0x8002 });
 });
 
-test("static segment slots round-trip selectors and loaded hidden state", async () => {
+test("static segment ranges round-trip selectors and loaded hidden state", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const fields = ["selector", "base", "limit", "access"] as const;
+  const sourceOperands = fields.map((field) => state.segment("es", field));
+  const destinationOperands = fields.map((field) => state.segment("gs", field));
   const inputs = fields.map((_, index) => values.external(index));
   const loaded = fields.map((field) => values.addActionOutput(field === "selector" ? fitsUnsigned(16) : undefined));
   const block: IrBlock = {
     values,
     body: {
       actions: [
-        ...fields.map((field, index) => stateWrite(segmentChannel("es", field), inputs[index]!)),
-        ...fields.map((field, index) => stateRead(loaded[index]!, segmentChannel("es", field))),
-        ...fields.map((field, index) => stateWrite(segmentChannel("gs", field), loaded[index]!))
+        ...sourceOperands.map((operand, index) =>
+          operandWrite(operand, inputs[index]!)
+        ),
+        ...sourceOperands.map((operand, index) =>
+          operandRead(loaded[index]!, operand)
+        ),
+        ...destinationOperands.map((operand, index) =>
+          operandWrite(operand, loaded[index]!)
+        )
       ]
     }
   };
@@ -264,25 +281,30 @@ test("static segment slots round-trip selectors and loaded hidden state", async 
   }
 });
 
-test("dynamic segment slots use separate contiguous arrays for every loaded field", async () => {
+test("dynamic segment accesses use separate contiguous arrays for every loaded field", async () => {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const fields = ["selector", "base", "limit", "access"] as const;
   const targetIndex = values.external(0);
   const inputs = fields.map((_, index) => values.external(index + 1));
+  const operands = fields.map((field) =>
+    state.dynamicSegment(targetIndex, field)
+  );
+  const destinationOperands = fields.map((field) => state.segment("fs", field));
   const loaded = fields.map((field) => values.addActionOutput(field === "selector" ? fitsUnsigned(16) : undefined));
   const block: IrBlock = {
     values,
     body: {
       actions: [
-        ...fields.map((field, index) => stateWrite(
-          { kind: "segmentDynamic", index: targetIndex, field },
-          inputs[index]!
-        )),
-        ...fields.map((field, index) => stateRead(
-          loaded[index]!,
-          { kind: "segmentDynamic", index: targetIndex, field }
-        )),
-        ...fields.map((field, index) => stateWrite(segmentChannel("fs", field), loaded[index]!))
+        ...operands.map((operand, index) =>
+          operandWrite(operand, inputs[index]!)
+        ),
+        ...operands.map((operand, index) =>
+          operandRead(loaded[index]!, operand)
+        ),
+        ...destinationOperands.map((operand, index) =>
+          operandWrite(operand, loaded[index]!)
+        )
       ]
     }
   };
@@ -304,12 +326,13 @@ test("a dynamic memory check evaluates each semantic operand once", async () => 
   const address = values.external(0);
   const byteLength = values.external(1);
   const body = new RegionBuilder(values);
+  const state = cpuStateAccess.bind(body);
   const fault = flatMemoryAccess(
     values,
     { start: address, byteLength },
     "read"
-  ).invalid;
-  body.push(stateWrite(gprChannel("eax"), fault));
+  ).faulted;
+  state.write(state.gprChannel(gprChannel("eax")), fault);
   const block: IrBlock = {
     values,
     body: body.build()
@@ -335,17 +358,18 @@ test("nested dynamic memory checks compose through the value graph", async () =>
   const innerByteLength = values.external(1);
   const outerByteLength = values.external(2);
   const body = new RegionBuilder(values);
+  const state = cpuStateAccess.bind(body);
   const innerFault = flatMemoryAccess(
     values,
     { start: innerAddress, byteLength: innerByteLength },
     "read"
-  ).invalid;
+  ).faulted;
   const outerFault = flatMemoryAccess(
     values,
     { start: innerFault, byteLength: outerByteLength },
     "read"
-  ).invalid;
-  body.push(stateWrite(gprChannel("eax"), outerFault));
+  ).faulted;
+  state.write(state.gprChannel(gprChannel("eax")), outerFault);
   const block: IrBlock = {
     values,
     body: body.build()

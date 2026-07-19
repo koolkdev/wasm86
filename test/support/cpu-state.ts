@@ -1,35 +1,88 @@
 import { strictEqual } from "node:assert";
 
 import { assert } from "#common/assert.js";
-import { LAZY_FLAGS_KIND } from "#core/flags/state.js";
-import { x86StatusFlags, x86Flags, type X86Flag, type X86StatusFlag } from "#core/flags/definitions.js";
-import { u32 } from "#core/numeric.js";
-import { reg32, segmentRegisters } from "#core/types.js";
-import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import {
-  eipChannel,
-  flagChannel,
+  flagStateFields,
+  isConcreteFlagStateField
+} from "#core/flags/layout.js";
+import { x86StatusFlags, x86Flags, type X86Flag, type X86StatusFlag } from "#core/flags/definitions.js";
+import type { SegmentStateField } from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
+import { registerAlias } from "#core/registers.js";
+import { u32 } from "#core/numeric.js";
+import { reg32, segmentRegisters, type SegmentRegister } from "#core/types.js";
+import { cpuState } from "#cpu/state.js";
+import { instructionCountField } from "#cpu/instruction-count.js";
+import {
+  type ArrayRef,
+  type FieldRef,
+  type LayoutByteLength,
+  type LayoutWidth
+} from "#compiler/layout/handles.js";
+import type { InstructionStateChannel } from "#core/instruction/state/channels.js";
+import {
   gprChannel,
-  instructionCountChannel,
-  lazyFlagsAChannel,
-  lazyFlagsBChannel,
-  lazyFlagsKindChannel,
   segmentAccessChannel,
   segmentBaseChannel,
   segmentLimitChannel,
-  segmentSelectorChannel,
-  type StateChannel
-} from "#ir/slots.js";
-import { executionStateLayout, stateSlotLocation, type StateLocation } from "#ir/state-layout.js";
-import {
-  wasmCpuStateFields,
-  type WasmCpuState,
-  type WasmCpuStateField,
-  type WasmCpuStateInit,
-  type WasmCpuStateSnapshot
-} from "#wasm/host/cpu-state.js";
+  segmentSelectorChannel
+} from "#core/state/channels.js";
 
-export type { WasmCpuStateField, WasmCpuStateInit, WasmCpuStateSnapshot } from "#wasm/host/cpu-state.js";
+export const wasmCpuStateFields = [
+  "eax",
+  "ecx",
+  "edx",
+  "ebx",
+  "esp",
+  "ebp",
+  "esi",
+  "edi",
+  "eip",
+  "instructionCount",
+  "lazyFlagsKind",
+  "lazyFlagsA",
+  "lazyFlagsB",
+  "CF",
+  "PF",
+  "AF",
+  "ZF",
+  "SF",
+  "OF",
+  "DF",
+  "TF",
+  "NT",
+  "AC",
+  "ID",
+  "esSelector",
+  "csSelector",
+  "ssSelector",
+  "dsSelector",
+  "fsSelector",
+  "gsSelector",
+  "esBase",
+  "csBase",
+  "ssBase",
+  "dsBase",
+  "fsBase",
+  "gsBase",
+  "esLimit",
+  "csLimit",
+  "ssLimit",
+  "dsLimit",
+  "fsLimit",
+  "gsLimit",
+  "esAccess",
+  "csAccess",
+  "ssAccess",
+  "dsAccess",
+  "fsAccess",
+  "gsAccess"
+] as const;
+
+export type WasmCpuStateField = (typeof wasmCpuStateFields)[number];
+export type WasmCpuStateSnapshot = Record<WasmCpuStateField, number>;
+export type WasmCpuStateInit = Partial<WasmCpuStateSnapshot>;
 export type WasmCpuStatusFlag = X86StatusFlag;
 export type WasmCpuExpectedLazyFlagState = Readonly<{
   kind: keyof typeof LAZY_FLAGS_KIND;
@@ -45,10 +98,11 @@ type WasmCpuLazyFlagStateSnapshot = Pick<
 
 export const wasmCpuStateSnapshotFields = wasmCpuStateFields;
 
+const gprByteLength = { 8: 1, 16: 2, 32: 4 } as const;
 const wasmCpuStateFieldLocations = createWasmCpuStateFieldLocations();
 
 export function createWasmCpuStateSnapshot(overrides: WasmCpuStateInit = {}): WasmCpuStateSnapshot {
-  const view = new DataView(new ArrayBuffer(executionStateLayout.byteLength));
+  const view = new DataView(new ArrayBuffer(cpuState.layout.byteLength));
 
   writeWasmCpuStateSnapshot(view, overrides);
 
@@ -65,10 +119,6 @@ export function readWasmCpuStateSnapshot(view: DataView): WasmCpuStateSnapshot {
   return state;
 }
 
-export function readWasmCpuState(state: WasmCpuState): WasmCpuStateSnapshot {
-  return readWasmCpuStateSnapshot(new DataView(state.memory.buffer));
-}
-
 export function writeWasmCpuStateSnapshot(view: DataView, state: WasmCpuStateInit): void {
   for (const field of wasmCpuStateSnapshotFields) {
     writeWasmCpuStateField(view, field, state[field] ?? 0);
@@ -76,13 +126,13 @@ export function writeWasmCpuStateSnapshot(view: DataView, state: WasmCpuStateIni
 }
 
 export function readWasmCpuStateField(view: DataView, field: WasmCpuStateField): number {
-  const resolved = resolveLocation(wasmCpuStateFieldLocations[field]);
+  const resolved = wasmCpuStateFieldLocations[field];
 
   return readUnsigned(view, resolved.offset, resolved.byteLength);
 }
 
 export function writeWasmCpuStateField(view: DataView, field: WasmCpuStateField, value: number): void {
-  const resolved = resolveLocation(wasmCpuStateFieldLocations[field]);
+  const resolved = wasmCpuStateFieldLocations[field];
   const normalized = (x86Flags as readonly string[]).includes(field)
     ? (value === 0 ? 0 : 1)
     : value;
@@ -118,29 +168,31 @@ export function assertLazyFlagState(
   }
 }
 
-export function readWasmCpuStateChannel(view: DataView, channel: StateChannel): number {
-  const resolved = resolveLocation(stateSlotLocation(channel));
+export function readWasmCpuStateChannel(view: DataView, channel: InstructionStateChannel): number {
+  const resolved = channelLocation(channel);
 
   return readUnsigned(view, resolved.offset, resolved.byteLength);
 }
 
-export function writeWasmCpuStateChannel(view: DataView, channel: StateChannel, value: number): void {
-  if (channel.kind === "flag") {
-    writeWasmCpuFlagByte(view, channel.flag, value);
+export function writeWasmCpuStateChannel(view: DataView, channel: InstructionStateChannel, value: number): void {
+  if (channel.kind === "field" && isConcreteFlagStateField(channel)) {
+    const resolved = fieldLocation(channel);
+
+    view.setUint8(resolved.offset, value === 0 ? 0 : 1);
     return;
   }
 
-  const resolved = resolveLocation(stateSlotLocation(channel));
+  const resolved = channelLocation(channel);
 
   writeUnsigned(view, resolved.offset, resolved.byteLength, value);
 }
 
 export function readWasmCpuFlagByte(view: DataView, flag: X86Flag): number {
-  return readWasmCpuStateChannel(view, flagChannel(flag));
+  return readWasmCpuStateChannel(view, flagStateFields.concrete[flag]);
 }
 
 export function writeWasmCpuFlagByte(view: DataView, flag: X86Flag, value: number): void {
-  const resolved = resolveLocation(stateSlotLocation(flagChannel(flag)));
+  const resolved = fieldLocation(flagStateFields.concrete[flag]);
 
   view.setUint8(resolved.offset, value === 0 ? 0 : 1);
 }
@@ -175,49 +227,90 @@ export function assertWasmCpuStateFields(
   }
 }
 
-function createWasmCpuStateFieldLocations(): Record<WasmCpuStateField, StateLocation> {
-  const locations = {} as Record<WasmCpuStateField, StateLocation>;
+type ResolvedLocation = Readonly<{
+  offset: number;
+  byteLength: LayoutByteLength;
+}>;
+
+function createWasmCpuStateFieldLocations(): Record<WasmCpuStateField, ResolvedLocation> {
+  const locations = {} as Record<WasmCpuStateField, ResolvedLocation>;
 
   for (const reg of reg32) {
-    locations[reg] = stateSlotLocation(gprChannel(reg));
+    locations[reg] = channelLocation(gprChannel(reg));
   }
-  locations.eip = stateSlotLocation(eipChannel);
-  locations.instructionCount = stateSlotLocation(instructionCountChannel);
-  locations.lazyFlagsKind = stateSlotLocation(lazyFlagsKindChannel);
-  locations.lazyFlagsA = stateSlotLocation(lazyFlagsAChannel);
-  locations.lazyFlagsB = stateSlotLocation(lazyFlagsBChannel);
+  locations.eip = fieldLocation(coreStateFields.eip);
+  locations.instructionCount = fieldLocation(instructionCountField);
+  locations.lazyFlagsKind = fieldLocation(flagStateFields.lazyKind);
+  locations.lazyFlagsA = fieldLocation(flagStateFields.lazyA);
+  locations.lazyFlagsB = fieldLocation(flagStateFields.lazyB);
 
   for (const flag of x86Flags) {
-    locations[flag] = stateSlotLocation(flagChannel(flag));
+    locations[flag] = fieldLocation(flagStateFields.concrete[flag]);
   }
   for (const reg of segmentRegisters) {
-    locations[`${reg}Selector`] = stateSlotLocation(segmentSelectorChannel(reg));
-    locations[`${reg}Base`] = stateSlotLocation(segmentBaseChannel(reg));
-    locations[`${reg}Limit`] = stateSlotLocation(segmentLimitChannel(reg));
-    locations[`${reg}Access`] = stateSlotLocation(segmentAccessChannel(reg));
+    locations[`${reg}Selector`] = channelLocation(segmentSelectorChannel(reg));
+    locations[`${reg}Base`] = channelLocation(segmentBaseChannel(reg));
+    locations[`${reg}Limit`] = channelLocation(segmentLimitChannel(reg));
+    locations[`${reg}Access`] = channelLocation(segmentAccessChannel(reg));
   }
 
   return locations;
 }
 
-function resolveLocation(location: StateLocation): Readonly<{
-  offset: number;
-  byteLength: 1 | 2 | 4;
-}> {
-  switch (location.kind) {
+function channelLocation(channel: InstructionStateChannel): ResolvedLocation {
+  switch (channel.kind) {
     case "field":
-      return executionStateLayout.field(location.field);
-    case "element": {
-      const array = executionStateLayout.array(location.array);
-
-      assert(location.index < array.count, `state element index ${location.index} is out of range`);
-      return {
-        offset: array.offset + location.index * array.stride + location.byteOffset,
-        byteLength: location.byteLength
-      };
+      return fieldLocation(channel);
+    case "gpr": {
+      const alias = registerAlias(channel.reg);
+      return arrayElementLocation(
+        coreStateFields.gprs,
+        coreStateFields.gprs.elementIndex(alias.base),
+        alias.bitOffset / 8,
+        gprByteLength[alias.width]
+      );
     }
-    case "array":
-      assert(false, "a dynamic state array has no static test address");
+    case "segment": {
+      const array = segmentArray(channel.field);
+      return arrayElementLocation(
+        array,
+        array.elementIndex(channel.reg),
+        0,
+        cpuState.layout.array(array).elementByteLength
+      );
+    }
+  }
+}
+
+function fieldLocation(field: FieldRef): ResolvedLocation {
+  return cpuState.layout.field(field);
+}
+
+function arrayElementLocation<TWidth extends LayoutWidth>(
+  arrayRef: ArrayRef<TWidth>,
+  index: number,
+  byteOffset: number,
+  byteLength: LayoutByteLength
+): ResolvedLocation {
+  const array = cpuState.layout.array(arrayRef);
+
+  assert(index < array.count, `state element index ${index} is out of range`);
+  return {
+    offset: array.offset + index * array.stride + byteOffset,
+    byteLength
+  };
+}
+
+function segmentArray(field: SegmentStateField): ArrayRef<"u16" | "u32", SegmentRegister> {
+  switch (field) {
+    case "selector":
+      return coreStateFields.segmentSelectors;
+    case "base":
+      return coreStateFields.segmentBases;
+    case "limit":
+      return coreStateFields.segmentLimits;
+    case "access":
+      return coreStateFields.segmentAccess;
   }
 }
 

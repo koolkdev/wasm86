@@ -17,8 +17,8 @@ import {
   functionRef,
   signatureRef
 } from "#compiler/program/refs.js";
-import { resourceRef } from "#compiler/ir/resource.js";
-import { statusFlagResolverType } from "#core/flags/resolvers.js";
+import { cpuState } from "#cpu/state.js";
+import { statusFlagResolverType } from "#core/flags/lazy/resolvers.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
 import { guestMemoryResource } from "#memory/resource.js";
@@ -165,7 +165,7 @@ function createIrBlockProgram(
   );
   const entrySignature = signatureRef("test.ir-block-entry-signature");
   const entry = functionRef("test.ir-block-entry");
-  const cpuState = resourceRef("test.ir-block-cpu-state");
+  const cpuStateRef = cpuState.resource;
 
   builder.signature({ ref: entrySignature, type: entryType });
   builder.signature({
@@ -173,7 +173,7 @@ function createIrBlockProgram(
     type: statusFlagResolverType
   });
   builder.importMemory({
-    ref: cpuState,
+    ref: cpuStateRef,
     moduleName: wasmImport.namespace,
     name: wasmImport.cpuStateMemoryName,
     limits: { minPages: 1 }
@@ -188,13 +188,13 @@ function createIrBlockProgram(
     ref: entry,
     signature: entrySignature,
     calls: [],
-    resources: [cpuState, guestMemoryResource],
+    resources: [cpuStateRef, guestMemoryResource],
     globals: [],
     tables: [],
     irBlocks: [{ block, allowImplicitEntryFallthrough: true }],
     build: (bindings) => {
       assert(
-        bindings.resources.get(cpuState) === wasmMemoryIndex.cpuState,
+        bindings.resources.get(cpuStateRef) === wasmMemoryIndex.cpuState,
         "unexpected CPU-state memory import index"
       );
       assert(

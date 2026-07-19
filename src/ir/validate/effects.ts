@@ -31,7 +31,6 @@ function validateDeclaredAccesses(
     );
 
     switch (access.space) {
-      case "state":
       case "cell":
         break;
       case "resource":

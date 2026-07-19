@@ -1,13 +1,16 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { SemanticTemplate, StatusFlagValues } from "#core/semantics/builder.js";
+import type { StatusFlagValues } from "#core/flags/values.js";
+import type { SemanticTemplate } from "#core/semantics/builder.js";
 import type { ValueInput } from "#core/semantics/refs.js";
 import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
 import {
   addFlagSource,
   logicFlagSource,
-  subFlagSource,
+  subFlagSource
+} from "#core/flags/lazy/sources.js";
+import {
   writeAddFlags,
   writeDecFlags,
   writeIncFlags,
@@ -27,8 +30,8 @@ import {
 test("ADD and SUB flag writers write every arithmetic flag value from caller-provided results", () => {
   for (const op of ["add", "sub"] as const) {
     const trace = buildHelperTrace((s, v) => {
-      const left = s.get(s.operand(0), 32);
-      const right = s.get(s.operand(1), 32);
+      const left = s.read(s.operand(0), { width: 32 });
+      const right = s.read(s.operand(1), { width: 32 });
       const result = op === "add"
         ? v.truncate(32, v.binary("add", left, right))
         : v.truncate(32, v.binary("sub", left, right));
@@ -39,7 +42,7 @@ test("ADD and SUB flag writers write every arithmetic flag value from caller-pro
         writeSubFlags(s, v, { width: 32, left, right, result });
       }
 
-      s.set(s.operand(0), result);
+      s.write(s.operand(0), result, { width: 32 });
     });
     const write = onlyFlagWrite(trace);
 
@@ -51,8 +54,8 @@ test("arithmetic flag source helpers wrap precomputed results without setting op
   let addSource: ReturnType<typeof addFlagSource> | undefined;
   let subSource: ReturnType<typeof subFlagSource> | undefined;
   const trace = buildHelperTrace((s, v) => {
-    const left = s.get(s.operand(0), 16);
-    const right = s.get(s.operand(1), 16);
+    const left = s.read(s.operand(0), { width: 16 });
+    const right = s.read(s.operand(1), { width: 16 });
     const addResult = v.truncate(16, v.binary("add", left, right));
     const subResult = v.truncate(16, v.binary("sub", left, right));
 
@@ -73,8 +76,8 @@ test("arithmetic flag source helpers wrap precomputed results without setting op
 
 test("logic flag source helper wraps a precomputed logic result", () => {
   const trace = buildHelperTrace((s, v) => {
-    const left = s.get(s.operand(0), 32);
-    const right = s.get(s.operand(1), 32);
+    const left = s.read(s.operand(0), { width: 32 });
+    const right = s.read(s.operand(1), { width: 32 });
     const result = v.truncate(32, v.binary("and", left, right));
 
     s.writeStatusFlagsSource(logicFlagSource({ width: 32, result }));
@@ -91,7 +94,7 @@ test("INC and DEC helpers preserve CF by writing only the other status flags", (
     ["dec", writeDecFlags]
   ] as const) {
     const trace = buildHelperTrace((s, v) => {
-      const input = s.get(s.operand(0), 8);
+      const input = s.read(s.operand(0), { width: 8 });
       const one = v.const(1);
       const result = name === "inc" ? v.binary("add", input, one) : v.binary("sub", input, one);
 
@@ -109,7 +112,7 @@ test("INC and DEC helpers preserve CF by writing only the other status flags", (
 
 test("NEG helper follows x86 CF and OF rules", () => {
   const trace = buildHelperTrace((s, v) => {
-    const input = s.get(s.operand(0), 8);
+    const input = s.read(s.operand(0), { width: 8 });
     const result = v.binary("sub", v.const(0), input);
 
     writeNegFlags(s, v, { width: 8, input, result });
@@ -126,8 +129,8 @@ test("NEG helper follows x86 CF and OF rules", () => {
 
 test("parity formulas use popcnt over only the low byte", () => {
   const trace = buildHelperTrace((s, v) => {
-    const left = s.get(s.operand(0), 32);
-    const right = s.get(s.operand(1), 32);
+    const left = s.read(s.operand(0), { width: 32 });
+    const right = s.read(s.operand(1), { width: 32 });
     const result = v.truncate(32, v.binary("add", left, right));
 
     writeAddFlags(s, v, { width: 32, left, right, result });
@@ -143,8 +146,8 @@ test("parity formulas use popcnt over only the low byte", () => {
 test("sign and overflow formulas consume the operation sign bit", () => {
   for (const width of [8, 16, 32] as const) {
     const trace = buildHelperTrace((s, v) => {
-      const left = s.get(s.operand(0), width);
-      const right = s.get(s.operand(1), width);
+      const left = s.read(s.operand(0), { width });
+      const right = s.read(s.operand(1), { width });
       const result = v.truncate(width, v.binary("add", left, right));
 
       writeAddFlags(s, v, { width, left, right, result });
@@ -159,8 +162,8 @@ test("sign and overflow formulas consume the operation sign bit", () => {
 test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
   let addCarryIn: ValueInput | undefined;
   const addTrace = buildHelperTrace((s, v) => {
-    const left = s.get(s.operand(0), 8);
-    const right = s.get(s.operand(1), 8);
+    const left = s.read(s.operand(0), { width: 8 });
+    const right = s.read(s.operand(1), { width: 8 });
 
     addCarryIn = v.compare(8, "ne", left, v.const(0));
     const result = v.truncate(8, v.binary("add", v.binary("add", left, right), addCarryIn));
@@ -177,8 +180,8 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
 
   let subBorrowIn: ValueInput | undefined;
   const subTrace = buildHelperTrace((s, v) => {
-    const left = s.get(s.operand(0), 8);
-    const right = s.get(s.operand(1), 8);
+    const left = s.read(s.operand(0), { width: 8 });
+    const right = s.read(s.operand(1), { width: 8 });
 
     subBorrowIn = v.compare(8, "ne", right, v.const(0));
     const result = v.truncate(8, v.binary("sub", v.binary("sub", left, right), subBorrowIn));
@@ -197,12 +200,12 @@ test("carryIn and borrowIn helpers use ADC/SBB-style carry selects", () => {
 test("flag writers use the supplied result value for result-derived flags", () => {
   let result: ValueInput | undefined;
   const trace = buildHelperTrace((s, v) => {
-    const left = s.get(s.operand(0), 16);
-    const right = s.get(s.operand(1), 16);
+    const left = s.read(s.operand(0), { width: 16 });
+    const right = s.read(s.operand(1), { width: 16 });
 
     result = v.truncate(16, v.binary("add", left, right));
     writeAddFlags(s, v, { width: 16, left, right, result });
-    s.set(s.operand(0), result, 16);
+    s.write(s.operand(0), result, { width: 16 });
   });
 
   ok(result !== undefined, "expected captured result");
@@ -219,15 +222,15 @@ test("flag writers use the supplied result value for result-derived flags", () =
 test("logic source helpers build source-backed results without direct conditions", () => {
   for (const op of ["and", "or", "xor"] as const) {
     const trace = buildHelperTrace((s, v) => {
-      const left = s.get(s.operand(0), 8);
-      const right = s.get(s.operand(1), 8);
+      const left = s.read(s.operand(0), { width: 8 });
+      const right = s.read(s.operand(1), { width: 8 });
       const result = op === "and"
         ? v.binary("and", left, right)
         : op === "or"
           ? v.binary("or", left, right)
           : v.binary("xor", left, right);
 
-      s.set(s.operand(0), result, 8);
+      s.write(s.operand(0), result, { width: 8 });
       s.writeStatusFlagsSource(logicFlagSource({ width: 8, result }));
     });
 
@@ -238,9 +241,9 @@ test("logic source helpers build source-backed results without direct conditions
 
 test("shift flag writer consumes the masked count and supplied result", () => {
   const trace = buildHelperTrace((s, v) => {
-    const value = v.truncate(16, s.get(s.operand(0), 16));
-    const count = v.binary("and", s.get(s.operand(1), 8), v.const(0x1f));
-    const result = s.get(s.operand(2), 16);
+    const value = v.truncate(16, s.read(s.operand(0), { width: 16 }));
+    const count = v.binary("and", s.read(s.operand(1), { width: 8 }), v.const(0x1f));
+    const result = s.read(s.operand(2), { width: 16 });
 
     writeShiftFlags(s, v, {
       op: "shl",
@@ -261,8 +264,8 @@ test("shift flag writer consumes the masked count and supplied result", () => {
 
 test("rotate flag writer updates only carry and overflow", () => {
   const trace = buildHelperTrace((s, v) => {
-    const result = s.get(s.operand(0), 8);
-    const count = s.get(s.operand(1), 8);
+    const result = s.read(s.operand(0), { width: 8 });
+    const count = s.read(s.operand(1), { width: 8 });
     const carry = v.binary("and", result, v.const(1));
     const carryDefined = v.compare(32, "ne", count, v.const(0));
 

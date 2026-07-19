@@ -1,19 +1,13 @@
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   SemanticsBuilder,
+  SemanticUpdate,
   SemanticTemplate
 } from "#core/semantics/builder.js";
 import { bitAt, lowBit, signBit } from "#core/flags/values.js";
 import type { Value } from "#core/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
-import { semanticFlagOps } from "./flag-value-ops.js";
 import { writeRotateFlags } from "./flag-writes.js";
-import {
-  readStorage,
-  resolveStorageReadWrite,
-  type ResolvedStorageAccess,
-  writeStorage
-} from "./memory.js";
 import { readShiftCount, type ShiftCountSource } from "./shift.js";
 
 export type RotateOp = "rol" | "ror" | "rcl" | "rcr";
@@ -27,21 +21,19 @@ export function rotateSemantic(
   width: OperandWidth,
   countSource: ShiftCountSource
 ): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
-
-    const dstStorage = resolveStorageReadWrite(s, v, context, dst, width);
-
-    const value = v.truncate(width, readStorage(s, v, dstStorage, width));
+    const destination = s.update(dst, { width });
+    const value = v.truncate(width, destination.read(s));
     const rawCount = readShiftCount(s, v, countSource);
     const count = v.binary("and", rawCount, v.const(0x1f));
 
     if (op === "rol" || op === "ror") {
-      writePlainRotate(s, v, op, width, value, count, dstStorage);
+      writePlainRotate(s, v, op, width, value, count, destination);
       return;
     }
 
-    writeCarryRotate(s, v, op, width, value, count, dstStorage);
+    writeCarryRotate(s, v, op, width, value, count, destination);
   };
 }
 
@@ -52,12 +44,11 @@ function writePlainRotate(
   width: OperandWidth,
   value: Value,
   count: Value,
-  dst: ResolvedStorageAccess<"write">
+  dst: SemanticUpdate
 ): void {
   const effective = rotateCount(v, width, count);
   const result = v.truncate(width, rotateI32(v, rotateDirection(op), width, value, effective));
-  const ops = semanticFlagOps(v);
-  const carry = op === "rol" ? lowBit(ops, result) : signBit(ops, width, result);
+  const carry = op === "rol" ? lowBit(v, result) : signBit(v, width, result);
   const countIsNonZero = countNonZero(v, count);
 
   writeRotateFlags(s, v, {
@@ -68,7 +59,7 @@ function writePlainRotate(
     carry,
     carryDefined: countIsNonZero
   });
-  writeStorage(s, v, dst, result, width);
+  dst.write(s, result);
 }
 
 function writeCarryRotate(
@@ -78,7 +69,7 @@ function writeCarryRotate(
   width: OperandWidth,
   value: Value,
   count: Value,
-  dst: ResolvedStorageAccess<"write">
+  dst: SemanticUpdate
 ): void {
   const oldCf = s.readFlag("CF");
   const effective = throughCarryCount(v, width, count);
@@ -96,7 +87,7 @@ function writeCarryRotate(
     carryDefined: effectiveNonZero,
     oldCf
   });
-  writeStorage(s, v, dst, result, width);
+  dst.write(s, result);
 }
 
 function rotateI32(
@@ -173,7 +164,7 @@ function rotateThroughCarry32(
 
   return {
     result: v.truncate(width, rotated),
-    carry: bitAt(semanticFlagOps(v), rotated, width)
+    carry: bitAt(v, rotated, width)
   };
 }
 
@@ -211,7 +202,7 @@ function rotateThroughCarry64(
   return {
     result: v.truncate64(32, rotated),
     carry: lowBit(
-      semanticFlagOps(v),
+      v,
       v.truncate64(32, v.binary64("shr_u", rotated, extendU64(v, v.const(32))))
     )
   };

@@ -22,12 +22,10 @@ import type { CallAction, ReturnCallAction } from "#ir/actions.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
 
 export type ValueEmitterContext = Readonly<{
   body: WasmFunctionBodyEncoder;
-  scratch: WasmLocalScratchAllocator;
   values: ValueTable;
   analysis: BodyAnalysis;
   plan: PlacementPlan;
@@ -71,9 +69,6 @@ export class ValueEmitter implements OperationValueEmitter {
 
     this.#operationTarget = {
       body: context.body,
-      withTemporaryLocal: (type, callback) => {
-        context.scratch.withLocals([wasmTypeForValue(type)], ([local]) => callback(local));
-      },
       cellLocal: (cell) => this.#cellLocal(cell),
       resourceIndex: (resource) => context.resourceIndex(resource)
     };

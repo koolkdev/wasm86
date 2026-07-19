@@ -1,27 +1,27 @@
 import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { eipChannel, gprChannel } from "#ir/slots.js";
+import { coreStateFields } from "#core/state/layout.js";
 import type { IrBlock } from "#ir/block.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
+import { cpuState, cpuStateAccess } from "#cpu/state.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 import type { RunStop } from "#cpu/cpu.js";
-import { decodeExit } from "#cpu/exit.js";
-import { buildException } from "#cpu/exit.js";
+import { buildExit, decodeExit } from "#cpu/exit.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { FallthroughTarget } from "#wasm/emit/embed.js";
 import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
+import { exceptionExit } from "#core/exits.js";
 import { assertPageFaultException } from "#cpu/tests/stop-fixtures.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { instantiateFunctionBody } from "./harness.js";
-import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 import { RegionBuilder } from "#ir/region-builder.js";
-import { stateRead as stateReadOperation } from "#compiler/ir/operations/state.js";
+import { operandWrite } from "#ir/tests/storage-op-helpers.js";
 import { resourceRead } from "#compiler/ir/operations/resource.js";
 import {
   flatMemoryAccess,
@@ -38,13 +38,24 @@ type DecodeReadFragment = Readonly<{
   fetched: ValueId;
 }>;
 
+const stateResourceIndices = new Map([
+  [cpuState.resource, wasmMemoryIndex.cpuState]
+]);
+const decodeResourceIndices = new Map([
+  [cpuState.resource, wasmMemoryIndex.cpuState],
+  [guestMemoryResource, wasmMemoryIndex.guest]
+]);
+
 function dispatchFragment(targetEip: number): IrBlock {
   const values = new ValueTable();
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
+  const eip = state.field(coreStateFields.eip);
   const target = values.const(targetEip);
 
   return {
     body: {
       actions: [
+        operandWrite(eip, target),
         { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
       ]
     },
@@ -57,7 +68,9 @@ function dispatchFragment(targetEip: number): IrBlock {
 function decodeReadFragment(k: number): DecodeReadFragment {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
-  const eipValue = builder.operation(stateReadOperation.create({ slot: eipChannel }));
+  const state = cpuStateAccess.bind(builder);
+  const eip = state.field(coreStateFields.eip);
+  const eipValue = state.read(eip);
   const address = values.binary("add", eipValue, values.const(k));
   const byteLength = values.const(1);
   const access = flatMemoryAccess(
@@ -65,17 +78,22 @@ function decodeReadFragment(k: number): DecodeReadFragment {
     { start: address, byteLength },
     "instructionFetch"
   );
-  const faultResult = buildException(
+  const faultResult = buildExit(
     values,
-    pageFault(address, PageFaultErrorCode.INSTRUCTION_FETCH)
+    exceptionExit(
+      pageFault(
+        address,
+        values.const(PageFaultErrorCode.INSTRUCTION_FETCH)
+      )
+    )
   );
   builder.push({
     kind: "if",
-    condition: access.invalid,
+    condition: access.faulted,
     hint: "unlikely",
     thenBody: {
       actions: [
-        stateWrite(eipChannel, eipValue),
+        operandWrite(eip, eipValue),
         {
           kind: "finish",
           finish: {
@@ -104,7 +122,7 @@ async function instantiateDecodeRead(fallthrough: FallthroughTarget) {
   emitActionFragment(fragment.block, {
     body,
     scratch,
-    resourceIndices: new Map([[guestMemoryResource, wasmMemoryIndex.guest]]),
+    resourceIndices: decodeResourceIndices,
     embedding: { fallthrough, outputs: new Map([[fragment.fetched, fetchedLocal]]) }
   });
   body.localGet(fetchedLocal).i64ExtendI32U();
@@ -141,6 +159,7 @@ test("a dispatching fragment requires a dispatch embedding", () => {
       emitActionFragment(dispatchFragment(0x20), {
         body,
         scratch,
+        resourceIndices: stateResourceIndices,
         embedding: {}
       }),
     /dispatch action requires embedding\.dispatch/
@@ -156,6 +175,7 @@ test("dispatch br target skips later enclosing harness-style actions", async () 
   emitActionFragment(dispatchFragment(0x20), {
     body,
     scratch,
+    resourceIndices: stateResourceIndices,
     embedding: {
       dispatch: { kind: "br", depth: 0 },
       fallthrough: { kind: "fallthrough" }
@@ -183,7 +203,7 @@ test("the instruction-fetch fault edge keeps the encoded return", async () => {
   assertPageFaultException(decoded.exception);
   strictEqual(decoded.exception.linearAddress, eip + 2);
   strictEqual(decoded.exception.errorCode, PageFaultErrorCode.INSTRUCTION_FETCH);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), eip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), eip);
 });
 
 test("fallthrough br target lands on the embedder label across the fragment's nesting", async () => {
@@ -196,7 +216,7 @@ test("fallthrough br target lands on the embedder label across the fragment's ne
   emitActionFragment(fragment.block, {
     body,
     scratch,
-    resourceIndices: new Map([[guestMemoryResource, wasmMemoryIndex.guest]]),
+    resourceIndices: decodeResourceIndices,
     embedding: {
       fallthrough: { kind: "br", depth: 0 },
       outputs: new Map([[fragment.fetched, fetchedLocal]])
@@ -228,7 +248,7 @@ test("consecutive fragments share the embedder's scratch locals", async () => {
     emitActionFragment(fragment.block, {
       body,
       scratch,
-      resourceIndices: new Map([[guestMemoryResource, wasmMemoryIndex.guest]]),
+      resourceIndices: decodeResourceIndices,
       embedding: {
         fallthrough: { kind: "fallthrough" },
         outputs: new Map([[fragment.fetched, local]])
@@ -256,41 +276,4 @@ test("consecutive fragments share the embedder's scratch locals", async () => {
   guestView.setUint8(0x13, 0x12);
 
   strictEqual(run(), 0x1234n);
-});
-
-test("an exported register read pins across a later overlapping store", async () => {
-  const values = new ValueTable();
-  const readValue = values.addActionOutput();
-  const incremented = values.binary("add", readValue, values.const(1));
-  const block: IrBlock = {
-    body: {
-      actions: [
-        stateRead(readValue, gprChannel("eax")),
-        stateWrite(gprChannel("eax"), incremented)
-      ]
-    },
-    values
-  };
-  const body = new WasmFunctionBodyEncoder();
-  const scratch = new WasmLocalScratchAllocator(body);
-  const readLocal = scratch.allocLocal(wasmValueType.i32);
-
-  emitActionFragment(block, {
-    body,
-    scratch,
-    embedding: {
-      fallthrough: { kind: "fallthrough" },
-      outputs: new Map([[readValue, readLocal]])
-    }
-  });
-  body.localGet(readLocal).i64ExtendI32U();
-  scratch.freeLocal(readLocal);
-  scratch.assertClear();
-
-  const { stateView, run } = await instantiateFunctionBody(body.finish());
-
-  writeWasmCpuStateSnapshot(stateView, { eax: 5 });
-
-  strictEqual(run(), 5n);
-  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 6);
 });

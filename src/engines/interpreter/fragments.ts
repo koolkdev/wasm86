@@ -1,8 +1,10 @@
 import { assert } from "#common/assert.js";
-import { stateRead } from "#compiler/ir/operations/state.js";
-import { buildException } from "#cpu/exit.js";
+import { buildExit } from "#cpu/exit.js";
+import { cpuState } from "#cpu/state.js";
+import { StateAccess } from "#core/state/access.js";
+import { coreStateFields } from "#core/state/layout.js";
 import { pageFault, pageFaultErrorCode } from "#core/exceptions.js";
-import { eipChannel } from "#ir/slots.js";
+import { exceptionExit } from "#core/exits.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -13,12 +15,13 @@ import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
-import { MemoryAccessBuilder } from "#memory/access.js";
+import { guestMemoryAccess } from "#memory/access.js";
 
 // Decode reads as action fragments: a guarded instruction fetch is Memory's
-// flat predicate + if + resource.read with a decode-fault body, and the decoded values leave
-// through exported outputs. This file builds the blocks; everything is
-// emitted by the action emitter and fragment bodies fall through naturally.
+// fault predicate + if + resource.read with a decode-fault body, and the
+// decoded values leave through exported outputs. This file builds the blocks;
+// everything is emitted by the action emitter and fragment bodies fall
+// through naturally.
 
 export type FragmentEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -35,10 +38,8 @@ export type DecodeCursor =
 
 class DecodeFragment {
   readonly #builder = new RegionBuilder(new ValueTable());
-  readonly #memory = new MemoryAccessBuilder({
-    values: this.#builder.values,
-    currentBody: () => this.#builder
-  });
+  readonly #state = new StateAccess(cpuState).bind(this.#builder);
+  readonly #memory = guestMemoryAccess.bind(this.#builder);
   readonly #externalLocals = new Map<ExternalValueId, number>();
   readonly #externalsByLocal = new Map<number, ValueId>();
   readonly #outputs = new Map<ValueId, number>();
@@ -63,13 +64,11 @@ class DecodeFragment {
   }
 
   readEip(): ValueId {
-    return this.#builder.operation(stateRead.create({ slot: eipChannel }));
+    return this.#state.readField(coreStateFields.eip);
   }
 
   readGprWord(index: ValueId): ValueId {
-    return this.#builder.operation(
-      stateRead.create({ slot: { kind: "gprDynamic", index, byteLength: 4 } })
-    );
+    return this.#state.read(this.#state.dynamicGpr(index, 32));
   }
 
   // The scaled-index term: zero when the index field selects "none" (4).
@@ -91,12 +90,17 @@ class DecodeFragment {
     );
 
     this.#builder.if(
-      access.invalid,
+      access.faulted,
       (faultBody) => faultBody.finish({
         kind: "exit",
-        result: buildException(
+        result: buildExit(
           this.values,
-          pageFault(access.fault.address, pageFaultErrorCode("instructionFetch"))
+          exceptionExit(
+            pageFault(
+              access.fault.address,
+              this.values.const(pageFaultErrorCode("instructionFetch"))
+            )
+          )
         )
       }),
       { hint: "unlikely" }

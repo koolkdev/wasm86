@@ -2,64 +2,59 @@ import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
 import type { Value, ValueInput } from "#core/semantics/refs.js";
 import type { OperandWidth, RegName } from "#core/types.js";
-import { addFlagSource, subFlagSource } from "./flag-writes.js";
-import {
-  readStorage,
-  resolveMemoryAccess,
-  resolveStorageRead,
-  resolveStorageReadWrite,
-  writeStorage
-} from "./memory.js";
+import { addFlagSource, subFlagSource } from "#core/flags/lazy/sources.js";
 
 export function cmpxchgSemantic(width: OperandWidth): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
     const acc = s.reg(accumulator(width));
 
-    const dstAccess = resolveStorageReadWrite(s, v, context, dst, width);
-    const srcAccess = resolveStorageRead(s, v, context, src, width);
-
-    const oldDst = v.truncate(width, readStorage(s, v, dstAccess, width));
-    const oldSrc = v.truncate(width, readStorage(s, v, srcAccess, width));
-    const oldAcc = v.truncate(width, s.get(acc, width));
+    const destination = s.update(dst, { width });
+    const oldDst = v.truncate(width, destination.read(s));
+    const oldSrc = v.truncate(width, s.read(src, { width }));
+    const oldAcc = v.truncate(width, s.read(acc, { width }));
     const result = v.truncate(width, v.binary("sub", oldAcc, oldDst));
     const equal = v.compare(width, "eq", oldAcc, oldDst);
 
     s.writeStatusFlagsSource(subFlagSource({ width, left: oldAcc, right: oldDst, result }));
     s.ifElse(
       equal,
-      (then, thenValues) => writeStorage(then, thenValues, dstAccess, oldSrc, width),
-      (otherwise) => otherwise.set(acc, oldDst, width)
+      (then) => destination.write(then, oldSrc),
+      (otherwise) => otherwise.write(acc, oldDst, { width })
     );
   };
 }
 
 export function xaddSemantic(width: OperandWidth): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    const dstAccess = resolveStorageReadWrite(s, v, context, dst, width);
-    const srcAccess = resolveStorageReadWrite(s, v, context, src, width);
-
-    const oldDst = v.truncate(width, readStorage(s, v, dstAccess, width));
-    const oldSrc = v.truncate(width, readStorage(s, v, srcAccess, width));
+    const destination = s.update(dst, { width });
+    const source = s.update(src, { width });
+    const oldDst = v.truncate(width, destination.read(s));
+    const oldSrc = v.truncate(width, source.read(s));
     const result = v.truncate(width, v.binary("add", oldDst, oldSrc));
 
     s.writeStatusFlagsSource(addFlagSource({ width, left: oldDst, right: oldSrc, result }));
-    writeStorage(s, v, srcAccess, oldDst, width);
-    writeStorage(s, v, dstAccess, result, width);
+    source.write(s, oldDst);
+    destination.write(s, result);
   };
 }
 
 export function cmpxchg8bSemantic(): SemanticTemplate {
   return (s, v) => {
-    const access = resolveMemoryAccess(s, s.operandMem(s.operand(0)), v.const(8), "write");
-    const oldLo = s.memoryRead(access, v.const(0), 32);
-    const oldHi = s.memoryRead(access, v.const(4), 32);
-    const oldEax = s.get(s.reg("eax"), 32);
-    const oldEdx = s.get(s.reg("edx"), 32);
+    const access = s.memory.access({
+      reference: s.memory.operand(s.operand(0)),
+      byteLength: v.const(8),
+      intent: "write"
+    });
+
+    const oldLo = s.memory.read(access, { width: 32 });
+    const oldHi = s.memory.read(access, { width: 32, byteOffset: v.const(4) });
+    const oldEax = s.read(s.reg("eax"), { width: 32 });
+    const oldEdx = s.read(s.reg("edx"), { width: 32 });
     const equal = and(
       v,
       v.compare(32, "eq", oldEax, oldLo),
@@ -68,11 +63,18 @@ export function cmpxchg8bSemantic(): SemanticTemplate {
 
     s.writeFlag("ZF", equal);
     s.if(equal, (then, thenValues) => {
-      then.memoryWrite(access, thenValues.const(0), then.get(then.reg("ebx"), 32), 32);
-      then.memoryWrite(access, thenValues.const(4), then.get(then.reg("ecx"), 32), 32);
+      then.memory.write(access, {
+        width: 32,
+        value: then.read(then.reg("ebx"), { width: 32 })
+      });
+      then.memory.write(access, {
+        width: 32,
+        byteOffset: thenValues.const(4),
+        value: then.read(then.reg("ecx"), { width: 32 })
+      });
     });
-    s.set(s.reg("eax"), v.select(equal, oldEax, oldLo), 32);
-    s.set(s.reg("edx"), v.select(equal, oldEdx, oldHi), 32);
+    s.write(s.reg("eax"), v.select(equal, oldEax, oldLo), { width: 32 });
+    s.write(s.reg("edx"), v.select(equal, oldEdx, oldHi), { width: 32 });
   };
 }
 

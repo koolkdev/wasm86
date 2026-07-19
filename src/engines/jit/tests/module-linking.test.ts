@@ -3,8 +3,13 @@ import { test } from "node:test";
 
 import { decodeIsaBlock } from "#core/decoder/decode-block.js";
 import { ByteArrayDecodeReader } from "#core/decoder/tests/helpers.js";
-import { createWasmHostMemories, type WasmHostMemories } from "#wasm/host/memories.js";
-import { assertLazyFlagState, readWasmCpuState, wasmCpuStatusFlagsOf } from "#test/support/cpu-state.js";
+import {
+  assertLazyFlagState,
+  readWasmCpuStateSnapshot,
+  wasmCpuStatusFlagsOf,
+  writeWasmCpuStateSnapshot
+} from "#test/support/cpu-state.js";
+import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 import { compileActionWasmBlockHandle, type WasmBlockHandle } from "#engines/jit/block-handle.js";
 
 const aEip = 0x1000;
@@ -17,10 +22,12 @@ test("unlinked final static jmp uses module-local fallback stub", () => {
   ]);
   const a = compileBlock(fixture, aEip);
 
-  fixture.memories.cpuState.load({ eip: aEip });
+  const stateView = new DataView(fixture.memories.cpuStateMemory.buffer);
+
+  writeWasmCpuStateSnapshot(stateView, { eip: aEip });
 
   const run = a.run();
-  const state = readWasmCpuState(fixture.memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, { kind: "linkStub", targetEip: bEip });
   strictEqual(state.eip, bEip);
@@ -33,10 +40,12 @@ test("unlinked final static call uses module-local fallback stub", () => {
   ]);
   const a = compileBlock(fixture, aEip);
 
-  fixture.memories.cpuState.load({ eip: aEip, esp: 0x80 });
+  const stateView = new DataView(fixture.memories.cpuStateMemory.buffer);
+
+  writeWasmCpuStateSnapshot(stateView, { eip: aEip, esp: 0x80 });
 
   const run = a.run();
-  const state = readWasmCpuState(fixture.memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
   const returnAddress = aEip + incEaxCallRel32(aEip, bEip).length;
 
   deepStrictEqual(run.exit, { kind: "linkStub", targetEip: bEip });
@@ -54,10 +63,12 @@ test("constant-folded indirect jump target uses module-local fallback stub", () 
   ]);
   const a = compileBlock(fixture, aEip);
 
-  fixture.memories.cpuState.load({ eip: aEip });
+  const stateView = new DataView(fixture.memories.cpuStateMemory.buffer);
+
+  writeWasmCpuStateSnapshot(stateView, { eip: aEip });
 
   const run = a.run();
-  const state = readWasmCpuState(fixture.memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, { kind: "linkStub", targetEip: bEip });
   strictEqual(state.eax, bEip);
@@ -72,10 +83,12 @@ test("unlinked final jmp rel8 uses module-local fallback stub", () => {
   ]);
   const a = compileBlock(fixture, rel8A);
 
-  fixture.memories.cpuState.load({ eip: rel8A });
+  const stateView = new DataView(fixture.memories.cpuStateMemory.buffer);
+
+  writeWasmCpuStateSnapshot(stateView, { eip: rel8A });
 
   const run = a.run();
-  const state = readWasmCpuState(fixture.memories.cpuState);
+  const state = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(run.exit, { kind: "linkStub", targetEip: rel8B });
   strictEqual(state.eip, rel8B);
@@ -91,19 +104,21 @@ test("conditional side exit uses the module-local fallback only when taken", () 
   ]);
   const branch = compileBlock(fixture, aEip);
 
-  fixture.memories.cpuState.load({ eip: aEip });
+  const stateView = new DataView(fixture.memories.cpuStateMemory.buffer);
+
+  writeWasmCpuStateSnapshot(stateView, { eip: aEip });
 
   const takenRun = branch.run();
-  const takenState = readWasmCpuState(fixture.memories.cpuState);
+  const takenState = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(takenRun.exit, { kind: "linkStub", targetEip: takenEip });
   strictEqual(takenState.eip, takenEip);
   strictEqual(takenState.eax, 1);
 
-  fixture.memories.cpuState.load({ eip: aEip, eax: 0xffff_ffff });
+  writeWasmCpuStateSnapshot(stateView, { eip: aEip, eax: 0xffff_ffff });
 
   const notTakenRun = branch.run();
-  const notTakenState = readWasmCpuState(fixture.memories.cpuState);
+  const notTakenState = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(notTakenRun.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(notTakenState.eax, 1);
@@ -118,10 +133,12 @@ test("unlinked conditional side exits and local fallthrough preserve exit-store 
   ]);
   const branch = compileBlock(fixture, aEip);
 
-  fixture.memories.cpuState.load({ eip: aEip, eax: 0 });
+  const stateView = new DataView(fixture.memories.cpuStateMemory.buffer);
+
+  writeWasmCpuStateSnapshot(stateView, { eip: aEip, eax: 0 });
 
   const takenRun = branch.run();
-  const takenState = readWasmCpuState(fixture.memories.cpuState);
+  const takenState = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(takenRun.exit, { kind: "linkStub", targetEip: takenEip });
   strictEqual(takenState.eip, takenEip);
@@ -129,10 +146,10 @@ test("unlinked conditional side exits and local fallthrough preserve exit-store 
   deepStrictEqual(wasmCpuStatusFlagsOf(takenState), noFlags);
   assertLazyFlagState(takenState, { kind: "ADD", width: 32, a: 0, b: 1 }, "taken");
 
-  fixture.memories.cpuState.load({ eip: aEip, eax: 0xffff_ffff });
+  writeWasmCpuStateSnapshot(stateView, { eip: aEip, eax: 0xffff_ffff });
 
   const notTakenRun = branch.run();
-  const notTakenState = readWasmCpuState(fixture.memories.cpuState);
+  const notTakenState = readWasmCpuStateSnapshot(stateView);
 
   deepStrictEqual(notTakenRun.exit, { kind: "hostTrap", vector: 0x2e });
   strictEqual(notTakenState.eax, 0);
@@ -142,9 +159,9 @@ test("unlinked conditional side exits and local fallthrough preserve exit-store 
 
 function createLinkingFixture(blocks: readonly TestBlock[]): Readonly<{
   blocks: readonly TestBlock[];
-  memories: WasmHostMemories;
+  memories: ReturnType<typeof createTestWasmMemories>;
 }> {
-  const memories = createWasmHostMemories();
+  const memories = createTestWasmMemories();
 
   return {
     blocks,

@@ -1,8 +1,10 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
+import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { gprChannel } from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
 import {
   readWasmCpuStateChannel,
   readWasmCpuStateSnapshot,
@@ -30,11 +32,11 @@ test("decoded CBW and CWDE sign-extend into the accumulator without touching fla
   const cwde = await runDecoded([0x98], { eax: 0xaaaa_8000, ...allFlagsSet });
 
   strictEqual(readRegister(cbw.stateView, "eax"), 0xaaaa_ff80);
-  strictEqual(readWasmCpuStateChannel(cbw.stateView, eipChannel), cbw.instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(cbw.stateView, coreStateFields.eip), cbw.instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(cbw.stateView)), allFlagsSet);
 
   strictEqual(readRegister(cwde.stateView, "eax"), 0xffff_8000);
-  strictEqual(readWasmCpuStateChannel(cwde.stateView, eipChannel), cwde.instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(cwde.stateView, coreStateFields.eip), cwde.instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(cwde.stateView)), allFlagsSet);
 });
 
@@ -52,12 +54,12 @@ test("decoded CWD and CDQ sign-extend into the high accumulator without touching
 
   strictEqual(readRegister(cwd.stateView, "eax"), 0xaaaa_8000);
   strictEqual(readRegister(cwd.stateView, "edx"), 0xbbbb_ffff);
-  strictEqual(readWasmCpuStateChannel(cwd.stateView, eipChannel), cwd.instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(cwd.stateView, coreStateFields.eip), cwd.instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(cwd.stateView)), allFlagsSet);
 
   strictEqual(readRegister(cdq.stateView, "eax"), 0x8000_0000);
   strictEqual(readRegister(cdq.stateView, "edx"), 0xffff_ffff);
-  strictEqual(readWasmCpuStateChannel(cdq.stateView, eipChannel), cdq.instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(cdq.stateView, coreStateFields.eip), cdq.instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(cdq.stateView)), allFlagsSet);
 });
 
@@ -76,8 +78,8 @@ async function runDecoded(
 }
 
 function blockOf(instruction: IsaDecodedInstruction) {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(instruction.spec.semantics, [], loc(instruction.address, instruction.nextEip));
+  builder.add(instruction.spec.semantics, [], loc(instruction.address, instruction.nextEip));
   return builder.finish();
 }

@@ -1,16 +1,18 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
+import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
 import {
   memBinding,
   regBinding,
   staticMemSegment,
   type EffectiveAddressTerms,
   type OperandBinding
-} from "#ir/operands.js";
+} from "#core/instruction/bindings.js";
 import { defaultSegmentForBase } from "#core/segments.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
+import { gprChannel } from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok as decoded, startAddress } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
@@ -58,7 +60,7 @@ test("decoded DIV r/m32 lowers through unsigned i64 division and writes EDX:EAX"
   strictEqual(run(), irBlockCompleted);
   strictEqual(readRegister(stateView, "eax"), 0x8000_0000);
   strictEqual(readRegister(stateView, "edx"), 0);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   strictEqual(readWasmCpuStateSnapshot(stateView).DF, 1);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), allFlagsSet);
   assertLazyFlagState(stateView, { kind: "NONE", width: 0 });
@@ -87,7 +89,7 @@ test("decoded IDIV r/m32 lowers through signed i64 division and keeps remainder 
   strictEqual(run(), irBlockCompleted);
   strictEqual(readRegister(stateView, "eax"), 0xffff_fffd);
   strictEqual(readRegister(stateView, "edx"), 0xffff_ffff);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), allFlagsSet);
 });
 
@@ -104,7 +106,7 @@ test("decoded IDIV r/m8 rounds an inexact boundary quotient toward zero", async 
 
   strictEqual(run(), irBlockCompleted);
   strictEqual(readRegister(stateView, "eax"), 0xaaaa_057f);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), allFlagsSet);
 });
 
@@ -123,7 +125,7 @@ test("decoded IDIV r/m32 fills the widest fitting quotient without a divide erro
   strictEqual(run(), irBlockCompleted);
   strictEqual(readRegister(stateView, "eax"), 0x7fff_ffff);
   strictEqual(readRegister(stateView, "edx"), 1);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), allFlagsSet);
 });
 
@@ -237,10 +239,10 @@ test("DIV memory source fault takes priority over divide error", async () => {
 });
 
 function blockOf(instructions: readonly IsaDecodedInstruction[]): IrBlock {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
   for (const instruction of instructions) {
-    builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
+    builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
   }
 
   return builder.finish();

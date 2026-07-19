@@ -3,11 +3,9 @@ import { test } from "node:test";
 
 import { wasmValueType } from "#compiler/encoder/types.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
+import { cpuStatusFlagResolvers } from "#cpu/state.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
-import {
-  statusFlagResolvers,
-  statusFlagResolverType
-} from "#core/flags/resolvers.js";
+import { statusFlagResolverType } from "#core/flags/lazy/resolvers.js";
 import { rmDecodeFunctionType } from "#engines/interpreter/decode.js";
 import { buildInterpreterProgram } from "#engines/interpreter/program.js";
 
@@ -49,7 +47,10 @@ test("interpreter declarations close every decoder and resolver dependency befor
   });
   const rmFunctions = called.filter((fn) => fn.kind === "legacy");
   const resolverFunctions = called.filter((fn) => fn.kind === "function");
-  const expectedResolvers = statusFlagResolvers.members(x86StatusFlags);
+  const expectedResolvers = cpuStatusFlagResolvers.members(x86StatusFlags);
+  const expectedResolversByRef = new Map(
+    expectedResolvers.map((definition) => [definition.ref, definition])
+  );
 
   strictEqual(rmFunctions.length, built.rmDecodeHelpers.length);
   strictEqual(resolverFunctions.length, x86StatusFlags.length);
@@ -67,11 +68,14 @@ test("interpreter declarations close every decoder and resolver dependency befor
     deepStrictEqual(fn.calls, []);
   }
   for (const fn of resolverFunctions) {
+    const expected = expectedResolversByRef.get(fn.ref);
+
+    ok(expected !== undefined, `unexpected status-flag resolver ${fn.ref.id}`);
     strictEqual(
       program.signatures.find((signature) => signature.ref === fn.signature)?.type,
       statusFlagResolverType
     );
-    deepStrictEqual(fn.effects, { reads: [], writes: [] });
+    deepStrictEqual(fn.effects, expected.effects);
     deepStrictEqual(fn.callTargets, []);
   }
 

@@ -1,30 +1,29 @@
+import { assert } from "#common/assert.js";
 import type { Action, CallAction, OpAction } from "#ir/actions.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import {
   resourceRead as resourceReadOperation,
   resourceWrite as resourceWriteOperation
 } from "#compiler/ir/operations/resource.js";
-import {
-  stateRead as stateReadOperation,
-  stateWrite as stateWriteOperation
-} from "#compiler/ir/operations/state.js";
-import type { StateSlot } from "#ir/slots.js";
 import { valueId } from "#compiler/ir/values/id.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { statusFlagResolvers } from "#core/flags/resolvers.js";
+import { cpuStatusFlagResolvers } from "#cpu/state.js";
 import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
 import type { OperandWidth } from "#core/types.js";
 import { guestMemoryResource } from "#memory/resource.js";
-import { DynamicByteOriginRef } from "#compiler/ir/resource.js";
+import {
+  DynamicByteOriginRef,
+  resourceRef,
+  type ResourceByteOperand,
+  type ResourceReadMode,
+  type ResourceEffect
+} from "#compiler/ir/resource.js";
+import { covers } from "#ir/aliasing.js";
 
 type TestValueId = ValueId | number;
 type OperationOf<Kind extends Operation["kind"]> = Extract<Operation, { kind: Kind }>;
 
-export type StateReadAction = OpAction & Readonly<{
-  op: OperationOf<"state.read">;
-  output: ValueId;
-}>;
-export type StateWriteAction = OpAction & Readonly<{ op: OperationOf<"state.write"> }>;
 export type MemoryReadAction = OpAction & Readonly<{
   op: OperationOf<"resource.read">;
   output: ValueId;
@@ -34,21 +33,90 @@ export type StatusFlagCallAction = CallAction & Readonly<{
   outputs: readonly [ValueId];
 }>;
 
-export function stateRead(output: TestValueId, slot: StateSlot): StateReadAction;
-export function stateRead(output: TestValueId, slot: StateSlot, signed: true): StateReadAction;
-export function stateRead(output: TestValueId, slot: StateSlot, signed?: true): StateReadAction {
-  const outputId = valueId(output);
-  const op = signed === true
-    ? stateReadOperation.create({ slot, signed: true })
-    : stateReadOperation.create({ slot });
+export const compilerTestResource = resourceRef("test.compiler-storage");
 
-  return { kind: "op", output: outputId, op };
+export function compilerTestValues(): ValueTable {
+  const values = new ValueTable();
+
+  // Static resource operations need their zero base to precede action outputs.
+  values.const(0);
+  return values;
 }
 
-export function stateWrite(slot: StateSlot, value: TestValueId): StateWriteAction {
+export function compilerTestResourceEffect(
+  region: number,
+  byteLength = 4
+): ResourceEffect {
+  return {
+    space: "resource",
+    resource: compilerTestResource,
+    range: {
+      basis: { kind: "resource" },
+      slice: { byteOffset: region * 4, byteLength }
+    }
+  };
+}
+
+export function resourceReadAction(
+  values: ValueTable,
+  output: TestValueId,
+  region: number,
+  width: OperandWidth = 32,
+  signed?: true
+): MemoryReadAction {
+  const source = {
+    effect: compilerTestResourceEffect(region, width / 8),
+    address: { base: values.const(0), displacement: region * 4 },
+    width
+  };
+  const op = signed === true
+    ? resourceReadOperation.create({ source, mode: { kind: "signed" } })
+    : resourceReadOperation.create({ source });
+
+  return { kind: "op", output: valueId(output), op };
+}
+
+export function resourceWriteAction(
+  values: ValueTable,
+  region: number,
+  value: TestValueId,
+  width: OperandWidth = 32
+): MemoryWriteAction {
   return {
     kind: "op",
-    op: stateWriteOperation.create({ slot, value: valueId(value) })
+    op: resourceWriteOperation.create({
+      destination: {
+        effect: compilerTestResourceEffect(region, width / 8),
+        address: { base: values.const(0), displacement: region * 4 },
+        width
+      },
+      value: valueId(value)
+    })
+  };
+}
+
+export function operandRead(
+  output: TestValueId,
+  source: ResourceByteOperand,
+  mode?: ResourceReadMode
+): MemoryReadAction {
+  const op = resourceReadOperation.create(
+    mode === undefined ? { source } : { source, mode }
+  );
+
+  return { kind: "op", output: valueId(output), op };
+}
+
+export function operandWrite(
+  destination: ResourceByteOperand,
+  value: TestValueId
+): MemoryWriteAction {
+  return {
+    kind: "op",
+    op: resourceWriteOperation.create({
+      destination,
+      value: valueId(value)
+    })
   };
 }
 
@@ -113,48 +181,63 @@ export function memoryWrite(address: TestValueId, value: TestValueId, width: Ope
 
 export function statusFlagCall(
   output: TestValueId,
-  flag: X86StatusFlag,
-  sourceKind: TestValueId,
-  operandA: TestValueId,
-  operandB: TestValueId,
-  concrete: TestValueId
+  flag: X86StatusFlag
 ): StatusFlagCallAction {
   return {
     kind: "call",
-    target: statusFlagResolvers.get(flag),
-    arguments: [sourceKind, operandA, operandB, concrete].map((value) => ({
-      value: valueId(value),
-      type: "i32" as const
-    })),
+    target: cpuStatusFlagResolvers.get(flag),
+    arguments: [],
     outputs: [valueId(output)]
   };
 }
 
-export function isStateRead(action: Action): action is StateReadAction {
-  return action.kind === "op" && action.op.kind === "state.read" && "output" in action && action.output !== undefined;
-}
-
-export function isStateWrite(action: Action): action is StateWriteAction {
-  return action.kind === "op" && action.op.kind === "state.write";
-}
-
 export function isMemoryRead(action: Action): action is MemoryReadAction {
-  return action.kind === "op" && action.op.kind === "resource.read" && "output" in action && action.output !== undefined;
+  return action.kind === "op" &&
+    action.op.kind === "resource.read" &&
+    action.op.effect.resource === guestMemoryResource &&
+    "output" in action &&
+    action.output !== undefined;
 }
 
 export function isMemoryWrite(action: Action): action is MemoryWriteAction {
+  return action.kind === "op" &&
+    action.op.kind === "resource.write" &&
+    action.op.effect.resource === guestMemoryResource;
+}
+
+export function isResourceRead(action: Action): action is MemoryReadAction {
+  return action.kind === "op" &&
+    action.op.kind === "resource.read" &&
+    action.output !== undefined;
+}
+
+export function isResourceWrite(action: Action): action is MemoryWriteAction {
   return action.kind === "op" && action.op.kind === "resource.write";
+}
+
+export function resourceEffectsEqual(
+  left: ResourceEffect,
+  right: ResourceEffect
+): boolean {
+  return covers(left, right) && covers(right, left);
+}
+
+export function resourceWriteValue(action: MemoryWriteAction): ValueId {
+  const input = action.op.inputs.at(-1);
+
+  assert(input !== undefined, "resource write is missing its value input");
+  return input.value;
 }
 
 export function isStatusFlagCall(action: Action): action is StatusFlagCallAction {
   return action.kind === "call" &&
     action.outputs.length === 1 &&
-    x86StatusFlags.some((flag) => action.target === statusFlagResolvers.get(flag));
+    x86StatusFlags.some((flag) => action.target === cpuStatusFlagResolvers.get(flag));
 }
 
 export function resolvedStatusFlag(action: StatusFlagCallAction): X86StatusFlag {
   const flag = x86StatusFlags.find((candidate) =>
-    action.target === statusFlagResolvers.get(candidate)
+    action.target === cpuStatusFlagResolvers.get(candidate)
   );
 
   if (flag === undefined) {

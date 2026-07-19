@@ -14,15 +14,15 @@ import {
   type SignatureRef
 } from "#compiler/program/refs.js";
 import {
-  resourceRef,
   type ResourceRef
 } from "#compiler/ir/resource.js";
+import {
+  cpuState,
+  cpuStatusFlagResolvers
+} from "#cpu/state.js";
 import type { OpcodeDispatchNode } from "#core/decoder/opcode-dispatch.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
-import {
-  statusFlagResolvers,
-  statusFlagResolverType
-} from "#core/flags/resolvers.js";
+import { statusFlagResolverType } from "#core/flags/lazy/resolvers.js";
 import { wasmBlockExportName, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
 import { guestMemoryResource } from "#memory/resource.js";
@@ -72,7 +72,7 @@ export function buildInterpreterProgram(): BuiltInterpreterProgram {
   const declarations = createInterpreterProgram();
   const handlers: InterpreterHandler[] = [];
   const rmFunctions = declareRmDecodeHelpers(declarations, rmDecodeLengths);
-  const resolverFunctions = statusFlagResolvers.members(x86StatusFlags);
+  const resolverFunctions = cpuStatusFlagResolvers.members(x86StatusFlags);
   const run = functionRef("interpreter.run");
   const adapter = new DeclaredDependencyLegacyRootAdapter({
     cpuState: declarations.cpuState,
@@ -113,7 +113,7 @@ function createInterpreterProgram(): InterpreterProgramDeclarations {
   const builder = new ProgramBuilder();
   const runSignature = signatureRef("interpreter.run-signature");
   const rmDecodeSignature = signatureRef("interpreter.rm-decode-signature");
-  const cpuState = resourceRef("interpreter.cpu-state");
+  const cpuStateRef = cpuState.resource;
   const guestMemory = guestMemoryResource;
   const rmGlobals = {
     base: globalRef("interpreter.rm-result.base"),
@@ -131,7 +131,7 @@ function createInterpreterProgram(): InterpreterProgramDeclarations {
     type: statusFlagResolverType
   });
   builder.importMemory({
-    ref: cpuState,
+    ref: cpuStateRef,
     moduleName: wasmImport.namespace,
     name: wasmImport.cpuStateMemoryName,
     limits: { minPages: 1 }
@@ -165,7 +165,7 @@ function createInterpreterProgram(): InterpreterProgramDeclarations {
     builder,
     runSignature,
     rmDecodeSignature,
-    cpuState,
+    cpuState: cpuStateRef,
     guestMemory,
     rmGlobals
   };

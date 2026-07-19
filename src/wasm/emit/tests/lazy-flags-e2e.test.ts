@@ -1,17 +1,18 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { lazyFlagsKindByte } from "#ir/lazy-flags.js";
+import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
 import type { IrBlock } from "#ir/block.js";
-import { immBinding, regBinding, type OperandBinding } from "#ir/operands.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
+import { immBinding, regBinding, type OperandBinding } from "#core/instruction/bindings.js";
+import { gprChannel } from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
 import { CONDITIONS, type ConditionCode, type FlagBoolExpr } from "#core/flags/conditions.js";
 import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import { CONDITION_CODE_DESCRIPTORS } from "#core/instructions/condition-codes.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags, type X86Flag, type X86StatusFlag } from "#core/flags/definitions.js";
-import { LAZY_FLAGS_KIND } from "#core/flags/state.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import { widthMask, type OperandWidth } from "#core/types.js";
 import {
   assertLazyFlagState,
@@ -90,7 +91,7 @@ test("direct-capable live-in conditions fall back to concrete flags for NONE laz
 
     writeWasmCpuStateSnapshot(stateView, { eip: jbe.address, ...state });
     strictEqual(run(), irBlockCompleted, "jbe NONE fallback");
-    strictEqual(readWasmCpuStateChannel(stateView, eipChannel), relTarget(jbe), "jbe NONE fallback eip");
+    strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), relTarget(jbe), "jbe NONE fallback eip");
     assertStatusFlags(stateView, explicitFlags, "jbe NONE fallback");
   }
 
@@ -126,7 +127,7 @@ test("jcc resolves seeded SUB32 lazy flag metadata", async () => {
 
     strictEqual(run(), irBlockCompleted, entry.name);
     strictEqual(
-      readWasmCpuStateChannel(stateView, eipChannel),
+      readWasmCpuStateChannel(stateView, coreStateFields.eip),
       entry.taken ? relTarget(instruction) : instruction.nextEip,
       `${entry.name} eip`
     );
@@ -154,7 +155,7 @@ test("jcc resolves seeded ADD32 lazy flag metadata", async () => {
 
     strictEqual(run(), irBlockCompleted, entry.name);
     strictEqual(
-      readWasmCpuStateChannel(stateView, eipChannel),
+      readWasmCpuStateChannel(stateView, coreStateFields.eip),
       entry.taken ? relTarget(instruction) : instruction.nextEip,
       `${entry.name} eip`
     );
@@ -184,7 +185,7 @@ test("jcc resolves seeded LOGIC_RESULT lazy flag metadata", async () => {
 
     strictEqual(run(), irBlockCompleted, entry.name);
     strictEqual(
-      readWasmCpuStateChannel(stateView, eipChannel),
+      readWasmCpuStateChannel(stateView, coreStateFields.eip),
       entry.taken ? relTarget(instruction) : instruction.nextEip,
       `${entry.name} eip`
     );
@@ -218,7 +219,7 @@ test("setcc resolves seeded SUB32 lazy flag metadata", async () => {
       0x55aa_5500 + (evaluateCondition(CONDITIONS.BE.expr, flagSet(lazyFlags)) ? 1 : 0),
       label
     );
-    strictEqual(readWasmCpuStateChannel(stateView, eipChannel), 0x1003, `${label} eip`);
+    strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), 0x1003, `${label} eip`);
     assertStatusFlags(stateView, explicitFlags, label);
   }
 });
@@ -250,7 +251,7 @@ test("setcc resolves seeded SUB8 and SUB16 lazy flag metadata", async () => {
       0x55aa_5500 + (evaluateCondition(CONDITIONS.BE.expr, flagSet(lazyFlags)) ? 1 : 0),
       label
     );
-    strictEqual(readWasmCpuStateChannel(stateView, eipChannel), 0x1003, `${label} eip`);
+    strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), 0x1003, `${label} eip`);
     assertStatusFlags(stateView, explicitFlags, label);
   }
 });
@@ -281,7 +282,7 @@ test("setcc resolves seeded LOGIC_RESULT lazy flag metadata", async () => {
       0x55aa_5500 + (evaluateCondition(CONDITIONS.BE.expr, flagSet(lazyFlags)) ? 1 : 0),
       label
     );
-    strictEqual(readWasmCpuStateChannel(stateView, eipChannel), 0x1003, `${label} eip`);
+    strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), 0x1003, `${label} eip`);
     assertStatusFlags(stateView, explicitFlags, label);
   }
 });
@@ -306,7 +307,7 @@ test("pushfd resolves seeded SUB32 lazy flag metadata", async () => {
   strictEqual(run(), irBlockCompleted);
   strictEqual(guestView.getUint32(0x3c, true), expectedPushfdImage({ ...lazyFlags, ...nonStatusFlags }));
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("esp")), 0x3c);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   assertStatusFlags(stateView, explicitFlags, "pushfd");
 });
 
@@ -330,7 +331,7 @@ test("pushfd resolves seeded LOGIC_RESULT lazy flag metadata", async () => {
   strictEqual(run(), irBlockCompleted);
   strictEqual(guestView.getUint32(0x3c, true), expectedPushfdImage({ ...lazyFlags, ...nonStatusFlags }));
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("esp")), 0x3c);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), instruction.nextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   assertStatusFlags(stateView, explicitFlags, "pushfd logic");
 });
 
@@ -419,7 +420,7 @@ test("jcc consumes LOGIC_RESULT records committed by previous logic blocks", asy
 
     strictEqual(consumerRun.run(), irBlockCompleted, `${entry.name} consumer`);
     strictEqual(
-      readWasmCpuStateChannel(consumerRun.stateView, eipChannel),
+      readWasmCpuStateChannel(consumerRun.stateView, coreStateFields.eip),
       entry.taken ? relTarget(consumer) : consumer.nextEip,
       `${entry.name} consumer eip`
     );
@@ -482,7 +483,7 @@ test("jcc consumes a SUB32 record committed by a previous cmp block", async () =
   writeWasmCpuStateSnapshot(consumerRun.stateView, readWasmCpuStateSnapshot(producerRun.stateView));
 
   strictEqual(consumerRun.run(), irBlockCompleted);
-  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, eipChannel), relTarget(consumer), "cmp32 consumer eip");
+  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, coreStateFields.eip), relTarget(consumer), "cmp32 consumer eip");
   assertStatusFlags(consumerRun.stateView, explicitFlags, "cmp32 consumer");
 });
 
@@ -573,7 +574,7 @@ test("partial flag writer after incoming SUB record materializes preserved CF", 
 
   strictEqual(consumerRun.run(), irBlockCompleted);
   strictEqual(readWasmCpuStateChannel(consumerRun.stateView, gprChannel("ecx")), 0, "partial consumer ecx");
-  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, eipChannel), consumer.nextEip, "partial consumer eip");
+  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, coreStateFields.eip), consumer.nextEip, "partial consumer eip");
   assertStatusFlags(
     consumerRun.stateView,
     { CF: lazyFlags.CF, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 },
@@ -607,7 +608,7 @@ test("partial flag writer after incoming ADD record materializes preserved CF", 
 
   strictEqual(consumerRun.run(), irBlockCompleted);
   strictEqual(readWasmCpuStateChannel(consumerRun.stateView, gprChannel("ecx")), 0, "partial add consumer ecx");
-  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, eipChannel), consumer.nextEip, "partial add consumer eip");
+  strictEqual(readWasmCpuStateChannel(consumerRun.stateView, coreStateFields.eip), consumer.nextEip, "partial add consumer eip");
   assertStatusFlags(
     consumerRun.stateView,
     { CF: lazyFlags.CF, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 },
@@ -632,7 +633,7 @@ test("partial flag writer after incoming LOGIC_RESULT record materializes preser
 
   strictEqual(run(), irBlockCompleted);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 0, "partial logic consumer ecx");
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), consumer.nextEip, "partial logic consumer eip");
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), consumer.nextEip, "partial logic consumer eip");
   assertStatusFlags(
     stateView,
     { CF: lazyFlags.CF, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 },
@@ -691,7 +692,7 @@ async function assertJccReadsLazySub(
 
   strictEqual(run(), irBlockCompleted, `${label} jcc`);
   strictEqual(
-    readWasmCpuStateChannel(stateView, eipChannel),
+    readWasmCpuStateChannel(stateView, coreStateFields.eip),
     taken ? relTarget(instruction) : instruction.nextEip,
     `${label} jcc eip`
   );
@@ -760,10 +761,10 @@ function cmpRegBytes(width: OperandWidth): readonly number[] {
 }
 
 function blockOf(instructions: readonly IsaDecodedInstruction[]): IrBlock {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
   for (const instruction of instructions) {
-    builder.addInstruction(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
+    builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
   }
 
   return builder.finish();

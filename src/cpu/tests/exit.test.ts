@@ -5,11 +5,9 @@ import type { RunStop } from "#cpu/cpu.js";
 import { decodeExit, exitLayout } from "#cpu/exit.js";
 import { encodeVariant, type VariantValue } from "#compiler/layout/variant-codec.js";
 import {
-  deExit,
-  pfExit,
+  exceptionExit,
   segmentExit,
-  trapExit,
-  udExit
+  trapExit
 } from "#core/exits.js";
 import { divideError, invalidOpcode, pageFault } from "#core/exceptions.js";
 import {
@@ -45,17 +43,17 @@ const validExits: readonly Readonly<{
   },
   {
     name: "divide-error",
-    exit: deExit(),
+    exit: exceptionExit(divideError<number>()),
     stop: { kind: "cpuException", exception: divideError() }
   },
   {
     name: "invalid-opcode",
-    exit: udExit(),
+    exit: exceptionExit(invalidOpcode<number>()),
     stop: { kind: "cpuException", exception: invalidOpcode() }
   },
   {
     name: "page-fault",
-    exit: pfExit(0xffff_fffc, 0x8001),
+    exit: exceptionExit(pageFault(0xffff_fffc, 0x8001)),
     stop: {
       kind: "cpuException",
       exception: pageFault(0xffff_fffc, 0x8001)
@@ -64,14 +62,14 @@ const validExits: readonly Readonly<{
 ];
 
 for (const fixture of validExits) {
-  test(`Cpu exit decodes ${fixture.name}`, () => {
+  test(`Cpu exit decoder classifies ${fixture.name}`, () => {
     const encoded = encodeVariant(exitLayout, fixture.exit);
 
     deepStrictEqual(decodeExit(encoded), fixture.stop);
   });
 }
 
-test("Cpu exit rejects zero, unknown tags, and noncanonical payload bits", () => {
+test("Cpu exit decoder rejects zero, unknown tags, and noncanonical payload bits", () => {
   const instructionLimit = encodeVariant(
     exitLayout,
     budgetExit()
@@ -86,13 +84,13 @@ test("Cpu exit rejects zero, unknown tags, and noncanonical payload bits", () =>
   );
 });
 
-test("Cpu exit rejects a segment-load request with an invalid architectural index", () => {
+test("Cpu exit decoder rejects a segment-load request with an invalid architectural index", () => {
   const encoded = encodeVariant(exitLayout, segmentExit(0xff, 0x1234));
 
   throws(() => decodeExit(encoded), /invalid segment index/);
 });
 
-test("legacy JIT transfers are not Cpu exits", () => {
+test("Cpu exit decoder rejects legacy JIT transfers", () => {
   for (const encoded of [
     encodeTransfer({ kind: "dynamicJump" }),
     encodeTransfer({ kind: "linkStub", targetEip: 0x1234 })

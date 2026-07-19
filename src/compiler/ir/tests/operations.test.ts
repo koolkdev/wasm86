@@ -6,7 +6,6 @@ import {
   emitOperation,
   type Operation
 } from "#compiler/ir/operations/index.js";
-import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import {
@@ -24,22 +23,10 @@ import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js"
 import { valueId } from "#compiler/ir/values/id.js";
 import type {
   IntegerWidth,
-  ValueId,
-  WidthBounds
+  ValueId
 } from "#compiler/ir/values/types.js";
-import {
-  flagChannel,
-  gprChannel,
-  lazyFlagsAChannel,
-  lazyFlagsKindChannel,
-  segmentAccessChannel,
-  segmentLimitChannel,
-  segmentSelectorChannel,
-  type StateSlot
-} from "#ir/slots.js";
 
-test("every operation constructs through its owner", () => {
-  const slot = gprChannel("eax");
+test("every normalized operation constructs through its owner", () => {
   const address = valueId(1);
   const value = valueId(3);
   const cell = new CellRef("i32");
@@ -48,8 +35,6 @@ test("every operation constructs through its owner", () => {
     basis: { kind: "dynamic", origin: new DynamicByteOriginRef() }
   };
   const operations = [
-    stateRead.create({ slot }),
-    stateWrite.create({ slot, value }),
     resourceRead.create({ source: byteOperand(resource, range, address, 4, 16) }),
     resourceWrite.create({
       destination: byteOperand(resource, range, address, 4, 16),
@@ -60,8 +45,6 @@ test("every operation constructs through its owner", () => {
   ];
 
   deepStrictEqual(operations.map((operation) => operation.kind), [
-    "state.read",
-    "state.write",
     "resource.read",
     "resource.write",
     "cell.read",
@@ -70,55 +53,30 @@ test("every operation constructs through its owner", () => {
 });
 
 test("operation owners do not copy caller metadata", () => {
+  const resource = resourceRef("test.metadata-resource");
   const args = {
-    slot: gprChannel("eax"),
+    source: byteOperand(
+      resource,
+      { basis: { kind: "resource" } },
+      valueId(0),
+      0,
+      32
+    ),
     loweringMetadata: { kind: "unrelated" },
     callerMetadata: true
   };
-  const operation = stateRead.create(args);
+  const operation = resourceRead.create(args);
 
   strictEqual("loweringMetadata" in operation, false);
   strictEqual("callerMetadata" in operation, false);
 });
 
-test("dynamic byte state definitions expose each semantic input once", () => {
-  const index = valueId(7);
-  const value = valueId(8);
-  const slot: StateSlot = { kind: "gprDynamic", index, byteLength: 1 };
-
-  const read = stateRead.create({ slot });
-  const write = stateWrite.create({ slot, value });
-
-  deepStrictEqual(read.inputs, [{ value: index, type: "i32" }]);
-  deepStrictEqual(read.result, { type: "i32", bounds: fitsUnsigned(8) });
-  deepStrictEqual(read.effects, { reads: [{ space: "state", slot }], writes: [] });
-  deepStrictEqual(write.inputs, [
-    { value: index, type: "i32" },
-    { value, type: "i32" }
-  ]);
-  deepStrictEqual(write.result, undefined);
-  deepStrictEqual(write.effects, { reads: [], writes: [{ space: "state", slot }] });
-});
-
 test("operation inputs are the complete semantic dependencies", () => {
-  const index = valueId(20);
   const address = valueId(21);
   const value = valueId(24);
-  const wordSlot: StateSlot = { kind: "gprDynamic", index, byteLength: 2 };
   const resource = resourceRef("test.inputs-resource");
   const range: ByteRange = { basis: { kind: "resource" } };
 
-  deepStrictEqual(
-    stateRead.create({ slot: wordSlot }).inputs,
-    [{ value: index, type: "i32" }]
-  );
-  deepStrictEqual(
-    stateWrite.create({ slot: wordSlot, value }).inputs,
-    [
-      { value: index, type: "i32" },
-      { value, type: "i32" }
-    ]
-  );
   deepStrictEqual(
     resourceRead.create({
       source: byteOperand(resource, range, address, 0, 32)
@@ -138,21 +96,17 @@ test("operation inputs are the complete semantic dependencies", () => {
 });
 
 test("operation emission consumes every declared input position once", () => {
-  const index = valueId(30);
   const address = valueId(31);
   const value = valueId(33);
   const cell = new CellRef("i32");
   const target = {
     body: new WasmFunctionBodyEncoder(),
-    withTemporaryLocal: (_type: "i32" | "i64", callback: (local: number) => void) => {
-      callback(0);
-    },
     cellLocal: () => 0,
     resourceIndex: () => 0
   };
 
   function emittedUses(operation: Operation) {
-    const uses: typeof index[] = [];
+    const uses: ValueId[] = [];
 
     emitOperation(target, {
       emitUse: (id) => uses.push(id),
@@ -161,19 +115,6 @@ test("operation emission consumes every declared input position once", () => {
     return uses;
   }
 
-  deepStrictEqual(
-    emittedUses(stateRead.create({
-      slot: { kind: "gprDynamic", index, byteLength: 1 }
-    })),
-    [index]
-  );
-  deepStrictEqual(
-    emittedUses(stateWrite.create({
-      slot: { kind: "gprDynamic", index, byteLength: 1 },
-      value
-    })),
-    [index, value]
-  );
   const resource = resourceRef("test.emission-resource");
   const range: ByteRange = { basis: { kind: "resource" } };
 
@@ -195,28 +136,6 @@ test("operation emission consumes every declared input position once", () => {
     emittedUses(cellWrite.create({ cell, value, initialization: "update" })),
     [value]
   );
-});
-
-test("state read bounds retain access width and signedness", () => {
-  const index = valueId(9);
-  const cases: readonly [StateSlot, Readonly<{ signed?: true; accessByteLength?: 1 | 2 }>, WidthBounds | undefined][] = [
-    [gprChannel("al"), {}, fitsUnsigned(8)],
-    [gprChannel("al"), { signed: true }, signExtended(8)],
-    [flagChannel("CF"), {}, fitsUnsigned(1)],
-    [lazyFlagsKindChannel, {}, fitsUnsigned(8)],
-    [lazyFlagsAChannel, { accessByteLength: 1 }, fitsUnsigned(8)],
-    [lazyFlagsAChannel, { signed: true, accessByteLength: 2 }, signExtended(16)],
-    [segmentSelectorChannel("fs"), {}, fitsUnsigned(16)],
-    [segmentLimitChannel("fs"), {}, undefined],
-    [segmentAccessChannel("fs"), {}, undefined],
-    [{ kind: "segmentDynamic", index, field: "limit" }, {}, undefined]
-  ];
-
-  for (const [slot, options, bounds] of cases) {
-    const result = stateRead.create({ slot, ...options }).result;
-
-    deepStrictEqual(result, bounds === undefined ? { type: "i32" } : { type: "i32", bounds });
-  }
 });
 
 test("resource definitions retain identities, ranges, and indexed memory facts", () => {
@@ -262,9 +181,6 @@ test("resource definitions retain identities, ranges, and indexed memory facts",
   const body = new WasmFunctionBodyEncoder();
   const target = {
     body,
-    withTemporaryLocal: () => {
-      throw new Error("resource operation requested a temporary");
-    },
     cellLocal: () => {
       throw new Error("resource operation requested a cell local");
     },

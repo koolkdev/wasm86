@@ -8,14 +8,16 @@ import { test } from "node:test";
 
 import { CellRef } from "#compiler/refs/cell.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { placeBody } from "#compiler/placement/place.js";
 import { validatePlacement } from "#compiler/placement/validate.js";
 import type { OpAction } from "#ir/actions.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { gprChannel } from "#ir/slots.js";
-import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
+import {
+  compilerTestValues,
+  resourceReadAction,
+  resourceWriteAction
+} from "#ir/tests/storage-op-helpers.js";
 
 function write(
   cell: CellRef,
@@ -44,7 +46,7 @@ function place(block: IrBlock, exports: readonly ValueId[] = []) {
 }
 
 test("a referenced cell receives one typed local", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const cell = new CellRef("i32");
   const output = values.addActionOutput();
   const block: IrBlock = {
@@ -53,7 +55,7 @@ test("a referenced cell receives one typed local", () => {
       actions: [
         write(cell, values.const(7), "seed"),
         read(cell, output),
-        stateWrite(gprChannel("eax"), output)
+        resourceWriteAction(values, 0, output)
       ]
     }
   };
@@ -65,7 +67,7 @@ test("a referenced cell receives one typed local", () => {
 });
 
 test("cell locals are allocated when a cell has only writes", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const cell = new CellRef("i32");
   const block: IrBlock = {
     values,
@@ -83,7 +85,7 @@ test("cell locals are allocated when a cell has only writes", () => {
 });
 
 test("distinct cells receive distinct locals with their scalar types", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const narrow = new CellRef("i32");
   const wide = new CellRef("i64");
   const block: IrBlock = {
@@ -107,14 +109,14 @@ test("distinct cells receive distinct locals with their scalar types", () => {
 });
 
 test("nested branch and loop accesses share the declaring cell's local", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const cell = new CellRef("i32");
   const output = values.addActionOutput();
   const loopBody: Body = {
     actions: [
       write(cell, values.const(3), "update"),
       read(cell, output),
-      stateWrite(gprChannel("eax"), output)
+      resourceWriteAction(values, 0, output)
     ]
   };
   const thenBody: Body = {
@@ -136,7 +138,7 @@ test("nested branch and loop accesses share the declaring cell's local", () => {
 });
 
 test("a cell never shares a local with an overlapping value temporary", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const cell = new CellRef("i32");
   const snapshot = values.addActionOutput();
   const output = values.addActionOutput();
@@ -144,12 +146,12 @@ test("a cell never shares a local with an overlapping value temporary", () => {
     values,
     body: {
       actions: [
-        stateRead(snapshot, gprChannel("eax")),
-        stateWrite(gprChannel("eax"), values.const(9)),
+        resourceReadAction(values, snapshot, 0),
+        resourceWriteAction(values, 0, values.const(9)),
         write(cell, values.const(1), "seed"),
         read(cell, output),
-        stateWrite(gprChannel("ebx"), snapshot),
-        stateWrite(gprChannel("ecx"), output)
+        resourceWriteAction(values, 1, snapshot),
+        resourceWriteAction(values, 2, output)
       ]
     }
   };
@@ -178,7 +180,7 @@ test("a cell never shares a local with an overlapping value temporary", () => {
 });
 
 test("placement validation rejects overlapping, mistyped, and stale cell locals", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const first = new CellRef("i32");
   const second = new CellRef("i32");
   const firstOut = values.addActionOutput();
@@ -191,8 +193,8 @@ test("placement validation rejects overlapping, mistyped, and stale cell locals"
         write(second, values.const(2), "seed"),
         read(first, firstOut),
         read(second, secondOut),
-        stateWrite(gprChannel("eax"), firstOut),
-        stateWrite(gprChannel("ebx"), secondOut)
+        resourceWriteAction(values, 0, firstOut),
+        resourceWriteAction(values, 1, secondOut)
       ]
     }
   };
@@ -233,7 +235,7 @@ test("placement validation rejects overlapping, mistyped, and stale cell locals"
 });
 
 test("cells with disjoint lifetimes pool one local", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const first = new CellRef("i32");
   const second = new CellRef("i32");
   const firstOut = values.addActionOutput();
@@ -244,10 +246,10 @@ test("cells with disjoint lifetimes pool one local", () => {
       actions: [
         write(first, values.const(1), "seed"),
         read(first, firstOut),
-        stateWrite(gprChannel("eax"), firstOut),
+        resourceWriteAction(values, 0, firstOut),
         write(second, values.const(2), "seed"),
         read(second, secondOut),
-        stateWrite(gprChannel("ebx"), secondOut)
+        resourceWriteAction(values, 1, secondOut)
       ]
     }
   };
@@ -258,7 +260,7 @@ test("cells with disjoint lifetimes pool one local", () => {
 });
 
 test("a loop-crossing cell stays live through the whole loop", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const outer = new CellRef("i32");
   const inner = new CellRef("i32");
   const outerOut = values.addActionOutput();
@@ -266,10 +268,10 @@ test("a loop-crossing cell stays live through the whole loop", () => {
   const loopBody: Body = {
     actions: [
       read(outer, outerOut),
-      stateWrite(gprChannel("eax"), outerOut),
+      resourceWriteAction(values, 0, outerOut),
       write(inner, values.const(5), "seed"),
       read(inner, innerOut),
-      stateWrite(gprChannel("ebx"), innerOut)
+      resourceWriteAction(values, 1, innerOut)
     ]
   };
   const block: IrBlock = {

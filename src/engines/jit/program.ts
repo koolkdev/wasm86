@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import { u32 } from "#core/numeric.js";
-import { statusFlagResolverType } from "#core/flags/resolvers.js";
+import { statusFlagResolverType } from "#core/flags/lazy/resolvers.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/program/function-type.js";
@@ -15,9 +15,9 @@ import {
   type TableRef
 } from "#compiler/program/refs.js";
 import {
-  resourceRef,
   type ResourceRef
 } from "#compiler/ir/resource.js";
+import { cpuState } from "#cpu/state.js";
 import { wasmImport } from "#wasm/abi.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
 import { guestMemoryResource } from "#memory/resource.js";
@@ -114,7 +114,7 @@ export function jitBlockLinkTargets(ir: IrBlock): readonly number[] {
 function createJitProgram(tableTargetEips: readonly number[]): JitProgram {
   const builder = new ProgramBuilder();
   const blockSignature = signatureRef("jit.block-entry");
-  const cpuState = resourceRef("jit.cpu-state");
+  const cpuStateRef = cpuState.resource;
   const guestMemory = guestMemoryResource;
   const linkTable = tableTargetEips.length === 0 ? undefined : tableRef("jit.links");
 
@@ -127,7 +127,7 @@ function createJitProgram(tableTargetEips: readonly number[]): JitProgram {
     type: statusFlagResolverType
   });
   builder.importMemory({
-    ref: cpuState,
+    ref: cpuStateRef,
     moduleName: wasmImport.namespace,
     name: wasmImport.cpuStateMemoryName,
     limits: { minPages: 1 }
@@ -147,7 +147,13 @@ function createJitProgram(tableTargetEips: readonly number[]): JitProgram {
     });
   }
 
-  return { builder, blockSignature, cpuState, guestMemory, linkTable };
+  return {
+    builder,
+    blockSignature,
+    cpuState: cpuStateRef,
+    guestMemory,
+    linkTable
+  };
 }
 
 function declareLinkStubs(program: JitProgram, targetEips: readonly number[]): void {

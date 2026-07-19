@@ -2,27 +2,47 @@ import { deepStrictEqual, doesNotThrow, ok, strictEqual, throws } from "node:ass
 import { test } from "node:test";
 
 import type { Action } from "#ir/actions.js";
-import { stateRead } from "#compiler/ir/operations/state.js";
+import { resourceRead } from "#compiler/ir/operations/resource.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
-import { gprChannel } from "#ir/slots.js";
 import { actionOutput } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
+import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
+import {
+  compilerTestResourceEffect,
+  compilerTestValues
+} from "#ir/tests/storage-op-helpers.js";
+
+function readOperation(
+  values: ValueTable,
+  region: number,
+  width: IntegerWidth,
+  signed?: true
+) {
+  const source = {
+    effect: compilerTestResourceEffect(region, width / 8),
+    address: { base: values.const(0), displacement: region * 4 },
+    width
+  };
+
+  return signed === true
+    ? resourceRead.create({ source, mode: { kind: "signed" } })
+    : resourceRead.create({ source });
+}
 
 test("ifValue joins its arm results into one output", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const body = new RegionBuilder(values);
   const condition = values.external(0);
   let thenResult!: ValueId;
   let elseResult!: ValueId;
   const output = body.ifValue(
     condition,
-    (then) => (thenResult = then.operation(stateRead.create({ slot: gprChannel("al") }))),
+    (then) => (thenResult = then.operation(readOperation(then.values, 0, 8))),
     (otherwise) => (elseResult = otherwise.operation(
-      stateRead.create({ slot: gprChannel("ax"), signed: true })
+      readOperation(otherwise.values, 0, 16, true)
     )),
     { hint: "unlikely" }
   );
@@ -45,7 +65,7 @@ test("ifValue joins its arm results into one output", () => {
 });
 
 test("ifValue ignores an unreachable arm when joining bounds", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const body = new RegionBuilder(values);
   const output = body.ifValue(
     values.external(0),
@@ -58,7 +78,7 @@ test("ifValue ignores an unreachable arm when joining bounds", () => {
 });
 
 test("validation rejects a control output narrower than an arm result", () => {
-  const values = new ValueTable();
+  const values = compilerTestValues();
   const condition = values.const(1);
   const armResult = values.addActionOutput();
   const fallback = values.const(0);
@@ -74,7 +94,7 @@ test("validation rejects a control output narrower than an arm result", () => {
           actions: [{
             kind: "op",
             output: armResult,
-            op: stateRead.create({ slot: gprChannel("eax") })
+            op: readOperation(values, 0, 32)
           }],
           result: armResult
         },

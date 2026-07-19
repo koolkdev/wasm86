@@ -5,47 +5,40 @@ import { widthMask, type OperandWidth } from "#core/types.js";
 import {
   addFlagSource,
   logicFlagSource,
-  subFlagSource,
+  subFlagSource
+} from "#core/flags/lazy/sources.js";
+import {
   writeAddFlags,
   writeDecFlags,
   writeIncFlags,
   writeNegFlags,
   writeSubFlags
 } from "./flag-writes.js";
-import {
-  readStorage,
-  resolveStorageRead,
-  resolveStorageReadWrite,
-  writeStorage
-} from "./memory.js";
 
 export type AluOp = "add" | "adc" | "sub" | "sbb" | "xor" | "and" | "or";
 export type UnaryAluOp = "inc" | "dec" | "not" | "neg";
 
 export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-
-    const dstStorage = resolveStorageReadWrite(s, v, context, dst, width);
-    const srcStorage = resolveStorageRead(s, v, context, src, width);
-
-    const left = v.truncate(width, readStorage(s, v, dstStorage, width));
-    const right = v.truncate(width, readStorage(s, v, srcStorage, width));
+    const destination = s.update(dst, { width });
+    const left = v.truncate(width, destination.read(s));
+    const right = v.truncate(width, s.read(src, { width }));
 
     switch (op) {
       case "add": {
         const result = v.truncate(width, v.binary("add", left, right));
 
         s.writeStatusFlagsSource(addFlagSource({ width, left, right, result }));
-        writeStorage(s, v, dstStorage, result, width);
+        destination.write(s, result);
         return;
       }
       case "sub": {
         const result = v.truncate(width, v.binary("sub", left, right));
 
         s.writeStatusFlagsSource(subFlagSource({ width, left, right, result }));
-        writeStorage(s, v, dstStorage, result, width);
+        destination.write(s, result);
         return;
       }
       case "xor":
@@ -54,7 +47,7 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
         const result = v.truncate(width, logicResult(v, op, left, right));
 
         s.writeStatusFlagsSource(logicFlagSource({ width, result }));
-        writeStorage(s, v, dstStorage, result, width);
+        destination.write(s, result);
         return;
       }
       case "adc": {
@@ -62,7 +55,7 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
         const result = v.truncate(width, v.binary("add", v.binary("add", left, right), oldCf));
 
         writeAddFlags(s, v, { width, left, right, result, carryIn: oldCf });
-        writeStorage(s, v, dstStorage, result, width);
+        destination.write(s, result);
         return;
       }
       case "sbb": {
@@ -70,7 +63,7 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
         const result = v.truncate(width, v.binary("sub", v.binary("sub", left, right), oldCf));
 
         writeSubFlags(s, v, { width, left, right, result, borrowIn: oldCf });
-        writeStorage(s, v, dstStorage, result, width);
+        destination.write(s, result);
         return;
       }
     }
@@ -78,12 +71,10 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
 }
 
 export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticTemplate {
-  return (s, v, context) => {
+  return (s, v) => {
     const dst = s.operand(0);
-
-    const dstStorage = resolveStorageReadWrite(s, v, context, dst, width);
-
-    const value = readStorage(s, v, dstStorage, width);
+    const destination = s.update(dst, { width });
+    const value = destination.read(s);
     let result;
 
     switch (op) {
@@ -104,7 +95,7 @@ export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticT
         break;
     }
 
-    writeStorage(s, v, dstStorage, result, width);
+    destination.write(s, result);
   };
 }
 

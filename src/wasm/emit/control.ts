@@ -1,12 +1,10 @@
 import { assert } from "#common/assert.js";
 import type { DispatchFinish, ExitFinish } from "#ir/actions.js";
-import { eipChannel } from "#ir/slots.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { u32 } from "#core/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { encodeTransfer } from "#engines/jit/legacy-transfer.js";
 import type { DispatchTarget, FallthroughTarget, LinkCompletion } from "./embed.js";
-import { emitChannelStore } from "#compiler/ir/operations/state-encoding.js";
 
 // Exit and completion lowering for nested bodies emitted inline by emit.ts.
 
@@ -68,8 +66,6 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
 
     assert(target !== undefined, "dispatch action requires embedding.dispatch");
 
-    emitDispatchEipWrite(dispatch.targetEip);
-
     switch (target.kind) {
       case "br":
         body.br(target.depth + inlineControlDepth);
@@ -78,10 +74,6 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
         emitLinkedCompletion(resolveLinkedTarget(target, dispatch.targetEip));
         return;
     }
-  }
-
-  function emitDispatchEipWrite(targetEip: ValueId): void {
-    emitChannelStore(body, eipChannel, () => context.emitValue(targetEip));
   }
 
   function resolveLinkedTarget(link: LinkCompletion, eip: ValueId): LinkedTarget {
@@ -106,8 +98,6 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     return { kind: "table", slot, typeIndex: link.table.typeIndex, tableIndex: link.table.tableIndex };
   }
 
-  // Non-EIP state is already flushed by ordinary actions; dispatch itself
-  // commits targetEip to architectural EIP before applying the embedding.
   function emitLinkedCompletion(target: LinkedTarget): void {
     switch (target.kind) {
       case "dynamic":

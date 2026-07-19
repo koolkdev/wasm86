@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import { stateRead, stateWrite } from "./state.js";
 import { cellRead, cellWrite } from "./cells.js";
 import { resourceRead, resourceWrite } from "./resource.js";
 import type {
@@ -9,12 +8,10 @@ import type {
 } from "./definition.js";
 
 export type OperationWithResult =
-  | ReturnType<typeof stateRead.create>
   | ReturnType<typeof resourceRead.create>
   | ReturnType<typeof cellRead.create>;
 
 export type OperationWithoutResult =
-  | ReturnType<typeof stateWrite.create>
   | ReturnType<typeof resourceWrite.create>
   | ReturnType<typeof cellWrite.create>;
 
@@ -62,12 +59,6 @@ export function emitOperation(
   };
 
   switch (operation.kind) {
-    case stateRead.kind:
-      stateRead.emit(operation, target, inputs);
-      break;
-    case stateWrite.kind:
-      stateWrite.emit(operation, target, inputs);
-      break;
     case resourceRead.kind:
       resourceRead.emit(operation, target, inputs);
       break;

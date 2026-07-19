@@ -1,61 +1,52 @@
-import type { FieldRef } from "#compiler/layout/handles.js";
-import type { Layout } from "#compiler/layout/layout.js";
-import { u32 } from "#core/numeric.js";
+import type { LayoutHostView } from "#compiler/layout/host-view.js";
 import type { X86Flag } from "./definitions.js";
-import { flagStateFields } from "./state.js";
+import { flagStateFields } from "./layout.js";
+import type { MutableFlagStateView } from "./view.js";
 
-export interface FlagStateHostView {
+export interface FlagStateHostView extends MutableFlagStateView {
   lazyKind: number;
   lazyA: number;
   lazyB: number;
 
-  readFlag(flag: X86Flag): boolean;
-  writeFlag(flag: X86Flag, value: boolean): void;
   readFlagByte(flag: X86Flag): number;
   writeFlagByte(flag: X86Flag, value: number): void;
 }
 
 export function createFlagStateHostView(
-  memory: WebAssembly.Memory,
-  layout: Layout
+  storage: LayoutHostView
 ): FlagStateHostView {
-  return new FlagStateHostViewImpl(memory, layout);
+  return new FlagStateHostViewImpl(storage);
 }
 
 class FlagStateHostViewImpl implements FlagStateHostView {
-  readonly #memory: WebAssembly.Memory;
-  readonly #layout: Layout;
+  readonly #storage: LayoutHostView;
 
-  constructor(
-    memory: WebAssembly.Memory,
-    layout: Layout
-  ) {
-    this.#memory = memory;
-    this.#layout = layout;
+  constructor(storage: LayoutHostView) {
+    this.#storage = storage;
   }
 
   get lazyKind(): number {
-    return this.#read(flagStateFields.lazyKind);
+    return this.#storage.readField(flagStateFields.lazyKind);
   }
 
   set lazyKind(value: number) {
-    this.#write(flagStateFields.lazyKind, value);
+    this.#storage.writeField(flagStateFields.lazyKind, value);
   }
 
   get lazyA(): number {
-    return this.#read(flagStateFields.lazyA);
+    return this.#storage.readField(flagStateFields.lazyA);
   }
 
   set lazyA(value: number) {
-    this.#write(flagStateFields.lazyA, value);
+    this.#storage.writeField(flagStateFields.lazyA, value);
   }
 
   get lazyB(): number {
-    return this.#read(flagStateFields.lazyB);
+    return this.#storage.readField(flagStateFields.lazyB);
   }
 
   set lazyB(value: number) {
-    this.#write(flagStateFields.lazyB, value);
+    this.#storage.writeField(flagStateFields.lazyB, value);
   }
 
   readFlag(flag: X86Flag): boolean {
@@ -67,45 +58,13 @@ class FlagStateHostViewImpl implements FlagStateHostView {
   }
 
   readFlagByte(flag: X86Flag): number {
-    return this.#read(flagStateFields.concrete[flag]);
+    return this.#storage.readField(flagStateFields.concrete[flag]);
   }
 
   writeFlagByte(flag: X86Flag, value: number): void {
-    this.#write(flagStateFields.concrete[flag], value === 0 ? 0 : 1);
-  }
-
-  #read(field: FieldRef): number {
-    const resolved = this.#layout.field(field);
-    const view = this.#view();
-
-    switch (resolved.byteLength) {
-      case 1:
-        return view.getUint8(resolved.offset);
-      case 2:
-        return view.getUint16(resolved.offset, true);
-      case 4:
-        return view.getUint32(resolved.offset, true);
-    }
-  }
-
-  #write(field: FieldRef, value: number): void {
-    const resolved = this.#layout.field(field);
-    const view = this.#view();
-
-    switch (resolved.byteLength) {
-      case 1:
-        view.setUint8(resolved.offset, u32(value) & 0xff);
-        return;
-      case 2:
-        view.setUint16(resolved.offset, u32(value) & 0xffff, true);
-        return;
-      case 4:
-        view.setUint32(resolved.offset, u32(value), true);
-        return;
-    }
-  }
-
-  #view(): DataView<ArrayBuffer> {
-    return new DataView(this.#memory.buffer);
+    this.#storage.writeField(
+      flagStateFields.concrete[flag],
+      value === 0 ? 0 : 1
+    );
   }
 }

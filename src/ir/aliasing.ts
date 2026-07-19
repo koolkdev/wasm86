@@ -1,21 +1,16 @@
-import { channelCovers, channelsOverlap, isDynamicSlot } from "./slots.js";
 import type { Action } from "./actions.js";
 import type { Body } from "./block.js";
 import type {
   StorageEffects,
   StorageAccess
 } from "#compiler/ir/effects.js";
-import type { StateSlot } from "./slots.js";
 import {
   type ByteRange,
   type ResourceEffect
 } from "#compiler/ir/resource.js";
 
-// One aliasing rule over the address spaces: static channels alias iff their
-// byte ranges intersect; a dynamic GPR slot may alias every GPR word and a
-// dynamic segment slot may alias every segment channel for the same field;
-// compiler cells alias only their own opaque identity. Resource accesses use
-// their resource identity plus the compiler-owned region/range algebra.
+// Compiler cells alias only their own opaque identity. Resource accesses use
+// their resource identity plus the compiler-owned byte-range algebra.
 // Distinct spaces never alias.
 
 const noEffects: StorageEffects = { reads: [], writes: [] };
@@ -64,8 +59,6 @@ function bodyEffects(...bodies: readonly (Body | undefined)[]): StorageEffects {
 
 export function mayAlias(a: StorageAccess, b: StorageAccess): boolean {
   switch (a.space) {
-    case "state":
-      return b.space === "state" && slotsMayAlias(a.slot, b.slot);
     case "cell":
       return b.space === "cell" && a.cell === b.cell;
     case "resource":
@@ -76,75 +69,11 @@ export function mayAlias(a: StorageAccess, b: StorageAccess): boolean {
 // Is every location in `covered` also in `covering`?
 export function covers(covering: StorageAccess, covered: StorageAccess): boolean {
   switch (covering.space) {
-    case "state":
-      return covered.space === "state" && stateSlotCovers(covering.slot, covered.slot);
     case "cell":
       return covered.space === "cell" && covering.cell === covered.cell;
     case "resource":
       return covered.space === "resource" && resourceEffectCovers(covering, covered);
   }
-}
-
-export function slotsMayAlias(a: StateSlot, b: StateSlot): boolean {
-  switch (a.kind) {
-    case "gprDynamic":
-      return b.kind === "gpr" || b.kind === "gprDynamic";
-    case "segmentDynamic":
-      return (b.kind === "segmentDynamic" || b.kind === "segment") && a.field === b.field;
-    case "gpr":
-      return isDynamicSlot(b) ? b.kind === "gprDynamic" : channelsOverlap(a, b);
-    case "flag":
-    case "eip":
-    case "instructionCount":
-    case "lazyFlags":
-      return !isDynamicSlot(b) && channelsOverlap(a, b);
-    case "segment":
-      return isDynamicSlot(b)
-        ? b.kind === "segmentDynamic" && a.field === b.field
-        : channelsOverlap(a, b);
-  }
-}
-
-export function stateSlotCovers(covering: StateSlot, covered: StateSlot): boolean {
-  if (isDynamicSlot(covering)) {
-    if (covering.kind === "gprDynamic") {
-      return (covered.kind === "gpr" && covering.byteLength === covered.byteLength) ||
-        (covered.kind === "gprDynamic" && covering.byteLength === covered.byteLength);
-    }
-    return (covered.kind === "segment" && covering.field === covered.field) ||
-      (covered.kind === "segmentDynamic" && covering.field === covered.field);
-  }
-  return !isDynamicSlot(covered) && channelCovers(covering, covered);
-}
-
-export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolean {
-  switch (action.kind) {
-    case "op":
-      return action.op.effects.writes.some(
-        (write) => write.space === "state" && slotsMayAlias(write.slot, slot)
-      );
-    case "call":
-    case "returnCall":
-      return action.target.effects.writes.some(
-        (write) => write.space === "state" && slotsMayAlias(write.slot, slot)
-      );
-    case "if":
-      return bodyMayWriteStateSlot(action.thenBody, slot) ||
-        (action.elseBody !== undefined && bodyMayWriteStateSlot(action.elseBody, slot));
-    case "switch":
-      return action.cases.some((switchCase) => bodyMayWriteStateSlot(switchCase.body, slot)) ||
-        bodyMayWriteStateSlot(action.defaultBody, slot);
-    case "loop":
-      return bodyMayWriteStateSlot(action.body, slot);
-    case "loopContinue":
-    case "finish":
-    case "return":
-      return false;
-  }
-}
-
-export function bodyMayWriteStateSlot(body: Body, slot: StateSlot): boolean {
-  return body.actions.some((action) => actionMayWriteStateSlot(action, slot));
 }
 
 function resourceEffectsMayAlias(a: ResourceEffect, b: ResourceEffect): boolean {

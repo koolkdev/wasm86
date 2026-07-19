@@ -253,7 +253,7 @@ async function assertMovRegisterCase(entry: MovRegisterCase): Promise<void> {
   deepStrictEqual(
     result.completion,
     {
-      kind: "linkStub",
+      kind: "completed",
       targetEip: startAddress + entry.bytes.length
     },
     entry.name

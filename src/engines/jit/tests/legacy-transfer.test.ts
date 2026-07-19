@@ -3,12 +3,11 @@ import { test } from "node:test";
 
 import { encodeVariant } from "#compiler/layout/variant-codec.js";
 import {
-  deExit,
-  pfExit,
+  exceptionExit,
   segmentExit,
-  trapExit,
-  udExit
+  trapExit
 } from "#core/exits.js";
+import { divideError, invalidOpcode, pageFault } from "#core/exceptions.js";
 import { exitLayout } from "#cpu/exit.js";
 import {
   budgetExit,
@@ -49,9 +48,18 @@ test("the extracted codec preserves the raw JIT wire values", () => {
 
 test("legacy JIT transfers are disjoint from Cpu exits", () => {
   const exits = [
-    encodeVariant(exitLayout, deExit()),
-    encodeVariant(exitLayout, udExit()),
-    encodeVariant(exitLayout, pfExit(0xffff_ffff, 0xffff)),
+    encodeVariant(
+      exitLayout,
+      exceptionExit(divideError<number>())
+    ),
+    encodeVariant(
+      exitLayout,
+      exceptionExit(invalidOpcode<number>())
+    ),
+    encodeVariant(
+      exitLayout,
+      exceptionExit(pageFault(0xffff_ffff, 0xffff))
+    ),
     encodeVariant(exitLayout, trapExit(0xff)),
     encodeVariant(exitLayout, segmentExit(5, 0xffff)),
     encodeVariant(exitLayout, budgetExit()),

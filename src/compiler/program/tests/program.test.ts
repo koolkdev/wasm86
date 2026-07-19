@@ -29,13 +29,10 @@ import {
 } from "#compiler/ir/resource.js";
 import { buildIrBlock } from "#ir/region-builder.js";
 import type { FunctionBuilder } from "#ir/function.js";
-import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
 import {
   resourceRead,
   resourceWrite
 } from "#compiler/ir/operations/resource.js";
-import { gprChannel, segmentSelectorChannel } from "#ir/slots.js";
-import { valueId } from "#compiler/ir/values/id.js";
 import type {
   IntegerWidth,
   ValueId
@@ -58,6 +55,61 @@ function byteOperand(
     address: { base, displacement },
     width
   };
+}
+
+const functionEffectResource = resourceRef("test.function-effect-resource");
+
+function functionEffect(region = 0, byteLength = 4): ResourceEffect {
+  return {
+    space: "resource",
+    resource: functionEffectResource,
+    range: {
+      basis: { kind: "resource" },
+      slice: { byteOffset: region * 4, byteLength }
+    }
+  };
+}
+
+function importFunctionEffectResource(program: ProgramBuilder): void {
+  program.importMemory({
+    ref: functionEffectResource,
+    moduleName: "test",
+    name: "functionEffectResource",
+    limits: { minPages: 1 }
+  });
+}
+
+function writeFunctionEffect(
+  fn: FunctionBuilder,
+  value: ValueId,
+  region = 0
+): void {
+  fn.region.operation(resourceWrite.create({
+    destination: byteOperand(
+      functionEffectResource,
+      functionEffect(region).range,
+      fn.values.const(0),
+      region * 4,
+      32
+    ),
+    value
+  }));
+}
+
+function readFunctionEffect(
+  fn: FunctionBuilder,
+  region = 0,
+  width: IntegerWidth = 32
+): ValueId {
+  return fn.region.operation(resourceRead.create({
+    source: byteOperand(
+      functionEffectResource,
+      functionEffect(region, width / 8).range,
+      fn.values.const(0),
+      region * 4,
+      width
+    )
+  }));
 }
 
 test("forward function declarations close before their factories build and execute", async () => {
@@ -479,9 +531,10 @@ test("an effectful function call stays single and conditional inside its selecte
   const callerRef = functionRef("test.conditional-caller");
   const effects = {
     reads: [],
-    writes: [{ space: "state", slot: gprChannel("eax") }]
+    writes: [functionEffect()]
   } as const;
 
+  importFunctionEffectResource(program);
   program.signature({ ref: calleeSignature, type: calleeType });
   program.signature({ ref: callerSignature, type: callerType });
   const callee = program.defineFunction({
@@ -494,7 +547,7 @@ test("an effectful function call stays single and conditional inside its selecte
     if (value === undefined) {
       throw new Error("missing value parameter");
     }
-    fn.region.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
+    writeFunctionEffect(fn, value);
     fn.return([]);
   });
   const caller = program.defineFunction({
@@ -588,11 +641,11 @@ test("function declarations carry conservative transitive effects", () => {
   const rootRef = functionRef("test.transitive-effects-root");
   const middleRef = functionRef("test.transitive-effects-middle");
   const leafRef = functionRef("test.transitive-effects-leaf");
-  const eax = gprChannel("eax");
-  const effects = { reads: [], writes: [{ space: "state", slot: eax }] } as const;
+  const effects = { reads: [], writes: [functionEffect()] } as const;
   let middle!: FunctionDefinition;
   let leaf!: FunctionDefinition;
 
+  importFunctionEffectResource(program);
   program.signature({ ref: signature, type });
   const root = program.defineFunction({ ref: rootRef, signature, effects }, (fn) => {
     const value = fn.parameters[0];
@@ -618,7 +671,7 @@ test("function declarations carry conservative transitive effects", () => {
     if (value === undefined) {
       throw new Error("missing leaf parameter");
     }
-    fn.region.operation(stateWrite.create({ slot: eax, value }));
+    writeFunctionEffect(fn, value);
     fn.return([]);
   });
 
@@ -634,6 +687,7 @@ test("function effect declarations must cover their bodies", () => {
   const type = functionType(["i32"], []);
   const signature = signatureRef("test.undeclared-effect-signature");
 
+  importFunctionEffectResource(program);
   program.signature({ ref: signature, type });
   program.defineFunction({
     ref: functionRef("test.undeclared-effect"),
@@ -645,7 +699,7 @@ test("function effect declarations must cover their bodies", () => {
     if (value === undefined) {
       throw new Error("missing value parameter");
     }
-    fn.region.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
+    writeFunctionEffect(fn, value);
     fn.return([]);
   });
 
@@ -658,9 +712,10 @@ test("callers must cover the effects declared by their call targets", () => {
   const signature = signatureRef("test.call-effect-signature");
   const effects = {
     reads: [],
-    writes: [{ space: "state", slot: gprChannel("eax") }]
+    writes: [functionEffect()]
   } as const;
 
+  importFunctionEffectResource(program);
   program.signature({ ref: signature, type });
   const callee = program.defineFunction({
     ref: functionRef("test.call-effect-callee"),
@@ -672,7 +727,7 @@ test("callers must cover the effects declared by their call targets", () => {
     if (value === undefined) {
       throw new Error("missing value parameter");
     }
-    fn.region.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
+    writeFunctionEffect(fn, value);
     fn.return([]);
   });
   program.defineFunction({
@@ -695,22 +750,20 @@ test("callers must cover the effects declared by their call targets", () => {
   );
 });
 
-test("dynamic effect declarations preserve their access width and segment field", () => {
+test("resource effect declarations preserve their range basis and extent", () => {
   {
     const program = new ProgramBuilder();
     const type = functionType(["i32"], []);
     const signature = signatureRef("test.dynamic-gpr-effect-signature");
 
+    importFunctionEffectResource(program);
     program.signature({ ref: signature, type });
     program.defineFunction({
       ref: functionRef("test.dynamic-gpr-effect"),
       signature,
       effects: {
         reads: [],
-        writes: [{
-          space: "state",
-          slot: { kind: "gprDynamic", index: valueId(0), byteLength: 1 }
-        }]
+        writes: [functionEffect(0, 1)]
       }
     }, (fn) => {
       const value = fn.parameters[0];
@@ -718,7 +771,7 @@ test("dynamic effect declarations preserve their access width and segment field"
       if (value === undefined) {
         throw new Error("missing value parameter");
       }
-      fn.region.operation(stateWrite.create({ slot: gprChannel("eax"), value }));
+      writeFunctionEffect(fn, value);
       fn.return([]);
     });
 
@@ -729,19 +782,26 @@ test("dynamic effect declarations preserve their access width and segment field"
     const type = functionType([], ["i32"]);
     const signature = signatureRef("test.dynamic-segment-effect-signature");
 
+    const origin = new DynamicByteOriginRef();
+
+    importFunctionEffectResource(program);
     program.signature({ ref: signature, type });
     program.defineFunction({
       ref: functionRef("test.dynamic-segment-effect"),
       signature,
       effects: {
         reads: [{
-          space: "state",
-          slot: { kind: "segmentDynamic", index: valueId(0), field: "base" }
+          space: "resource",
+          resource: functionEffectResource,
+          range: {
+            basis: { kind: "dynamic", origin },
+            slice: { byteOffset: 0, byteLength: 2 }
+          }
         }],
         writes: []
       }
     }, (fn) => {
-      const selector = fn.region.operation(stateRead.create({ slot: segmentSelectorChannel("ds") }));
+      const selector = readFunctionEffect(fn, 0, 16);
 
       fn.return([selector]);
     });

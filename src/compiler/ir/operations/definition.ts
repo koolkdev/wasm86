@@ -3,7 +3,6 @@ import type { StorageEffects } from "#compiler/ir/effects.js";
 import type {
   ValueId,
   ValueInput,
-  ValueType,
   WidthBounds
 } from "#compiler/ir/values/types.js";
 import type { CellRef } from "#compiler/refs/cell.js";
@@ -40,14 +39,9 @@ export type DeclaredOperationInputs = Readonly<{
   constValue(index: number): number | undefined;
 }>;
 
-// Lowering-only services shared by operation definitions. Scoped locals never
-// escape one operation emission or become part of placement.
+// Lowering-only services shared by operation definitions.
 export type OperationEmitTarget = Readonly<{
   body: WasmFunctionBodyEncoder;
-  withTemporaryLocal(
-    type: ValueType,
-    callback: (local: number) => void
-  ): void;
   cellLocal(cell: CellRef): number;
   resourceIndex(resource: ResourceRef): number;
 }>;

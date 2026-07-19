@@ -1,6 +1,5 @@
 import type { Body } from "./block.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
-import type { StateChannel } from "./slots.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ValueInput } from "#compiler/ir/values/types.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
@@ -51,10 +50,8 @@ export type SwitchCase = Readonly<{ match: number; body: Body }>;
 export const maxSwitchMatch = 255;
 
 // One loop-carried cell: a local seeded at loop entry, read inside the body
-// as the opaque `loopInput` leaf, rewritten at each back edge. The channel
-// names the state it stands in for while the loop runs.
+// as the opaque `loopInput` leaf, and rewritten at each back edge.
 export type LoopCarriedCell = Readonly<{
-  channel: StateChannel;
   seed: ValueId;
   loopInput: ValueId;
 }>;
@@ -108,11 +105,6 @@ export type Action =
   | LoopContinueAction
   | FinishAction
   | ReturnAction;
-
-export type StateWriteAction = Readonly<{
-  kind: "op";
-  op: Extract<Operation, { kind: "state.write" }>;
-}>;
 
 // A control action completes if every selectable body escapes; a
 // result-bearing body does not complete — it falls through to the join.

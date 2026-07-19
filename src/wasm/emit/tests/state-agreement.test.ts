@@ -1,59 +1,54 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { assert } from "#common/assert.js";
-import { stateRead, stateWrite } from "#compiler/ir/operations/state.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import {
-  createCpuExecutionStateHostView,
-  type CpuExecutionStateHostView
-} from "#cpu/execution-state.js";
+  createLayoutHostView,
+  type LayoutHostView
+} from "#compiler/layout/host-view.js";
+import { instructionCountField } from "#cpu/instruction-count.js";
+import { createCpuStateHostView } from "#cpu/host-view.js";
+import { cpuState, cpuStateAccess } from "#cpu/state.js";
 import { x86Flags } from "#core/flags/definitions.js";
 import {
   createFlagStateHostView,
   type FlagStateHostView
 } from "#core/flags/host-view.js";
 import { u32 } from "#core/numeric.js";
-import {
-  createCoreStateHostView,
-  type CoreStateHostView
-} from "#core/state/host-view.js";
-import { reg32, segmentRegisters } from "#core/types.js";
+import { createCoreStateHostView } from "#core/state/host-view.js";
+import type { MutableCoreStateView } from "#core/state/view.js";
+import { reg32, segmentRegisters, type Reg32 } from "#core/types.js";
 import type { IrBlock } from "#ir/block.js";
+import { RegionBuilder } from "#ir/region-builder.js";
+import { flagStateFields } from "#core/flags/layout.js";
+import type { BoundStateAccess } from "#core/state/access.js";
+import type { InstructionStateChannel } from "#core/instruction/state/channels.js";
 import {
-  eipChannel,
-  flagChannel,
   gprChannel,
-  instructionCountChannel,
-  lazyFlagsAChannel,
-  lazyFlagsBChannel,
-  lazyFlagsKindChannel,
   segmentAccessChannel,
   segmentBaseChannel,
   segmentLimitChannel,
-  segmentSelectorChannel,
-  type GprChannel,
-  type StateChannel
-} from "#ir/slots.js";
-import { executionStateLayout } from "#ir/state-layout.js";
+  segmentSelectorChannel
+} from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
 import {
-  WasmCpuState,
   wasmCpuStateFields,
+  writeWasmCpuStateSnapshot,
   type WasmCpuStateField,
   type WasmCpuStateInit
-} from "#wasm/host/cpu-state.js";
+} from "#test/support/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
 type OwnerViews = Readonly<{
-  core: CoreStateHostView;
+  core: MutableCoreStateView;
   flags: FlagStateHostView;
-  execution: CpuExecutionStateHostView;
+  storage: LayoutHostView;
 }>;
 
 type AgreementCase = Readonly<{
   name: string;
   field: WasmCpuStateField;
-  slot: StateChannel;
+  location: InstructionStateChannel;
   hostSeed: number;
   expectedGeneratedRead: number;
   generatedWrite: number;
@@ -70,7 +65,7 @@ for (const [index, reg] of reg32.entries()) {
   fullMemberCases.push({
     name: reg,
     field: reg,
-    slot: gprChannel(reg),
+    location: gprChannel(reg),
     hostSeed,
     expectedGeneratedRead: hostSeed,
     generatedWrite,
@@ -83,7 +78,7 @@ fullMemberCases.push(
   {
     name: "eip",
     field: "eip",
-    slot: eipChannel,
+    location: coreStateFields.eip,
     hostSeed: 0x89ab_cdef,
     expectedGeneratedRead: 0x89ab_cdef,
     generatedWrite: 0x1_2345_6789,
@@ -93,17 +88,17 @@ fullMemberCases.push(
   {
     name: "instructionCount",
     field: "instructionCount",
-    slot: instructionCountChannel,
+    location: instructionCountField,
     hostSeed: 0xfedc_ba98,
     expectedGeneratedRead: 0xfedc_ba98,
     generatedWrite: 0x1_7654_3210,
     expectedHostRead: 0x7654_3210,
-    readHost: ({ execution }) => execution.instructionCount
+    readHost: ({ storage }) => storage.readField(instructionCountField)
   },
   {
     name: "lazyFlagsKind",
     field: "lazyFlagsKind",
-    slot: lazyFlagsKindChannel,
+    location: flagStateFields.lazyKind,
     hostSeed: 0x1ab,
     expectedGeneratedRead: 0xab,
     generatedWrite: 0x2cd,
@@ -113,7 +108,7 @@ fullMemberCases.push(
   {
     name: "lazyFlagsA",
     field: "lazyFlagsA",
-    slot: lazyFlagsAChannel,
+    location: flagStateFields.lazyA,
     hostSeed: 0xa1b2_c3d4,
     expectedGeneratedRead: 0xa1b2_c3d4,
     generatedWrite: 0x1_e5f6_0718,
@@ -123,7 +118,7 @@ fullMemberCases.push(
   {
     name: "lazyFlagsB",
     field: "lazyFlagsB",
-    slot: lazyFlagsBChannel,
+    location: flagStateFields.lazyB,
     hostSeed: 0x192a_3b4c,
     expectedGeneratedRead: 0x192a_3b4c,
     generatedWrite: 0x1_5d6e_7f80,
@@ -136,7 +131,7 @@ for (const flag of x86Flags) {
   fullMemberCases.push({
     name: flag,
     field: flag,
-    slot: flagChannel(flag),
+    location: flagStateFields.concrete[flag],
     hostSeed: 0x80,
     expectedGeneratedRead: 1,
     generatedWrite: 0xfe,
@@ -155,7 +150,7 @@ for (const [index, reg] of segmentRegisters.entries()) {
     {
       name: selectorField,
       field: selectorField,
-      slot: segmentSelectorChannel(reg),
+      location: segmentSelectorChannel(reg),
       hostSeed: 0x1_2300 + index,
       expectedGeneratedRead: 0x2300 + index,
       generatedWrite: 0x2_4500 + index,
@@ -165,7 +160,7 @@ for (const [index, reg] of segmentRegisters.entries()) {
     {
       name: baseField,
       field: baseField,
-      slot: segmentBaseChannel(reg),
+      location: segmentBaseChannel(reg),
       hostSeed: u32(0x8100_0000 + index),
       expectedGeneratedRead: u32(0x8100_0000 + index),
       generatedWrite: 0x1_9100_0000 + index,
@@ -175,7 +170,7 @@ for (const [index, reg] of segmentRegisters.entries()) {
     {
       name: limitField,
       field: limitField,
-      slot: segmentLimitChannel(reg),
+      location: segmentLimitChannel(reg),
       hostSeed: u32(0x8200_0000 + index),
       expectedGeneratedRead: u32(0x8200_0000 + index),
       generatedWrite: 0x1_9200_0000 + index,
@@ -185,7 +180,7 @@ for (const [index, reg] of segmentRegisters.entries()) {
     {
       name: accessField,
       field: accessField,
-      slot: segmentAccessChannel(reg),
+      location: segmentAccessChannel(reg),
       hostSeed: u32(0x8300_0000 + index),
       expectedGeneratedRead: u32(0x8300_0000 + index),
       generatedWrite: 0x1_9300_0000 + index,
@@ -199,7 +194,7 @@ const narrowGprCases: readonly AgreementCase[] = [
   {
     name: "AL alias",
     field: "eax",
-    slot: gprChannel("al"),
+    location: gprChannel("al"),
     hostSeed: 0xaabb_ccdd,
     expectedGeneratedRead: 0xdd,
     generatedWrite: 0x1234,
@@ -209,7 +204,7 @@ const narrowGprCases: readonly AgreementCase[] = [
   {
     name: "AH alias",
     field: "eax",
-    slot: gprChannel("ah"),
+    location: gprChannel("ah"),
     hostSeed: 0xaabb_ccdd,
     expectedGeneratedRead: 0xcc,
     generatedWrite: 0x1234,
@@ -219,7 +214,7 @@ const narrowGprCases: readonly AgreementCase[] = [
   {
     name: "AX alias",
     field: "eax",
-    slot: gprChannel("ax"),
+    location: gprChannel("ax"),
     hostSeed: 0xaabb_ccdd,
     expectedGeneratedRead: 0xccdd,
     generatedWrite: 0x12_3456,
@@ -237,18 +232,18 @@ test("agreement cases cover every combined host-view field", () => {
 
 for (const agreement of [...fullMemberCases, ...narrowGprCases]) {
   test(`host and generated state access agree for ${agreement.name}`, async () => {
-    const destination = destinationFor(agreement.slot);
-    const block = agreementBlock(agreement.slot, destination, agreement.generatedWrite);
+    const destination = destinationFor(agreement.location);
+    const block = agreementBlock(agreement.location, destination, agreement.generatedWrite);
     const { stateMemory, run } = await instantiateIrBlock(block);
-    const combined = new WasmCpuState(stateMemory);
+    const combined = createCpuStateHostView(stateMemory);
     const initial: WasmCpuStateInit = {};
 
     initial[agreement.field] = agreement.hostSeed;
-    combined.load(initial);
+    writeWasmCpuStateSnapshot(new DataView(stateMemory.buffer), initial);
 
     strictEqual(run(), irBlockCompleted, `${agreement.name}: generated block completed`);
     strictEqual(
-      combined.readReg32(destination.reg),
+      combined.core.readReg32(destination),
       agreement.expectedGeneratedRead,
       `${agreement.name}: generated read observed the host write`
     );
@@ -260,47 +255,53 @@ for (const agreement of [...fullMemberCases, ...narrowGprCases]) {
   });
 }
 
-function destinationFor(source: StateChannel): GprChannel {
+function destinationFor(source: InstructionStateChannel): Reg32 {
   return source.kind === "gpr" && source.reg === "edi"
-    ? gprChannel("eax")
-    : gprChannel("edi");
+    ? "eax"
+    : "edi";
 }
 
 function agreementBlock(
-  source: StateChannel,
-  destination: GprChannel,
+  source: InstructionStateChannel,
+  destination: Reg32,
   generatedWrite: number
 ): IrBlock {
   const values = new ValueTable();
+  const builder = new RegionBuilder(values);
+  const state = cpuStateAccess.bind(builder);
   const generatedValue = values.const(generatedWrite);
-  const read = stateRead.create({ slot: source });
+  const sourceOperand = stateOperand(state, source);
+  const readOutput = state.read(sourceOperand);
 
-  assert(read.result.type === "i32", "state reads must produce i32 values");
-
-  const readOutput = values.addActionOutput(read.result.bounds);
+  state.write(state.gpr(destination), readOutput);
+  state.write(sourceOperand, generatedValue);
 
   return {
-    body: {
-      actions: [
-        { kind: "op", output: readOutput, op: read },
-        {
-          kind: "op",
-          op: stateWrite.create({ slot: destination, value: readOutput })
-        },
-        {
-          kind: "op",
-          op: stateWrite.create({ slot: source, value: generatedValue })
-        }
-      ]
-    },
+    body: builder.build(),
     values
   };
 }
 
+function stateOperand(
+  state: BoundStateAccess,
+  channel: InstructionStateChannel
+) {
+  switch (channel.kind) {
+    case "field":
+      return state.field(channel);
+    case "gpr":
+      return state.gprChannel(channel);
+    case "segment":
+      return state.segment(channel.reg, channel.field);
+  }
+}
+
 function ownerViews(memory: WebAssembly.Memory): OwnerViews {
+  const storage = createLayoutHostView(memory, cpuState.layout);
+
   return {
-    core: createCoreStateHostView(memory, executionStateLayout),
-    flags: createFlagStateHostView(memory, executionStateLayout),
-    execution: createCpuExecutionStateHostView(memory, executionStateLayout)
+    core: createCoreStateHostView(storage),
+    flags: createFlagStateHostView(storage),
+    storage
   };
 }

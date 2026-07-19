@@ -2,23 +2,20 @@ import { assert } from "#common/assert.js";
 import { buildVariant } from "#compiler/ir/values/variant.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { decodeVariant } from "#compiler/layout/variant-codec.js";
+import {
+  decodeVariant,
+  type VariantValue
+} from "#compiler/layout/variant-codec.js";
 import { createVariantLayout } from "#compiler/layout/variant.js";
 import {
-  deExit,
   coreExits,
   coreExitFields,
-  coreExitSet,
-  pfExit,
-  segmentExit,
-  trapExit,
-  udExit
+  coreExitSet
 } from "#core/exits.js";
 import {
   divideError,
   invalidOpcode,
-  pageFault,
-  type CpuException
+  pageFault
 } from "#core/exceptions.js";
 import { segmentRegisters } from "#core/types.js";
 import {
@@ -34,36 +31,11 @@ export const exitLayout = createVariantLayout("cpu.exit", [
   interpreterExitSet
 ]);
 
-// Block-shaped roots encode the selected owner variant as the scalar value
-// consumed by Finish.
-export function buildException(
+export function buildExit(
   values: ValueTable,
-  exception: CpuException<ValueId>
+  exit: VariantValue<ValueId>
 ): ValueId {
-  switch (exception.kind) {
-    case "DE":
-      return buildVariant(values, exitLayout, deExit());
-    case "UD":
-      return buildVariant(values, exitLayout, udExit());
-    case "PF":
-      return buildVariant(
-        values,
-        exitLayout,
-        pfExit(exception.linearAddress, values.const(exception.errorCode))
-      );
-  }
-}
-
-export function buildTrap(values: ValueTable, vector: ValueId): ValueId {
-  return buildVariant(values, exitLayout, trapExit(vector));
-}
-
-export function buildSegmentLoad(
-  values: ValueTable,
-  segment: ValueId,
-  selector: ValueId
-): ValueId {
-  return buildVariant(values, exitLayout, segmentExit(segment, selector));
+  return buildVariant(values, exitLayout, exit);
 }
 
 export function decodeExit(encoded: bigint): RunStop {

@@ -22,7 +22,7 @@ test("a static-length flat access is one unsigned limit compare", () => {
   const access = flatMemoryAccess(values, range, "write");
   const limit = values.const(guestMemoryMinimumByteLength - 4);
 
-  deepStrictEqual(values.node(access.invalid), {
+  deepStrictEqual(values.node(access.faulted), {
     kind: "compare",
     type: "i32",
     operator: "gt_u",
@@ -40,7 +40,7 @@ test("a dynamic-length flat access rejects zero with the complete nonwrapping pr
   const access = flatMemoryAccess(values, { start, byteLength }, "read");
   const one = values.const(1);
   const last = values.const(guestMemoryMinimumByteLength - 1);
-  const expectedInvalid = values.binary(
+  const expectedFaulted = values.binary(
     "or",
     values.compare(32, "gt_u", start, last),
     values.compare(
@@ -51,7 +51,7 @@ test("a dynamic-length flat access rejects zero with the complete nonwrapping pr
     )
   );
 
-  strictEqual(access.invalid, expectedInvalid);
+  strictEqual(access.faulted, expectedFaulted);
   deepStrictEqual(access.fault, { address: start, intent: "read" });
 });
 
@@ -79,9 +79,9 @@ test("static flat bounds accept the last range and reject invalid lengths", () =
     "read"
   );
 
-  strictEqual(values.constValue(finalWord.invalid), 0);
-  strictEqual(values.constValue(crossingWord.invalid), 1);
-  strictEqual(values.constValue(wrappedByte.invalid), 1);
+  strictEqual(values.constValue(finalWord.faulted), 0);
+  strictEqual(values.constValue(crossingWord.faulted), 1);
+  strictEqual(values.constValue(wrappedByte.faulted), 1);
   throws(
     () => flatMemoryAccess(
       values,

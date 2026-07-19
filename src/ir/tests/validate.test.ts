@@ -2,7 +2,6 @@ import { doesNotThrow, ok, throws } from "node:assert";
 import { test } from "node:test";
 
 import { maxSwitchMatch, type Action, type SwitchAction } from "#ir/actions.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { validateIrBlock } from "#ir/validate.js";
@@ -30,11 +29,6 @@ import type {
   IntegerWidth,
   ValueId
 } from "#compiler/ir/values/types.js";
-import {
-  memoryRead,
-  stateRead,
-  stateWrite
-} from "#ir/tests/storage-op-helpers.js";
 
 function blockWith(
   actions: readonly Action[] | ((values: ValueTable) => readonly Action[])
@@ -67,8 +61,6 @@ function finishExit(values: ValueTable): Action {
 }
 
 const finishDispatch0 = finishDispatch(0);
-const writeEip0 = stateWrite(eipChannel, 0);
-const writeEip1 = stateWrite(eipChannel, 1);
 
 function testCell(): CellRef<"i32"> {
   return new CellRef("i32");
@@ -94,6 +86,55 @@ function resourceOperand(
     effect: { space: "resource", resource, range },
     address: { base, displacement },
     width
+  };
+}
+
+function testRead(output: ValueId): Action {
+  return {
+    kind: "op",
+    output,
+    op: resourceRead.create({
+      source: resourceOperand(
+        { basis: { kind: "resource" } },
+        valueId(0),
+        0,
+        32
+      )
+    })
+  };
+}
+
+function memoryRead(
+  output: ValueId,
+  address: ValueId,
+  width: IntegerWidth
+): Action {
+  const range: ByteRange = {
+    basis: { kind: "dynamic", origin: new DynamicByteOriginRef() },
+    slice: { byteOffset: 0, byteLength: width / 8 }
+  };
+
+  return {
+    kind: "op",
+    output,
+    op: resourceRead.create({
+      source: resourceOperand(range, address, 0, width)
+    })
+  };
+}
+
+function testWrite(value: ValueId | number): Action {
+  return {
+    kind: "op",
+    op: resourceWrite.create({
+      destination: resourceOperand(
+        { basis: { kind: "resource" } },
+        valueId(0),
+        0,
+        32
+      ),
+      value: valueId(value)
+    })
   };
 }
 
@@ -123,7 +164,7 @@ test("a body ending with a finish dispatch validates", () => {
 });
 
 test("an implicit fragment body end validates only when allowed", () => {
-  const block = blockWith([stateWrite(gprChannel("eax"), 0)]);
+  const block = blockWith([testWrite(0)]);
 
   throws(() => validateIrBlock(block), /root body does not complete/);
   doesNotThrow(() => validateIrBlock(block, { allowImplicitEntryFallthrough: true }));
@@ -150,7 +191,7 @@ test("an action after the finish exit terminator is rejected", () => {
       validateIrBlock(
         blockWith((values) => [
           finishExit(values),
-          stateWrite(eipChannel, 0)
+          testWrite(0)
         ])
       ),
     /has actions after its terminal finish action/
@@ -160,7 +201,7 @@ test("an action after the finish exit terminator is rejected", () => {
 test("an action after a finish dispatch terminator is rejected", () => {
   throws(
     () =>
-      validateIrBlock(blockWith([finishDispatch0, stateWrite(eipChannel, 0)])),
+      validateIrBlock(blockWith([finishDispatch0, testWrite(0)])),
     /has actions after its terminal finish action/
   );
 });
@@ -176,7 +217,7 @@ test("an action after a terminal if is rejected", () => {
           thenBody: { actions: [finishDispatch0] },
           elseBody: { actions: [finishExit(values)] }
         },
-          stateWrite(eipChannel, 0)
+          testWrite(0)
         ])
       ),
     /has actions after its terminal if action/
@@ -185,7 +226,7 @@ test("an action after a terminal if is rejected", () => {
 
 test("a body that does not complete is rejected", () => {
   throws(
-    () => validateIrBlock(blockWith([stateWrite(eipChannel, 0)])),
+    () => validateIrBlock(blockWith([testWrite(0)])),
     /root body does not complete/
   );
 });
@@ -286,18 +327,19 @@ test("resource operation validation rejects invalid width and signedness", () =>
   {
     const values = new ValueTable();
     const address = values.const(0);
+    const read = resourceRead.create({
+      source: resourceOperand(
+        { basis: { kind: "resource" } },
+        address,
+        0,
+        32
+      )
+    });
+    const operation = { ...read, signed: true } as ResourceOperation;
 
     throws(
-      () => resourceRead.create({
-        source: resourceOperand(
-          { basis: { kind: "resource" } },
-          address,
-          0,
-          32
-        ),
-        mode: { kind: "signed" }
-      }),
-      /32-bit resource read has no signed extension/
+      () => validateIrBlock(blockWithResourceOperation(values, operation)),
+      /signedness is valid only for a narrow read/
     );
   }
 
@@ -440,7 +482,9 @@ test("resource operation validation accepts a containing conservative slice", ()
     )
   });
 
-  doesNotThrow(() => validateIrBlock(blockWithResourceOperation(values, operation)));
+  doesNotThrow(
+    () => validateIrBlock(blockWithResourceOperation(values, operation))
+  );
 });
 
 test("resource operation validation rejects incoherent retained effects", () => {
@@ -688,50 +732,16 @@ test("unsigned resource read bounds may refine within mechanical bounds", () => 
   );
 });
 
-test("a root dispatch EIP write is rejected", () => {
-  throws(
-    () =>
-      validateIrBlock(
-        blockWith([
-          stateWrite(eipChannel, 1),
-          stateWrite(gprChannel("eax"), 1),
-          finishDispatch0
-        ])
-      ),
-    /body dispatch path must not flush EIP state/
-  );
-});
-
-test("a nested dispatch validates without an EIP flush", () => {
+test("a nested dispatch is generic control", () => {
   doesNotThrow(() =>
     validateIrBlock(
-      blockWith((values) => [
-        {
-          kind: "if",
-          condition: valueId(1),
-          thenBody: { actions: [finishDispatch0] },
-          elseBody: { actions: [finishExit(values)] }
-        }
-      ])
+      blockWith((values) => [{
+        kind: "if",
+        condition: valueId(0),
+        thenBody: { actions: [finishDispatch0] },
+        elseBody: { actions: [finishExit(values)] }
+      }])
     )
-  );
-});
-
-test("a nested dispatch rejects an ancestor EIP write", () => {
-  throws(
-    () =>
-      validateIrBlock(
-        blockWith((values) => [
-          writeEip0,
-          {
-            kind: "if",
-            condition: valueId(0),
-            thenBody: { actions: [finishDispatch0] },
-            elseBody: { actions: [finishExit(values)] }
-          }
-        ])
-      ),
-    /thenBody dispatch path must not flush EIP state/
   );
 });
 
@@ -864,24 +874,7 @@ test("a switch without a default body is rejected", () => {
   );
 });
 
-test("a nested dispatch EIP write is rejected", () => {
-  throws(
-    () =>
-      validateIrBlock(
-        blockWith((values) => [
-          {
-            kind: "if",
-            condition: valueId(0),
-            thenBody: { actions: [writeEip1, finishDispatch0] },
-            elseBody: { actions: [finishExit(values)] }
-          }
-        ])
-      ),
-    /thenBody dispatch path must not flush EIP state/
-  );
-});
-
-test("a loop with a dword carried cell and an aligned continue validates", () => {
+test("a loop with a carried cell and an aligned continue validates", () => {
   const values = new ValueTable();
   const seed = values.const(3);
   const loopInput = values.addLoopInput();
@@ -892,11 +885,11 @@ test("a loop with a dword carried cell and an aligned continue validates", () =>
       entryBlock(values, [
         {
           kind: "loop",
-          carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+          carried: [{ seed, loopInput }],
           body: {
             actions: [
               { kind: "if", condition: update, thenBody: { actions: [{ kind: "loopContinue", updates: [update] }] } },
-              stateWrite(gprChannel("ecx"), update)
+              testWrite(update)
             ]
           }
         },
@@ -1103,7 +1096,7 @@ test("loopContinue updates misaligned with the carried list are rejected", () =>
         entryBlock(values, [
           {
             kind: "loop",
-            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+            carried: [{ seed, loopInput }],
             body: { actions: [{ kind: "loopContinue", updates: [] }] }
           },
           finishDispatch0
@@ -1113,7 +1106,7 @@ test("loopContinue updates misaligned with the carried list are rejected", () =>
   );
 });
 
-test("a narrow GPR carried channel validates", () => {
+test("a carried loop input validates", () => {
   const values = new ValueTable();
   const seed = values.const(3);
   const loopInput = values.addLoopInput();
@@ -1124,39 +1117,12 @@ test("a narrow GPR carried channel validates", () => {
         entryBlock(values, [
           {
             kind: "loop",
-            carried: [{ channel: gprChannel("cl"), seed, loopInput }],
+            carried: [{ seed, loopInput }],
             body: { actions: [{ kind: "loopContinue", updates: [loopInput] }] }
           },
           finishDispatch0
         ])
       )
-  );
-});
-
-test("a loop body state access partially overlapping a carried channel is rejected", () => {
-  const values = new ValueTable();
-  const seed = values.const(3);
-  const loopInput = values.addLoopInput();
-  const partialRead = values.addActionOutput(fitsUnsigned(8));
-
-  throws(
-    () =>
-      validateIrBlock(
-        entryBlock(values, [
-          {
-            kind: "loop",
-            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
-            body: {
-              actions: [
-                stateRead(partialRead, gprChannel("cl")),
-                { kind: "loopContinue", updates: [loopInput] }
-              ]
-            }
-          },
-          finishDispatch0
-        ])
-      ),
-    /loop body read partially overlaps a carried channel/
   );
 });
 
@@ -1170,7 +1136,7 @@ test("a carried cell whose input is not a loopInput value is rejected", () => {
         entryBlock(values, [
           {
             kind: "loop",
-            carried: [{ channel: gprChannel("ecx"), seed, loopInput: seed }],
+            carried: [{ seed, loopInput: seed }],
             body: { actions: [{ kind: "loopContinue", updates: [seed] }] }
           },
           finishDispatch0
@@ -1196,7 +1162,7 @@ test("used and unused action outputs without producers are rejected", () => {
     () =>
       validateIrBlock(
         entryBlock(usedValues, [
-          stateWrite(gprChannel("eax"), used),
+          testWrite(used),
           finishExit(usedValues)
         ])
       ),
@@ -1206,11 +1172,12 @@ test("used and unused action outputs without producers are rejected", () => {
 
 test("producer outputs must name actionOutput values", () => {
   const constValues = new ValueTable();
-  const constant = constValues.const(0);
+  constValues.const(0);
+  const constant = constValues.const(1);
 
   throws(
     () => validateIrBlock(entryBlock(constValues, [
-      stateRead(constant, gprChannel("eax")),
+      testRead(constant),
       finishExit(constValues)
     ])),
     /producer output \d+ is not an actionOutput value/
@@ -1221,18 +1188,19 @@ test("producer outputs must name actionOutput values", () => {
 
   throws(
     () => validateIrBlock(entryBlock(compoundValues, [
-      stateRead(compound, gprChannel("eax")),
+      testRead(compound),
       finishExit(compoundValues)
     ])),
     /producer output \d+ is not an actionOutput value/
   );
 
   const loopValues = new ValueTable();
+  loopValues.const(0);
   const loopInput = loopValues.addLoopInput();
 
   throws(
     () => validateIrBlock(entryBlock(loopValues, [
-      stateRead(loopInput, gprChannel("eax")),
+      testRead(loopInput),
       finishExit(loopValues)
     ])),
     /producer output \d+ is not an actionOutput value/
@@ -1241,14 +1209,15 @@ test("producer outputs must name actionOutput values", () => {
 
 test("duplicate op producers and op-vs-switch producers are rejected", () => {
   const opValues = new ValueTable();
+  opValues.const(0);
   const opOutput = opValues.addActionOutput();
 
   throws(
     () =>
       validateIrBlock(
         entryBlock(opValues, [
-          stateRead(opOutput, gprChannel("eax")),
-          stateRead(opOutput, gprChannel("ebx")),
+          testRead(opOutput),
+          testRead(opOutput),
           finishExit(opValues)
         ])
       ),
@@ -1264,7 +1233,7 @@ test("duplicate op producers and op-vs-switch producers are rejected", () => {
     () =>
       validateIrBlock(
         entryBlock(mixedValues, [
-          stateRead(mixedOutput, gprChannel("eax")),
+          testRead(mixedOutput),
           {
             kind: "switch",
             selector,
@@ -1281,14 +1250,15 @@ test("duplicate op producers and op-vs-switch producers are rejected", () => {
 
 test("a same-body compound use before its producer is rejected", () => {
   const directValues = new ValueTable();
+  directValues.const(0);
   const directOutput = directValues.addActionOutput();
 
   throws(
     () =>
       validateIrBlock(
         entryBlock(directValues, [
-          stateWrite(gprChannel("eax"), directOutput),
-          stateRead(directOutput, gprChannel("ebx")),
+          testWrite(directOutput),
+          testRead(directOutput),
           finishExit(directValues)
         ])
       ),
@@ -1296,6 +1266,7 @@ test("a same-body compound use before its producer is rejected", () => {
   );
 
   const values = new ValueTable();
+  values.const(0);
   const output = values.addActionOutput();
   const compound = values.binary("add", output, values.external(0));
 
@@ -1303,8 +1274,8 @@ test("a same-body compound use before its producer is rejected", () => {
     () =>
       validateIrBlock(
         entryBlock(values, [
-          stateWrite(gprChannel("eax"), compound),
-          stateRead(output, gprChannel("ebx")),
+          testWrite(compound),
+          testRead(output),
           finishExit(values)
         ])
       ),
@@ -1324,8 +1295,8 @@ test("an action output cannot be used from a sibling body", () => {
           {
             kind: "if",
             condition,
-            thenBody: { actions: [stateRead(output, gprChannel("eax"))] },
-            elseBody: { actions: [stateWrite(gprChannel("ebx"), output)] }
+            thenBody: { actions: [testRead(output)] },
+            elseBody: { actions: [testWrite(output)] }
           },
           finishExit(values)
         ])
@@ -1363,10 +1334,10 @@ test("a loop input is scoped to its owning loop body", () => {
         entryBlock(values, [
           {
             kind: "loop",
-            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+            carried: [{ seed, loopInput }],
             body: { actions: [] }
           },
-          stateWrite(gprChannel("eax"), loopInput),
+          testWrite(loopInput),
           finishExit(values)
         ])
       ),
@@ -1385,12 +1356,12 @@ test("a loop input cannot be reused by a sibling loop", () => {
         entryBlock(values, [
           {
             kind: "loop",
-            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+            carried: [{ seed, loopInput }],
             body: { actions: [] }
           },
           {
             kind: "loop",
-            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+            carried: [{ seed, loopInput }],
             body: { actions: [] }
           },
           finishExit(values)
@@ -1411,13 +1382,13 @@ test("a loop input cannot be consumed inside a sibling loop body", () => {
         entryBlock(values, [
           {
             kind: "loop",
-            carried: [{ channel: gprChannel("ecx"), seed, loopInput }],
+            carried: [{ seed, loopInput }],
             body: { actions: [] }
           },
           {
             kind: "loop",
             carried: [],
-            body: { actions: [stateWrite(gprChannel("eax"), loopInput)] }
+            body: { actions: [testWrite(loopInput)] }
           },
           finishExit(values)
         ])
@@ -1428,6 +1399,7 @@ test("a loop input cannot be consumed inside a sibling loop body", () => {
 
 test("a loop-body action output cannot escape directly after the loop", () => {
   const values = new ValueTable();
+  values.const(0);
   const output = values.addActionOutput();
 
   throws(
@@ -1437,9 +1409,9 @@ test("a loop-body action output cannot escape directly after the loop", () => {
           {
             kind: "loop",
             carried: [],
-            body: { actions: [stateRead(output, gprChannel("eax"))] }
+            body: { actions: [testRead(output)] }
           },
-          stateWrite(gprChannel("ebx"), output),
+          testWrite(output),
           finishExit(values)
         ])
       ),
@@ -1507,7 +1479,7 @@ test("a valid switch output can be used after the switch", () => {
           cases: [{ match: 0, body: { actions: [], result } }],
           defaultBody: { actions: [], result }
         },
-        stateWrite(gprChannel("eax"), output),
+        testWrite(output),
         finishExit(values)
       ])
     )
@@ -1524,11 +1496,11 @@ test("an ancestor producer can feed nested if, switch-result, and loop-body uses
   doesNotThrow(() =>
     validateIrBlock(
       entryBlock(values, [
-        stateRead(output, gprChannel("eax")),
+        testRead(output),
         {
           kind: "if",
           condition,
-          thenBody: { actions: [stateWrite(gprChannel("ebx"), output)] }
+          thenBody: { actions: [testWrite(output)] }
         },
         {
           kind: "switch",
@@ -1540,7 +1512,7 @@ test("an ancestor producer can feed nested if, switch-result, and loop-body uses
         {
           kind: "loop",
           carried: [],
-          body: { actions: [stateWrite(gprChannel("ecx"), output)] }
+          body: { actions: [testWrite(output)] }
         },
         finishExit(values)
       ])
@@ -1567,7 +1539,7 @@ test("a body-local producer can feed its body result", () => {
             {
               match: 0,
               body: {
-                actions: [stateRead(armOutput, gprChannel("eax"))],
+                actions: [testRead(armOutput)],
                 result: formula
               }
             }
@@ -1599,9 +1571,10 @@ test("producer operands must have lower value ids than their output", () => {
 
 test("exported outputs are validated at the root body boundary", () => {
   const validValues = new ValueTable();
+  validValues.const(0);
   const validOutput = validValues.addActionOutput();
   const validBlock = entryBlock(validValues, [
-    stateRead(validOutput, gprChannel("eax")),
+    testRead(validOutput),
     finishExit(validValues)
   ]);
 
@@ -1614,7 +1587,7 @@ test("exported outputs are validated at the root body boundary", () => {
     {
       kind: "if",
       condition,
-      thenBody: { actions: [stateRead(escapingOutput, gprChannel("eax"))] }
+      thenBody: { actions: [testRead(escapingOutput)] }
     },
     finishExit(escapingValues)
   ]);

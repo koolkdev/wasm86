@@ -55,7 +55,7 @@ export function flatMemoryAccess<TIntent extends MemoryAccessIntent>(
   const one = values.const(1);
   const last = values.const(guestMemoryMinimumByteLength - 1);
   const lengthMinusOne = values.binary("sub", range.byteLength, one);
-  const invalid = values.binary(
+  const faulted = values.binary(
     "or",
     values.compare(32, "gt_u", range.start, last),
     values.compare(
@@ -65,18 +65,18 @@ export function flatMemoryAccess<TIntent extends MemoryAccessIntent>(
       values.binary("sub", last, range.start)
     )
   );
-  return createMemoryAccess(range, invalid, intent);
+  return createMemoryAccess(range, faulted, intent);
 }
 
 function createMemoryAccess<TIntent extends MemoryAccessIntent>(
   range: LinearRange,
-  invalid: ValueId,
+  faulted: ValueId,
   intent: TIntent
 ): MemoryAccess<TIntent> {
   return {
     range,
     origin: new DynamicByteOriginRef(),
-    invalid,
+    faulted,
     fault: { address: range.start, intent }
   };
 }

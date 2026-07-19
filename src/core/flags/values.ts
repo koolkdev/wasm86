@@ -1,241 +1,212 @@
-import type { SimpleFlagSource } from "./sources.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type { X86StatusFlag } from "./definitions.js";
-import type { CompareOperator } from "#compiler/ir/values/comparison.js";
 import { widthMask, type OperandWidth } from "../types.js";
 
-export type FlagValueOps<TValue extends number> = Readonly<{
-  const32(value: number): TValue;
-  truncate(width: OperandWidth, value: TValue): TValue;
-  and(a: TValue, b: TValue): TValue;
-  sub(a: TValue, b: TValue): TValue;
-  xor(a: TValue, b: TValue): TValue;
-  shrU(a: TValue, b: TValue): TValue;
-  popcnt(value: TValue): TValue;
-  compare(width: OperandWidth, operator: CompareOperator, a: TValue, b: TValue): TValue;
-  select(condition: TValue, whenTrue: TValue, whenFalse: TValue): TValue;
-}>;
-
-export type StatusFlagValues<TValue extends number> =
-  Readonly<Record<X86StatusFlag, TValue>>;
+export type StatusFlagValues = Readonly<Record<X86StatusFlag, ValueId>>;
 
 export type ShiftFlagOp = "shl" | "shr" | "sar" | "shld" | "shrd";
 export type RotateFlagOp = "rol" | "ror" | "rcl" | "rcr";
 
-export function statusFlagValuesForSource<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  source: SimpleFlagSource<TValue>,
-  input: Readonly<{ undefinedAF: TValue }>
-): StatusFlagValues<TValue> {
-  switch (source.kind) {
-    case "add":
-      return addStatusFlagValues(ops, {
-        width: source.width,
-        left: ops.truncate(source.width, source.left),
-        right: ops.truncate(source.width, source.right),
-        result: ops.truncate(source.width, source.result)
-      });
-    case "sub":
-      return subStatusFlagValues(ops, {
-        width: source.width,
-        left: ops.truncate(source.width, source.left),
-        right: ops.truncate(source.width, source.right),
-        result: ops.truncate(source.width, source.result)
-      });
-    case "logic":
-      return logicStatusFlagValues(ops, {
-        width: source.width,
-        result: ops.truncate(source.width, source.result),
-        undefinedAF: input.undefinedAF
-      });
-  }
-}
-
-export function addStatusFlagValues<TValue extends number>(
-  ops: FlagValueOps<TValue>,
+export function addStatusFlagValues(
+  values: ValueBuilder,
   input: Readonly<{
     width: OperandWidth;
-    left: TValue;
-    right: TValue;
-    result: TValue;
-    carryIn?: TValue;
+    left: ValueId;
+    right: ValueId;
+    result: ValueId;
+    carryIn?: ValueId;
   }>
-): StatusFlagValues<TValue> {
-  const dag = binaryFlagDag(ops, input.width, input.left, input.right, input.result);
+): StatusFlagValues {
+  const dag = binaryFlagDag(values, input.width, input.left, input.right, input.result);
 
   return {
-    ...zspValues(ops, dag),
-    CF: addCarry(ops, dag, input.carryIn),
-    AF: auxCarry(ops, dag),
-    OF: signBit(ops, input.width, ops.and(dag.leftXorResult, dag.rightXorResult))
+    ...zspValues(values, dag),
+    CF: addCarry(values, dag, input.carryIn),
+    AF: auxCarry(values, dag),
+    OF: signBit(
+      values,
+      input.width,
+      values.binary("and", dag.leftXorResult, dag.rightXorResult)
+    )
   };
 }
 
-export function subStatusFlagValues<TValue extends number>(
-  ops: FlagValueOps<TValue>,
+export function subStatusFlagValues(
+  values: ValueBuilder,
   input: Readonly<{
     width: OperandWidth;
-    left: TValue;
-    right: TValue;
-    result: TValue;
-    borrowIn?: TValue;
+    left: ValueId;
+    right: ValueId;
+    result: ValueId;
+    borrowIn?: ValueId;
   }>
-): StatusFlagValues<TValue> {
-  const dag = binaryFlagDag(ops, input.width, input.left, input.right, input.result);
+): StatusFlagValues {
+  const dag = binaryFlagDag(values, input.width, input.left, input.right, input.result);
 
   return {
-    ...zspValues(ops, dag),
-    CF: subBorrow(ops, dag, input.borrowIn),
-    AF: auxCarry(ops, dag),
-    OF: signBit(ops, input.width, ops.and(dag.leftXorRight, dag.leftXorResult))
+    ...zspValues(values, dag),
+    CF: subBorrow(values, dag, input.borrowIn),
+    AF: auxCarry(values, dag),
+    OF: signBit(
+      values,
+      input.width,
+      values.binary("and", dag.leftXorRight, dag.leftXorResult)
+    )
   };
 }
 
-export function logicStatusFlagValues<TValue extends number>(
-  ops: FlagValueOps<TValue>,
+export function logicStatusFlagValues(
+  values: ValueBuilder,
   input: Readonly<{
     width: OperandWidth;
-    result: TValue;
-    undefinedAF: TValue;
+    result: ValueId;
+    undefinedAF: ValueId;
   }>
-): StatusFlagValues<TValue> {
-  const zero = ops.const32(0);
+): StatusFlagValues {
+  const zero = values.const(0);
 
   return {
-    ...zspValues(ops, { width: input.width, result: input.result }),
+    ...zspValues(values, { width: input.width, result: input.result }),
     CF: zero,
     AF: input.undefinedAF,
     OF: zero
   };
 }
 
-export function incStatusFlagValues<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  input: Readonly<{ width: OperandWidth; input: TValue; result: TValue }>
-): Pick<StatusFlagValues<TValue>, "PF" | "AF" | "ZF" | "SF" | "OF"> {
+export function incStatusFlagValues(
+  values: ValueBuilder,
+  input: Readonly<{ width: OperandWidth; input: ValueId; result: ValueId }>
+): Pick<StatusFlagValues, "PF" | "AF" | "ZF" | "SF" | "OF"> {
   const width = input.width;
-  const left = ops.truncate(width, input.input);
-  const result = ops.truncate(width, input.result);
+  const left = values.truncate(width, input.input);
+  const result = values.truncate(width, input.result);
 
   return {
-    ...zspValues(ops, { width, result }),
-    AF: ops.compare(32, "eq", lowNibble(ops, left), ops.const32(0xf)),
-    OF: ops.compare(width, "eq", left, ops.const32(maxSignedValue(width)))
+    ...zspValues(values, { width, result }),
+    AF: values.compare(32, "eq", lowNibble(values, left), values.const(0xf)),
+    OF: values.compare(width, "eq", left, values.const(maxSignedValue(width)))
   };
 }
 
-export function decStatusFlagValues<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  input: Readonly<{ width: OperandWidth; input: TValue; result: TValue }>
-): Pick<StatusFlagValues<TValue>, "PF" | "AF" | "ZF" | "SF" | "OF"> {
+export function decStatusFlagValues(
+  values: ValueBuilder,
+  input: Readonly<{ width: OperandWidth; input: ValueId; result: ValueId }>
+): Pick<StatusFlagValues, "PF" | "AF" | "ZF" | "SF" | "OF"> {
   const width = input.width;
-  const left = ops.truncate(width, input.input);
-  const result = ops.truncate(width, input.result);
-  const zero = ops.const32(0);
+  const left = values.truncate(width, input.input);
+  const result = values.truncate(width, input.result);
+  const zero = values.const(0);
 
   return {
-    ...zspValues(ops, { width, result }),
-    AF: ops.compare(32, "eq", lowNibble(ops, left), zero),
-    OF: ops.compare(width, "eq", left, ops.const32(minSignedValue(width)))
+    ...zspValues(values, { width, result }),
+    AF: values.compare(32, "eq", lowNibble(values, left), zero),
+    OF: values.compare(width, "eq", left, values.const(minSignedValue(width)))
   };
 }
 
-export function negStatusFlagValues<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  input: Readonly<{ width: OperandWidth; input: TValue; result: TValue }>
-): StatusFlagValues<TValue> {
+export function negStatusFlagValues(
+  values: ValueBuilder,
+  input: Readonly<{ width: OperandWidth; input: ValueId; result: ValueId }>
+): StatusFlagValues {
   const width = input.width;
-  const value = ops.truncate(width, input.input);
-  const result = ops.truncate(width, input.result);
-  const zero = ops.const32(0);
+  const value = values.truncate(width, input.input);
+  const result = values.truncate(width, input.result);
+  const zero = values.const(0);
 
   return {
-    ...zspValues(ops, { width, result }),
-    CF: ops.compare(width, "ne", value, zero),
-    AF: ops.compare(32, "ne", lowNibble(ops, value), zero),
-    OF: ops.compare(width, "eq", value, ops.const32(minSignedValue(width)))
+    ...zspValues(values, { width, result }),
+    CF: values.compare(width, "ne", value, zero),
+    AF: values.compare(32, "ne", lowNibble(values, value), zero),
+    OF: values.compare(width, "eq", value, values.const(minSignedValue(width)))
   };
 }
 
-export function shiftStatusFlagValues<TValue extends number>(
-  ops: FlagValueOps<TValue>,
+export function shiftStatusFlagValues(
+  values: ValueBuilder,
   input: Readonly<{
     op: ShiftFlagOp;
     width: OperandWidth;
-    value: TValue;
-    count: TValue;
-    result: TValue;
-    oldFlags: StatusFlagValues<TValue>;
+    value: ValueId;
+    count: ValueId;
+    result: ValueId;
+    oldFlags: StatusFlagValues;
   }>
-): StatusFlagValues<TValue> {
-  const zero = ops.const32(0);
-  const one = ops.const32(1);
-  const countIsOne = ops.compare(32, "eq", input.count, one);
-  const cf = shiftCarry(ops, input);
-  const of = shiftOverflow(ops, { ...input, cf });
-  const countNonZero = ops.compare(32, "ne", input.count, zero);
-  const countLeWidth = ops.compare(32, "le_u", input.count, ops.const32(input.width));
-  const cfDefined = ops.and(countNonZero, countLeWidth);
-  const zsp = zspValues(ops, { width: input.width, result: input.result });
-  const nonzeroOf = ops.select(countIsOne, of, zero);
+): StatusFlagValues {
+  const zero = values.const(0);
+  const one = values.const(1);
+  const countIsOne = values.compare(32, "eq", input.count, one);
+  const cf = shiftCarry(values, input);
+  const of = shiftOverflow(values, { ...input, cf });
+  const countNonZero = values.compare(32, "ne", input.count, zero);
+  const countLeWidth = values.compare(
+    32,
+    "le_u",
+    input.count,
+    values.const(input.width)
+  );
+  const cfDefined = values.binary("and", countNonZero, countLeWidth);
+  const zsp = zspValues(values, { width: input.width, result: input.result });
+  const nonzeroOf = values.select(countIsOne, of, zero);
 
   return {
-    CF: ops.select(cfDefined, cf, input.oldFlags.CF),
-    PF: ops.select(countNonZero, zsp.PF, input.oldFlags.PF),
-    AF: ops.select(countNonZero, zero, input.oldFlags.AF),
-    ZF: ops.select(countNonZero, zsp.ZF, input.oldFlags.ZF),
-    SF: ops.select(countNonZero, zsp.SF, input.oldFlags.SF),
-    OF: ops.select(countNonZero, nonzeroOf, input.oldFlags.OF)
+    CF: values.select(cfDefined, cf, input.oldFlags.CF),
+    PF: values.select(countNonZero, zsp.PF, input.oldFlags.PF),
+    AF: values.select(countNonZero, zero, input.oldFlags.AF),
+    ZF: values.select(countNonZero, zsp.ZF, input.oldFlags.ZF),
+    SF: values.select(countNonZero, zsp.SF, input.oldFlags.SF),
+    OF: values.select(countNonZero, nonzeroOf, input.oldFlags.OF)
   };
 }
 
-export function rotateStatusFlagValues<TValue extends number>(
-  ops: FlagValueOps<TValue>,
+export function rotateStatusFlagValues(
+  values: ValueBuilder,
   input: Readonly<{
     op: RotateFlagOp;
     width: OperandWidth;
-    count: TValue;
-    result: TValue;
-    carry: TValue;
-    carryDefined: TValue;
-    oldFlags: Pick<StatusFlagValues<TValue>, "CF" | "OF">;
+    count: ValueId;
+    result: ValueId;
+    carry: ValueId;
+    carryDefined: ValueId;
+    oldFlags: Pick<StatusFlagValues, "CF" | "OF">;
   }>
-): Pick<StatusFlagValues<TValue>, "CF" | "OF"> {
-  const zero = ops.const32(0);
-  const countIsNonZero = ops.compare(32, "ne", input.count, zero);
-  const countIsOne = ops.compare(32, "eq", input.count, ops.const32(1));
-  const definedOf = rotateOverflow(ops, input);
-  const nonzeroOf = ops.select(countIsOne, definedOf, zero);
+): Pick<StatusFlagValues, "CF" | "OF"> {
+  const zero = values.const(0);
+  const countIsNonZero = values.compare(32, "ne", input.count, zero);
+  const countIsOne = values.compare(32, "eq", input.count, values.const(1));
+  const definedOf = rotateOverflow(values, input);
+  const nonzeroOf = values.select(countIsOne, definedOf, zero);
 
   return {
-    CF: ops.select(input.carryDefined, input.carry, input.oldFlags.CF),
-    OF: ops.select(countIsNonZero, nonzeroOf, input.oldFlags.OF)
+    CF: values.select(input.carryDefined, input.carry, input.oldFlags.CF),
+    OF: values.select(countIsNonZero, nonzeroOf, input.oldFlags.OF)
   };
 }
 
-type ResultFlagDag<TValue extends number> = Readonly<{
+type ResultFlagDag = Readonly<{
   width: OperandWidth;
-  result: TValue;
+  result: ValueId;
 }>;
 
-type BinaryFlagDag<TValue extends number> = ResultFlagDag<TValue> & Readonly<{
-  left: TValue;
-  right: TValue;
-  leftXorResult: TValue;
-  rightXorResult: TValue;
-  leftXorRight: TValue;
-  leftXorRightXorResult: TValue;
+type BinaryFlagDag = ResultFlagDag & Readonly<{
+  left: ValueId;
+  right: ValueId;
+  leftXorResult: ValueId;
+  rightXorResult: ValueId;
+  leftXorRight: ValueId;
+  leftXorRightXorResult: ValueId;
 }>;
 
-function binaryFlagDag<TValue extends number>(
-  ops: FlagValueOps<TValue>,
+function binaryFlagDag(
+  values: ValueBuilder,
   width: OperandWidth,
-  left: TValue,
-  right: TValue,
-  rawResult: TValue
-): BinaryFlagDag<TValue> {
-  const leftXorResult = ops.xor(left, rawResult);
-  const rightXorResult = ops.xor(right, rawResult);
-  const leftXorRight = ops.xor(left, right);
+  left: ValueId,
+  right: ValueId,
+  rawResult: ValueId
+): BinaryFlagDag {
+  const leftXorResult = values.binary("xor", left, rawResult);
+  const rightXorResult = values.binary("xor", right, rawResult);
+  const leftXorRight = values.binary("xor", left, right);
 
   return {
     width,
@@ -245,157 +216,175 @@ function binaryFlagDag<TValue extends number>(
     leftXorResult,
     rightXorResult,
     leftXorRight,
-    leftXorRightXorResult: ops.xor(leftXorRight, rawResult)
+    leftXorRightXorResult: values.binary("xor", leftXorRight, rawResult)
   };
 }
 
-export function zspValues<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  dag: ResultFlagDag<TValue>
-): Pick<StatusFlagValues<TValue>, "ZF" | "SF" | "PF"> {
+export function zspValues(
+  values: ValueBuilder,
+  dag: ResultFlagDag
+): Pick<StatusFlagValues, "ZF" | "SF" | "PF"> {
   return {
-    ZF: ops.compare(dag.width, "eq", dag.result, ops.const32(0)),
-    SF: signBit(ops, dag.width, dag.result),
-    PF: parityFlag(ops, dag.result)
+    ZF: values.compare(dag.width, "eq", dag.result, values.const(0)),
+    SF: signBit(values, dag.width, dag.result),
+    PF: parityFlag(values, dag.result)
   };
 }
 
-function addCarry<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  dag: BinaryFlagDag<TValue>,
-  carryIn?: TValue
-): TValue {
-  const carry = ops.compare(dag.width, "lt_u", dag.result, dag.left);
+function addCarry(
+  values: ValueBuilder,
+  dag: BinaryFlagDag,
+  carryIn?: ValueId
+): ValueId {
+  const carry = values.compare(dag.width, "lt_u", dag.result, dag.left);
 
   if (carryIn === undefined) {
     return carry;
   }
 
-  return ops.select(carryIn, ops.compare(dag.width, "le_u", dag.result, dag.left), carry);
+  return values.select(
+    carryIn,
+    values.compare(dag.width, "le_u", dag.result, dag.left),
+    carry
+  );
 }
 
-function subBorrow<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  dag: BinaryFlagDag<TValue>,
-  borrowIn?: TValue
-): TValue {
-  const borrow = ops.compare(dag.width, "lt_u", dag.left, dag.right);
+function subBorrow(
+  values: ValueBuilder,
+  dag: BinaryFlagDag,
+  borrowIn?: ValueId
+): ValueId {
+  const borrow = values.compare(dag.width, "lt_u", dag.left, dag.right);
 
   if (borrowIn === undefined) {
     return borrow;
   }
 
-  return ops.select(borrowIn, ops.compare(dag.width, "le_u", dag.left, dag.right), borrow);
+  return values.select(
+    borrowIn,
+    values.compare(dag.width, "le_u", dag.left, dag.right),
+    borrow
+  );
 }
 
-function auxCarry<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  dag: BinaryFlagDag<TValue>
-): TValue {
-  return lowBit(ops, ops.shrU(dag.leftXorRightXorResult, ops.const32(4)));
+function auxCarry(values: ValueBuilder, dag: BinaryFlagDag): ValueId {
+  return lowBit(
+    values,
+    values.binary("shr_u", dag.leftXorRightXorResult, values.const(4))
+  );
 }
 
-function shiftCarry<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  input: Readonly<{ op: ShiftFlagOp; width: OperandWidth; value: TValue; count: TValue }>
-): TValue {
-  const shift = input.op === "shl"
-    || input.op === "shld"
-    ? ops.sub(ops.const32(input.width), input.count)
-    : ops.sub(input.count, ops.const32(1));
-
-  return lowBit(ops, ops.shrU(input.value, shift));
-}
-
-function shiftOverflow<TValue extends number>(
-  ops: FlagValueOps<TValue>,
+function shiftCarry(
+  values: ValueBuilder,
   input: Readonly<{
     op: ShiftFlagOp;
     width: OperandWidth;
-    value: TValue;
-    result: TValue;
-    cf: TValue;
+    value: ValueId;
+    count: ValueId;
   }>
-): TValue {
+): ValueId {
+  const shift = input.op === "shl" || input.op === "shld"
+    ? values.binary("sub", values.const(input.width), input.count)
+    : values.binary("sub", input.count, values.const(1));
+
+  return lowBit(values, values.binary("shr_u", input.value, shift));
+}
+
+function shiftOverflow(
+  values: ValueBuilder,
+  input: Readonly<{
+    op: ShiftFlagOp;
+    width: OperandWidth;
+    value: ValueId;
+    result: ValueId;
+    cf: ValueId;
+  }>
+): ValueId {
   switch (input.op) {
     case "shl":
     case "shld":
-      return ops.xor(signBit(ops, input.width, input.result), input.cf);
+      return values.binary(
+        "xor",
+        signBit(values, input.width, input.result),
+        input.cf
+      );
     case "shr":
-      return signBit(ops, input.width, input.value);
+      return signBit(values, input.width, input.value);
     case "shrd":
-      return ops.xor(
-        signBit(ops, input.width, input.value),
-        signBit(ops, input.width, input.result)
+      return values.binary(
+        "xor",
+        signBit(values, input.width, input.value),
+        signBit(values, input.width, input.result)
       );
     case "sar":
-      return ops.const32(0);
+      return values.const(0);
   }
 }
 
-function rotateOverflow<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  input: Readonly<{ op: RotateFlagOp; width: OperandWidth; result: TValue; carry: TValue }>
-): TValue {
+function rotateOverflow(
+  values: ValueBuilder,
+  input: Readonly<{
+    op: RotateFlagOp;
+    width: OperandWidth;
+    result: ValueId;
+    carry: ValueId;
+  }>
+): ValueId {
   switch (input.op) {
     case "rol":
     case "rcl":
-      return ops.xor(signBit(ops, input.width, input.result), input.carry);
+      return values.binary(
+        "xor",
+        signBit(values, input.width, input.result),
+        input.carry
+      );
     case "ror":
     case "rcr":
-      return ops.xor(
-        signBit(ops, input.width, input.result),
-        nextSignBit(ops, input.width, input.result)
+      return values.binary(
+        "xor",
+        signBit(values, input.width, input.result),
+        nextSignBit(values, input.width, input.result)
       );
   }
 }
 
-function parityFlag<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  value: TValue
-): TValue {
-  const lowByte = ops.and(value, ops.const32(0xff));
-  const odd = lowBit(ops, ops.popcnt(lowByte));
+function parityFlag(values: ValueBuilder, value: ValueId): ValueId {
+  const lowByte = values.binary("and", value, values.const(0xff));
+  const odd = lowBit(values, values.unary("popcnt", lowByte));
 
-  return ops.compare(32, "eq", odd, ops.const32(0));
+  return values.compare(32, "eq", odd, values.const(0));
 }
 
-export function bitAt<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  value: TValue,
+export function bitAt(
+  values: ValueBuilder,
+  value: ValueId,
   bit: number
-): TValue {
-  return lowBit(ops, ops.shrU(value, ops.const32(bit)));
+): ValueId {
+  return lowBit(values, values.binary("shr_u", value, values.const(bit)));
 }
 
-export function signBit<TValue extends number>(
-  ops: FlagValueOps<TValue>,
+export function signBit(
+  values: ValueBuilder,
   width: OperandWidth,
-  value: TValue
-): TValue {
-  return ops.shrU(value, ops.const32(width - 1));
+  value: ValueId
+): ValueId {
+  return values.binary("shr_u", value, values.const(width - 1));
 }
 
-export function nextSignBit<TValue extends number>(
-  ops: FlagValueOps<TValue>,
+export function nextSignBit(
+  values: ValueBuilder,
   width: OperandWidth,
-  value: TValue
-): TValue {
-  return bitAt(ops, value, width - 2);
+  value: ValueId
+): ValueId {
+  return bitAt(values, value, width - 2);
 }
 
-export function lowBit<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  value: TValue
-): TValue {
-  return ops.and(value, ops.const32(1));
+export function lowBit(values: ValueBuilder, value: ValueId): ValueId {
+  return values.binary("and", value, values.const(1));
 }
 
-function lowNibble<TValue extends number>(
-  ops: FlagValueOps<TValue>,
-  value: TValue
-): TValue {
-  return ops.and(value, ops.const32(0xf));
+function lowNibble(values: ValueBuilder, value: ValueId): ValueId {
+  return values.binary("and", value, values.const(0xf));
 }
 
 function minSignedValue(width: OperandWidth): number {

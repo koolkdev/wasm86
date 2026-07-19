@@ -1,15 +1,12 @@
 import { assert } from "#common/assert.js";
 import type { CpuException } from "#core/exceptions.js";
-import type { MutableCpuStateView } from "#core/state/cpu-state.js";
 import type { SegmentRegister } from "#core/types.js";
-import { executionStateLayout } from "#ir/state-layout.js";
-import {
-  bindWasmInterpreter,
-  type WasmInterpreterBinding
-} from "#engines/interpreter/binding.js";
-import { WasmCpuState } from "#wasm/host/cpu-state.js";
+import { bindWasmInterpreter } from "#engines/interpreter/binding.js";
 import { wasmPageByteLength } from "#wasm/abi.js";
 import { decodeExit } from "./exit.js";
+import { createCpuStateHostView } from "./host-view.js";
+import { cpuState } from "./state.js";
+import type { CpuStateView } from "./view.js";
 
 export type UnsupportedReason =
   | "unsupportedOpcode"
@@ -24,10 +21,6 @@ export type RunStop =
   | Readonly<{ kind: "cpuException"; exception: CpuException<number> }>
   | Readonly<{ kind: "instructionLimit" }>;
 
-export type CpuStateView = MutableCpuStateView & Readonly<{
-  instructionCount: number;
-}>;
-
 export type CpuRunOptions = Readonly<{
   instructionBudget: number;
 }>;
@@ -37,21 +30,15 @@ export type Cpu = Readonly<{
   run(options: CpuRunOptions): RunStop;
 }>;
 
-type CpuContext = Readonly<{
-  state: WasmCpuState;
-  interpreter: WasmInterpreterBinding;
-}>;
-
 export function createCpu(guestMemory: WebAssembly.Memory): Cpu {
   const cpuStateMemory = new WebAssembly.Memory({
-    initial: Math.ceil(executionStateLayout.byteLength / wasmPageByteLength)
+    initial: Math.ceil(cpuState.layout.byteLength / wasmPageByteLength)
   });
-  const state = new WasmCpuState(cpuStateMemory);
+  const state = createCpuStateHostView(cpuStateMemory);
   const interpreter = bindWasmInterpreter(
     guestMemory,
     cpuStateMemory
   );
-  const context: CpuContext = { state, interpreter };
 
   return {
     state,
@@ -63,7 +50,7 @@ export function createCpu(guestMemory: WebAssembly.Memory): Cpu {
         `instructionBudget must be a valid Wasm i32 fuel value: ${instructionBudget}`
       );
 
-      const encodedExit = context.interpreter.run(instructionBudget);
+      const encodedExit = interpreter.run(instructionBudget);
 
       return decodeExit(encodedExit);
     }

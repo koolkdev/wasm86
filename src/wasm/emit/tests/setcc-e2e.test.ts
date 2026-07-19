@@ -1,9 +1,10 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { immBinding, regBinding } from "#ir/operands.js";
-import { gprChannel } from "#ir/slots.js";
+import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { immBinding, regBinding } from "#core/instruction/bindings.js";
+import { gprChannel } from "#core/state/channels.js";
 import { CONDITIONS, type FlagBoolExpr } from "#core/flags/conditions.js";
 import type { X86StatusFlag } from "#core/flags/definitions.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
@@ -13,7 +14,6 @@ import { cmpSemantic } from "#core/semantics/cmp.js";
 import { setccSemantic } from "#core/semantics/setcc.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
-import { isStateRead } from "#ir/tests/storage-op-helpers.js";
 
 // cmp + setcc consumes source-derived cmp conditions, and standalone setcc
 // rebuilds the condition through status-flag resolver calls.
@@ -45,7 +45,7 @@ const operandPairs: ReadonlyArray<readonly [number, number]> = [
 
 test("a condition after a flag-writing branch uses the captured pending lazy record", async () => {
   const joinedLazyCondition: SemanticTemplate = (s, v) => {
-    const left = s.get(s.reg("ebx"));
+    const left = s.read(s.reg("ebx"), { width: 32 });
     const right = v.const(5);
 
     s.writeStatusFlagsSource({
@@ -55,12 +55,12 @@ test("a condition after a flag-writing branch uses the captured pending lazy rec
       right,
       result: v.binary("sub", left, right)
     });
-    s.if(s.get(s.reg("ecx")), (then) => then.writeFlag("ZF", v.const(1)));
-    s.set(s.reg("eax"), v.select(s.condition("B"), v.const(1), v.const(0)));
+    s.if(s.read(s.reg("ecx"), { width: 32 }), (then) => then.writeFlag("ZF", v.const(1)));
+    s.write(s.reg("eax"), v.select(s.condition("B"), v.const(1), v.const(0)), { width: 32 });
   };
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(joinedLazyCondition, [], loc(0x1000, 0x1001));
+  builder.add(joinedLazyCondition, [], loc(0x1000, 0x1001));
   const { stateView, run } = await instantiateIrBlock(builder.finish());
 
   writeWasmCpuStateSnapshot(stateView, {
@@ -76,21 +76,12 @@ test("a condition after a flag-writing branch uses the captured pending lazy rec
 for (const [cc, predicate] of comparePredicates) {
   test(`cmp ebx, imm + set${cc.toLowerCase()} al matches the predicate`, async () => {
     for (const [left, right] of operandPairs) {
-      const builder = createIrBlockBuilder();
+      const builder = createLegacyInstructionBlock();
 
-      builder.addInstruction(cmpSemantic(32), [regBinding("ebx"), immBinding(right)], loc(0x1000, 0x1006));
-      builder.addInstruction(setccSemantic(cc), [regBinding("al")], loc(0x1006, 0x1009));
+      builder.add(cmpSemantic(32), [regBinding("ebx"), immBinding(right)], loc(0x1000, 0x1006));
+      builder.add(setccSemantic(cc), [regBinding("al")], loc(0x1006, 0x1009));
 
       const block = builder.finish();
-
-      // Source-derived cmp conditions serve setcc: no flag byte is read back.
-      strictEqual(
-        block.body.actions.some(
-          (action) => isStateRead(action) && action.op.slot.kind === "flag"
-        ),
-        false
-      );
-
       const { stateView, run } = await instantiateIrBlock(block);
       const label = `set${cc.toLowerCase()} with ${left}, ${right}`;
 
@@ -123,9 +114,9 @@ function evaluateCondition(expr: FlagBoolExpr, flags: ReadonlySet<X86StatusFlag>
 for (const cc of Object.keys(CONDITIONS) as ConditionCode[]) {
   test(`standalone set${cc.toLowerCase()} al evaluates every flag combination`, async () => {
     const condition = CONDITIONS[cc];
-    const builder = createIrBlockBuilder();
+    const builder = createLegacyInstructionBlock();
 
-    builder.addInstruction(setccSemantic(cc), [regBinding("al")], loc(0x1000, 0x1003));
+    builder.add(setccSemantic(cc), [regBinding("al")], loc(0x1000, 0x1003));
 
     const { stateView, run } = await instantiateIrBlock(builder.finish());
 

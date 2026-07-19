@@ -1,12 +1,19 @@
 import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { createIrBlockBuilder, staticInstructionLocation as loc } from "#ir/builder.js";
-import { memBinding, staticMemSegment } from "#ir/operands.js";
-import { eipChannel, gprChannel } from "#ir/slots.js";
+import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
+import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { memBinding, staticMemSegment } from "#core/instruction/bindings.js";
+import { gprChannel } from "#core/state/channels.js";
+import { coreStateFields } from "#core/state/layout.js";
+import { cpuStateAccess } from "#cpu/state.js";
 import type { Action } from "#ir/actions.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
+import {
+  operandRead,
+  operandWrite
+} from "#ir/tests/storage-op-helpers.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { repMovsSemantic } from "#core/semantics/strings.js";
 import { wasmMemoryIndex } from "#wasm/abi.js";
@@ -21,7 +28,6 @@ import {
   wasmBodyOpcodes
 } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
-import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 
 // The loop machinery end to end: carried cells in locals, the continue's
 // parallel back-edge assignment, loop-invariant hoisting, and the fused rep
@@ -30,6 +36,7 @@ import { stateRead, stateWrite } from "#ir/tests/storage-op-helpers.js";
 const dispatchEip = 0x2000;
 
 function loopBlock(values: ValueTable, actions: readonly Action[]): IrBlock {
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const eip = values.const(dispatchEip);
 
   return {
@@ -37,6 +44,7 @@ function loopBlock(values: ValueTable, actions: readonly Action[]): IrBlock {
     body: {
       actions: [
         ...actions,
+        operandWrite(state.field(coreStateFields.eip), eip),
         { kind: "finish", finish: { kind: "dispatch", targetEip: eip } }
       ]
     }
@@ -47,6 +55,8 @@ function loopBlock(values: ValueTable, actions: readonly Action[]): IrBlock {
 // parallel — a sequential rewrite would collapse both registers to one value.
 function swapLoopBlock(): IrBlock {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const aSeed = values.addActionOutput();
   const bSeed = values.addActionOutput();
   const nSeed = values.addActionOutput();
@@ -56,15 +66,15 @@ function swapLoopBlock(): IrBlock {
   const remaining = values.binary("sub", nInput, values.const(1));
 
   return loopBlock(values, [
-    stateRead(aSeed, gprChannel("eax")),
-    stateRead(bSeed, gprChannel("ebx")),
-    stateRead(nSeed, gprChannel("ecx")),
+    operandRead(aSeed, state.gpr("eax")),
+    operandRead(bSeed, state.gpr("ebx")),
+    operandRead(nSeed, state.gpr("ecx")),
     {
       kind: "loop",
       carried: [
-        { channel: gprChannel("eax"), seed: aSeed, loopInput: aInput },
-        { channel: gprChannel("ebx"), seed: bSeed, loopInput: bInput },
-        { channel: gprChannel("ecx"), seed: nSeed, loopInput: nInput }
+        { seed: aSeed, loopInput: aInput },
+        { seed: bSeed, loopInput: bInput },
+        { seed: nSeed, loopInput: nInput }
       ],
       body: {
         actions: [
@@ -73,9 +83,9 @@ function swapLoopBlock(): IrBlock {
             condition: values.compare(32, "ne", remaining, values.const(0)),
             thenBody: { actions: [{ kind: "loopContinue", updates: [bInput, aInput, remaining] }] }
           },
-          stateWrite(gprChannel("eax"), bInput),
-          stateWrite(gprChannel("ebx"), aInput),
-          stateWrite(gprChannel("ecx"), remaining)
+          operandWrite(state.gpr("eax"), bInput),
+          operandWrite(state.gpr("ebx"), aInput),
+          operandWrite(state.gpr("ecx"), remaining)
         ]
       }
     }
@@ -107,6 +117,8 @@ test("the back edge assigns all carried cells in parallel", async () => {
 // must survive every iteration even after its last statically counted use.
 test("a hoisted loop-invariant value stays live across iterations", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const invariant = values.addActionOutput();
   const sumSeed = values.addActionOutput();
   const nSeed = values.addActionOutput();
@@ -115,14 +127,14 @@ test("a hoisted loop-invariant value stays live across iterations", async () => 
   const total = values.binary("add", sumInput, invariant);
   const remaining = values.binary("sub", nInput, values.const(1));
   const block = loopBlock(values, [
-    stateRead(invariant, gprChannel("edx")),
-    stateRead(sumSeed, gprChannel("eax")),
-    stateRead(nSeed, gprChannel("ecx")),
+    operandRead(invariant, state.gpr("edx")),
+    operandRead(sumSeed, state.gpr("eax")),
+    operandRead(nSeed, state.gpr("ecx")),
     {
       kind: "loop",
       carried: [
-        { channel: gprChannel("eax"), seed: sumSeed, loopInput: sumInput },
-        { channel: gprChannel("ecx"), seed: nSeed, loopInput: nInput }
+        { seed: sumSeed, loopInput: sumInput },
+        { seed: nSeed, loopInput: nInput }
       ],
       body: {
         actions: [
@@ -131,8 +143,8 @@ test("a hoisted loop-invariant value stays live across iterations", async () => 
             condition: values.compare(32, "ne", remaining, values.const(0)),
             thenBody: { actions: [{ kind: "loopContinue", updates: [total, remaining] }] }
           },
-          stateWrite(gprChannel("eax"), total),
-          stateWrite(gprChannel("ecx"), remaining)
+          operandWrite(state.gpr("eax"), total),
+          operandWrite(state.gpr("ecx"), remaining)
         ]
       }
     }
@@ -147,18 +159,20 @@ test("a hoisted loop-invariant value stays live across iterations", async () => 
 
 test("a pure invariant evaluates before the loop", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const invariant = values.binary("add", values.external(0), values.const(1));
   const countSeed = values.addActionOutput();
   const countInput = values.addLoopInput();
   const remaining = values.binary("sub", countInput, values.const(1));
   const block = loopBlock(values, [
-    stateRead(countSeed, gprChannel("ecx")),
+    operandRead(countSeed, state.gpr("ecx")),
     {
       kind: "loop",
-      carried: [{ channel: gprChannel("ecx"), seed: countSeed, loopInput: countInput }],
+      carried: [{ seed: countSeed, loopInput: countInput }],
       body: {
         actions: [
-          stateWrite(gprChannel("eax"), invariant),
+          operandWrite(state.gpr("eax"), invariant),
           {
             kind: "if",
             condition: values.compare(32, "ne", remaining, values.const(0)),
@@ -166,7 +180,7 @@ test("a pure invariant evaluates before the loop", async () => {
               actions: [{ kind: "loopContinue", updates: [remaining] }]
             }
           },
-          stateWrite(gprChannel("ecx"), remaining)
+          operandWrite(state.gpr("ecx"), remaining)
         ]
       }
     }
@@ -184,6 +198,8 @@ test("a pure invariant evaluates before the loop", async () => {
 
 test("an outer value captures at each inner loop entry", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const outerSeed = values.addActionOutput();
   const outerInput = values.addLoopInput();
   const innerInput = values.addLoopInput();
@@ -192,22 +208,18 @@ test("an outer value captures at each inner loop entry", async () => {
   const outerRemaining = values.binary("sub", outerInput, one);
   const innerRemaining = values.binary("sub", innerInput, one);
   const block = loopBlock(values, [
-    stateRead(outerSeed, gprChannel("ecx")),
+    operandRead(outerSeed, state.gpr("ecx")),
     {
       kind: "loop",
-      carried: [{ channel: gprChannel("ecx"), seed: outerSeed, loopInput: outerInput }],
+      carried: [{ seed: outerSeed, loopInput: outerInput }],
       body: {
         actions: [
           {
             kind: "loop",
-            carried: [{
-              channel: gprChannel("ebx"),
-              seed: values.const(2),
-              loopInput: innerInput
-            }],
+            carried: [{ seed: values.const(2), loopInput: innerInput }],
             body: {
               actions: [
-                stateWrite(gprChannel("eax"), adjusted),
+                operandWrite(state.gpr("eax"), adjusted),
                 {
                   kind: "if",
                   condition: values.compare(32, "ne", innerRemaining, values.const(0)),
@@ -225,7 +237,7 @@ test("an outer value captures at each inner loop entry", async () => {
               actions: [{ kind: "loopContinue", updates: [outerRemaining] }]
             }
           },
-          stateWrite(gprChannel("ecx"), outerRemaining)
+          operandWrite(state.gpr("ecx"), outerRemaining)
         ]
       }
     }
@@ -248,6 +260,8 @@ test("an outer value captures at each inner loop entry", async () => {
 
 test("an outer capture survives nested loops and both back edges", async () => {
   const values = new ValueTable();
+  values.const(0);
+  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const invariant = values.addActionOutput();
   const outerSeed = values.addActionOutput();
   const transient = values.addActionOutput();
@@ -256,30 +270,22 @@ test("an outer capture survives nested loops and both back edges", async () => {
   const outerRemaining = values.binary("sub", outerInput, values.const(1));
   const innerRemaining = values.binary("sub", innerInput, values.const(1));
   const block = loopBlock(values, [
-    stateRead(invariant, gprChannel("edx")),
-    stateRead(outerSeed, gprChannel("ecx")),
+    operandRead(invariant, state.gpr("edx")),
+    operandRead(outerSeed, state.gpr("ecx")),
     {
       kind: "loop",
-      carried: [{
-        channel: gprChannel("ecx"),
-        seed: outerSeed,
-        loopInput: outerInput
-      }],
+      carried: [{ seed: outerSeed, loopInput: outerInput }],
       body: {
         actions: [
           {
             kind: "loop",
-            carried: [{
-              channel: gprChannel("ebx"),
-              seed: values.const(2),
-              loopInput: innerInput
-            }],
+            carried: [{ seed: values.const(2), loopInput: innerInput }],
             body: {
               actions: [
-                stateWrite(gprChannel("ebx"), invariant),
-                stateRead(transient, gprChannel("esi")),
-                stateWrite(gprChannel("edi"), transient),
-                stateWrite(gprChannel("ebp"), transient),
+                operandWrite(state.gpr("ebx"), invariant),
+                operandRead(transient, state.gpr("esi")),
+                operandWrite(state.gpr("edi"), transient),
+                operandWrite(state.gpr("ebp"), transient),
                 {
                   kind: "if",
                   condition: values.compare(
@@ -313,7 +319,7 @@ test("an outer capture survives nested loops and both back edges", async () => {
               }]
             }
           },
-          stateWrite(gprChannel("eax"), invariant)
+          operandWrite(state.gpr("eax"), invariant)
         ]
       }
     }
@@ -343,9 +349,9 @@ test("an outer capture survives nested loops and both back edges", async () => {
 test("cell locals carry loop state and survive to post-loop reads", async () => {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
-  const nSeed = values.addActionOutput();
+  const state = cpuStateAccess.bind(body);
+  const nSeed = state.read(state.gpr("ecx"));
 
-  body.push(stateRead(nSeed, gprChannel("ecx")));
   const cell = body.cell(nSeed);
 
   body.loop([], (loop) => {
@@ -360,13 +366,13 @@ test("cell locals carry loop state and survive to post-loop reads", async () => 
   });
   const postOut = body.read(cell);
 
-  body.push(
-    stateWrite(
-      gprChannel("eax"),
-      values.binary("add", postOut, values.const(100))
-    )
+  state.write(
+    state.gpr("eax"),
+    values.binary("add", postOut, values.const(100))
   );
-  body.finish({ kind: "dispatch", targetEip: values.const(dispatchEip) });
+  const targetEip = values.const(dispatchEip);
+  state.write(state.field(coreStateFields.eip), targetEip);
+  body.finish({ kind: "dispatch", targetEip });
   const block: IrBlock = { values, body: body.build() };
   const { stateView, run } = await instantiateIrBlock(block);
 
@@ -381,9 +387,9 @@ const repEip = 0x1000;
 const repNextEip = 0x1002;
 
 function repMovsdBlock(): IrBlock {
-  const builder = createIrBlockBuilder();
+  const builder = createLegacyInstructionBlock();
 
-  builder.addInstruction(
+  builder.add(
     repMovsSemantic(32),
     [
       memBinding({ base: "esi", index: undefined, scale: 1, disp: 0 }, staticMemSegment("ds")),
@@ -406,7 +412,7 @@ test("rep movsd runs its whole count in one dispatch with an exact count", async
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 0);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("esi")), 0x2c);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("edi")), 0x4c);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), repNextEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), repNextEip);
   strictEqual(readWasmCpuStateField(stateView, "instructionCount"), 3);
   deepStrictEqual(
     [0x40, 0x44, 0x48].map((address) => guestView.getUint32(address, true)),
@@ -426,7 +432,7 @@ test("a mid-string fault commits partial progress with eip at the rep", async ()
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 1);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("esi")), 0x24);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("edi")), guestByteLength);
-  strictEqual(readWasmCpuStateChannel(stateView, eipChannel), repEip);
+  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), repEip);
   // The count is not carried: a mid-rep fault reports the pre-rep count.
   strictEqual(readWasmCpuStateField(stateView, "instructionCount"), 0);
   strictEqual(guestView.getUint32(guestByteLength - 4, true), 0x1111_2222);
