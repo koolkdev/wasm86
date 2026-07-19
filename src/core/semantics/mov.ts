@@ -20,7 +20,7 @@ export function movSregSemantic(registerWidth: Extract<OperandWidth, 16 | 32>): 
   return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-    const value = s.read(src, { width: registerWidth });
+    const value = s.read(src, { width: 16 });
 
     s.write(dst, value, { width: registerWidth, memory: { width: 16 } });
   };

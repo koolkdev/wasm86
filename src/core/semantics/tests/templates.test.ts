@@ -27,7 +27,11 @@ import {
 } from "#core/semantics/flags.js";
 import { leaSemantic } from "#core/semantics/lea.js";
 import { int3Semantic, intoSemantic, intSemantic, nopSemantic } from "#core/semantics/misc.js";
-import { cmovSemantic, movToSregSemantic } from "#core/semantics/mov.js";
+import {
+  cmovSemantic,
+  movSregSemantic,
+  movToSregSemantic
+} from "#core/semantics/mov.js";
 import {
   imulImplicitSemantic,
   imulRegRmImmSemantic,
@@ -81,6 +85,26 @@ test("MOV to CS raises #UD before loading the selector source", () => {
     "ifEnd",
     "%0 = get op1:16",
     "set op0:16 <- %0",
+    "next"
+  ]);
+});
+
+test("MOV from a segment register keeps its memory transfer at 16 bits", () => {
+  const register = buildSemanticTrace(movSregSemantic(32), regOperands(2));
+  const memory = buildSemanticTrace(movSregSemantic(32), operands("mem", "reg"));
+
+  deepStrictEqual(register.events, [
+    "%0 = get op1:16",
+    "set op0:32 <- %0",
+    "next"
+  ]);
+  deepStrictEqual(memory.events, [
+    "%0 = get op1:16",
+    "resolve r0 = operand(op0):2",
+    "if %2",
+    "cpuException PF r0.write",
+    "ifEnd",
+    "write r0.write+0:16 <- %0",
     "next"
   ]);
 });
