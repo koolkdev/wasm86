@@ -5,9 +5,11 @@ import {
   maxSwitchMatch,
   type Action,
   type CallAction,
+  type FunctionCallAction,
   type IfAction,
   type LoopAction,
   type OpAction,
+  type ReturnCallAction,
   type SwitchAction
 } from "./actions.js";
 import type { Body, IrBlock } from "./block.js";
@@ -170,6 +172,7 @@ class IrValidator {
       case "loopContinue":
       case "finish":
       case "return":
+      case "returnCall":
         return;
     }
   }
@@ -420,7 +423,7 @@ class IrValidator {
           `${site.path} operand ${input.value}`
         );
       }
-    } else if (action.kind === "call") {
+    } else if (action.kind === "call" || action.kind === "returnCall") {
       this.#validateCall(action, site);
     } else {
       for (const operand of actionOperands(action)) {
@@ -458,6 +461,9 @@ class IrValidator {
         return;
       case "return":
         this.#validateReturn(action.results, site.path);
+        return;
+      case "returnCall":
+        this.#validateReturnCall(action, site.path);
         return;
       case "if":
       case "call":
@@ -562,6 +568,7 @@ class IrValidator {
       case "loopContinue":
       case "finish":
       case "return":
+      case "returnCall":
         return;
     }
   }
@@ -716,7 +723,7 @@ class IrValidator {
     }
   }
 
-  #validateCall(action: CallAction, site: ActionSite): void {
+  #validateCall(action: FunctionCallAction, site: ActionSite): void {
     const expected = action.target.type.parameters;
 
     assert(
@@ -739,6 +746,19 @@ class IrValidator {
       );
       this.#validateValueUse(argument.value, site, `${site.path} argument ${index}`);
     }
+  }
+
+  #validateReturnCall(action: ReturnCallAction, path: string): void {
+    const fn = this.#function;
+
+    assert(fn !== undefined, `${path} returns from a block body`);
+    const results = action.target.type.results;
+
+    assert(
+      results.length === fn.results.length &&
+        results.every((type, index) => type === fn.results[index]),
+      `${path} target results do not match the enclosing function`
+    );
   }
 
   #validateReturn(results: readonly ValueId[], path: string): void {
@@ -883,6 +903,7 @@ function assertKnownAction(action: Action): void {
   assert(
     kind === "op" ||
       kind === "call" ||
+      kind === "returnCall" ||
       kind === "if" ||
       kind === "switch" ||
       kind === "loop" ||

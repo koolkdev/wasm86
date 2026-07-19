@@ -16,6 +16,7 @@ export function nestedBodies(action: Action): readonly Body[] {
       return [action.body];
     case "op":
     case "call":
+    case "returnCall":
     case "loopContinue":
     case "finish":
     case "return":
@@ -59,6 +60,8 @@ export function actionOperands(action: Action): readonly ValueId[] {
     case "op":
       return action.op.inputs.map((input) => input.value);
     case "call":
+      return action.arguments.map((argument) => argument.value);
+    case "returnCall":
       return action.arguments.map((argument) => argument.value);
     case "if":
       return [action.condition];
@@ -108,6 +111,7 @@ export function actionOutput(action: Action): ValueId | undefined {
     case "loopContinue":
     case "finish":
     case "return":
+    case "returnCall":
       return undefined;
   }
 }

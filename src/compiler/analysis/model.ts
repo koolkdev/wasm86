@@ -3,6 +3,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import type {
   Action,
   CallAction,
+  FunctionCallAction,
   IfAction,
   OpAction,
   SwitchAction
@@ -60,7 +61,7 @@ export type OperationSite = Readonly<{
 }>;
 
 export type CallSite = Readonly<{
-  action: CallAction;
+  action: FunctionCallAction;
   site: SiteId;
 }>;
 
@@ -90,5 +91,5 @@ export type BodyAnalysis = Readonly<{
   }>;
   actionMustExecute(action: ProducingAction): boolean;
   opActionMustExecute(action: OpAction): boolean;
-  callActionMustExecute(action: CallAction): boolean;
+  callActionMustExecute(action: FunctionCallAction): boolean;
 }>;

@@ -19,7 +19,7 @@ import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { PlacementIndex } from "#compiler/placement/index.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
 import type { ExternalValueId } from "#ir/operands.js";
-import type { CallAction } from "#ir/actions.js";
+import type { CallAction, ReturnCallAction } from "#ir/actions.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
@@ -117,6 +117,13 @@ export class ValueEmitter implements OperationValueEmitter {
       this.emitUse(argument.value);
     }
     this.#body.callFunction(this.#context.functionIndex(action.target));
+  }
+
+  emitReturnCall(action: ReturnCallAction): void {
+    for (const argument of action.arguments) {
+      this.emitUse(argument.value);
+    }
+    this.#body.returnCallFunction(this.#context.functionIndex(action.target));
   }
 
   constValue(value: ValueId): number | undefined {

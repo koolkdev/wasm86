@@ -179,6 +179,9 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
           }
           return;
         }
+        case "returnCall":
+          valueEmitter.emitReturnCall(action);
+          return;
         case "finish":
           switch (action.finish.kind) {
             case "exit":

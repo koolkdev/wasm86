@@ -5,6 +5,7 @@ import { ValueTable } from "#compiler/ir/values/table.js";
 import type { Action } from "./actions.js";
 import type { Body } from "./block.js";
 import { RegionBuilder } from "./region-builder.js";
+import type { FunctionDefinition } from "#compiler/program/functions.js";
 
 export type IrFunction = Readonly<{
   type: FunctionType;
@@ -15,7 +16,7 @@ export type IrFunction = Readonly<{
 
 export class FunctionBuilder {
   readonly values = new ValueTable();
-  readonly region = new RegionBuilder(this.values);
+  readonly region: RegionBuilder;
   readonly parameters: readonly ValueId[];
   readonly #type: FunctionType;
   #finished = false;
@@ -26,6 +27,7 @@ export class FunctionBuilder {
       `functions with ${type.results.length} results are not supported yet`
     );
     this.#type = type;
+    this.region = new RegionBuilder(this.values, undefined, type.results);
     this.parameters = type.parameters.map((parameterType, index) =>
       this.values.parameter(index, parameterType)
     );
@@ -33,6 +35,10 @@ export class FunctionBuilder {
 
   return(results: readonly ValueId[]): void {
     this.region.return(results);
+  }
+
+  returnCall(target: FunctionDefinition, args: readonly ValueId[]): void {
+    this.region.returnCall(target, args);
   }
 
   finish(): IrFunction {
@@ -86,6 +92,7 @@ function snapshotAction(action: Action): Action {
       return { ...action, body: snapshotBody(action.body) };
     case "op":
     case "call":
+    case "returnCall":
     case "loopContinue":
     case "finish":
     case "return":

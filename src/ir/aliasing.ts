@@ -27,6 +27,7 @@ export function effectsOf(action: Action): StorageEffects {
     case "op":
       return action.op.effects;
     case "call":
+    case "returnCall":
       return action.target.effects;
     case "if":
       return bodyEffects(action.thenBody, action.elseBody);
@@ -123,6 +124,7 @@ export function actionMayWriteStateSlot(action: Action, slot: StateSlot): boolea
         (write) => write.space === "state" && slotsMayAlias(write.slot, slot)
       );
     case "call":
+    case "returnCall":
       return action.target.effects.writes.some(
         (write) => write.space === "state" && slotsMayAlias(write.slot, slot)
       );

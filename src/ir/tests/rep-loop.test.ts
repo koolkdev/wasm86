@@ -77,6 +77,7 @@ function collectLoops(actions: readonly Action[]): LoopAction[] {
         ];
       case "op":
       case "call":
+      case "returnCall":
       case "loopContinue":
       case "finish":
       case "return":

@@ -8,7 +8,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   bodyFinal,
   type Action,
-  type CallAction,
+  type FunctionCallAction,
   type IfAction,
   type OpAction,
   type SwitchAction
@@ -63,7 +63,7 @@ class BodyAnalyzer implements BodyAnalysis {
   readonly #operations: OperationSite[] = [];
   readonly #operationActions = new Set<OpAction>();
   readonly #calls: CallSite[] = [];
-  readonly #callActions = new Set<CallAction>();
+  readonly #callActions = new Set<FunctionCallAction>();
 
   constructor(
     block: IrBlock,
@@ -195,8 +195,9 @@ class BodyAnalyzer implements BodyAnalysis {
     return this.actionMustExecute(action);
   }
 
-  callActionMustExecute(action: CallAction): boolean {
-    return this.actionMustExecute(action);
+  callActionMustExecute(action: FunctionCallAction): boolean {
+    assert(this.#callActions.has(action), "call action is not part of this analysis");
+    return action.kind === "returnCall" || this.actionMustExecute(action);
   }
 
   #walkBody(body: Body): BodyWalkResult {
@@ -281,6 +282,12 @@ class BodyAnalyzer implements BodyAnalysis {
         );
         this.#producers.set(output, { output, action, site, inputs });
         return effects.writes;
+      }
+      case "returnCall": {
+        this.#calls.push({ action, site });
+        this.#callActions.add(action);
+        this.#roots.push(...action.arguments.map((argument) => demand(argument.value)));
+        return action.target.effects.writes;
       }
       case "if": {
         this.#roots.push(demand(action.condition));
@@ -396,6 +403,9 @@ class BodyAnalyzer implements BodyAnalysis {
     let added = false;
 
     for (const { action, site } of this.#calls) {
+      if (action.kind === "returnCall") {
+        continue;
+      }
       const effects = action.target.effects;
 
       if (effects.writes.length === 0) {

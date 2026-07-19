@@ -14,6 +14,14 @@ export type CallAction = Readonly<{
   outputs: readonly ValueId[];
 }>;
 
+export type ReturnCallAction = Readonly<{
+  kind: "returnCall";
+  target: FunctionDefinition;
+  arguments: readonly ValueInput[];
+}>;
+
+export type FunctionCallAction = CallAction | ReturnCallAction;
+
 export type BranchHint = "unlikely" | "likely";
 
 export type IfAction = Readonly<{
@@ -93,6 +101,7 @@ export type DispatchFinish = Extract<Finish, { kind: "dispatch" }>;
 export type Action =
   | OpAction
   | CallAction
+  | ReturnCallAction
   | IfAction
   | SwitchAction
   | LoopAction
@@ -126,6 +135,7 @@ export function actionCompletes(action: Action): boolean {
     case "loopContinue":
     case "finish":
     case "return":
+    case "returnCall":
       return true;
   }
 }

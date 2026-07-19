@@ -10,7 +10,11 @@ import {
 } from "#compiler/ir/operations/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { joinWidthBounds } from "#compiler/ir/values/width-bounds.js";
-import type { ValueId, WidthBounds } from "#compiler/ir/values/types.js";
+import type {
+  ValueId,
+  ValueType,
+  WidthBounds
+} from "#compiler/ir/values/types.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 
 export type BuildBody = (b: RegionBuilder) => void;
@@ -33,16 +37,19 @@ export type IfValueOptions = Readonly<{
 
 export class RegionBuilder {
   readonly #sink: BodyActionSink;
+  readonly #functionResults: readonly ValueType[] | undefined;
 
   constructor(
     readonly values: ValueTable,
-    sink: BodyActionSink = new BufferedBodyActionSink()
+    sink: BodyActionSink = new BufferedBodyActionSink(),
+    functionResults: readonly ValueType[] | undefined = undefined
   ) {
     this.#sink = sink;
+    this.#functionResults = functionResults;
   }
 
   child(sink: BodyActionSink = new BufferedBodyActionSink()): RegionBuilder {
-    return new RegionBuilder(this.values, sink);
+    return new RegionBuilder(this.values, sink, this.#functionResults);
   }
 
   cell(seed: ValueId): CellRef {
@@ -108,6 +115,37 @@ export class RegionBuilder {
 
     this.#emit({ kind: "call", target, arguments: inputs, outputs });
     return outputs;
+  }
+
+  returnCall(target: FunctionDefinition, args: readonly ValueId[]): void {
+    const functionResults = this.#functionResults;
+
+    assert(functionResults !== undefined, "returnCall requires an enclosing function");
+    const { parameters, results } = target.type;
+
+    assert(
+      args.length === parameters.length,
+      `function ${target.ref.id} expects ${parameters.length} arguments, got ${args.length}`
+    );
+    assert(
+      results.length === functionResults.length &&
+        results.every((type, index) => type === functionResults[index]),
+      `function ${target.ref.id} results do not match the enclosing function`
+    );
+    const inputs = args.map((value, index) => {
+      const expected = parameters[index];
+
+      assert(expected !== undefined, `function ${target.ref.id} has no parameter ${index}`);
+      const actual = this.values.valueType(value);
+
+      assert(
+        actual === expected,
+        `function ${target.ref.id} argument ${index} must be ${expected}, got ${actual}`
+      );
+      return { value, type: expected };
+    });
+
+    this.#emit({ kind: "returnCall", target, arguments: inputs });
   }
 
   // Escape hatch for an already-built action.
