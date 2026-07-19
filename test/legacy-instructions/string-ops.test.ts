@@ -108,6 +108,68 @@ registerInstructionFixture({
   }
 });
 
+registerInstructionFixture({
+  name: "cmpsd-dual-read-fault-reports-source-without-progress",
+  bytes: cmpsOpcode(32),
+  initialState: {
+    esi: guestByteLength,
+    edi: guestByteLength - 1,
+    esBase,
+    ...allStatusFlagsSet,
+    eip: startAddress
+  },
+  expected: {
+    stop: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: guestByteLength, errorCode: 0 }
+    },
+    state: {
+      esi: guestByteLength,
+      edi: guestByteLength - 1,
+      esBase,
+      ...allStatusFlagsSet,
+      eip: startAddress,
+      instructionCount: 0
+    }
+  }
+});
+
+const dualFaultSourceAddress = guestByteLength - 4;
+const dualFaultDestinationAddress = guestByteLength - 5;
+const dualFaultComparedBytes = [0x11, 0x11, 0x11, 0x11, 0x11] as const;
+
+registerInstructionFixture({
+  name: "repe-cmpsd-commits-one-unit-before-source-first-dual-fault",
+  bytes: repeCmpsOpcode(32),
+  initialState: {
+    ecx: 2,
+    esi: dualFaultSourceAddress,
+    edi: dualFaultDestinationAddress,
+    esBase,
+    eip: startAddress
+  },
+  initialMemory: [
+    { address: dualFaultDestinationAddress, bytes: dualFaultComparedBytes }
+  ],
+  expected: {
+    stop: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: guestByteLength, errorCode: 0 }
+    },
+    state: {
+      ecx: 1,
+      esi: guestByteLength,
+      edi: guestByteLength - 1,
+      esBase,
+      eip: startAddress,
+      instructionCount: 0
+    },
+    memory: [
+      { address: dualFaultDestinationAddress, bytes: dualFaultComparedBytes }
+    ]
+  }
+});
+
 registerInstructionFixture(repMovsdFixture(0));
 registerInstructionFixture(repMovsdFixture(1));
 registerInstructionFixture(repMovsPrefixSequenceFixture("rep-movsw-f3-66-prefix-order/trap", [0xf3, 0x66, 0xa5], 16));

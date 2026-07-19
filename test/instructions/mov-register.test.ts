@@ -111,6 +111,12 @@ const modRmCases: readonly MovRegisterCase[] = [
     bytes: [0x89, 0xd9],
     initialState: { ebx: 0x8765_4321, ecx: 0xaaaa_aaaa },
     expectedState: { ecx: 0x8765_4321 }
+  },
+  {
+    name: "8C zero-extends FS into EAX",
+    bytes: [0x8c, 0xe0],
+    initialState: { eax: 0xffff_ffff, fsSelector: 0x8001 },
+    expectedState: { eax: 0x0000_8001 }
   }
 ];
 
