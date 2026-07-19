@@ -7,12 +7,12 @@ import {
   loopContinueControl,
   loopControl,
   maxSwitchMatch,
-  returnCallControl,
+  returnControl,
   switchControl,
-  type ReturnCallControl,
   type SwitchControl,
   type SwitchControlArgs
 } from "#compiler/ir/controls/index.js";
+import { Invocation } from "#compiler/ir/invocation.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
 import type { BodyNode, Body, IrBlock } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
@@ -188,7 +188,7 @@ test("a terminal if with both bodies complete validates", () => {
   );
 });
 
-test("a terminal returnCall with the enclosing function result shape validates", () => {
+test("a returned invocation with the enclosing function result shape validates", () => {
   const values = new ValueTable();
   const argument = values.parameter(0, "i32");
   const type = functionType(["i32"], ["i64"]);
@@ -198,9 +198,14 @@ test("a terminal returnCall with the enclosing function result shape validates",
     parameters: [argument],
     values,
     body: {
-      nodes: [returnCallControl.create({
-        target,
-        arguments: [{ value: argument, type: "i32" }]
+      nodes: [returnControl.create({
+        source: {
+          kind: "invocation",
+          invocation: Invocation.create({
+            target,
+            arguments: [{ value: argument, type: "i32" }]
+          })
+        }
       })]
     }
   };
@@ -208,7 +213,7 @@ test("a terminal returnCall with the enclosing function result shape validates",
   doesNotThrow(() => validateIrFunction(fn));
 });
 
-test("a returnCall rejects a target with different function results", () => {
+test("a returned invocation rejects different function results", () => {
   const values = new ValueTable();
   const target = testFunctionDefinition("validation.return-call-result", [], ["i64"]);
   const fn: IrFunction = {
@@ -216,23 +221,31 @@ test("a returnCall rejects a target with different function results", () => {
     parameters: [],
     values,
     body: {
-      nodes: [returnCallControl.create({ target, arguments: [] })]
+      nodes: [returnControl.create({
+        source: {
+          kind: "invocation",
+          invocation: Invocation.create({ target, arguments: [] })
+        }
+      })]
     }
   };
 
   throws(
     () => validateIrFunction(fn),
-    /target results do not match the enclosing function/
+    /invocation results do not match the enclosing function/
   );
 });
 
-test("a returnCall validates exact retained arguments and their value types", () => {
+test("a returned invocation validates exact arguments and value types", () => {
   const values = new ValueTable();
   const argument = values.parameter(0, "i32");
   const target = testFunctionDefinition("validation.return-call-argument", ["i64"], []);
-  const control = returnCallControl.create({
+  const invocation = Invocation.create({
     target,
     arguments: [{ value: argument, type: "i64" }]
+  });
+  const control = returnControl.create({
+    source: { kind: "invocation", invocation }
   });
   const fn: IrFunction = {
     type: functionType(["i32"], []),
@@ -241,13 +254,17 @@ test("a returnCall validates exact retained arguments and their value types", ()
     body: { nodes: [control] }
   };
 
-  throws(() => validateIrFunction(fn), /argument 0 must be i64, got i32/);
+  throws(() => validateIrFunction(fn), /invocation input 0 must be i64, got i32/);
 
-  const missingInputs = {
-    ...control,
+  const missingInvocation = {
+    ...invocation,
+    arguments: [],
     inputs: [],
     operands: []
-  } as unknown as ReturnCallControl;
+  } as unknown as Invocation;
+  const missingInputs = returnControl.create({
+    source: { kind: "invocation", invocation: missingInvocation }
+  });
 
   throws(
     () => validateIrFunction({ ...fn, body: { nodes: [missingInputs] } }),
@@ -255,13 +272,18 @@ test("a returnCall validates exact retained arguments and their value types", ()
   );
 });
 
-test("a returnCall is rejected in a block body", () => {
+test("a returned invocation is rejected in a block body", () => {
   const values = new ValueTable();
   const target = testFunctionDefinition("validation.block-return-call", [], []);
 
   throws(
     () => validateIrBlock(entryBlock(values, [
-      returnCallControl.create({ target, arguments: [] })
+      returnControl.create({
+        source: {
+          kind: "invocation",
+          invocation: Invocation.create({ target, arguments: [] })
+        }
+      })
     ])),
     /returns from a block body/
   );

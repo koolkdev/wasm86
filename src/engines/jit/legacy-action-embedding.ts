@@ -41,6 +41,8 @@ export class LegacyActionEmbeddingAdapter {
     assert(placement !== undefined, "missing placement for JIT IR block");
     return emitActionFunction(this.#options.ir, {
       functionIndices: bindings.definitionIndices,
+      typeIndices: bindings.typeIndices,
+      tableIndices: bindings.tables,
       resourceIndices: bindings.resources,
       placement,
       embedding: { dispatch: this.#options.links.resolve(bindings) }

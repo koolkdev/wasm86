@@ -15,6 +15,8 @@ import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { PlacementIndex } from "#compiler/placement/index.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
+import type { FunctionType } from "#compiler/program/function-type.js";
+import type { TableRef } from "#compiler/program/refs.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
@@ -31,6 +33,8 @@ export type ValueEmitterContext = Readonly<{
   // External id -> the Wasm local supplied by the embedding.
   externalLocals: ReadonlyMap<ExternalValueId, number>;
   functionIndex(target: FunctionDefinition): number;
+  typeIndex(type: FunctionType): number;
+  tableIndex(table: TableRef): number;
   resourceIndex(resource: ResourceRef): number;
 }>;
 
@@ -67,7 +71,9 @@ export class ValueEmitter implements ValueUseEmitter {
       body: context.body,
       cellLocal: (cell) => this.#cellLocal(cell),
       resourceIndex: (resource) => context.resourceIndex(resource),
-      functionIndex: (target) => context.functionIndex(target)
+      functionIndex: (target) => context.functionIndex(target),
+      typeIndex: (type) => context.typeIndex(type),
+      tableIndex: (table) => context.tableIndex(table)
     };
     this.#valueContext = {
       body: context.body,

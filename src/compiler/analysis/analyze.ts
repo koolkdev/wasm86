@@ -1,9 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { StorageAccess } from "#compiler/ir/effects.js";
-import type {
-  Control,
-  ReturnCallControl
-} from "#compiler/ir/controls/index.js";
+import type { Control, ReturnControl } from "#compiler/ir/controls/index.js";
 import type {
   Operation
 } from "#compiler/ir/operations/index.js";
@@ -14,8 +11,7 @@ import type {
   BodyAnalysis,
   BodyPathStep,
   BodySite,
-  CallSite,
-  FunctionCall,
+  InvocationSite,
   JoinControlProducer,
   OperationSite,
   Producer,
@@ -57,8 +53,11 @@ class BodyAnalyzer implements BodyAnalysis {
 
   readonly #operations: OperationSite[] = [];
   readonly #operationSet = new Set<Operation>();
-  readonly #calls: CallSite[] = [];
-  readonly #callSet = new Set<FunctionCall>();
+  readonly #invocations: InvocationSite[] = [];
+  readonly #operationByInvocationSite = new Map<
+    InvocationSite,
+    Operation | null
+  >();
 
   constructor(
     block: IrBlock,
@@ -155,8 +154,8 @@ class BodyAnalyzer implements BodyAnalysis {
     return this.#operations;
   }
 
-  calls(): readonly CallSite[] {
-    return this.#calls;
+  invocations(): readonly InvocationSite[] {
+    return this.#invocations;
   }
 
   operationMustExecute(operation: Operation): boolean {
@@ -166,9 +165,15 @@ class BodyAnalyzer implements BodyAnalysis {
       operation.directEffects.writes.length !== 0;
   }
 
-  callMustExecute(call: FunctionCall): boolean {
-    assert(this.#callSet.has(call), "call is not part of this analysis");
-    return call.category === "control" || this.operationMustExecute(call);
+  invocationMustExecute(site: InvocationSite): boolean {
+    assert(
+      this.#operationByInvocationSite.has(site),
+      "invocation site is not part of this analysis"
+    );
+    const operation = this.#operationByInvocationSite.get(site);
+
+    assert(operation !== undefined, "invocation site has no owner");
+    return operation === null || this.operationMustExecute(operation);
   }
 
   #walkBody(body: Body): BodyWalkResult {
@@ -221,8 +226,8 @@ class BodyAnalyzer implements BodyAnalysis {
     }
 
     this.#roots.push(...node.operands.map(demand));
-    if (node.kind === "returnCall") {
-      this.#recordReturnCall(node, site);
+    if (node.kind === "return" && node.source.kind === "invocation") {
+      this.#recordReturnInvocation(node, site);
     }
     const nested = node.nestedBodies;
     const bodies = nested.map((entry) => entry.body);
@@ -250,8 +255,13 @@ class BodyAnalyzer implements BodyAnalysis {
     this.#operations.push({ operation, site });
     this.#operationSet.add(operation);
     if (operation.kind === "call") {
-      this.#calls.push({ call: operation, site });
-      this.#callSet.add(operation);
+      const invocationSite: InvocationSite = {
+        invocation: operation.invocation,
+        site
+      };
+
+      this.#invocations.push(invocationSite);
+      this.#operationByInvocationSite.set(invocationSite, operation);
     }
     const inputs = operation.operands;
     const outputs = operation.outputs;
@@ -270,9 +280,15 @@ class BodyAnalyzer implements BodyAnalysis {
     return effects.writes;
   }
 
-  #recordReturnCall(call: ReturnCallControl, site: SiteId): void {
-    this.#calls.push({ call, site });
-    this.#callSet.add(call);
+  #recordReturnInvocation(control: ReturnControl, site: SiteId): void {
+    assert(control.source.kind === "invocation", "return has no invocation");
+    const invocationSite: InvocationSite = {
+      invocation: control.source.invocation,
+      site
+    };
+
+    this.#invocations.push(invocationSite);
+    this.#operationByInvocationSite.set(invocationSite, null);
   }
 
   #walkNestedBody(

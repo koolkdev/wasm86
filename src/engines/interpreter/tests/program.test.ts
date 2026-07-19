@@ -76,7 +76,7 @@ test("interpreter declarations close every decoder and resolver dependency befor
       statusFlagResolverType
     );
     deepStrictEqual(fn.effects, expected.effects);
-    deepStrictEqual(fn.callTargets, []);
+    deepStrictEqual(fn.directTargets, []);
   }
 
   // Raw handler emission belongs to encodeProgram, after all declarations and

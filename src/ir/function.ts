@@ -1,10 +1,10 @@
 import { assert } from "#common/assert.js";
 import type { FunctionType } from "#compiler/program/function-type.js";
+import type { CallTarget } from "#compiler/ir/invocation.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { Body } from "./block.js";
 import { RegionBuilder } from "./region-builder.js";
-import type { FunctionDefinition } from "#compiler/program/functions.js";
 
 export type IrFunction = Readonly<{
   type: FunctionType;
@@ -36,7 +36,7 @@ export class FunctionBuilder {
     this.region.return(results);
   }
 
-  returnCall(target: FunctionDefinition, args: readonly ValueId[]): void {
+  returnCall(target: CallTarget, args: readonly ValueId[]): void {
     this.region.returnCall(target, args);
   }
 

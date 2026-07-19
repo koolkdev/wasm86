@@ -80,6 +80,11 @@ export function wasmBodyOpcodes(functionBody: Uint8Array<ArrayBuffer>): readonly
       case wasmOpcode.memorySize:
         offset = readU32Leb128(functionBody, offset).nextOffset;
         break;
+      case wasmOpcode.callIndirect:
+      case wasmOpcode.returnCallIndirect:
+        offset = readU32Leb128(functionBody, offset).nextOffset;
+        offset = readU32Leb128(functionBody, offset).nextOffset;
+        break;
       case wasmOpcode.brTable: {
         const tableLength = readU32Leb128(functionBody, offset);
 
@@ -216,6 +221,12 @@ export function wasmBodyInstructions(functionBody: Uint8Array<ArrayBuffer>): rea
         instructions.push({ offset: instructionOffset, opcode });
         offset = readU32Leb128(functionBody, offset).nextOffset;
         break;
+      case wasmOpcode.callIndirect:
+      case wasmOpcode.returnCallIndirect:
+        instructions.push({ offset: instructionOffset, opcode });
+        offset = readU32Leb128(functionBody, offset).nextOffset;
+        offset = readU32Leb128(functionBody, offset).nextOffset;
+        break;
       case wasmOpcode.brTable: {
         const tableLength = readU32Leb128(functionBody, offset);
 
@@ -280,6 +291,11 @@ export function wasmBodyMemoryAccesses(functionBody: Uint8Array<ArrayBuffer>): r
       case wasmOpcode.call:
       case wasmOpcode.returnCall:
       case wasmOpcode.memorySize:
+        offset = readU32Leb128(functionBody, offset).nextOffset;
+        break;
+      case wasmOpcode.callIndirect:
+      case wasmOpcode.returnCallIndirect:
+        offset = readU32Leb128(functionBody, offset).nextOffset;
         offset = readU32Leb128(functionBody, offset).nextOffset;
         break;
       case wasmOpcode.brTable: {

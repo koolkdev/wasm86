@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
-import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { InvocationEmitTarget } from "#compiler/ir/invocation.js";
 import type {
   ValueId,
   ValueInput,
@@ -9,7 +9,6 @@ import type {
   WidthBounds
 } from "#compiler/ir/values/types.js";
 import type { CellRef } from "#compiler/refs/cell.js";
-import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type {
   BodyCompletionContext,
   BodyNodeBase,
@@ -33,11 +32,9 @@ export function operationResult(type: ValueType): OperationResult {
 
 // Lowering-only services available to every operation occurrence. An
 // occurrence's direct `emit` function uses only the capabilities it needs.
-export type OperationEmitTarget = Readonly<{
-  body: WasmFunctionBodyEncoder;
+export type OperationEmitTarget = InvocationEmitTarget & Readonly<{
   cellLocal: (cell: CellRef) => number;
   resourceIndex: (resource: ResourceRef) => number;
-  functionIndex: (target: FunctionDefinition) => number;
 }>;
 
 export type OperationOutputAllocator = (result: OperationResult) => ValueId;

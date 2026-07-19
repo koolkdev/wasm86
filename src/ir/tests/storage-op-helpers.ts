@@ -2,6 +2,7 @@ import {
   callOperation,
   type CallOperation
 } from "#compiler/ir/operations/index.js";
+import { Invocation } from "#compiler/ir/invocation.js";
 import type { BodyNode } from "#ir/block.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import {
@@ -188,8 +189,10 @@ export function statusFlagCallOperation(
 ): StatusFlagCallOperation {
   return callOperation.create(
     {
-      target: cpuStatusFlagResolvers.get(flag),
-      arguments: []
+      invocation: Invocation.create({
+        target: cpuStatusFlagResolvers.get(flag),
+        arguments: []
+      })
     },
     () => valueId(output)
   ) as StatusFlagCallOperation;
@@ -228,17 +231,20 @@ export function resourceWriteValue(operation: MemoryWriteOperation): ValueId {
 export function isStatusFlagCall(node: BodyNode): node is StatusFlagCallOperation {
   return node.kind === "call" &&
     node.outputs.length === 1 &&
-    x86StatusFlags.some((flag) => node.target === cpuStatusFlagResolvers.get(flag));
+    x86StatusFlags.some((flag) =>
+      node.invocation.target === cpuStatusFlagResolvers.get(flag)
+    );
 }
 
 
 export function resolvedStatusFlag(operation: StatusFlagCallOperation): X86StatusFlag {
+  const target = operation.invocation.target;
   const flag = x86StatusFlags.find((candidate) =>
-    operation.target === cpuStatusFlagResolvers.get(candidate)
+    target === cpuStatusFlagResolvers.get(candidate)
   );
 
   if (flag === undefined) {
-    throw new Error(`unknown status-flag resolver ${operation.target.ref.id}`);
+    throw new Error("unknown status-flag resolver");
   }
   return flag;
 }

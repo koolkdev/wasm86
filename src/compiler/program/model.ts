@@ -58,6 +58,7 @@ export type LegacyFunction = Readonly<{
   signature: SignatureRef;
   calls: readonly FunctionRef[];
   callTargets: readonly FunctionDefinition[];
+  indirectTypes: readonly FunctionType[];
   resources: readonly ResourceRef[];
   globals: readonly GlobalRef[];
   tables: readonly TableRef[];
@@ -73,8 +74,10 @@ export type DefinedFunction = Readonly<{
   type: FunctionType;
   effects: StorageEffects;
   signature: SignatureRef;
-  callTargets: readonly FunctionDefinition[];
+  directTargets: readonly FunctionDefinition[];
+  indirectTypes: readonly FunctionType[];
   resources: readonly ResourceRef[];
+  tables: readonly TableRef[];
   body: IrFunction;
   placement: BodyPlacement;
 }>;

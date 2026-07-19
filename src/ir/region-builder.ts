@@ -1,5 +1,11 @@
 import { assert } from "#common/assert.js";
 import { CellRef } from "#compiler/refs/cell.js";
+import type { StorageEffects } from "#compiler/ir/effects.js";
+import {
+  IndirectCallTarget,
+  Invocation,
+  type CallTarget
+} from "#compiler/ir/invocation.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import { callOperation } from "#compiler/ir/operations/call.js";
 import {
@@ -7,7 +13,6 @@ import {
   ifControl,
   loopContinueControl,
   loopControl,
-  returnCallControl,
   returnControl,
   switchControl,
   type BranchHint,
@@ -27,7 +32,8 @@ import type {
   ValueType,
   WidthBounds
 } from "#compiler/ir/values/types.js";
-import type { FunctionDefinition } from "#compiler/program/functions.js";
+import type { FunctionType } from "#compiler/program/function-type.js";
+import type { TableRef } from "#compiler/program/refs.js";
 
 export type BuildBody = (b: RegionBuilder) => void;
 export type BuildResult = (b: RegionBuilder) => ValueId;
@@ -45,6 +51,13 @@ export type IfOptions = Readonly<{
 
 export type IfValueOptions = Readonly<{
   hint?: BranchHint;
+}>;
+
+export type IndirectTargetArgs = Readonly<{
+  table: TableRef;
+  type: FunctionType;
+  effects: StorageEffects;
+  elementIndex: ValueId;
 }>;
 
 export class RegionBuilder {
@@ -116,27 +129,22 @@ export class RegionBuilder {
     return outputs[0];
   }
 
-  call(target: FunctionDefinition, args: readonly ValueId[]): readonly ValueId[] {
-    const { parameters } = target.type;
-
-    assert(
-      args.length === parameters.length,
-      `function ${target.ref.id} expects ${parameters.length} arguments, got ${args.length}`
-    );
-    const inputs = args.map((value, index) => {
-      const expected = parameters[index];
-
-      assert(expected !== undefined, `function ${target.ref.id} has no parameter ${index}`);
-      const actual = this.values.valueType(value);
-
-      assert(
-        actual === expected,
-        `function ${target.ref.id} argument ${index} must be ${expected}, got ${actual}`
-      );
-      return { value, type: expected };
+  indirectTarget(args: IndirectTargetArgs): IndirectCallTarget {
+    return IndirectCallTarget.create({
+      table: args.table,
+      type: args.type,
+      effects: args.effects,
+      elementIndex: {
+        value: args.elementIndex,
+        type: this.values.valueType(args.elementIndex)
+      }
     });
+  }
+
+  call(target: CallTarget, args: readonly ValueId[]): readonly ValueId[] {
+    const invocation = this.#invocation(target, args);
     const operation = callOperation.create(
-      { target, arguments: inputs },
+      { invocation },
       (result) => this.#allocateOperationOutput(result)
     );
 
@@ -144,35 +152,22 @@ export class RegionBuilder {
     return operation.outputs;
   }
 
-  returnCall(target: FunctionDefinition, args: readonly ValueId[]): void {
+  returnCall(target: CallTarget, args: readonly ValueId[]): void {
     const functionResults = this.#functionResults;
 
     assert(functionResults !== undefined, "returnCall requires an enclosing function");
-    const { parameters, results } = target.type;
+    const invocation = this.#invocation(target, args);
+    const results = invocation.target.type.results;
 
-    assert(
-      args.length === parameters.length,
-      `function ${target.ref.id} expects ${parameters.length} arguments, got ${args.length}`
-    );
     assert(
       results.length === functionResults.length &&
         results.every((type, index) => type === functionResults[index]),
-      `function ${target.ref.id} results do not match the enclosing function`
+      "call results do not match the enclosing function"
     );
-    const inputs = args.map((value, index) => {
-      const expected = parameters[index];
 
-      assert(expected !== undefined, `function ${target.ref.id} has no parameter ${index}`);
-      const actual = this.values.valueType(value);
-
-      assert(
-        actual === expected,
-        `function ${target.ref.id} argument ${index} must be ${expected}, got ${actual}`
-      );
-      return { value, type: expected };
-    });
-
-    this.#emit(returnCallControl.create({ target, arguments: inputs }));
+    this.#emit(returnControl.create({
+      source: { kind: "invocation", invocation }
+    }));
   }
 
   // Escape hatch for an already-built body node.
@@ -240,7 +235,9 @@ export class RegionBuilder {
   }
 
   return(results: readonly ValueId[]): void {
-    this.#emit(returnControl.create({ results }));
+    this.#emit(returnControl.create({
+      source: { kind: "values", values: results }
+    }));
   }
 
   loop(carried: readonly LoopCarriedCell[], bodyBuild: BuildBody): void {
@@ -295,6 +292,19 @@ export class RegionBuilder {
     return result.type === "i64"
       ? this.values.addNodeOutput64()
       : this.values.addNodeOutput(result.bounds);
+  }
+
+  #invocation(
+    target: CallTarget,
+    args: readonly ValueId[]
+  ): Invocation {
+    return Invocation.create({
+      target,
+      arguments: args.map((value) => ({
+        value,
+        type: this.values.valueType(value)
+      }))
+    });
   }
 
   #emit(node: BodyNode): void {

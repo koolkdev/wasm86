@@ -1,10 +1,9 @@
-import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { InvocationEmitTarget } from "#compiler/ir/invocation.js";
 import {
   noStorageEffects,
   type StorageEffects
 } from "#compiler/ir/effects.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type { Body } from "#ir/block.js";
 import type {
   BodyCompletionContext,
@@ -13,10 +12,8 @@ import type {
   ValueUseEmitter
 } from "#ir/node.js";
 
-export type ControlEmitTarget = BodyCompletionContext &
+export type ControlEmitTarget = BodyCompletionContext & InvocationEmitTarget &
   Readonly<{
-    body: WasmFunctionBodyEncoder;
-    functionIndex: (target: FunctionDefinition) => number;
     emitCaptures: () => void;
     emitBody: (body: Body, resultLocal?: number) => void;
     controlOutputLocal: (output: ValueId) => number | undefined;

@@ -1,9 +1,6 @@
 import type { StorageAccess } from "#compiler/ir/effects.js";
-import type {
-  CallOperation,
-  Operation
-} from "#compiler/ir/operations/index.js";
-import type { ReturnCallControl } from "#compiler/ir/controls/index.js";
+import type { Invocation } from "#compiler/ir/invocation.js";
+import type { Operation } from "#compiler/ir/operations/index.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { Body, BodyNode } from "#ir/block.js";
 
@@ -54,10 +51,8 @@ export type OperationSite = Readonly<{
   site: SiteId;
 }>;
 
-export type FunctionCall = CallOperation | ReturnCallControl;
-
-export type CallSite = Readonly<{
-  call: FunctionCall;
+export type InvocationSite = Readonly<{
+  invocation: Invocation;
   site: SiteId;
 }>;
 
@@ -80,7 +75,7 @@ export type BodyAnalysis = Readonly<{
   exportedOutputs(): readonly ValueId[];
 
   operations(): readonly OperationSite[];
-  calls(): readonly CallSite[];
+  invocations(): readonly InvocationSite[];
   operationMustExecute(operation: Operation): boolean;
-  callMustExecute(call: FunctionCall): boolean;
+  invocationMustExecute(site: InvocationSite): boolean;
 }>;

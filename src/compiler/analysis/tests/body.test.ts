@@ -8,16 +8,20 @@ import {
   ifControl,
   loopContinueControl,
   loopControl,
-  returnCallControl,
+  returnControl,
   switchControl
 } from "#compiler/ir/controls/index.js";
+import {
+  IndirectCallTarget,
+  Invocation
+} from "#compiler/ir/invocation.js";
 import { callOperation } from "#compiler/ir/operations/index.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { BodyNode, Body, IrBlock } from "#ir/block.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef } from "#compiler/program/refs.js";
+import { functionRef, tableRef } from "#compiler/program/refs.js";
 import {
   compilerTestResourceEffect,
   compilerTestValues,
@@ -390,10 +394,12 @@ test("pure call execution follows result liveness", () => {
     value,
     type: "i32" as const
   }));
-  const call = (output: ValueId) => callOperation.create(
-    { target, arguments: args },
-    () => output
-  );
+  const call = (output: ValueId) => callOperation.create({
+    invocation: Invocation.create({
+      target,
+      arguments: args
+    })
+  }, () => output);
   const firstCall = call(first);
   const secondCall = call(second);
   const deadCall = call(dead);
@@ -410,14 +416,15 @@ test("pure call execution follows result liveness", () => {
     }
   });
 
-  strictEqual(analysis.callMustExecute(firstCall), true);
-  strictEqual(analysis.callMustExecute(secondCall), true);
-  strictEqual(analysis.callMustExecute(deadCall), false);
-  deepStrictEqual(analysis.calls().map((site) => site.call), [
-    firstCall,
-    secondCall,
-    deadCall
-  ]);
+  const invocations = analysis.invocations();
+
+  strictEqual(analysis.invocationMustExecute(invocations[0]!), true);
+  strictEqual(analysis.invocationMustExecute(invocations[1]!), true);
+  strictEqual(analysis.invocationMustExecute(invocations[2]!), false);
+  deepStrictEqual(
+    invocations.map(({ invocation }) => invocation),
+    [firstCall, secondCall, deadCall].map(({ invocation }) => invocation)
+  );
   deepStrictEqual(analysis.producer(first)?.inputs, [sourceKind, operandA, operandB, concrete]);
 });
 
@@ -434,19 +441,22 @@ test("effectful calls remain live even when their result is unused", () => {
   });
   const call = callOperation.create(
     {
-      target,
-      arguments: [{ value: argument, type: "i32" }]
+      invocation: Invocation.create({
+        target,
+        arguments: [{ value: argument, type: "i32" }]
+      })
     },
     () => output
   );
   const analysis = analyzeBody({ values, body: { nodes: [call] } });
+  const invocation = analysis.invocations()[0]!;
 
   strictEqual(analysis.isLive(output), false);
   strictEqual(analysis.isLive(argument), true);
-  strictEqual(analysis.callMustExecute(call), true);
+  strictEqual(analysis.invocationMustExecute(invocation), true);
 });
 
-test("return calls are mandatory terminal call edges", () => {
+test("invocation liveness follows its owning node", () => {
   const values = compilerTestValues();
   const argument = values.external(0);
   const target = new FunctionDefinition({
@@ -456,15 +466,59 @@ test("return calls are mandatory terminal call edges", () => {
     owner: undefined,
     build: () => {}
   });
-  const call = returnCallControl.create({
+  const invocation = Invocation.create({
     target,
     arguments: [{ value: argument, type: "i32" }]
   });
-  const analysis = analyzeBody({ values, body: { nodes: [call] } });
+  const returned = returnControl.create({
+    source: { kind: "invocation", invocation }
+  });
+  const ordinaryCall = callOperation.create({ invocation }, () => {
+    throw new Error("resultless invocation allocated an output");
+  });
+  const body: Body = { nodes: [ordinaryCall, returned] };
+  const analysis = analyzeBody({ values, body });
+  const [callSite, returnSite] = analysis.invocations();
 
-  strictEqual(analysis.callMustExecute(call), true);
+  strictEqual(analysis.invocationMustExecute(callSite!), false);
+  strictEqual(analysis.invocationMustExecute(returnSite!), true);
   strictEqual(analysis.isLive(argument), true);
-  deepStrictEqual(analysis.calls(), [{ call, site: analysis.siteOf(analysis.sites()[0]!.body, 0) }]);
+  deepStrictEqual(analysis.invocations(), [
+    {
+      invocation,
+      site: analysis.siteOf(body, 0)
+    },
+    {
+      invocation,
+      site: analysis.siteOf(body, 1)
+    }
+  ]);
+});
+
+test("returned indirect invocations root arguments and the table index", () => {
+  const values = compilerTestValues();
+  const argument = values.external(0);
+  const elementIndex = values.external(1);
+  const invocation = Invocation.create({
+    target: IndirectCallTarget.create({
+      table: tableRef("tests.analysis.indirect-call"),
+      type: functionType(["i32"], []),
+      effects: noEffects,
+      elementIndex: { value: elementIndex, type: "i32" }
+    }),
+    arguments: [{ value: argument, type: "i32" }]
+  });
+  const returned = returnControl.create({
+    source: { kind: "invocation", invocation }
+  });
+  const analysis = analyzeBody({ values, body: { nodes: [returned] } });
+
+  strictEqual(analysis.isLive(argument), true);
+  strictEqual(analysis.isLive(elementIndex), true);
+  deepStrictEqual(analysis.roots().map(({ value }) => value), [
+    argument,
+    elementIndex
+  ]);
 });
 
 test("queries reject unknown values, sites, and bodies", () => {

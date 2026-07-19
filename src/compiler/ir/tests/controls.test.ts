@@ -11,11 +11,14 @@ import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
+  IndirectCallTarget,
+  Invocation
+} from "#compiler/ir/invocation.js";
+import {
   finishControl,
   ifControl,
   loopContinueControl,
   loopControl,
-  returnCallControl,
   returnControl,
   switchControl,
   type Control,
@@ -26,7 +29,7 @@ import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef } from "#compiler/program/refs.js";
+import { functionRef, tableRef } from "#compiler/program/refs.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import type { Body } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
@@ -58,7 +61,13 @@ function fixture() {
     build: () => {}
   });
   const args = [{ value: argument, type: "i32" }] as const;
-  const returnCall = returnCallControl.create({ target, arguments: args });
+  const invocation = Invocation.create({
+    target,
+    arguments: args
+  });
+  const returnInvocation = returnControl.create({
+    source: { kind: "invocation", invocation }
+  });
   const branch = ifControl.create({
     condition,
     hint: "likely",
@@ -80,7 +89,9 @@ function fixture() {
   const finish = finishControl.create({
     finish: { kind: "dispatch", targetEip: result }
   });
-  const returnFromFunction = returnControl.create({ results: [result] });
+  const returnFromFunction = returnControl.create({
+    source: { kind: "values", values: [result] }
+  });
 
   return {
     values: {
@@ -97,8 +108,9 @@ function fixture() {
     bodies: { thenBody, elseBody, caseBody, defaultBody, loopBody },
     target,
     args,
+    invocation,
     controls: {
-      returnCall,
+      returnInvocation,
       branch,
       selection,
       loop,
@@ -110,13 +122,17 @@ function fixture() {
 }
 
 test("control owners construct complete final nodes", () => {
-  const { values, bodies, target, args, controls } = fixture();
+  const { values, bodies, target, args, invocation, controls } = fixture();
 
-  strictEqual(controls.returnCall.category, "control");
-  strictEqual(controls.returnCall.kind, "returnCall");
-  strictEqual(controls.returnCall.target, target);
-  deepStrictEqual(controls.returnCall.inputs, args);
-  strictEqual("node" in controls.returnCall, false);
+  strictEqual(controls.returnInvocation.category, "control");
+  strictEqual(controls.returnInvocation.kind, "return");
+  deepStrictEqual(controls.returnInvocation.source, {
+    kind: "invocation",
+    invocation
+  });
+  strictEqual(invocation.target, target);
+  deepStrictEqual(invocation.arguments, args);
+  strictEqual("node" in controls.returnInvocation, false);
 
   strictEqual(controls.branch.category, "control");
   strictEqual(controls.branch.condition, values.condition);
@@ -139,7 +155,10 @@ test("control owners construct complete final nodes", () => {
     kind: "dispatch",
     targetEip: values.result
   });
-  deepStrictEqual(controls.returnFromFunction.results, [values.result]);
+  deepStrictEqual(controls.returnFromFunction.source, {
+    kind: "values",
+    values: [values.result]
+  });
 
   const metadataArgs = {
     condition: values.condition,
@@ -153,16 +172,21 @@ test("control owners construct complete final nodes", () => {
 
 test("return controls snapshot their result list", () => {
   const results = [valueId(1)];
-  const control = returnControl.create({ results });
+  const control = returnControl.create({
+    source: { kind: "values", values: results }
+  });
 
   results.push(valueId(2));
-  deepStrictEqual(control.results, [valueId(1)]);
+  deepStrictEqual(control.source, {
+    kind: "values",
+    values: [valueId(1)]
+  });
 });
 
 test("direct control facts describe operands, bodies, outputs, and effects", () => {
   const { values, bodies, target, controls } = fixture();
   const ordered: readonly Control[] = [
-    controls.returnCall,
+    controls.returnInvocation,
     controls.branch,
     controls.selection,
     controls.loop,
@@ -211,7 +235,7 @@ test("direct control facts describe operands, bodies, outputs, and effects", () 
   }]);
   deepStrictEqual(
     [
-      controls.returnCall,
+      controls.returnInvocation,
       controls.loopContinue,
       controls.finish,
       controls.returnFromFunction
@@ -254,7 +278,7 @@ test("direct completion methods use nested body completion", () => {
     bodyCompletes: (body: Body) => completingBodies.has(body)
   };
   const ordered: readonly Control[] = [
-    controls.returnCall,
+    controls.returnInvocation,
     controls.branch,
     controls.selection,
     controls.loop,
@@ -322,7 +346,7 @@ test("direct body mapping follows each control's owned structure", () => {
   deepStrictEqual(mappedBranch.outputs, [values.ifOutput]);
   deepStrictEqual(mappedSelection.outputs, [values.switchOutput]);
   for (const leaf of [
-    controls.returnCall,
+    controls.returnInvocation,
     controls.loopContinue,
     controls.finish,
     controls.returnFromFunction
@@ -331,9 +355,9 @@ test("direct body mapping follows each control's owned structure", () => {
   }
 });
 
-test("explicit returnCall directly emits Wasm return_call", () => {
+test("a return sourced by an invocation directly emits Wasm return_call", () => {
   const { values, target, controls } = fixture();
-  const emitted = emitRawControl(controls.returnCall, target);
+  const emitted = emitRawControl(controls.returnInvocation, target);
 
   deepStrictEqual(emitted.uses, [values.argument]);
   deepStrictEqual(emitted.functionIndices, [7]);
@@ -342,12 +366,62 @@ test("explicit returnCall directly emits Wasm return_call", () => {
     wasmOpcode.returnCall,
     wasmOpcode.end
   ]);
-  strictEqual(controls.returnCall.completes({ bodyCompletes: () => false }), true);
-  deepStrictEqual(controls.returnCall.outputs, []);
+  strictEqual(
+    controls.returnInvocation.completes({ bodyCompletes: () => false }),
+    true
+  );
+  deepStrictEqual(controls.returnInvocation.outputs, []);
   throws(
-    () => returnCallControl.create({ target, arguments: [] }),
+    () => Invocation.create({
+      target,
+      arguments: []
+    }),
     /expects 1 arguments, got 0/
   );
+});
+
+test("an indirect invocation return emits arguments, selector, and return_call_indirect", () => {
+  const argument = valueId(30);
+  const elementIndex = valueId(31);
+  const table = tableRef("test.controls.table");
+  const type = functionType(["i32"], ["i32"]);
+  const invocation = Invocation.create({
+    target: IndirectCallTarget.create({
+      table,
+      type,
+      effects: { reads: [], writes: [] },
+      elementIndex: { value: elementIndex, type: "i32" }
+    }),
+    arguments: [{ value: argument, type: "i32" }]
+  });
+  const control = returnControl.create({
+    source: { kind: "invocation", invocation }
+  });
+  const body = new WasmFunctionBodyEncoder();
+  const uses: ValueId[] = [];
+
+  control.emit({
+    ...rawControlTarget(body),
+    typeIndex(candidate) {
+      strictEqual(candidate, type);
+      return 5;
+    },
+    tableIndex(candidate) {
+      strictEqual(candidate, table);
+      return 6;
+    }
+  }, {
+    emitUse(value) {
+      uses.push(value);
+      body.i32Const(value);
+    }
+  });
+  const encoded = body.finish();
+
+  deepStrictEqual(uses, [argument, elementIndex]);
+  deepStrictEqual(encoded.references.typeIndices, [5]);
+  deepStrictEqual(encoded.references.tableIndices, [6]);
+  strictEqual(encoded.bytes.includes(wasmOpcode.returnCallIndirect), true);
 });
 
 test("return and finish controls directly emit their terminal behavior", () => {
@@ -399,7 +473,7 @@ test("RegionBuilder emits an ordinary CallOperation and owner-defined controls",
 
   deepStrictEqual(nodes.map((node) => node.kind), [
     "call",
-    "returnCall",
+    "return",
     "if",
     "switch",
     "loop",
@@ -432,6 +506,8 @@ function emitRawControl(
 ): Readonly<{
   uses: readonly ValueId[];
   functionIndices: readonly number[];
+  typeIndices: readonly number[];
+  tableIndices: readonly number[];
   opcodes: readonly number[];
   dispatched: ValueId | undefined;
 }> {
@@ -453,6 +529,8 @@ function emitRawControl(
   return {
     uses,
     functionIndices: encoded.references.functionIndices,
+    typeIndices: encoded.references.typeIndices,
+    tableIndices: encoded.references.tableIndices,
     opcodes: wasmBodyOpcodes(encoded.bytes),
     dispatched
   };
@@ -469,6 +547,8 @@ function rawControlTarget(
       strictEqual(candidate, expectedFunction);
       return 7;
     },
+    typeIndex: unsupported,
+    tableIndex: unsupported,
     bodyCompletes: () => false,
     emitCaptures: unsupported,
     emitBody: unsupported,

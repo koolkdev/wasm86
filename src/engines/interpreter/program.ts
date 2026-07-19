@@ -270,6 +270,8 @@ class DeclaredDependencyLegacyRootAdapter {
       new RmDecodeHelpers(rmFunctions, { base, offset, cursor }),
       {
         functionIndices: bindings.definitionIndices,
+        typeIndices: bindings.typeIndices,
+        tableIndices: bindings.tables,
         resourceIndices: bindings.resources
       },
       emittedHandlers

@@ -2,6 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { StorageAccess } from "#compiler/ir/effects.js";
+import { Invocation } from "#compiler/ir/invocation.js";
 import {
   resourceRead,
   resourceWrite
@@ -21,7 +22,7 @@ import { CellRef } from "#compiler/refs/cell.js";
 import {
   finishControl,
   ifControl,
-  returnCallControl
+  returnControl
 } from "#compiler/ir/controls/index.js";
 import { callOperation, type Operation } from "#compiler/ir/operations/index.js";
 import type { BodyNode } from "#ir/block.js";
@@ -126,15 +127,21 @@ test("direct-call effects come from their function definition", () => {
     owner: undefined,
     build: () => {}
   });
+  const invocation = Invocation.create({
+    target,
+    arguments: []
+  });
 
   deepStrictEqual(
-    effectsOf(callOperation.create({ target, arguments: [] }, () => {
+    effectsOf(callOperation.create({ invocation }, () => {
       throw new Error("zero-result call unexpectedly requested an output");
     })),
     effects
   );
   deepStrictEqual(
-    effectsOf(returnCallControl.create({ target, arguments: [] })),
+    effectsOf(returnControl.create({
+      source: { kind: "invocation", invocation }
+    })),
     effects
   );
 });

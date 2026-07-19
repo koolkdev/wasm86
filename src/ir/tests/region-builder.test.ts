@@ -23,7 +23,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef } from "#compiler/program/refs.js";
+import { functionRef, tableRef } from "#compiler/program/refs.js";
 import {
   compilerTestResourceEffect,
   resourceWriteNode
@@ -145,7 +145,7 @@ test("call validates typed arguments and allocates its declared result", () => {
   const [call] = builder.build().nodes;
 
   ok(call?.kind === "call");
-  strictEqual(call.target, target);
+  strictEqual(call.invocation.target, target);
   deepStrictEqual(call.inputs, args.map((value) => ({ value, type: "i32" as const })));
   deepStrictEqual(call.outputs, [output]);
   deepStrictEqual(values.node(output), { kind: "nodeOutput", type: "i32" });
@@ -153,6 +153,60 @@ test("call validates typed arguments and allocates its declared result", () => {
   throws(
     () => builder.call(target, [args[0]!, args[1]!, args[2]!, values.const64(3n)]),
     /argument 3 must be i32, got i64/
+  );
+});
+
+test("call and returnCall share indirect target normalization", () => {
+  const values = new ValueTable();
+  const builder = new RegionBuilder(values, undefined, ["i32"]);
+  const argument = values.const64(4n);
+  const elementIndex = values.const(2);
+  const table = tableRef("test.region-builder.call-table");
+  const type = functionType(["i64"], ["i32"]);
+  const effects = { reads: [], writes: [] } as const;
+  const target = builder.indirectTarget({
+    table,
+    type,
+    effects,
+    elementIndex
+  });
+  const [output] = builder.call(target, [argument]);
+
+  builder.returnCall(target, [argument]);
+  const [call, returned] = builder.build().nodes;
+
+  ok(output !== undefined);
+  ok(call?.kind === "call");
+  ok(returned?.kind === "return");
+  strictEqual(returned.source.kind, "invocation");
+  if (returned.source.kind !== "invocation") {
+    throw new Error("expected invocation return source");
+  }
+  const callInvocation = call.invocation;
+  const returnInvocation = returned.source.invocation;
+
+  deepStrictEqual(callInvocation.arguments, [{ value: argument, type: "i64" }]);
+  deepStrictEqual(callInvocation.inputs, [
+    { value: argument, type: "i64" },
+    { value: elementIndex, type: "i32" }
+  ]);
+  strictEqual(callInvocation.target, target);
+  strictEqual(returnInvocation.target, target);
+  deepStrictEqual(target.targetInputs, [
+    { value: elementIndex, type: "i32" }
+  ]);
+  deepStrictEqual(call.operands, [argument, elementIndex]);
+  deepStrictEqual(returnInvocation.inputs, callInvocation.inputs);
+  deepStrictEqual(returned.operands, [argument, elementIndex]);
+  deepStrictEqual(call.outputs, [output]);
+  throws(
+    () => builder.indirectTarget({
+      table,
+      type,
+      effects,
+      elementIndex: values.const64(1n)
+    }),
+    /table element index must be i32, got i64/
   );
 });
 
@@ -344,7 +398,7 @@ test("switch builds every arm before allocating the shared output", () => {
   const [call] = control.cases[0]?.body.nodes ?? [];
 
   ok(call?.kind === "call");
-  strictEqual(call.target, target);
+  strictEqual(call.invocation.target, target);
   deepStrictEqual(call.outputs, [armResult]);
   deepStrictEqual(control.defaultBody, { nodes: [], result: defaultResult });
 });

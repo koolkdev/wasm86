@@ -7,9 +7,9 @@ import {
   maxSwitchMatch,
   type Control,
   type IfControl,
-  type ReturnCallControl,
   type SwitchControl
 } from "#compiler/ir/controls/index.js";
+import type { Invocation } from "#compiler/ir/invocation.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
 import type {
   CallOperation,
@@ -21,6 +21,7 @@ import { valueId } from "#compiler/ir/values/id.js";
 import { unboundedWidthBounds } from "#compiler/ir/values/width-bounds.js";
 import type {
   ValueId,
+  ValueInput,
   ValueType,
   WidthBounds
 } from "#compiler/ir/values/types.js";
@@ -215,27 +216,21 @@ class IrValidator {
   }
 
   #validateCallDeclaration(call: CallOperation, path: string): void {
-    const parameterTypes = call.target.type.parameters;
-    const resultTypes = call.target.type.results;
+    const invocation = call.invocation;
+    const resultTypes = invocation.target.type.results;
+
+    validateInvocation(invocation, `${path} invocation`);
 
     assert(
       resultTypes.length <= 1,
       `${path} target has ${resultTypes.length} results; multiple call results are not supported yet`
     );
 
-    assert(
-      call.inputs.length === parameterTypes.length,
-      `${path} passes ${call.inputs.length} arguments to ${parameterTypes.length} parameters`
+    assertSameInputs(
+      call.inputs,
+      invocation.inputs,
+      `${path} inputs do not match its invocation`
     );
-    for (const [index, input] of call.inputs.entries()) {
-      const expected = parameterTypes[index];
-
-      assert(expected !== undefined, `${path} has no parameter ${index}`);
-      assert(
-        input.type === expected,
-        `${path} argument ${index} declares ${input.type}, expected ${expected}`
-      );
-    }
     assert(
       call.results.length === resultTypes.length,
       `${path} declares ${call.results.length} results for ${resultTypes.length} target results`
@@ -256,8 +251,8 @@ class IrValidator {
       }
     }
     assert(
-      call.directEffects === call.target.effects,
-      `${path} effects do not match its call target`
+      call.directEffects === invocation.target.effects,
+      `${path} effects do not match its invocation`
     );
     assert(
       call.referencedResources.length === 0,
@@ -330,16 +325,7 @@ class IrValidator {
         assertNoDirectEffects(directEffects, path);
         return;
       case "return":
-        assertNoControlResults(outputs, nestedBodies, path);
-        assertSameValues(
-          operands,
-          control.results,
-          `${path} operands do not match its return results`
-        );
-        assertNoDirectEffects(directEffects, path);
-        return;
-      case "returnCall":
-        validateReturnCallControlShape(
+        validateReturnControlShape(
           control,
           operands,
           outputs,
@@ -570,10 +556,7 @@ class IrValidator {
         this.#validateFinish(node, site.path);
         return;
       case "return":
-        this.#validateReturn(node.results, site.path);
-        return;
-      case "returnCall":
-        this.#validateReturnCall(node, site.path);
+        this.#validateReturn(node, site.path);
         return;
     }
   }
@@ -857,10 +840,37 @@ class IrValidator {
     }
   }
 
-  #validateReturn(results: readonly ValueId[], path: string): void {
+  #validateReturn(
+    control: Extract<Control, { kind: "return" }>,
+    path: string
+  ): void {
     const fn = this.#function;
 
     assert(fn !== undefined, `${path} returns from a block body`);
+    const source = control.source;
+
+    if (source.kind === "invocation") {
+      const invocation = source.invocation;
+      const targetResults = invocation.target.type.results;
+
+      assert(
+        targetResults.length === fn.results.length &&
+          targetResults.every((type, index) => type === fn.results[index]),
+        `${path} invocation results do not match the enclosing function`
+      );
+      for (const [index, input] of invocation.inputs.entries()) {
+        const actual = this.#block.values.valueType(input.value);
+
+        assert(
+          actual === input.type,
+          `${path} invocation input ${index} must be ${input.type}, got ${actual}`
+        );
+      }
+      return;
+    }
+
+    const results = source.values;
+
     assert(
       results.length === fn.results.length,
       `${path} returns ${results.length} values, expected ${fn.results.length}`
@@ -875,29 +885,6 @@ class IrValidator {
     }
   }
 
-  #validateReturnCall(control: ReturnCallControl, path: string): void {
-    const fn = this.#function;
-
-    assert(fn !== undefined, `${path} returns from a block body`);
-    const targetResults = control.target.type.results;
-
-    assert(
-      targetResults.length === fn.results.length &&
-        targetResults.every((type, index) => type === fn.results[index]),
-      `${path} target results do not match the enclosing function`
-    );
-    for (const [index, input] of control.inputs.entries()) {
-      const expected = control.target.type.parameters[index];
-
-      assert(expected !== undefined, `${path} target has no parameter ${index}`);
-      const actual = this.#block.values.valueType(input.value);
-
-      assert(
-        actual === expected,
-        `${path} argument ${index} must be ${expected}, got ${actual}`
-      );
-    }
-  }
 }
 
 function validateOperationResult(result: OperationResult, path: string): void {
@@ -1094,8 +1081,8 @@ function validateLoopControlShape(
   assertNoDirectEffects(directEffects, path);
 }
 
-function validateReturnCallControlShape(
-  control: ReturnCallControl,
+function validateReturnControlShape(
+  control: Extract<Control, { kind: "return" }>,
   operands: readonly ValueId[],
   outputs: readonly ValueId[],
   nestedBodies: readonly NestedBody[],
@@ -1103,19 +1090,73 @@ function validateReturnCallControlShape(
   path: string
 ): void {
   assertNoControlResults(outputs, nestedBodies, path);
-  assertSameValues(
-    operands,
-    control.inputs.map((input) => input.value),
-    `${path} operands do not match its call inputs`
-  );
-  const parameters = control.target.type.parameters;
+  const source = control.source;
 
+  if (source.kind === "values") {
+    assertSameValues(
+      operands,
+      source.values,
+      `${path} operands do not match its return values`
+    );
+    assertNoDirectEffects(directEffects, path);
+  } else {
+    validateInvocation(source.invocation, `${path} invocation`);
+    assertSameValues(
+      operands,
+      source.invocation.inputs.map((input) => input.value),
+      `${path} operands do not match its invocation inputs`
+    );
+    assert(
+      directEffects === source.invocation.target.effects,
+      `${path} effects do not match its invocation`
+    );
+  }
   assert(
-    control.inputs.length === parameters.length,
-    `${path} passes ${control.inputs.length} arguments to ${parameters.length} parameters`
+    control.completes({ bodyCompletes }),
+    `${path} return must complete its body`
   );
-  for (const [index, input] of control.inputs.entries()) {
-    const expected = parameters[index];
+}
+
+function validateInvocation(invocation: Invocation, path: string): void {
+  assert(invocation !== null && typeof invocation === "object", `${path} must be an object`);
+  assert(Array.isArray(invocation.arguments), `${path} arguments must be an array`);
+  assert(Array.isArray(invocation.inputs), `${path} inputs must be an array`);
+
+  const target = invocation.target;
+
+  assert(target !== null && typeof target === "object", `${path} target must be an object`);
+  assert(
+    typeof target.emitCall === "function" &&
+      typeof target.emitReturnCall === "function",
+    `${path} target must implement call emission`
+  );
+  const type = target.type;
+  const effects = target.effects;
+  const targetInputs = target.targetInputs;
+  const references = target.references;
+
+  assert(Array.isArray(targetInputs), `${path} target inputs must be an array`);
+  assert(
+    references !== null && typeof references === "object" &&
+      Array.isArray(references.functions) &&
+      Array.isArray(references.types) &&
+      Array.isArray(references.tables),
+    `${path} target references must contain function, type, and table arrays`
+  );
+  const expectedInputs: readonly ValueInput[] = [
+    ...invocation.arguments,
+    ...targetInputs
+  ];
+
+  assert(Array.isArray(type.parameters), `${path} parameters must be an array`);
+  assert(Array.isArray(type.results), `${path} results must be an array`);
+  validateDeclaredStorageEffects(effects, `${path} target`);
+  assert(
+    invocation.arguments.length === type.parameters.length,
+    `${path} passes ${invocation.arguments.length} arguments to ${type.parameters.length} parameters`
+  );
+  for (const [index, input] of invocation.arguments.entries()) {
+    const expected = type.parameters[index];
 
     assert(expected !== undefined, `${path} target has no parameter ${index}`);
     assert(
@@ -1123,10 +1164,10 @@ function validateReturnCallControlShape(
       `${path} argument ${index} declares ${input.type}, expected ${expected}`
     );
   }
-  assert(directEffects === control.target.effects, `${path} effects do not match its call target`);
-  assert(
-    control.completes({ bodyCompletes }),
-    `${path} returnCall must complete its body`
+  assertSameInputs(
+    invocation.inputs,
+    expectedInputs,
+    `${path} inputs do not match its target and arguments`
   );
 }
 
@@ -1169,6 +1210,24 @@ function assertSameValues(
   assert(
     actual.length === expected.length &&
       actual.every((value, index) => value === expected[index]),
+    message
+  );
+}
+
+function assertSameInputs(
+  actual: readonly ValueInput[],
+  expected: readonly ValueInput[],
+  message: string
+): void {
+  assert(
+    actual.length === expected.length &&
+      actual.every((input, index) => {
+        const expectedInput = expected[index];
+
+        return expectedInput !== undefined &&
+          input.value === expectedInput.value &&
+          input.type === expectedInput.type;
+      }),
     message
   );
 }

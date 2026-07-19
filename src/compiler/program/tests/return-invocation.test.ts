@@ -8,8 +8,9 @@ import { test } from "node:test";
 
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
+import { Invocation } from "#compiler/ir/invocation.js";
 import { resourceWrite } from "#compiler/ir/operations/resource.js";
-import { returnCallControl } from "#compiler/ir/controls/index.js";
+import { returnControl } from "#compiler/ir/controls/index.js";
 import {
   resourceRef,
   type ResourceEffect
@@ -55,6 +56,53 @@ function writeEffect(fn: FunctionBuilder, value: ValueId): void {
   });
 }
 
+test("returned direct invocations keep deep recursion on a bounded stack", async () => {
+  const program = new ProgramBuilder();
+  const type = functionType(["i32"], []);
+  const signature = signatureRef("test.deep-return-invocation-signature");
+
+  program.signature({ ref: signature, type });
+  const countdown = program.defineFunction({
+    ref: functionRef("test.deep-return-invocation-countdown"),
+    signature,
+    effects: noEffects
+  }, (fn, self) => {
+    const remaining = fn.parameters[0];
+
+    if (remaining === undefined) {
+      throw new Error("missing countdown argument");
+    }
+    fn.region.if(
+      remaining,
+      (thenBody) => {
+        thenBody.returnCall(self, [
+          fn.values.binary("sub", remaining, fn.values.const(1))
+        ]);
+      },
+      {
+        elseBuild: (elseBody) => {
+          elseBody.return([]);
+        }
+      }
+    );
+  });
+  program.exportFunction({
+    ref: exportRef("test.deep-return-invocation-export"),
+    name: "entry",
+    target: countdown.ref
+  });
+
+  const instance = await WebAssembly.instantiate(
+    await WebAssembly.compile(encodeProgram(program.finish()))
+  );
+  const entry = instance.exports.entry;
+
+  if (typeof entry !== "function") {
+    throw new Error("missing deep return-invocation entry");
+  }
+  strictEqual(entry(100_000), undefined);
+});
+
 test("returnCall closes and emits a typed terminal tail call", async () => {
   const program = new ProgramBuilder();
   const type = functionType(["i32"], ["i32"]);
@@ -99,11 +147,13 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
   if (callerFunction === undefined || callerFunction.kind !== "function") {
     throw new Error("missing returnCall caller");
   }
-  deepStrictEqual(callerFunction.callTargets, [target]);
-  strictEqual(callerFunction.body.body.nodes[0]?.kind, "returnCall");
+  deepStrictEqual(callerFunction.directTargets, [target]);
+  strictEqual(callerFunction.body.body.nodes[0]?.kind, "return");
   const emitted = emitFunction(callerFunction.body, {
     functionIndices: new Map([[target, 1]]),
+    typeIndices: new Map(),
     resourceIndices: new Map(),
+    tableIndices: new Map(),
     placement: callerFunction.placement
   });
   const opcodes = wasmBodyOpcodes(emitted.bytes);
@@ -199,13 +249,18 @@ test("returnCall enforces argument and enclosing-result types", () => {
 
   const forged = new FunctionBuilder(i32Result);
 
-  forged.region.push(returnCallControl.create({
-    target: i64ResultTarget,
-    arguments: []
+  forged.region.push(returnControl.create({
+    source: {
+      kind: "invocation",
+      invocation: Invocation.create({
+        target: i64ResultTarget,
+        arguments: []
+      })
+    }
   }));
   throws(
     () => validateIrFunction(forged.finish()),
-    /target results do not match the enclosing function/
+    /invocation results do not match the enclosing function/
   );
 
   const validTarget = new FunctionDefinition({

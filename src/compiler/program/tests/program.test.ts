@@ -581,6 +581,8 @@ test("an effectful function call stays single and conditional inside its selecte
   const functionIndices = new Map([[callee, 0]]);
   const emitted = emitFunction(callerDefinition.body, {
     functionIndices,
+    typeIndices: new Map(),
+    tableIndices: new Map(),
     resourceIndices: new Map(),
     placement: callerDefinition.placement
   });

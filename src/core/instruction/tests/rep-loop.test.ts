@@ -84,7 +84,6 @@ function collectLoops(nodes: readonly BodyNode[]): LoopControl[] {
           ...node.cases.flatMap((entry) => collectLoops(entry.body.nodes)),
           ...collectLoops(node.defaultBody.nodes)
         ];
-      case "returnCall":
       case "loopContinue":
       case "finish":
       case "return":

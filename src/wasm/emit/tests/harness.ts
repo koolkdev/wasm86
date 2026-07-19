@@ -73,6 +73,8 @@ function emitIrBlockBody(
     scratch,
     externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id])),
     functionIndices: bindings.definitionIndices,
+    typeIndices: bindings.typeIndices,
+    tableIndices: bindings.tables,
     resourceIndices: bindings.resources,
     placement,
     embedding: {

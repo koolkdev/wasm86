@@ -184,6 +184,13 @@ export function validateProgram(program: Program): void {
     validateFunctionType(signature.type);
   }
   for (const fn of program.functions) {
+    for (const type of fn.indirectTypes) {
+      assert(
+        program.signatures.some((signature) => signature.type === type),
+        `function ${fn.ref.id} uses an indirect call type with no program signature`
+      );
+    }
+
     if (fn.kind === "legacy") {
       assert(
         fn.effects === "none" || fn.effects === "world",
@@ -223,7 +230,7 @@ export function validateProgram(program: Program): void {
       );
     }
 
-    validateKnownCalls(fn, functions);
+    validateKnownDirectTargets(fn, functions);
     for (const resource of fn.resources) {
       assert(
         memories.has(resource),
@@ -245,6 +252,13 @@ export function validateProgram(program: Program): void {
         );
       }
       continue;
+    }
+
+    for (const table of fn.tables) {
+      assert(
+        tables.has(table),
+        `unknown program table ${table.id} used by function ${fn.ref.id}`
+      );
     }
 
     for (const access of [...fn.effects.reads, ...fn.effects.writes]) {
@@ -355,6 +369,7 @@ export function validateProgramEncoding(
 
 type ProgramEncodingIndices = Readonly<{
   signatures: ReadonlyMap<SignatureRef, number>;
+  types: ReadonlyMap<FunctionType, number>;
   functions: ReadonlyMap<FunctionRef, number>;
   resources: ReadonlyMap<ResourceRef, number>;
   globals: ReadonlyMap<GlobalRef, number>;
@@ -364,6 +379,7 @@ type ProgramEncodingIndices = Readonly<{
 function indexProgramEncoding(program: Program): ProgramEncodingIndices {
   const types: FunctionType[] = [];
   const signatures = new Map<SignatureRef, number>();
+  const typeIndices = new Map<FunctionType, number>();
 
   for (const signature of program.signatures) {
     let index = types.findIndex((type) => functionTypesEqual(type, signature.type));
@@ -373,10 +389,12 @@ function indexProgramEncoding(program: Program): ProgramEncodingIndices {
       types.push(signature.type);
     }
     signatures.set(signature.ref, index);
+    typeIndices.set(signature.type, index);
   }
 
   return {
     signatures,
+    types: typeIndices,
     functions: new Map(program.functions.map((fn, index) => [fn.ref, index])),
     resources: new Map(program.memories.map((memory, index) => [memory.ref, index])),
     globals: new Map(program.globals.map((global, index) => [global.ref, index])),
@@ -392,6 +410,12 @@ function validateLegacyEncoding(
   const typeIndex = indices.signatures.get(fn.signature);
 
   assert(typeIndex !== undefined, `missing layout for program signature ${fn.signature.id}`);
+  const indirectTypes = fn.indirectTypes.map((type) => {
+    const index = indices.types.get(type);
+
+    assert(index !== undefined, "missing layout for indirect call type");
+    return index;
+  });
   const functions = new Map<FunctionRef, number>();
 
   for (const call of fn.calls) {
@@ -426,7 +450,7 @@ function validateLegacyEncoding(
   );
   validateEncodingReferences(fn, body, {
     functions: functions.values(),
-    types: [typeIndex],
+    types: [typeIndex, ...indirectTypes],
     globals: globals.values(),
     tables: tables.values(),
     memories: resources.values()
@@ -439,7 +463,7 @@ function validateDefinedEncoding(
   indices: ProgramEncodingIndices
 ): void {
   const functions = new Map(
-    fn.callTargets.map((target) => {
+    fn.directTargets.map((target) => {
       const index = indices.functions.get(target.ref);
 
       assert(index !== undefined, `missing layout for called program function ${target.ref.id}`);
@@ -454,11 +478,27 @@ function validateDefinedEncoding(
       return [resource, index] as const;
     })
   );
+  const types = new Map(
+    fn.indirectTypes.map((type) => {
+      const index = indices.types.get(type);
+
+      assert(index !== undefined, "missing layout for indirect call type");
+      return [type, index] as const;
+    })
+  );
+  const tables = new Map(
+    fn.tables.map((table) => {
+      const index = indices.tables.get(table);
+
+      assert(index !== undefined, `missing layout for program table ${table.id}`);
+      return [table, index] as const;
+    })
+  );
   validateEncodingReferences(fn, body, {
     functions: functions.values(),
-    types: [],
+    types: types.values(),
     globals: [],
-    tables: [],
+    tables: tables.values(),
     memories: resources.values()
   });
 }
@@ -542,21 +582,23 @@ function validateFunctionType(type: Readonly<{
   }
 }
 
-function validateKnownCalls(
+function validateKnownDirectTargets(
   fn: ProgramFunction,
   functions: ReadonlyMap<ProgramFunction["ref"], ProgramFunction>
 ): void {
-  const calls = fn.kind === "legacy"
+  const directRefs = fn.kind === "legacy"
     ? fn.calls
-    : fn.callTargets.map((target) => target.ref);
+    : fn.directTargets.map((target) => target.ref);
 
-  for (const call of calls) {
+  for (const ref of directRefs) {
     assert(
-      functions.has(call),
-      `unknown program function ${call.id} called by function ${fn.ref.id}`
+      functions.has(ref),
+      `unknown program function ${ref.id} called by function ${fn.ref.id}`
     );
   }
-  for (const target of fn.callTargets) {
+  const directTargets = fn.kind === "legacy" ? fn.callTargets : fn.directTargets;
+
+  for (const target of directTargets) {
     const linked = functions.get(target.ref);
 
     assert(
@@ -583,6 +625,8 @@ function validateLegacyFunction(
   fn: LegacyFunction,
   retainedBodies: Set<IrBlock>
 ): void {
+  const indirectTypes: FunctionType[] = [];
+
   for (const entry of fn.irBlocks) {
     const placement = program.placements.get(entry.block);
 
@@ -596,17 +640,32 @@ function validateLegacyFunction(
     );
     retainedBodies.add(entry.block);
 
-    for (const { call } of placement.analysis.calls()) {
-      if (!placement.analysis.callMustExecute(call)) {
+    for (const site of placement.analysis.invocations()) {
+      if (!placement.analysis.invocationMustExecute(site)) {
         continue;
       }
-      const target = call.target;
+      const references = site.invocation.target.references;
 
-      assert(
-        fn.callTargets.includes(target) &&
-          fn.calls.includes(target.ref),
-        `legacy function ${fn.ref.id} omitted live call ${target.ref.id}`
-      );
+      for (const target of references.functions) {
+        assert(
+          fn.callTargets.includes(target) &&
+            fn.calls.includes(target.ref),
+          `legacy function ${fn.ref.id} omitted live call ${target.ref.id}`
+        );
+      }
+      for (const type of references.types) {
+        indirectTypes.push(type);
+        assert(
+          fn.indirectTypes.includes(type),
+          `legacy function ${fn.ref.id} omitted a live indirect call type`
+        );
+      }
+      for (const table of references.tables) {
+        assert(
+          fn.tables.includes(table),
+          `legacy function ${fn.ref.id} omitted live table ${table.id}`
+        );
+      }
     }
     for (const resource of resourcesUsedBy(placement.analysis)) {
       assert(
@@ -615,6 +674,10 @@ function validateLegacyFunction(
       );
     }
   }
+  assert(
+    sameIdentitySequence(fn.indirectTypes, unique(indirectTypes)),
+    `legacy function ${fn.ref.id} indirect types do not match its live invocations`
+  );
 }
 
 function validateDefinedFunction(
@@ -635,16 +698,33 @@ function validateDefinedFunction(
   );
   retainedBodies.add(fn.body);
 
-  const callTargets = unique(
-    placement.analysis.calls()
-      .filter(({ call }) => placement.analysis.callMustExecute(call))
-      .map(({ call }) => call.target)
-  );
+  const invocations = placement.analysis.invocations()
+    .filter((site) => placement.analysis.invocationMustExecute(site))
+    .map((site) => site.invocation);
+  const directTargets: FunctionDefinition[] = [];
+  const indirectTypes: FunctionType[] = [];
+  const tables: TableRef[] = [];
+
+  for (const invocation of invocations) {
+    const references = invocation.target.references;
+
+    directTargets.push(...references.functions);
+    indirectTypes.push(...references.types);
+    tables.push(...references.tables);
+  }
   const resources = resourcesUsedBy(placement.analysis);
 
   assert(
-    sameIdentitySequence(fn.callTargets, callTargets),
-    `function ${fn.ref.id} call targets do not match its live calls`
+    sameIdentitySequence(fn.directTargets, unique(directTargets)),
+    `function ${fn.ref.id} direct targets do not match its live invocations`
+  );
+  assert(
+    sameIdentitySequence(fn.indirectTypes, unique(indirectTypes)),
+    `function ${fn.ref.id} indirect types do not match its live invocations`
+  );
+  assert(
+    sameIdentitySequence(fn.tables, unique(tables)),
+    `function ${fn.ref.id} tables do not match its live invocations`
   );
   assert(
     sameIdentitySequence(fn.resources, resources),
@@ -679,21 +759,20 @@ function inferEffects(analysis: BodyAnalysis): StorageEffects {
   const reads = new Set<StorageAccess>();
   const writes = new Set<StorageAccess>();
 
-  for (const { operation } of analysis.operations()) {
-    if (analysis.operationMustExecute(operation)) {
-      const effects = operation.directEffects;
+  for (const site of analysis.sites()) {
+    if (site.kind === "bodyEnd") {
+      continue;
+    }
+    const node = site.node;
 
-      addExternalEffects(effects.reads, reads);
-      addExternalEffects(effects.writes, writes);
+    if (
+      node.category === "operation" &&
+      !analysis.operationMustExecute(node)
+    ) {
+      continue;
     }
-  }
-  for (const { call } of analysis.calls()) {
-    // Call operations were covered by the operation pass above. Terminal
-    // calls are controls, so their target effects enter through this pass.
-    if (call.category === "control" && analysis.callMustExecute(call)) {
-      addExternalEffects(call.target.effects.reads, reads);
-      addExternalEffects(call.target.effects.writes, writes);
-    }
+    addExternalEffects(node.directEffects.reads, reads);
+    addExternalEffects(node.directEffects.writes, writes);
   }
   return { reads: [...reads], writes: [...writes] };
 }

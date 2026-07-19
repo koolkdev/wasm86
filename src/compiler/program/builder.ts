@@ -183,6 +183,7 @@ function normalizeLegacyFunction(declaration: LegacyFunctionDeclaration): Legacy
       call instanceof FunctionDefinition ? call.ref : call
     )),
     callTargets,
+    indirectTypes: [],
     resources: [...declaration.resources],
     globals: [...declaration.globals],
     tables: [...declaration.tables],

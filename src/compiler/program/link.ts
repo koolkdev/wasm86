@@ -1,10 +1,12 @@
 import { assert } from "#common/assert.js";
 import { buildDefinition } from "#build";
 import type { BodyAnalysis } from "#compiler/analysis/model.js";
+import type { Invocation } from "#compiler/ir/invocation.js";
 import { placeBody, type BodyPlacement } from "#compiler/placement/place.js";
 import type { IrBlock } from "#ir/block.js";
 import { Declarations } from "./declarations.js";
 import { closeFunctions, type FunctionClosure } from "./function-closure.js";
+import type { FunctionType } from "./function-type.js";
 import { FunctionDefinition } from "./functions.js";
 import type {
   DefinedFunction,
@@ -19,6 +21,7 @@ import type {
   Signature,
   TableImport
 } from "./model.js";
+import type { TableRef } from "./refs.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import {
   validateLinkedProgramFunctions,
@@ -86,6 +89,8 @@ function placeLegacyFunctions(
   const rootPlacements: BodyPlacement[] = [];
   const functions = declarations.map((fn): LegacyFunction => {
     const liveCalls: FunctionDefinition[] = [];
+    const liveIndirectTypes = [...fn.indirectTypes];
+    const liveTables = [...fn.tables];
 
     for (const entry of fn.irBlocks) {
       const placement = placeBody(entry.block, {
@@ -94,9 +99,13 @@ function placeLegacyFunctions(
 
       placements.set(entry.block, placement);
       rootPlacements.push(placement);
-      for (const { call } of placement.analysis.calls()) {
-        if (placement.analysis.callMustExecute(call)) {
-          liveCalls.push(call.target);
+      for (const site of placement.analysis.invocations()) {
+        if (placement.analysis.invocationMustExecute(site)) {
+          const references = site.invocation.target.references;
+
+          liveCalls.push(...references.functions);
+          liveIndirectTypes.push(...references.types);
+          liveTables.push(...references.tables);
         }
       }
     }
@@ -105,7 +114,9 @@ function placeLegacyFunctions(
     return {
       ...fn,
       calls: unique([...fn.calls, ...callTargets.map((call) => call.ref)]),
-      callTargets
+      callTargets,
+      indirectTypes: unique(liveIndirectTypes),
+      tables: unique(liveTables)
     };
   });
 
@@ -122,9 +133,18 @@ function linkDefinedFunctions(
     const signature = signatures.find((candidate) => candidate.type === definition.type);
 
     assert(signature !== undefined, `function ${definition.ref.id} has no program signature`);
-    const callTargets = unique(placement.analysis.calls()
-      .filter(({ call }) => placement.analysis.callMustExecute(call))
-      .map(({ call }) => call.target));
+    const invocations = liveInvocations(placement.analysis);
+    const directTargets: FunctionDefinition[] = [];
+    const indirectTypes: FunctionType[] = [];
+    const tables: TableRef[] = [];
+
+    for (const invocation of invocations) {
+      const references = invocation.target.references;
+
+      directTargets.push(...references.functions);
+      indirectTypes.push(...references.types);
+      tables.push(...references.tables);
+    }
     const resources = resourcesUsedBy(placement.analysis);
 
     placements.set(body, placement);
@@ -134,8 +154,10 @@ function linkDefinedFunctions(
       type: definition.type,
       effects: definition.effects,
       signature: signature.ref,
-      callTargets,
+      directTargets: unique(directTargets),
+      indirectTypes: unique(indirectTypes),
       resources,
+      tables: unique(tables),
       body,
       placement
     };
@@ -193,6 +215,14 @@ function resourcesUsedBy(analysis: BodyAnalysis): readonly ResourceRef[] {
     resources.push(...operation.referencedResources);
   }
   return unique(resources);
+}
+
+function liveInvocations(
+  analysis: BodyAnalysis
+): readonly Invocation[] {
+  return analysis.invocations()
+    .filter((site) => analysis.invocationMustExecute(site))
+    .map((site) => site.invocation);
 }
 
 function isFunctionDefinition(

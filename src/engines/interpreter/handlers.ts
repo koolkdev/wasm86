@@ -112,6 +112,8 @@ export function emitInstructionHandler(
         scratch: context.scratch,
         externalLocals: externals.locals,
         functionIndices: context.functionIndices,
+        typeIndices: context.typeIndices,
+        tableIndices: context.tableIndices,
         resourceIndices: context.resourceIndices,
         embedding: { dispatch: { kind: "br", depth: context.continueDepth } }
       });

@@ -4,6 +4,11 @@ import { test } from "node:test";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
+import {
+  IndirectCallTarget,
+  Invocation,
+  type CallTarget
+} from "#compiler/ir/invocation.js";
 import { callOperation } from "#compiler/ir/operations/call.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import type {
@@ -31,7 +36,7 @@ import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js"
 import { CellRef } from "#compiler/refs/cell.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef } from "#compiler/program/refs.js";
+import { functionRef, tableRef } from "#compiler/program/refs.js";
 
 test("operation owners atomically construct complete occurrences", () => {
   const address = valueId(1);
@@ -218,8 +223,12 @@ test("ordinary calls are operations with allocator-owned outputs and direct emis
   const argument = valueId(40);
   const output = valueId(41);
   const targetFunction = functionDefinition("test.call", ["i32"], ["i32"]);
+  const invocation = Invocation.create({
+    target: targetFunction,
+    arguments: [{ value: argument, type: "i32" }]
+  });
   const operation = callOperation.create(
-    { target: targetFunction, arguments: [{ value: argument, type: "i32" }] },
+    { invocation },
     (result) => {
       deepStrictEqual(result, { type: "i32" });
       return output;
@@ -236,7 +245,8 @@ test("ordinary calls are operations with allocator-owned outputs and direct emis
   });
 
   strictEqual(operation.category, "operation");
-  strictEqual(operation.target, targetFunction);
+  strictEqual(operation.invocation, invocation);
+  strictEqual(invocation.target, targetFunction);
   deepStrictEqual(operation.operands, [argument]);
   deepStrictEqual(operation.outputs, [output]);
   deepStrictEqual(operation.directEffects, targetFunction.effects);
@@ -251,10 +261,10 @@ test("ordinary calls are operations with allocator-owned outputs and direct emis
     wasmOpcode.end
   ]);
   throws(
-    () => callOperation.create(
-      { target: targetFunction, arguments: [] },
-      () => output
-    ),
+    () => Invocation.create({
+      target: targetFunction,
+      arguments: []
+    }),
     /expects 1 arguments, got 0/
   );
   const multiResultTarget = functionDefinition(
@@ -265,10 +275,132 @@ test("ordinary calls are operations with allocator-owned outputs and direct emis
 
   throws(
     () => callOperation.create(
-      { target: multiResultTarget, arguments: [] },
+      {
+        invocation: Invocation.create({
+          target: multiResultTarget,
+          arguments: []
+        })
+      },
       () => output
     ),
     /multiple call results are not supported yet/
+  );
+});
+
+test("call targets are structurally polymorphic", () => {
+  const elementIndex = valueId(45);
+  const table = tableRef("test.structural-call-table");
+  const type = functionType([], []);
+  const effects = { reads: [], writes: [] } as const;
+  const target = {
+    type,
+    effects,
+    targetInputs: [{ value: elementIndex, type: "i32" }] as const,
+    references: { functions: [], types: [type], tables: [table] },
+    emitCall(context) {
+      context.body.callIndirect(
+        context.typeIndex(type),
+        context.tableIndex(table)
+      );
+    },
+    emitReturnCall(context) {
+      context.body.returnCallIndirect(
+        context.typeIndex(type),
+        context.tableIndex(table)
+      );
+    }
+  } satisfies CallTarget;
+  const invocation = Invocation.create({ target, arguments: [] });
+
+  strictEqual(invocation.target, target);
+  deepStrictEqual(invocation.inputs, [
+    { value: elementIndex, type: "i32" }
+  ]);
+  deepStrictEqual(target.references, {
+    functions: [],
+    types: [type],
+    tables: [table]
+  });
+});
+
+test("indirect invocations own their selector, effects, and emission", () => {
+  const argument = valueId(50);
+  const elementIndex = valueId(51);
+  const output = valueId(52);
+  const table = tableRef("test.call-table");
+  const type = functionType(["i64"], ["i32"]);
+  const effects = { reads: [], writes: [] } as const;
+  const target = IndirectCallTarget.create({
+    table,
+    type,
+    effects,
+    elementIndex: { value: elementIndex, type: "i32" }
+  });
+  const invocation = Invocation.create({
+    target,
+    arguments: [{ value: argument, type: "i64" }]
+  });
+  const operation = callOperation.create({ invocation }, () => output);
+  const body = new WasmFunctionBodyEncoder();
+  const uses: ValueId[] = [];
+
+  operation.emit({
+    body,
+    cellLocal: () => 0,
+    resourceIndex: () => 0,
+    functionIndex: () => {
+      throw new Error("indirect call requested a direct function index");
+    },
+    typeIndex(candidate) {
+      strictEqual(candidate, type);
+      return 8;
+    },
+    tableIndex(candidate) {
+      strictEqual(candidate, table);
+      return 9;
+    }
+  }, {
+    emitUse(value) {
+      uses.push(value);
+      body.i32Const(value);
+    }
+  });
+
+  deepStrictEqual(invocation.arguments, [{ value: argument, type: "i64" }]);
+  deepStrictEqual(invocation.inputs, [
+    { value: argument, type: "i64" },
+    { value: elementIndex, type: "i32" }
+  ]);
+  strictEqual(invocation.target, target);
+  strictEqual(target.type, type);
+  strictEqual(target.effects, effects);
+  deepStrictEqual(target.targetInputs, [
+    { value: elementIndex, type: "i32" }
+  ]);
+  deepStrictEqual(target.references, {
+    functions: [],
+    types: [type],
+    tables: [table]
+  });
+  deepStrictEqual(operation.operands, [argument, elementIndex]);
+  deepStrictEqual(operation.outputs, [output]);
+  deepStrictEqual(uses, [argument, elementIndex]);
+  const encoded = body.finish();
+
+  deepStrictEqual(encoded.references.typeIndices, [8]);
+  deepStrictEqual(encoded.references.tableIndices, [9]);
+  strictEqual(encoded.bytes.includes(wasmOpcode.callIndirect), true);
+  throws(
+    () => Invocation.create({
+      target: IndirectCallTarget.create({
+        table,
+        type,
+        effects,
+        elementIndex: { value: elementIndex, type: "i64" }
+      }),
+      arguments: [{ value: argument, type: "i64" }]
+    }),
+    /table element index must be i32, got i64/
   );
 });
 
@@ -292,6 +424,12 @@ test("resource and cell emission call their definition-specific target services"
     },
     functionIndex: () => {
       throw new Error("non-call operation requested a function index");
+    },
+    typeIndex: () => {
+      throw new Error("non-call operation requested a type index");
+    },
+    tableIndex: () => {
+      throw new Error("non-call operation requested a table index");
     }
   };
   const uses: ValueId[] = [];
@@ -330,7 +468,9 @@ function operationTarget(
     functionIndex(candidate) {
       strictEqual(candidate, expectedFunction);
       return 7;
-    }
+    },
+    typeIndex: () => 0,
+    tableIndex: () => 0
   };
 }
 

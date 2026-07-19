@@ -41,13 +41,15 @@ export function closeFunctions(options: CloseFunctionsOptions): FunctionClosure 
       pending.push(definition);
     }
   };
-  const inspectCalls = (analysis: BodyAnalysis): void => {
-    for (const { call } of analysis.calls()) {
-      const target = call.target;
+  const inspectInvocations = (analysis: BodyAnalysis): void => {
+    for (const site of analysis.invocations()) {
+      const mustExecute = analysis.invocationMustExecute(site);
 
-      assertOwned(target);
-      if (analysis.callMustExecute(call)) {
-        enqueue(target);
+      for (const definition of site.invocation.target.references.functions) {
+        assertOwned(definition);
+        if (mustExecute) {
+          enqueue(definition);
+        }
       }
     }
   };
@@ -56,7 +58,7 @@ export function closeFunctions(options: CloseFunctionsOptions): FunctionClosure 
     enqueue(definition);
   }
   for (const placement of options.rootPlacements) {
-    inspectCalls(placement.analysis);
+    inspectInvocations(placement.analysis);
   }
   while (next < pending.length) {
     const definition = pending[next];
@@ -67,7 +69,7 @@ export function closeFunctions(options: CloseFunctionsOptions): FunctionClosure 
     const placement = placeFunction(body);
 
     functions.set(definition, { body, placement });
-    inspectCalls(placement.analysis);
+    inspectInvocations(placement.analysis);
   }
 
   return { functions };

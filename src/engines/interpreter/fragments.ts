@@ -14,6 +14,8 @@ import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js
 import type { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
+import type { FunctionType } from "#compiler/program/function-type.js";
+import type { TableRef } from "#compiler/program/refs.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import { guestMemoryAccess } from "#memory/access.js";
 
@@ -27,6 +29,8 @@ export type FragmentEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
   functionIndices?: ReadonlyMap<FunctionDefinition, number> | undefined;
+  typeIndices?: ReadonlyMap<FunctionType, number> | undefined;
+  tableIndices?: ReadonlyMap<TableRef, number> | undefined;
   resourceIndices?: ReadonlyMap<ResourceRef, number> | undefined;
 }>;
 
@@ -167,6 +171,8 @@ class DecodeFragment {
       scratch: context.scratch,
       externalLocals: this.#externalLocals,
       functionIndices: context.functionIndices,
+      typeIndices: context.typeIndices,
+      tableIndices: context.tableIndices,
       resourceIndices: context.resourceIndices,
       embedding: { fallthrough: { kind: "fallthrough" }, outputs }
     });

@@ -29,6 +29,7 @@ type DefinedFunction = Extract<ProgramFunction, { kind: "function" }>;
 type ProgramLayout = Readonly<{
   types: readonly WasmFunctionType[];
   signatureIndices: ReadonlyMap<SignatureRef, number>;
+  typeIndices: ReadonlyMap<FunctionType, number>;
   functionIndices: ReadonlyMap<FunctionRef, number>;
   memoryIndices: ReadonlyMap<ResourceRef, number>;
   tableIndices: ReadonlyMap<TableRef, number>;
@@ -122,6 +123,7 @@ function addExports(module: WasmModuleEncoder, program: Program, layout: Program
 function layoutProgram(program: Program): ProgramLayout {
   const types: WasmFunctionType[] = [];
   const signatureIndices = new Map<SignatureRef, number>();
+  const typeIndices = new Map<FunctionType, number>();
 
   for (const signature of program.signatures) {
     const physicalType = encodeFunctionType(signature.type);
@@ -132,11 +134,13 @@ function layoutProgram(program: Program): ProgramLayout {
       types.push(physicalType);
     }
     signatureIndices.set(signature.ref, index);
+    typeIndices.set(signature.type, index);
   }
 
   return {
     types,
     signatureIndices,
+    typeIndices,
     functionIndices: new Map(program.functions.map((fn, index) => [fn.ref, index])),
     memoryIndices: new Map(program.memories.map((memory, index) => [memory.ref, index])),
     tableIndices: new Map(program.tables.map((table, index) => [table.ref, index])),
@@ -168,6 +172,7 @@ function buildLegacyBody(
 
   const functions = resolveFunctionIndices(layout, fn);
   const definitionIndices = resolveDefinitionIndices(layout, fn.callTargets);
+  const typeIndices = resolveTypeIndices(layout, fn.indirectTypes);
 
   const resources = resolveResourceIndices(layout, fn.resources);
 
@@ -180,17 +185,11 @@ function buildLegacyBody(
     globals.set(global, globalIndex);
   }
 
-  const tables = new Map<TableRef, number>();
-
-  for (const table of fn.tables) {
-    const tableIndex = layout.tableIndices.get(table);
-
-    assert(tableIndex !== undefined, `missing layout for program table ${table.id}`);
-    tables.set(table, tableIndex);
-  }
+  const tables = resolveTableIndices(layout, fn.tables);
 
   const bindings = {
     typeIndex: signatureIndex,
+    typeIndices,
     functions,
     definitionIndices,
     resources,
@@ -205,13 +204,47 @@ function buildDefinedBody(
   layout: ProgramLayout,
   fn: DefinedFunction
 ): EncodedWasmFunctionBody {
-  const functions = resolveDefinitionIndices(layout, fn.callTargets);
+  const functions = resolveDefinitionIndices(layout, fn.directTargets);
+  const typeIndices = resolveTypeIndices(layout, fn.indirectTypes);
   const resources = resolveResourceIndices(layout, fn.resources);
+  const tableIndices = resolveTableIndices(layout, fn.tables);
   return emitFunction(fn.body, {
     functionIndices: functions,
+    typeIndices,
     resourceIndices: resources,
+    tableIndices,
     placement: fn.placement
   });
+}
+
+function resolveTypeIndices(
+  layout: ProgramLayout,
+  types: readonly FunctionType[]
+): ReadonlyMap<FunctionType, number> {
+  const indices = new Map<FunctionType, number>();
+
+  for (const type of types) {
+    const typeIndex = layout.typeIndices.get(type);
+
+    assert(typeIndex !== undefined, "missing layout for indirect call type");
+    indices.set(type, typeIndex);
+  }
+  return indices;
+}
+
+function resolveTableIndices(
+  layout: ProgramLayout,
+  refs: readonly TableRef[]
+): ReadonlyMap<TableRef, number> {
+  const tables = new Map<TableRef, number>();
+
+  for (const table of refs) {
+    const tableIndex = layout.tableIndices.get(table);
+
+    assert(tableIndex !== undefined, `missing layout for program table ${table.id}`);
+    tables.set(table, tableIndex);
+  }
+  return tables;
 }
 
 function resolveResourceIndices(

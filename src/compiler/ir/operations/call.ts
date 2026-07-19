@@ -1,6 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { ValueInput } from "#compiler/ir/values/types.js";
-import type { FunctionDefinition } from "#compiler/program/functions.js";
+import { Invocation } from "#compiler/ir/invocation.js";
 import type { ValueUseEmitter } from "#ir/node.js";
 import {
   operationResult,
@@ -12,8 +11,7 @@ import {
 } from "./definition.js";
 
 export type CallOperationArgs = Readonly<{
-  target: FunctionDefinition;
-  arguments: readonly ValueInput[];
+  invocation: Invocation;
 }>;
 
 export class CallOperation extends OperationBase {
@@ -21,56 +19,39 @@ export class CallOperation extends OperationBase {
   readonly kind = CallOperation.kind;
 
   private constructor(
-    readonly target: FunctionDefinition,
-    inputs: readonly ValueInput[],
+    readonly invocation: Invocation,
     allocateOutput: OperationOutputAllocator
   ) {
-    assert(
-      inputs.length === target.type.parameters.length,
-      `function ${target.ref.id} expects ${target.type.parameters.length} arguments, got ${inputs.length}`
-    );
-    for (const [index, input] of inputs.entries()) {
-      const expected = target.type.parameters[index];
+    const { type, effects } = invocation.target;
 
-      assert(
-        expected !== undefined,
-        `function ${target.ref.id} has no parameter ${index}`
-      );
-      assert(
-        input.type === expected,
-        `function ${target.ref.id} argument ${index} must be ${expected}, got ${input.type}`
-      );
-    }
     assert(
-      target.type.results.length <= 1,
-      `function ${target.ref.id} has ${target.type.results.length} results; multiple call results are not supported yet`
+      type.results.length <= 1,
+      `call has ${type.results.length} results; multiple call results are not supported yet`
     );
 
-    const results: readonly OperationResult[] = target.type.results.map(
+    const results: readonly OperationResult[] = type.results.map(
       operationResult
     );
     const outputs = results.map(allocateOutput);
 
     super({
-      inputs,
+      inputs: invocation.inputs,
       results,
       outputs,
-      directEffects: target.effects
+      directEffects: effects
     });
   }
 
   static create(
-    { target, arguments: inputs }: CallOperationArgs,
+    { invocation }: CallOperationArgs,
     allocateOutput: OperationOutputAllocator
   ): CallOperation {
-    return new CallOperation(target, inputs, allocateOutput);
+    return new CallOperation(invocation, allocateOutput);
   }
 
   emit(target: OperationEmitTarget, values: ValueUseEmitter): void {
-    for (const input of this.inputs) {
-      values.emitUse(input.value);
-    }
-    target.body.callFunction(target.functionIndex(this.target));
+    this.invocation.emitInputs(values);
+    this.invocation.target.emitCall(target);
   }
 }
 

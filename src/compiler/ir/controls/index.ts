@@ -6,10 +6,6 @@ import {
   type LoopContinueControl,
   type LoopControl
 } from "./loop.js";
-import {
-  returnCallControl,
-  type ReturnCallControl
-} from "./return-call.js";
 import { returnControl, type ReturnControl } from "./return.js";
 import { switchControl, type SwitchControl } from "./switch.js";
 
@@ -18,7 +14,6 @@ export {
   ifControl,
   loopContinueControl,
   loopControl,
-  returnCallControl,
   returnControl,
   switchControl
 };
@@ -48,12 +43,9 @@ export type {
   LoopControlArgs
 } from "./loop.js";
 export type {
-  ReturnCallControl,
-  ReturnCallControlArgs
-} from "./return-call.js";
-export type {
   ReturnControl,
-  ReturnControlArgs
+  ReturnControlArgs,
+  ReturnSource
 } from "./return.js";
 export {
   maxSwitchMatch,
@@ -70,7 +62,6 @@ export type StructuredControl =
 export type TerminalControl =
   | LoopContinueControl
   | FinishControl
-  | ReturnCallControl
   | ReturnControl;
 
 export type Control = StructuredControl | TerminalControl;
