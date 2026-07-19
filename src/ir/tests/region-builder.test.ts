@@ -7,7 +7,7 @@ import {
 } from "node:assert";
 import { test } from "node:test";
 
-import type { Action } from "#ir/actions.js";
+import type { BodyNode } from "#ir/block.js";
 import {
   resourceRead,
   resourceWrite
@@ -16,7 +16,7 @@ import {
   resourceRef,
   type ResourceByteOperand
 } from "#compiler/ir/resource.js";
-import { RegionBuilder, buildIrBlock, type BodyActionSink } from "#ir/region-builder.js";
+import { RegionBuilder, buildIrBlock, type BodyNodeSink } from "#ir/region-builder.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -26,29 +26,28 @@ import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/program/refs.js";
 import {
   compilerTestResourceEffect,
-  resourceReadAction,
-  resourceWriteAction
+  resourceWriteNode
 } from "#ir/tests/storage-op-helpers.js";
 
-function readOperation(values: ValueTable, region = 0) {
-  return resourceRead.create({
+function readArgs(values: ValueTable, region = 0) {
+  return {
     source: {
       effect: compilerTestResourceEffect(region),
       address: { base: values.const(0), displacement: region * 4 },
       width: 32
     }
-  });
+  } as const;
 }
 
-function writeOperation(values: ValueTable, value: ValueId, region = 0) {
-  return resourceWrite.create({
+function writeArgs(values: ValueTable, value: ValueId, region = 0) {
+  return {
     destination: {
       effect: compilerTestResourceEffect(region),
       address: { base: values.const(0), displacement: region * 4 },
       width: 32
     },
     value
-  });
+  } as const;
 }
 
 function testCallTarget(id: string): FunctionDefinition {
@@ -78,19 +77,12 @@ test("operation derives the output and its bounds from the definition", () => {
     address: { base: address, displacement: 0 },
     width: 8
   };
-  const read = builder.operation(resourceRead.create({
-    source
-  }));
+  const read = builder.operation(resourceRead, { source });
+  const [operation] = builder.build().nodes;
 
-  deepStrictEqual(builder.build(), {
-    actions: [{
-      kind: "op",
-      output: read,
-      op: resourceRead.create({
-        source
-      })
-    }]
-  });
+  ok(operation?.kind === "resource.read");
+  strictEqual(operation.effect, source.effect);
+  deepStrictEqual(operation.outputs, [read]);
   deepStrictEqual(values.widthBounds(read), fitsUnsigned(8));
 });
 
@@ -111,24 +103,24 @@ test("resource read modes reach operation construction", () => {
     width: 8
   };
 
-  const signed = builder.operation(resourceRead.create({
+  const signed = builder.operation(resourceRead, {
     source,
     mode: { kind: "signed" }
-  }));
-  const bounded = builder.operation(resourceRead.create({
+  });
+  const bounded = builder.operation(resourceRead, {
     source,
     mode: {
       kind: "unsigned",
       bounds: fitsUnsigned(1)
     }
-  }));
+  });
 
-  const [signedAction, boundedAction] = builder.build().actions;
+  const [signedOperation, boundedOperation] = builder.build().nodes;
 
-  ok(signedAction?.kind === "op" && signedAction.op.kind === "resource.read");
-  ok(boundedAction?.kind === "op" && boundedAction.op.kind === "resource.read");
-  strictEqual(signedAction.op.signed, true);
-  strictEqual(boundedAction.op.signed, undefined);
+  ok(signedOperation?.kind === "resource.read");
+  ok(boundedOperation?.kind === "resource.read");
+  strictEqual(signedOperation.signed, true);
+  strictEqual(boundedOperation.signed, undefined);
   deepStrictEqual(values.widthBounds(signed), signExtended(8));
   deepStrictEqual(values.widthBounds(bounded), fitsUnsigned(1));
 });
@@ -138,8 +130,8 @@ test("one operation API handles value and effect definitions", () => {
   const builder = new RegionBuilder(values);
   const value = values.const(0);
 
-  strictEqual(builder.operation(writeOperation(values, value)), undefined);
-  strictEqual(builder.operation(readOperation(values)), value + 1);
+  strictEqual(builder.operation(resourceWrite, writeArgs(values, value)), undefined);
+  strictEqual(builder.operation(resourceRead, readArgs(values)), value + 1);
 });
 
 test("call validates typed arguments and allocates its declared result", () => {
@@ -150,15 +142,13 @@ test("call validates typed arguments and allocates its declared result", () => {
   const [output] = builder.call(target, args);
 
   ok(output !== undefined, "expected status-flag call result");
-  deepStrictEqual(builder.build(), {
-    actions: [{
-      kind: "call",
-      target,
-      arguments: args.map((value) => ({ value, type: "i32" as const })),
-      outputs: [output]
-    }]
-  });
-  deepStrictEqual(values.node(output), { kind: "actionOutput", type: "i32" });
+  const [call] = builder.build().nodes;
+
+  ok(call?.kind === "call");
+  strictEqual(call.target, target);
+  deepStrictEqual(call.inputs, args.map((value) => ({ value, type: "i32" as const })));
+  deepStrictEqual(call.outputs, [output]);
+  deepStrictEqual(values.node(output), { kind: "nodeOutput", type: "i32" });
   throws(() => builder.call(target, args.slice(1)), /expects 4 arguments, got 3/);
   throws(
     () => builder.call(target, [args[0]!, args[1]!, args[2]!, values.const64(3n)]),
@@ -180,16 +170,16 @@ test("cell APIs seed typed cells and preserve lexical access in child bodies", (
   builder.finish({ kind: "dispatch", targetEip: values.const(0) });
 
   const block = { values, body: builder.build() };
-  const seedAction = block.body.actions[0];
-  const branch = block.body.actions[1];
+  const seedOperation = block.body.nodes[0];
+  const branch = block.body.nodes[1];
 
   strictEqual(cell.type, "i64");
   strictEqual(values.valueType(read), "i64");
-  ok(seedAction?.kind === "op" && seedAction.op.kind === "cell.write");
-  strictEqual(seedAction.op.initialization, "seed");
+  ok(seedOperation?.kind === "cell.write");
+  strictEqual(seedOperation.initialization, "seed");
   ok(branch?.kind === "if");
-  strictEqual(branch.thenBody.actions[0]?.kind, "op");
-  strictEqual(branch.thenBody.actions[1]?.kind, "op");
+  strictEqual(branch.thenBody.nodes[0]?.kind, "cell.write");
+  strictEqual(branch.thenBody.nodes[1]?.kind, "cell.read");
   doesNotThrow(() => validateIrBlock(block));
 });
 
@@ -214,11 +204,11 @@ test("validation rejects a cell access transplanted away from its seed", () => {
 
   source.read(cell);
 
-  const sourceActions = source.build().actions;
+  const sourceNodes = source.build().nodes;
   const target = new RegionBuilder(values);
 
   // Moving only the read leaves its declaring seed behind in another tree.
-  target.push(sourceActions[1]!);
+  target.push(sourceNodes[1]!);
   target.finish({ kind: "dispatch", targetEip: values.const(0) });
 
   throws(
@@ -238,54 +228,56 @@ test("a transplanted seed carries its cell's scope with it", () => {
 
   const target = new RegionBuilder(values);
 
-  target.extend(source.build().actions);
+  target.extend(source.build().nodes);
   target.finish({ kind: "dispatch", targetEip: values.const(0) });
 
   doesNotThrow(() => validateIrBlock({ values, body: target.build() }));
 });
 
-test("effect, push, and extend append actions without outputs", () => {
+test("effect, push, and extend append nodes without outputs", () => {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
-  const prebuilt = resourceWriteAction(values, 0, values.const(4));
-  const other = resourceWriteAction(values, 0, values.const(8));
+  const prebuilt = resourceWriteNode(values, 0, values.const(4));
+  const other = resourceWriteNode(values, 0, values.const(8));
 
-  builder.operation(writeOperation(values, values.const(0)));
+  const built = builder.operation(resourceWrite, writeArgs(values, values.const(0)));
+
+  strictEqual(built, undefined);
   builder.push(prebuilt);
   builder.extend([other]);
-  deepStrictEqual(builder.build(), {
-    actions: [resourceWriteAction(values, 0, values.const(0)), prebuilt, other]
-  });
+  const [first, second, third] = builder.build().nodes;
+
+  ok(first?.kind === "resource.write");
+  strictEqual(second, prebuilt);
+  strictEqual(third, other);
 });
 
-test("custom action sinks can divert emitted top-level actions", () => {
+test("custom node sinks can divert emitted top-level nodes", () => {
   const values = new ValueTable();
-  const sink = new class implements BodyActionSink {
-    readonly bodyActions: Action[] = [];
-    readonly diverted: Action[] = [];
+  const sink = new class implements BodyNodeSink {
+    readonly bodyNodes: BodyNode[] = [];
+    readonly diverted: BodyNode[] = [];
 
-    push(action: Action): void {
-      if (action.kind === "op" && action.op.kind === "resource.read") {
-        this.diverted.push(action);
+    push(node: BodyNode): void {
+      if (node.kind === "resource.read") {
+        this.diverted.push(node);
         return;
       }
 
-      this.bodyActions.push(action);
+      this.bodyNodes.push(node);
     }
 
-    actions(): readonly Action[] {
-      return this.bodyActions;
+    nodes(): readonly BodyNode[] {
+      return this.bodyNodes;
     }
   }();
   const builder = new RegionBuilder(values, sink);
-  const read = builder.operation(readOperation(values));
+  const read = builder.operation(resourceRead, readArgs(values));
 
-  builder.operation(writeOperation(values, values.const(4)));
+  builder.operation(resourceWrite, writeArgs(values, values.const(4)));
 
-  deepStrictEqual(sink.diverted, [resourceReadAction(values, read, 0)]);
-  deepStrictEqual(builder.build(), {
-    actions: [resourceWriteAction(values, 0, values.const(4))]
-  });
+  deepStrictEqual(sink.diverted[0]?.outputs, [read]);
+  strictEqual(builder.build().nodes[0]?.kind, "resource.write");
 });
 
 test("if builds hinted then and else bodies against child builders", () => {
@@ -297,26 +289,24 @@ test("if builds hinted then and else bodies against child builders", () => {
   builder.if(
     condition,
     (then) => then.operation(
-      writeOperation(then.values, then.values.const(4))
+      resourceWrite,
+      writeArgs(then.values, then.values.const(4))
     ),
     {
       hint: "unlikely",
       elseBuild: (other) => other.finish({ kind: "exit", result: exitResult })
     }
   );
-  deepStrictEqual(builder.build(), {
-    actions: [
-      {
-        kind: "if",
-        condition,
-        hint: "unlikely",
-        thenBody: { actions: [resourceWriteAction(values, 0, values.const(4))] },
-        elseBody: {
-          actions: [{ kind: "finish", finish: { kind: "exit", result: exitResult } }]
-        }
-      }
-    ]
-  });
+  const [control] = builder.build().nodes;
+
+  ok(control?.kind === "if");
+  strictEqual(control.condition, condition);
+  strictEqual(control.hint, "unlikely");
+  strictEqual(control.thenBody.nodes[0]?.kind, "resource.write");
+  const [finish] = control.elseBody?.nodes ?? [];
+
+  ok(finish?.kind === "finish");
+  deepStrictEqual(finish.finish, { kind: "exit", result: exitResult });
 });
 
 test("switch builds every arm before allocating the shared output", () => {
@@ -344,28 +334,19 @@ test("switch builds every arm before allocating the shared output", () => {
   ok(armResult < output);
   ok(defaultResult < output);
   deepStrictEqual(values.widthBounds(output), { unsignedBits: 32, signedBits: 32 });
-  deepStrictEqual(builder.build(), {
-    actions: [
-      {
-        kind: "switch",
-        selector,
-        output,
-        cases: [{
-          match: 3,
-          body: {
-            actions: [{
-              kind: "call",
-              target,
-              arguments: args.map((value) => ({ value, type: "i32" as const })),
-              outputs: [armResult]
-            }],
-            result: armResult
-          }
-        }],
-        defaultBody: { actions: [], result: defaultResult }
-      }
-    ]
-  });
+  const [control] = builder.build().nodes;
+
+  ok(control?.kind === "switch");
+  strictEqual(control.selector, selector);
+  deepStrictEqual(control.outputs, [output]);
+  strictEqual(control.cases[0]?.match, 3);
+  strictEqual(control.cases[0]?.body.result, armResult);
+  const [call] = control.cases[0]?.body.nodes ?? [];
+
+  ok(call?.kind === "call");
+  strictEqual(call.target, target);
+  deepStrictEqual(call.outputs, [armResult]);
+  deepStrictEqual(control.defaultBody, { nodes: [], result: defaultResult });
 });
 
 test("switch derives its output bounds from reachable arms", () => {
@@ -398,7 +379,7 @@ test("loop bodies take the back edge through loopContinue and validate", () => {
 test("buildIrBlock forwards a returned value as the root body result", () => {
   let eip!: ValueId;
   const block = buildIrBlock(
-    (b) => (eip = b.operation(readOperation(b.values)))
+    (b) => (eip = b.operation(resourceRead, readArgs(b.values)))
   );
 
   strictEqual(block.body.result, eip);
@@ -406,7 +387,7 @@ test("buildIrBlock forwards a returned value as the root body result", () => {
 
 test("buildIrBlock leaves the root result unset for void callbacks", () => {
   const block = buildIrBlock((b) => {
-    b.operation(writeOperation(b.values, b.values.const(0)));
+    b.operation(resourceWrite, writeArgs(b.values, b.values.const(0)));
   });
 
   strictEqual(block.body.result, undefined);

@@ -1,6 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { Action } from "#ir/actions.js";
-import type { Body } from "#ir/block.js";
+import type { Body, BodyNode } from "#ir/block.js";
 import type {
   BodyPathStep,
   BodySite,
@@ -31,14 +30,14 @@ export class SiteIndex {
     return this.#sites;
   }
 
-  siteOf(body: Body, actionIndex: number): SiteId {
+  siteOf(body: Body, nodeIndex: number): SiteId {
     const bodyInfo = this.#bodies.get(body);
 
     assert(bodyInfo !== undefined, "body is not part of this analysis");
-    assert(Number.isInteger(actionIndex), `body action index must be an integer, got ${actionIndex}`);
-    const site = bodyInfo.sites[actionIndex];
+    assert(Number.isInteger(nodeIndex), `body node index must be an integer, got ${nodeIndex}`);
+    const site = bodyInfo.sites[nodeIndex];
 
-    assert(site !== undefined, `body has no site at action index ${actionIndex}`);
+    assert(site !== undefined, `body has no site at node index ${nodeIndex}`);
     return site;
   }
 
@@ -85,7 +84,7 @@ export class SiteIndex {
   }
 
   bodyEndSite(body: Body): SiteId {
-    return this.siteOf(body, body.actions.length);
+    return this.siteOf(body, body.nodes.length);
   }
 
   isLoopBody(body: Body): boolean {
@@ -110,13 +109,13 @@ export class SiteIndex {
     });
   }
 
-  addAction(body: Body, actionIndex: number, action: Action): SiteId {
+  addNode(body: Body, nodeIndex: number, node: BodyNode): SiteId {
     const bodyInfo = this.#bodies.get(body);
 
     assert(bodyInfo !== undefined, "body is not part of this analysis");
     const id = siteId(this.#sites.length);
 
-    this.#sites.push({ id, kind: "action", body, actionIndex, action });
+    this.#sites.push({ id, kind: "node", body, nodeIndex, node });
     bodyInfo.sites.push(id);
     return id;
   }
@@ -131,7 +130,7 @@ export class SiteIndex {
       id,
       kind: "bodyEnd",
       body,
-      actionIndex: body.actions.length
+      nodeIndex: body.nodes.length
     });
     bodyInfo.sites.push(id);
     return id;
@@ -176,7 +175,7 @@ export class SiteIndex {
 
   #projectedIndex(site: BodySite, body: Body): number {
     if (site.body === body) {
-      return site.actionIndex;
+      return site.nodeIndex;
     }
     const bodyPath = this.#bodies.get(body)?.ancestry;
     const sitePath = this.#bodies.get(site.body)?.ancestry;
@@ -197,10 +196,10 @@ export class SiteIndex {
     const ownerSite = this.site(owner);
 
     assert(
-      ownerSite.kind === "action" && ownerSite.body === body,
+      ownerSite.kind === "node" && ownerSite.body === body,
       "projected child body has the wrong owner"
     );
-    return ownerSite.actionIndex;
+    return ownerSite.nodeIndex;
   }
 }
 

@@ -9,8 +9,8 @@ import { flagStateFields } from "#core/flags/layout.js";
 import type { InstructionStateChannel } from "../state/channels.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
-import type { Action, IfAction, LoopAction } from "#ir/actions.js";
-import type { Body, IrBlock } from "#ir/block.js";
+import type { IfControl, LoopControl } from "#compiler/ir/controls/index.js";
+import type { BodyNode, Body, IrBlock } from "#ir/block.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { movSemantic } from "#core/semantics/mov.js";
@@ -32,11 +32,11 @@ import {
   isStateWrite,
   readsStateChannel,
   writesStateChannel,
-  type StateReadAction,
-  type StateWriteAction
-} from "./state-actions.js";
+  type StateReadOperation,
+  type StateWriteOperation
+} from "./state-operations.js";
 
-// The fused rep shape: one loop action carrying the string registers, a
+// The fused rep shape: one loop control carrying the string registers, a
 // per-iteration path with no state traffic for carried channels, fault arms
 // that restore iteration-start state, one exit-tail commit, and the unit
 // count settled from the ecx delta after the loop.
@@ -59,30 +59,31 @@ function repMovsBlock(): IrBlock {
   return builder.finish();
 }
 
-function findLoop(block: IrBlock): LoopAction {
-  const loops = collectLoops(block.body.actions);
+function findLoop(block: IrBlock): LoopControl {
+  const loops = collectLoops(block.body.nodes);
 
-  strictEqual(loops.length, 1, "block has exactly one loop action");
+  strictEqual(loops.length, 1, "block has exactly one loop control");
   return loops[0]!;
 }
 
-function collectLoops(actions: readonly Action[]): LoopAction[] {
-  return actions.flatMap((action): LoopAction[] => {
-    switch (action.kind) {
+function collectLoops(nodes: readonly BodyNode[]): LoopControl[] {
+  return nodes.flatMap((node): LoopControl[] => {
+    if (node.category === "operation") {
+      return [];
+    }
+    switch (node.kind) {
       case "loop":
-        return [action];
+        return [node];
       case "if":
         return [
-          ...collectLoops(action.thenBody.actions),
-          ...(action.elseBody === undefined ? [] : collectLoops(action.elseBody.actions))
+          ...collectLoops(node.thenBody.nodes),
+          ...(node.elseBody === undefined ? [] : collectLoops(node.elseBody.nodes))
         ];
       case "switch":
         return [
-          ...action.cases.flatMap((entry) => collectLoops(entry.body.actions)),
-          ...collectLoops(action.defaultBody.actions)
+          ...node.cases.flatMap((entry) => collectLoops(entry.body.nodes)),
+          ...collectLoops(node.defaultBody.nodes)
         ];
-      case "op":
-      case "call":
       case "returnCall":
       case "loopContinue":
       case "finish":
@@ -92,10 +93,10 @@ function collectLoops(actions: readonly Action[]): LoopAction[] {
   });
 }
 
-// The if whose then-body is the single loopContinue action: the back edge.
+// The if whose then-body is the single loopContinue control: the back edge.
 function backEdgeIndex(body: Body): number {
-  const index = body.actions.findIndex(
-    (action) => action.kind === "if" && action.thenBody.actions[0]?.kind === "loopContinue"
+  const index = body.nodes.findIndex(
+    (node) => node.kind === "if" && node.thenBody.nodes[0]?.kind === "loopContinue"
   );
 
   ok(index >= 0, "loop body has a back edge");
@@ -103,33 +104,33 @@ function backEdgeIndex(body: Body): number {
 }
 
 function backEdgeUpdates(body: Body): readonly ValueId[] {
-  const backEdge = body.actions[backEdgeIndex(body)] as IfAction;
-  const loopContinueAction = backEdge.thenBody.actions[0]!;
+  const backEdge = body.nodes[backEdgeIndex(body)] as IfControl;
+  const loopContinue = backEdge.thenBody.nodes[0]!;
 
-  ok(loopContinueAction.kind === "loopContinue", "back edge arm is a loopContinue");
-  return loopContinueAction.updates;
+  ok(loopContinue.kind === "loopContinue", "back edge arm is a loopContinue");
+  return loopContinue.updates;
 }
 
-function stateWrites(actions: readonly Action[]): StateWriteAction[] {
-  return actions.filter(isStateWrite);
+function stateWrites(nodes: readonly BodyNode[]): StateWriteOperation[] {
+  return nodes.filter(isStateWrite);
 }
 
-function faultArmWrites(body: Body): StateWriteAction[] {
-  const guardArm = body.actions.find(
-    (action): action is IfAction => action.kind === "if" && action.thenBody.actions[0]?.kind !== "loopContinue"
+function faultArmWrites(body: Body): StateWriteOperation[] {
+  const guardArm = body.nodes.find(
+    (node): node is IfControl => node.kind === "if" && node.thenBody.nodes[0]?.kind !== "loopContinue"
   );
 
   ok(guardArm !== undefined, "loop body has a guard fault arm");
-  return stateWrites(guardArm.thenBody.actions);
+  return stateWrites(guardArm.thenBody.nodes);
 }
 
 function writeFor(
   block: IrBlock,
-  writes: readonly StateWriteAction[],
+  writes: readonly StateWriteOperation[],
   channel: InstructionStateChannel
-): StateWriteAction {
-  const write = writes.find((action) =>
-    writesStateChannel(block.values, action, channel)
+): StateWriteOperation {
+  const write = writes.find((node) =>
+    writesStateChannel(block.values, node, channel)
   );
 
   ok(write !== undefined, `state write for ${channel.kind} exists`);
@@ -138,21 +139,21 @@ function writeFor(
 
 function readFor(
   block: IrBlock,
-  actions: readonly Action[],
+  nodes: readonly BodyNode[],
   channel: InstructionStateChannel
-): StateReadAction | undefined {
-  return actions.find((action): action is StateReadAction =>
-    readsStateChannel(block.values, action, channel)
+): StateReadOperation | undefined {
+  return nodes.find((node): node is StateReadOperation =>
+    readsStateChannel(block.values, node, channel)
   );
 }
 
 function carriedCellFor(
   block: IrBlock,
-  loop: LoopAction,
+  loop: LoopControl,
   channel: InstructionStateChannel
-): LoopAction["carried"][number] | undefined {
+): LoopControl["carried"][number] | undefined {
   const backEdge = backEdgeIndex(loop.body);
-  const commits = stateWrites(loop.body.actions.slice(backEdge + 1));
+  const commits = stateWrites(loop.body.nodes.slice(backEdge + 1));
   const index = commits.findIndex((write) =>
     writesStateChannel(block.values, write, channel)
   );
@@ -162,13 +163,13 @@ function carriedCellFor(
 
 function assertCarriedChannels(
   block: IrBlock,
-  loop: LoopAction,
+  loop: LoopControl,
   channels: readonly InstructionStateChannel[]
 ): void {
   strictEqual(loop.carried.length, channels.length, "carried channel count");
   const backEdge = backEdgeIndex(loop.body);
   const updates = backEdgeUpdates(loop.body);
-  const commits = stateWrites(loop.body.actions.slice(backEdge + 1));
+  const commits = stateWrites(loop.body.nodes.slice(backEdge + 1));
 
   for (let index = 0; index < channels.length; index += 1) {
     const cell = loop.carried[index];
@@ -189,43 +190,43 @@ function assertCarriedChannels(
   }
 }
 
-function stateTraffic(actions: readonly Action[]): Action[] {
-  return actions.filter((action) =>
-    isStateRead(action) || isStateWrite(action)
+function stateTraffic(nodes: readonly BodyNode[]): BodyNode[] {
+  return nodes.filter((node) =>
+    isStateRead(node) || isStateWrite(node)
   );
 }
 
-function preLoopActions(block: IrBlock, loop: LoopAction): readonly Action[] {
-  const actions = actionsBeforeLoop(block.body.actions, loop);
+function preLoopNodes(block: IrBlock, loop: LoopControl): readonly BodyNode[] {
+  const nodes = nodesBeforeLoop(block.body.nodes, loop);
 
-  ok(actions !== undefined, "loop belongs to the block");
-  return actions;
+  ok(nodes !== undefined, "loop belongs to the block");
+  return nodes;
 }
 
-function actionsBeforeLoop(
-  actions: readonly Action[],
-  target: LoopAction
-): readonly Action[] | undefined {
-  for (let index = 0; index < actions.length; index += 1) {
-    const action = actions[index]!;
+function nodesBeforeLoop(
+  nodes: readonly BodyNode[],
+  target: LoopControl
+): readonly BodyNode[] | undefined {
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index]!;
 
-    if (action === target) {
-      return actions.slice(0, index);
+    if (node === target) {
+      return nodes.slice(0, index);
     }
 
-    const nestedBodies: readonly Body[] = action.kind === "if"
-      ? [action.thenBody, ...(action.elseBody === undefined ? [] : [action.elseBody])]
-      : action.kind === "switch"
-        ? [...action.cases.map((entry) => entry.body), action.defaultBody]
-        : action.kind === "loop"
-          ? [action.body]
+    const nestedBodies: readonly Body[] = node.kind === "if"
+      ? [node.thenBody, ...(node.elseBody === undefined ? [] : [node.elseBody])]
+      : node.kind === "switch"
+        ? [...node.cases.map((entry) => entry.body), node.defaultBody]
+        : node.kind === "loop"
+          ? [node.body]
           : [];
 
     for (const body of nestedBodies) {
-      const nested = actionsBeforeLoop(body.actions, target);
+      const nested = nodesBeforeLoop(body.nodes, target);
 
       if (nested !== undefined) {
-        return [...actions.slice(0, index), ...nested];
+        return [...nodes.slice(0, index), ...nested];
       }
     }
   }
@@ -247,9 +248,12 @@ test("rep movs carries esi, edi, and ecx as loop cells in body write order", () 
   for (let index = 0; index < loop.carried.length; index += 1) {
     const cell = loop.carried[index]!;
     const channel = channels[index]!;
-    const read = readFor(block, preLoopActions(block, loop), channel);
+    const read = readFor(block, preLoopNodes(block, loop), channel);
 
-    ok(read !== undefined && read.output === cell.seed, `${channel.kind} seed comes from a pre-loop read`);
+    ok(
+      read !== undefined && read.outputs[0] === cell.seed,
+      `${channel.kind} seed comes from a pre-loop read`
+    );
   }
 });
 
@@ -257,7 +261,7 @@ test("the iteration path has no state ops; carried commits sit in the exit tail"
   const block = repMovsBlock();
   const loop = findLoop(block);
   const backEdge = backEdgeIndex(loop.body);
-  const iterationPath = loop.body.actions.slice(0, backEdge + 1);
+  const iterationPath = loop.body.nodes.slice(0, backEdge + 1);
 
   // Carried state lives in cells: nothing on the per-iteration path reads
   // or writes state directly (fault arms are nested, not on the path).
@@ -266,7 +270,7 @@ test("the iteration path has no state ops; carried commits sit in the exit tail"
   // The exit tail commits each carried channel once, and the back edge
   // carries exactly the values the exit tail commits.
   const updates = backEdgeUpdates(loop.body);
-  const tailWrites = stateWrites(loop.body.actions.slice(backEdge + 1));
+  const tailWrites = stateWrites(loop.body.nodes.slice(backEdge + 1));
 
   const channels = [gprChannel("esi"), gprChannel("edi"), gprChannel("ecx")];
 
@@ -291,8 +295,8 @@ test("a mid-body fault restores iteration-start carried values and the rep eip",
     );
   }
 
-  const eipWrite = writes.find((action) =>
-    writesStateChannel(block.values, action, coreStateFields.eip)
+  const eipWrite = writes.find((node) =>
+    writesStateChannel(block.values, node, coreStateFields.eip)
   );
 
   ok(eipWrite !== undefined, "fault arm flushes eip");
@@ -300,10 +304,10 @@ test("a mid-body fault restores iteration-start carried values and the rep eip",
 });
 
 // The if whose then-body holds the loop: the loop's enter join.
-function loopEnterIf(block: IrBlock): IfAction {
-  const entry = block.body.actions.find(
-    (action): action is IfAction =>
-      action.kind === "if" && action.thenBody.actions.some((nested) => nested.kind === "loop")
+function loopEnterIf(block: IrBlock): IfControl {
+  const entry = block.body.nodes.find(
+    (node): node is IfControl =>
+      node.kind === "if" && node.thenBody.nodes.some((nested) => nested.kind === "loop")
   );
 
   ok(entry !== undefined, "loop entry if exists");
@@ -325,7 +329,7 @@ test("a dirty-at-entry carried channel commits its seed on the zero-trip arm", (
 
   ok(enterIf.elseBody !== undefined, "the loop entry if has a zero-trip arm");
 
-  const elseWrites = stateWrites(enterIf.elseBody.actions);
+  const elseWrites = stateWrites(enterIf.elseBody.nodes);
   const ecxCell = carriedCellFor(block, loop, gprChannel("ecx"));
 
   ok(ecxCell !== undefined, "loop carries ecx");
@@ -356,33 +360,41 @@ test("the root count write folds the ecx delta over the block's read", () => {
   const v = block.values;
   const loop = findLoop(block);
   const enterIf = loopEnterIf(block);
-  const loopIndex = enterIf.thenBody.actions.findIndex((action) => action.kind === "loop");
+  const loopIndex = enterIf.thenBody.nodes.findIndex((node) => node.kind === "loop");
 
   ok(loopIndex >= 0, "loop entry arm holds a loop");
 
-  const enteredAfterLoop = enterIf.thenBody.actions.slice(loopIndex + 1);
-  const rootAfterEntry = block.body.actions.slice(block.body.actions.indexOf(enterIf) + 1);
+  const enteredAfterLoop = enterIf.thenBody.nodes.slice(loopIndex + 1);
+  const rootAfterEntry = block.body.nodes.slice(block.body.nodes.indexOf(enterIf) + 1);
   const exitEcxRead = readFor(block, rootAfterEntry, gprChannel("ecx"));
   const countRead = readFor(block, rootAfterEntry, instructionCountField);
-  const finish = block.body.actions.at(-1);
+  const finish = block.body.nodes.at(-1);
 
   deepStrictEqual(stateTraffic(enteredAfterLoop), []);
   ok(exitEcxRead !== undefined, "the count settle re-reads ecx after the loop");
   ok(countRead !== undefined, "the count folds from a post-entry read");
+  const exitEcx = exitEcxRead.outputs[0];
+  const count = countRead.outputs[0];
+
+  ok(exitEcx !== undefined && count !== undefined, "post-loop reads have outputs");
   ok(finish?.kind === "finish" && finish.finish.kind === "dispatch", "fallthrough dispatches");
   strictEqual(v.constValue(finish.finish.targetEip), repNextEip);
 
   const ecxSeed = carriedCellFor(block, loop, gprChannel("ecx"))!.seed;
-  const delta = v.binary("sub", v.binary("sub", ecxSeed, exitEcxRead.output), enterIf.condition);
+  const delta = v.binary(
+    "sub",
+    v.binary("sub", ecxSeed, exitEcx),
+    enterIf.condition
+  );
 
   deepStrictEqual(
-    stateWrites(rootAfterEntry).filter((action) =>
-      writesStateChannel(v, action, instructionCountField)
+    stateWrites(rootAfterEntry).filter((node) =>
+      writesStateChannel(v, node, instructionCountField)
     ),
     [stateWrite(
       v,
       instructionCountField,
-      v.binary("add", v.binary("add", countRead.output, delta), v.const(1))
+      v.binary("add", v.binary("add", count, delta), v.const(1))
     )]
   );
 });
@@ -394,15 +406,15 @@ test("instructions after the loop rebase the count from state", () => {
   builder.add(movSemantic(32), [regBinding("ebx"), immBinding(7)], loc(repNextEip, repNextEip + 5));
 
   const block = builder.finish();
-  const loopIndex = block.body.actions.findIndex(
-    (action) => action.kind === "if" && action.thenBody.actions.some((nested) => nested.kind === "loop")
+  const loopIndex = block.body.nodes.findIndex(
+    (node) => node.kind === "if" && node.thenBody.nodes.some((nested) => nested.kind === "loop")
   );
 
   ok(loopIndex >= 0, "loop entry if exists");
 
-  const countReads = block.body.actions
+  const countReads = block.body.nodes
     .slice(loopIndex + 1)
-    .filter((action) => readsStateChannel(block.values, action, instructionCountField));
+    .filter((node) => readsStateChannel(block.values, node, instructionCountField));
 
   strictEqual(countReads.length, 1, "the post-loop count folds from a fresh read");
 });
@@ -422,7 +434,7 @@ test("rep lods carries its accumulator instead of writing it through each iterat
   );
 
   const backEdge = backEdgeIndex(loop.body);
-  const iterationWrites = stateWrites(loop.body.actions.slice(0, backEdge + 1));
+  const iterationWrites = stateWrites(loop.body.nodes.slice(0, backEdge + 1));
 
   deepStrictEqual(iterationWrites, []);
   strictEqual(
@@ -624,14 +636,14 @@ test("loop analysis does not force its control shape onto final construction", (
 
   const block = builder.finish();
   const loop = findLoop(block);
-  const constantStructuredArm = loop.body.actions.find(
-    (action): action is IfAction => (
-      action.kind === "if" && block.values.constValue(action.condition) === 1
+  const constantStructuredArm = loop.body.nodes.find(
+    (node): node is IfControl => (
+      node.kind === "if" && block.values.constValue(node.condition) === 1
     )
   );
-  const finalNestedArm = loop.body.actions.find(
-    (action): action is IfAction => (
-      action.kind === "if" && action.thenBody.actions[0]?.kind !== "loopContinue"
+  const finalNestedArm = loop.body.nodes.find(
+    (node): node is IfControl => (
+      node.kind === "if" && node.thenBody.nodes[0]?.kind !== "loopContinue"
     )
   );
 
@@ -665,7 +677,7 @@ test("loop analysis conservatively includes writes from an unknown scratch arm",
 
   assertCarriedChannels(block, loop, [gprChannel("ebx")]);
   strictEqual(
-    loop.body.actions.filter((action) => action.kind === "if").length,
+    loop.body.nodes.filter((node) => node.kind === "if").length,
     1,
     "only the loop back edge remains in final construction"
   );
@@ -766,10 +778,10 @@ test("a loop body advancing only semantic vars carries nothing", () => {
   deepStrictEqual(loop.carried, []);
 
   // The post-loop read is its own cell.read op, ordered after the loop.
-  const actions = block.body.actions;
-  const loopIndex = actions.findIndex((action) => action === loop);
-  const readIndex = actions.findIndex(
-    (action) => action.kind === "op" && action.op.kind === "cell.read"
+  const nodes = block.body.nodes;
+  const loopIndex = nodes.findIndex((node) => node === loop);
+  const readIndex = nodes.findIndex(
+    (node) => node.kind === "cell.read"
   );
 
   ok(loopIndex >= 0, "the block holds the var-driven loop");

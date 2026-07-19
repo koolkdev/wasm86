@@ -87,20 +87,25 @@ test("state reads and writes normalize to resource operations", () => {
 
   access.write(count, values.const(7));
 
-  const actions = body.build().actions;
-  const read = actions[0];
-  const write = actions[1];
+  const nodes = body.build().nodes;
+  const read = nodes[0];
+  const write = nodes[1];
 
-  strictEqual(read?.kind, "op");
-  strictEqual(read.op.kind, "resource.read");
-  strictEqual(read.output, flagValue);
-  strictEqual(read.op.signed, undefined);
-  strictEqual(read.op.result.type, "i32");
-  deepStrictEqual(read.op.result.bounds, { unsignedBits: 1, signedBits: 2 });
-  strictEqual(read.op.inputs[0]?.value, flag.address.base);
-  strictEqual(write?.kind, "op");
-  strictEqual(write.op.kind, "resource.write");
-  strictEqual(write.op.effect.resource, cpuState.resource);
+  if (read?.kind !== "resource.read") {
+    throw new Error("missing state resource read");
+  }
+  if (write?.kind !== "resource.write") {
+    throw new Error("missing state resource write");
+  }
+
+  strictEqual(read.kind, "resource.read");
+  deepStrictEqual(read.outputs, [flagValue]);
+  strictEqual(read.signed, undefined);
+  strictEqual(read.results[0]?.type, "i32");
+  deepStrictEqual(read.results[0]?.bounds, { unsignedBits: 1, signedBits: 2 });
+  strictEqual(read.inputs[0]?.value, flag.address.base);
+  strictEqual(write.kind, "resource.write");
+  strictEqual(write.effect.resource, cpuState.resource);
 });
 
 test("execution-state access rejects an operand from another resource", () => {

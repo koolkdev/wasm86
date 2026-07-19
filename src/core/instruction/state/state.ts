@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { Action } from "#ir/actions.js";
+import type { ResourceWriteArgs } from "#compiler/ir/operations/resource.js";
 import type { RegionBuilder } from "#ir/region-builder.js";
 import type { ResourceEffect } from "#compiler/ir/resource.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
@@ -98,7 +98,7 @@ export class InstructionState {
   flushesForPath(
     access: BoundStateAccess,
     path: StatePathKind
-  ): readonly Action[] {
+  ): readonly ResourceWriteArgs[] {
     return [
       ...this.gpr.flushesForPath(access, path),
       ...this.#fields.flushesForPath(access, path)
@@ -164,14 +164,14 @@ export class InstructionState {
     }
   }
 
-  writeAction(
+  writeback(
     access: BoundStateAccess,
     channel: InstructionStateChannel,
     value: ValueId
-  ): Action {
+  ): ResourceWriteArgs {
     return channel.kind === "gpr"
-      ? this.gpr.writeAction(access, channel, value)
-      : this.#fields.writeAction(access, channel, value);
+      ? this.gpr.writeback(access, channel, value)
+      : this.#fields.writeback(access, channel, value);
   }
 
   effect(channel: InstructionStateChannel): ResourceEffect {

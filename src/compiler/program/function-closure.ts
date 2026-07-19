@@ -42,10 +42,12 @@ export function closeFunctions(options: CloseFunctionsOptions): FunctionClosure 
     }
   };
   const inspectCalls = (analysis: BodyAnalysis): void => {
-    for (const { action } of analysis.calls()) {
-      assertOwned(action.target);
-      if (analysis.callActionMustExecute(action)) {
-        enqueue(action.target);
+    for (const { call } of analysis.calls()) {
+      const target = call.target;
+
+      assertOwned(target);
+      if (analysis.callMustExecute(call)) {
+        enqueue(target);
       }
     }
   };

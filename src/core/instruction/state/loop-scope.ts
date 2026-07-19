@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import { isLazyFlagStateField } from "#core/flags/layout.js";
-import type { Action } from "#ir/actions.js";
+import type { ResourceWriteArgs } from "#compiler/ir/operations/resource.js";
 import type { InstructionStateChannel } from "./channels.js";
 import type { ResourceEffect } from "#compiler/ir/resource.js";
 import type { ValueId, WidthBounds } from "#compiler/ir/values/types.js";
@@ -72,12 +72,12 @@ export class StateLoopScope {
     );
   }
 
-  commitExitValues(
+  exitWritebacks(
     access: BoundStateAccess,
     exitValues: readonly ValueId[]
-  ): readonly Action[] {
+  ): readonly ResourceWriteArgs[] {
     return this.#openCarried().map((value, index) =>
-      this.#state.writeAction(access, value.channel, exitValues[index]!)
+      this.#state.writeback(access, value.channel, exitValues[index]!)
     );
   }
 

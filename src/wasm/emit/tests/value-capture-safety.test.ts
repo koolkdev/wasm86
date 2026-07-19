@@ -23,6 +23,10 @@ import {
   irBlockBody,
   irBlockCompleted
 } from "./harness.js";
+import {
+  ifControl,
+  switchControl
+} from "#compiler/ir/controls/index.js";
 
 test("a trapping value used only by a future then body stays in that body", async () => {
   const values = new ValueTable();
@@ -32,11 +36,10 @@ test("a trapping value used only by a future then body stays in that body", asyn
   const block: IrBlock = {
     values,
     body: {
-      actions: [{
-        kind: "if",
+      nodes: [ifControl.create({
         condition,
-        thenBody: { actions: [operandWrite(state.gpr("eax"), quotient)] }
-      }]
+        thenBody: { nodes: [operandWrite(state.gpr("eax"), quotient)] }
+      })]
     }
   };
 
@@ -59,11 +62,10 @@ test("a transitively trapping wrapper used only by a future body stays in that b
   const block: IrBlock = {
     values,
     body: {
-      actions: [{
-        kind: "if",
+      nodes: [ifControl.create({
         condition,
-        thenBody: { actions: [operandWrite(state.gpr("eax"), wrapped)] }
-      }]
+        thenBody: { nodes: [operandWrite(state.gpr("eax"), wrapped)] }
+      })]
     }
   };
 
@@ -84,24 +86,23 @@ test("trapping switch arm results evaluate only when selected", async () => {
     const selector = values.external(0);
     const quotient = values.binary("div_u", values.external(1), values.external(2));
     const safeResult = values.const(7);
-    const output = values.addActionOutput();
+    const output = values.addNodeOutput();
     const block: IrBlock = {
       values,
       body: {
-        actions: [
-          {
-            kind: "switch",
+        nodes: [
+          switchControl.create({
             selector,
             output,
             cases: [{
               match: 0,
-              body: { actions: [], result: trappingArm === "case" ? quotient : safeResult }
+              body: { nodes: [], result: trappingArm === "case" ? quotient : safeResult }
             }],
             defaultBody: {
-              actions: [],
+              nodes: [],
               result: trappingArm === "default" ? quotient : safeResult
             }
-          },
+          }),
           operandWrite(state.gpr("eax"), output)
         ]
       }
@@ -125,7 +126,7 @@ test("a trapping value demanded directly by the current body still evaluates", a
   const quotient = values.binary("div_u", values.external(0), values.external(1));
   const block: IrBlock = {
     values,
-    body: { actions: [operandWrite(state.gpr("eax"), quotient)] }
+    body: { nodes: [operandWrite(state.gpr("eax"), quotient)] }
   };
   const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
   const { stateView, run } = await instantiateIrBlock(block, 2);
@@ -144,11 +145,10 @@ test("a trapping condition makes its selected wrapper safe to capture", async ()
   const block: IrBlock = {
     values,
     body: {
-      actions: [{
-        kind: "if",
+      nodes: [ifControl.create({
         condition: quotient,
-        thenBody: { actions: [operandWrite(state.gpr("eax"), wrapped)] }
-      }]
+        thenBody: { nodes: [operandWrite(state.gpr("eax"), wrapped)] }
+      })]
     }
   };
   const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
@@ -172,12 +172,11 @@ test("both if arms share one wrapper captured after its trapping condition", asy
   const block: IrBlock = {
     values,
     body: {
-      actions: [{
-        kind: "if",
+      nodes: [ifControl.create({
         condition: quotient,
-        thenBody: { actions: [operandWrite(state.gpr("eax"), wrapped)] },
-        elseBody: { actions: [operandWrite(state.gpr("ebx"), wrapped)] }
-      }]
+        thenBody: { nodes: [operandWrite(state.gpr("eax"), wrapped)] },
+        elseBody: { nodes: [operandWrite(state.gpr("ebx"), wrapped)] }
+      })]
     }
   };
   const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
@@ -204,12 +203,11 @@ test("captures after an unreachable structured operand still form valid Wasm", a
   const block: IrBlock = {
     values,
     body: {
-      actions: [{
-        kind: "if",
+      nodes: [ifControl.create({
         condition: unreachable,
-        thenBody: { actions: [operandWrite(state.gpr("eax"), wrapped)] },
-        elseBody: { actions: [operandWrite(state.gpr("ebx"), wrapped)] }
-      }]
+        thenBody: { nodes: [operandWrite(state.gpr("eax"), wrapped)] },
+        elseBody: { nodes: [operandWrite(state.gpr("ebx"), wrapped)] }
+      })]
     }
   };
 
@@ -228,21 +226,20 @@ test("switch arms share a wrapper captured after its trapping selector", async (
   );
   const wrapped = values.binary("add", selector, values.const(1));
   const fallback = values.const(99);
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        {
-          kind: "switch",
+      nodes: [
+        switchControl.create({
           selector,
           output,
           cases: [
-            { match: 0, body: { actions: [], result: wrapped } },
-            { match: 1, body: { actions: [], result: wrapped } }
+            { match: 0, body: { nodes: [], result: wrapped } },
+            { match: 1, body: { nodes: [], result: wrapped } }
           ],
-          defaultBody: { actions: [], result: fallback }
-        },
+          defaultBody: { nodes: [], result: fallback }
+        }),
         operandWrite(state.gpr("eax"), output)
       ]
     }
@@ -273,7 +270,7 @@ test("an exported trapping value evaluates at the fragment boundary", async () =
   const quotient = values.binary("div_u", values.external(0), values.external(1));
   const block: IrBlock = {
     values,
-    body: { actions: [operandWrite(state.gpr("eax"), values.const(5))] }
+    body: { nodes: [operandWrite(state.gpr("eax"), values.const(5))] }
   };
   const body = new WasmFunctionBodyEncoder(2);
   const scratch = new WasmLocalScratchAllocator(body);

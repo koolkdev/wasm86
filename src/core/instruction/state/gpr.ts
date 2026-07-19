@@ -1,9 +1,8 @@
 import { assert } from "#common/assert.js";
-import { resourceWrite } from "#compiler/ir/operations/resource.js";
+import type { ResourceWriteArgs } from "#compiler/ir/operations/resource.js";
 import type { ResourceEffect } from "#compiler/ir/resource.js";
 import type { OperandWidth, RegName } from "#core/types.js";
 import { registerAlias } from "#core/registers.js";
-import type { Action } from "#ir/actions.js";
 import { gprChannel, type GprChannel } from "#core/state/channels.js";
 import type {
   BoundStateAccess,
@@ -237,7 +236,7 @@ export class GprState {
   flushesForPath(
     access: BoundStateAccess,
     path: StatePathKind
-  ): readonly Action[] {
+  ): readonly ResourceWriteArgs[] {
     if (path === "fault") {
       assert(
         !this.#unrestorableStore,
@@ -246,21 +245,18 @@ export class GprState {
     }
 
     return this.#buffer.entriesForPath(path).map(([channel, value]) =>
-      this.writeAction(access, channel, value)
+      this.writeback(access, channel, value)
     );
   }
 
-  writeAction(
+  writeback(
     access: BoundStateAccess,
     channel: GprChannel,
     value: ValueId
-  ): Action {
+  ): ResourceWriteArgs {
     return {
-      kind: "op",
-      op: resourceWrite.create({
-        destination: access.gprChannel(channel),
-        value
-      })
+      destination: access.gprChannel(channel),
+      value
     };
   }
 
@@ -350,7 +346,11 @@ export class GprState {
     return typeof reg === "string" ? gprChannel(reg) : reg;
   }
 
-  #assertAccessWidth(action: "get from" | "set to", channel: GprChannel, accessWidth: OperandWidth | undefined): void {
+  #assertAccessWidth(
+    verb: "get from" | "set to",
+    channel: GprChannel,
+    accessWidth: OperandWidth | undefined
+  ): void {
     if (accessWidth === undefined) {
       return;
     }
@@ -358,7 +358,7 @@ export class GprState {
 
     assert(
       channelWidth === accessWidth,
-      `${accessWidth}-bit ${action} a ${channelWidth}-bit register channel`
+      `${accessWidth}-bit ${verb} a ${channelWidth}-bit register channel`
     );
   }
 

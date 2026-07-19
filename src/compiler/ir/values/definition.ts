@@ -39,7 +39,7 @@ export type ValueFoldContext = ValueBoundsContext & ValueTrapContext & Readonly<
 // Operand evaluation is owned by the table from the stored `inputs` list.
 export type ValueEmitTarget = Readonly<{
   body: WasmFunctionBodyEncoder;
-  emitActionOutput(id: ValueId): void;
+  emitNodeOutput(id: ValueId): void;
   emitExternal(external: ExternalValueId): void;
   emitParameter(index: number): void;
   emitLoopInput(id: ValueId): void;

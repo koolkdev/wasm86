@@ -183,9 +183,15 @@ function collectLoopInputs(analysis: BodyAnalysis): Set<ValueId> {
   const result = new Set<ValueId>();
 
   for (const site of analysis.sites()) {
-    if (site.kind === "action" && site.action.kind === "loop") {
-      for (const cell of site.action.carried) {
-        result.add(cell.loopInput);
+    if (site.kind !== "node" || site.node.category === "operation") {
+      continue;
+    }
+
+    for (const nested of site.node.nestedBodies) {
+      if (nested.scope.kind === "loop") {
+        for (const input of nested.scope.inputs) {
+          result.add(input);
+        }
       }
     }
   }

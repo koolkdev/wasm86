@@ -30,15 +30,21 @@ export function planPlacement(
   });
 
   for (const site of analysis.sites()) {
-    if (site.kind !== "action" || site.action.kind !== "loop") {
+    if (site.kind !== "node" || site.node.category === "operation") {
       continue;
     }
-    for (const cell of site.action.carried) {
-      const local = locals.valueLocals[cell.loopInput];
 
-      assert(values[cell.loopInput] === undefined, `loop input ${cell.loopInput} is placed twice`);
-      assert(local !== undefined, `loop input ${cell.loopInput} has no local`);
-      values[cell.loopInput] = { kind: "loopInput", local };
+    for (const nested of site.node.nestedBodies) {
+      if (nested.scope.kind !== "loop") {
+        continue;
+      }
+      for (const input of nested.scope.inputs) {
+        const local = locals.valueLocals[input];
+
+        assert(values[input] === undefined, `loop input ${input} is placed twice`);
+        assert(local !== undefined, `loop input ${input} has no local`);
+        values[input] = { kind: "loopInput", local };
+      }
     }
   }
 

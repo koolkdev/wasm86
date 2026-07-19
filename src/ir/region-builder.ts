@@ -1,12 +1,24 @@
 import { assert } from "#common/assert.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
-import type { Action, BranchHint, Finish, LoopCarriedCell } from "./actions.js";
-import type { Body, IrBlock } from "./block.js";
+import { callOperation } from "#compiler/ir/operations/call.js";
+import {
+  finishControl,
+  ifControl,
+  loopContinueControl,
+  loopControl,
+  returnCallControl,
+  returnControl,
+  switchControl,
+  type BranchHint,
+  type Finish,
+  type LoopCarriedCell
+} from "#compiler/ir/controls/index.js";
+import type { Body, BodyNode, IrBlock } from "./block.js";
 import {
   type Operation,
-  type OperationWithResult,
-  type OperationWithoutResult
+  type OperationFactory,
+  type OperationResult
 } from "#compiler/ir/operations/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { joinWidthBounds } from "#compiler/ir/values/width-bounds.js";
@@ -19,9 +31,9 @@ import type { FunctionDefinition } from "#compiler/program/functions.js";
 
 export type BuildBody = (b: RegionBuilder) => void;
 export type BuildResult = (b: RegionBuilder) => ValueId;
-export type BodyActionSink = Readonly<{
-  push(action: Action): void;
-  actions(): readonly Action[];
+export type BodyNodeSink = Readonly<{
+  push(node: BodyNode): void;
+  nodes(): readonly BodyNode[];
 }>;
 
 export type SwitchArm = Readonly<{ match: number; build: BuildResult }>;
@@ -36,64 +48,80 @@ export type IfValueOptions = Readonly<{
 }>;
 
 export class RegionBuilder {
-  readonly #sink: BodyActionSink;
+  readonly #sink: BodyNodeSink;
   readonly #functionResults: readonly ValueType[] | undefined;
 
   constructor(
     readonly values: ValueTable,
-    sink: BodyActionSink = new BufferedBodyActionSink(),
+    sink: BodyNodeSink = new BufferedBodyNodeSink(),
     functionResults: readonly ValueType[] | undefined = undefined
   ) {
     this.#sink = sink;
     this.#functionResults = functionResults;
   }
 
-  child(sink: BodyActionSink = new BufferedBodyActionSink()): RegionBuilder {
+  child(sink: BodyNodeSink = new BufferedBodyNodeSink()): RegionBuilder {
     return new RegionBuilder(this.values, sink, this.#functionResults);
   }
 
   cell(seed: ValueId): CellRef {
     const cell = new CellRef(this.values.valueType(seed));
 
-    this.operation(cellWrite.create({ cell, value: seed, initialization: "seed" }));
+    this.operation(cellWrite, { cell, value: seed, initialization: "seed" });
     return cell;
   }
 
   read(cell: CellRef): ValueId {
-    return this.operation(cellRead.create({ cell }));
+    return this.operation(cellRead, { cell });
   }
 
   write(cell: CellRef, value: ValueId): void {
-    this.operation(cellWrite.create({ cell, value, initialization: "update" }));
+    this.operation(cellWrite, { cell, value, initialization: "update" });
   }
 
-  operation(op: OperationWithoutResult): void;
-  operation(op: OperationWithResult): ValueId;
-  operation(op: Operation): void | ValueId;
-  operation(op: Operation): void | ValueId {
-    if (op.result === undefined) {
-      this.#emit({ kind: "op", op });
+  operation<
+    CreateArgs,
+    Entry extends Operation & { readonly results: readonly [OperationResult] }
+  >(
+    factory: OperationFactory<CreateArgs, Entry>,
+    args: CreateArgs
+  ): ValueId;
+  operation<
+    CreateArgs,
+    Entry extends Operation & { readonly results: readonly [] }
+  >(
+    factory: OperationFactory<CreateArgs, Entry>,
+    args: CreateArgs
+  ): void;
+  operation<
+    CreateArgs,
+    Entry extends Operation
+  >(
+    factory: OperationFactory<CreateArgs, Entry>,
+    args: CreateArgs
+  ): void | ValueId {
+    const operation = factory.create(
+      args,
+      (result) => this.#allocateOperationOutput(result)
+    );
+    const outputs = operation.outputs;
+
+    this.#emit(operation);
+
+    if (outputs.length === 0) {
       return;
     }
 
-    const output = op.result.type === "i64"
-      ? this.values.addActionOutput64()
-      : this.values.addActionOutput(op.result.bounds);
-
-    this.#emit({ kind: "op", op, output });
-    return output;
+    assert(outputs.length === 1, `${factory.kind} has unsupported multiple results`);
+    return outputs[0];
   }
 
   call(target: FunctionDefinition, args: readonly ValueId[]): readonly ValueId[] {
-    const { parameters, results } = target.type;
+    const { parameters } = target.type;
 
     assert(
       args.length === parameters.length,
       `function ${target.ref.id} expects ${parameters.length} arguments, got ${args.length}`
-    );
-    assert(
-      results.length <= 1,
-      `function ${target.ref.id} has ${results.length} results; multiple call results are not supported yet`
     );
     const inputs = args.map((value, index) => {
       const expected = parameters[index];
@@ -107,14 +135,13 @@ export class RegionBuilder {
       );
       return { value, type: expected };
     });
-    const outputs = results.map((type) =>
-      type === "i64"
-        ? this.values.addActionOutput64()
-        : this.values.addActionOutput()
+    const operation = callOperation.create(
+      { target, arguments: inputs },
+      (result) => this.#allocateOperationOutput(result)
     );
 
-    this.#emit({ kind: "call", target, arguments: inputs, outputs });
-    return outputs;
+    this.#emit(operation);
+    return operation.outputs;
   }
 
   returnCall(target: FunctionDefinition, args: readonly ValueId[]): void {
@@ -145,17 +172,17 @@ export class RegionBuilder {
       return { value, type: expected };
     });
 
-    this.#emit({ kind: "returnCall", target, arguments: inputs });
+    this.#emit(returnCallControl.create({ target, arguments: inputs }));
   }
 
-  // Escape hatch for an already-built action.
-  push(action: Action): void {
-    this.#emit(action);
+  // Escape hatch for an already-built body node.
+  push(node: BodyNode): void {
+    this.#emit(node);
   }
 
-  extend(actions: readonly Action[]): void {
-    for (const action of actions) {
-      this.push(action);
+  extend(nodes: readonly BodyNode[]): void {
+    for (const node of nodes) {
+      this.push(node);
     }
   }
 
@@ -163,13 +190,12 @@ export class RegionBuilder {
     const thenBody = this.#childBody(thenBuild);
     const elseBody = options.elseBuild === undefined ? undefined : this.#childBody(options.elseBuild);
 
-    this.#emit({
-      kind: "if",
+    this.#emit(ifControl.create({
       condition,
       ...(options.hint !== undefined ? { hint: options.hint } : {}),
       thenBody,
       ...(elseBody !== undefined ? { elseBody } : {})
-    });
+    }));
   }
 
   ifValue(
@@ -182,14 +208,13 @@ export class RegionBuilder {
     const elseBody = this.#childResultBody(elseBuild);
     const output = this.#addControlOutput([thenBody, elseBody]);
 
-    this.#emit({
-      kind: "if",
+    this.#emit(ifControl.create({
       condition,
       ...(options.hint !== undefined ? { hint: options.hint } : {}),
       output,
       thenBody,
       elseBody
-    });
+    }));
     return output;
   }
 
@@ -205,32 +230,32 @@ export class RegionBuilder {
       defaultBody
     ]);
 
-    this.#emit({ kind: "switch", selector, output, cases, defaultBody });
+    this.#emit(switchControl.create({ selector, output, cases, defaultBody }));
     return output;
   }
 
   // Terminates this body: fault arms, trap arms, the root.
   finish(finish: Finish): void {
-    this.#emit({ kind: "finish", finish });
+    this.#emit(finishControl.create({ finish }));
   }
 
   return(results: readonly ValueId[]): void {
-    this.#emit({ kind: "return", results: [...results] });
+    this.#emit(returnControl.create({ results }));
   }
 
   loop(carried: readonly LoopCarriedCell[], bodyBuild: BuildBody): void {
-    this.#emit({ kind: "loop", carried, body: this.#childBody(bodyBuild) });
+    this.#emit(loopControl.create({ carried, body: this.#childBody(bodyBuild) }));
   }
 
   // The back edge of the enclosing loop; usually sits under an if arm.
   loopContinue(updates: readonly ValueId[]): void {
-    this.#emit({ kind: "loopContinue", updates });
+    this.#emit(loopContinueControl.create({ updates }));
   }
 
   build(result?: ValueId): Body {
-    const actions = this.#sink.actions();
+    const nodes = this.#sink.nodes();
 
-    return result === undefined ? { actions } : { actions, result };
+    return result === undefined ? { nodes } : { nodes, result };
   }
 
   #childBody(build: BuildBody): Body {
@@ -263,23 +288,29 @@ export class RegionBuilder {
       }
     }
 
-    return this.values.addActionOutput(joinWidthBounds(bounds));
+    return this.values.addNodeOutput(joinWidthBounds(bounds));
   }
 
-  #emit(action: Action): void {
-    this.#sink.push(action);
+  #allocateOperationOutput(result: OperationResult): ValueId {
+    return result.type === "i64"
+      ? this.values.addNodeOutput64()
+      : this.values.addNodeOutput(result.bounds);
+  }
+
+  #emit(node: BodyNode): void {
+    this.#sink.push(node);
   }
 }
 
-class BufferedBodyActionSink implements BodyActionSink {
-  readonly #actions: Action[] = [];
+class BufferedBodyNodeSink implements BodyNodeSink {
+  readonly #nodes: BodyNode[] = [];
 
-  push(action: Action): void {
-    this.#actions.push(action);
+  push(node: BodyNode): void {
+    this.#nodes.push(node);
   }
 
-  actions(): readonly Action[] {
-    return this.#actions;
+  nodes(): readonly BodyNode[] {
+    return this.#nodes;
   }
 }
 

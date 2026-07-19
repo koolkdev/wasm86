@@ -18,7 +18,13 @@ import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { functionRef } from "#compiler/program/refs.js";
 import { CellRef } from "#compiler/refs/cell.js";
-import type { Action, OpAction } from "#ir/actions.js";
+import {
+  finishControl,
+  ifControl,
+  returnCallControl
+} from "#compiler/ir/controls/index.js";
+import { callOperation, type Operation } from "#compiler/ir/operations/index.js";
+import type { BodyNode } from "#ir/block.js";
 import { covers, effectsOf, mayAlias } from "#ir/aliasing.js";
 
 const firstResource = resourceRef("test.aliasing.first");
@@ -37,45 +43,48 @@ function absolute(byteOffset: number, byteLength: number): ByteRange {
   };
 }
 
-function readAction(range: ByteRange, output = 1): OpAction {
-  return {
-    kind: "op",
-    output: valueId(output),
-    op: resourceRead.create({
+function readOperation(
+  range: ByteRange,
+  output = 1
+): Extract<Operation, { kind: "resource.read" }> {
+  return resourceRead.create(
+    {
       source: {
         effect: { space: "resource", resource: firstResource, range },
         address: { base: valueId(0), displacement: 0 },
         width: 8
       }
-    })
-  };
+    },
+    () => valueId(output)
+  );
 }
 
-function writeAction(range: ByteRange, value = 1): OpAction {
-  return {
-    kind: "op",
-    op: resourceWrite.create({
+function writeOperation(
+  range: ByteRange,
+  value = 1
+): Extract<Operation, { kind: "resource.write" }> {
+  return resourceWrite.create(
+    {
       destination: {
         effect: { space: "resource", resource: firstResource, range },
         address: { base: valueId(0), displacement: 0 },
         width: 8
       },
       value: valueId(value)
-    })
-  };
+    }
+  );
 }
 
 test("effects derive from generic operations and nested control", () => {
   const first = absolute(0, 1);
   const second = absolute(4, 1);
-  const action: Action = {
-    kind: "if",
+  const control: BodyNode = ifControl.create({
     condition: valueId(0),
-    thenBody: { actions: [readAction(first), writeAction(second)] },
-    elseBody: { actions: [writeAction(first)] }
-  };
+    thenBody: { nodes: [readOperation(first), writeOperation(second)] },
+    elseBody: { nodes: [writeOperation(first)] }
+  });
 
-  deepStrictEqual(effectsOf(action), {
+  deepStrictEqual(effectsOf(control), {
     reads: [effect(firstResource, first)],
     writes: [effect(firstResource, second), effect(firstResource, first)]
   });
@@ -85,20 +94,23 @@ test("control flow and finishes touch no data directly", () => {
   const values = new ValueTable();
 
   deepStrictEqual(
-    effectsOf({
-      kind: "if",
+    effectsOf(ifControl.create({
       condition: valueId(0),
-      thenBody: { actions: [] },
-      elseBody: { actions: [] }
-    }),
+      thenBody: { nodes: [] },
+      elseBody: { nodes: [] }
+    })),
     { reads: [], writes: [] }
   );
   deepStrictEqual(
-    effectsOf({ kind: "finish", finish: { kind: "exit", result: values.const64(0n) } }),
+    effectsOf(finishControl.create({
+      finish: { kind: "exit", result: values.const64(0n) }
+    })),
     { reads: [], writes: [] }
   );
   deepStrictEqual(
-    effectsOf({ kind: "finish", finish: { kind: "dispatch", targetEip: valueId(0) } }),
+    effectsOf(finishControl.create({
+      finish: { kind: "dispatch", targetEip: valueId(0) }
+    })),
     { reads: [], writes: [] }
   );
 });
@@ -116,11 +128,13 @@ test("direct-call effects come from their function definition", () => {
   });
 
   deepStrictEqual(
-    effectsOf({ kind: "call", target, arguments: [], outputs: [] }),
+    effectsOf(callOperation.create({ target, arguments: [] }, () => {
+      throw new Error("zero-result call unexpectedly requested an output");
+    })),
     effects
   );
   deepStrictEqual(
-    effectsOf({ kind: "returnCall", target, arguments: [] }),
+    effectsOf(returnCallControl.create({ target, arguments: [] })),
     effects
   );
 });

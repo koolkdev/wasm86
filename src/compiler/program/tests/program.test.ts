@@ -84,7 +84,7 @@ function writeFunctionEffect(
   value: ValueId,
   region = 0
 ): void {
-  fn.region.operation(resourceWrite.create({
+  fn.region.operation(resourceWrite, {
     destination: byteOperand(
       functionEffectResource,
       functionEffect(region).range,
@@ -93,7 +93,7 @@ function writeFunctionEffect(
       32
     ),
     value
-  }));
+  });
 }
 
 function readFunctionEffect(
@@ -101,7 +101,7 @@ function readFunctionEffect(
   region = 0,
   width: IntegerWidth = 32
 ): ValueId {
-  return fn.region.operation(resourceRead.create({
+  return fn.region.operation(resourceRead, {
     source: byteOperand(
       functionEffectResource,
       functionEffect(region, width / 8).range,
@@ -109,7 +109,7 @@ function readFunctionEffect(
       region * 4,
       width
     )
-  }));
+  });
 }
 
 test("forward function declarations close before their factories build and execute", async () => {
@@ -257,13 +257,13 @@ test("defined resource operations resolve memory index two", async () => {
   }, (fn) => {
     const address = fn.values.const(6);
 
-    fn.region.operation(resourceWrite.create({
+    fn.region.operation(resourceWrite, {
       destination: byteOperand(resource, range, address, 6, 16),
       value: fn.values.const(0x1234)
-    }));
-    const read = fn.region.operation(resourceRead.create({
+    });
+    const read = fn.region.operation(resourceRead, {
       source: byteOperand(resource, range, address, 6, 16)
-    }));
+    });
     fn.return([read]);
   });
   program.exportFunction({
@@ -424,9 +424,9 @@ test("program closure omits dead resource reads", () => {
     signature,
     effects: { reads: [byteAccess], writes: [] }
   }, (fn) => {
-    fn.region.operation(resourceRead.create({
+    fn.region.operation(resourceRead, {
       source: byteOperand(readResource, range, fn.values.const(0), 0, 8)
-    }));
+    });
     fn.return([fn.values.const(7)]);
   });
 
@@ -455,9 +455,9 @@ test("program validation rejects unknown effects and undeclared live resource us
       signature,
       effects: noEffects
     }, (fn) => {
-      fn.return([fn.region.operation(resourceRead.create({
+      fn.return([fn.region.operation(resourceRead, {
         source: byteOperand(resource, byteAccess.range, fn.values.const(0), 0, 8)
-      }))]);
+      })]);
     });
 
     throws(() => validateProgram(program.finish()), /unknown program resource.*used by function/);
@@ -490,10 +490,10 @@ test("program validation rejects unknown effects and undeclared live resource us
       slice: { byteOffset: 0, byteLength: 1 }
     };
     const ir = buildIrBlock((body) => {
-      body.operation(resourceWrite.create({
+      body.operation(resourceWrite, {
         destination: byteOperand(resource, range, body.values.const(0), 0, 8),
         value: body.values.const(1)
-      }));
+      });
     });
 
     program.signature({ ref: signature, type: voidType });
@@ -634,7 +634,7 @@ test("an effectful function call stays single and conditional inside its selecte
   strictEqual(new DataView(memory.buffer).getUint32(0, true), 2);
 });
 
-test("function declarations carry conservative transitive effects", () => {
+test("function declarations keep resource bindings direct while effects are transitive", () => {
   const program = new ProgramBuilder();
   const type = functionType(["i32"], []);
   const signature = signatureRef("test.transitive-effects-signature");
@@ -675,11 +675,19 @@ test("function declarations carry conservative transitive effects", () => {
     fn.return([]);
   });
 
-  const functions = program.finish().functions.filter((fn) => fn.kind === "function");
+  const closed = program.finish();
+  const functions = closed.functions.filter((fn) => fn.kind === "function");
 
   deepStrictEqual(functions.find((fn) => fn.ref === leaf.ref)?.effects, effects);
   deepStrictEqual(functions.find((fn) => fn.ref === middle.ref)?.effects, effects);
   deepStrictEqual(functions.find((fn) => fn.ref === root.ref)?.effects, effects);
+  deepStrictEqual(
+    functions.find((fn) => fn.ref === leaf.ref)?.resources,
+    [functionEffectResource]
+  );
+  deepStrictEqual(functions.find((fn) => fn.ref === middle.ref)?.resources, []);
+  deepStrictEqual(functions.find((fn) => fn.ref === root.ref)?.resources, []);
+  validateProgram(closed);
 });
 
 test("function effect declarations must cover their bodies", () => {
@@ -1021,7 +1029,7 @@ test("closed functions do not retain their mutable factory builders", () => {
 
   rawBuilder.region.return([]);
   rawBuilder.values.const(0x1234_5678);
-  strictEqual(fn.body.body.actions.length, 1);
+  strictEqual(fn.body.body.nodes.length, 1);
   strictEqual(fn.body.values.size(), valueCount);
   encodeProgram(closed);
 });

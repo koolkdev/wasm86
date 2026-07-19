@@ -16,8 +16,9 @@ import {
   segmentSelectorChannel
 } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
-import type { Action } from "#ir/actions.js";
+import type { BodyNode } from "#ir/block.js";
 import type { ResourceEffect } from "#compiler/ir/resource.js";
+import { resourceWrite } from "#compiler/ir/operations/resource.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { OperandWidth } from "#core/types.js";
@@ -31,12 +32,12 @@ import {
   stateWriteValue,
   isStateRead,
   isStateWrite,
-  type StateWriteAction
-} from "./state-actions.js";
+  type StateWriteOperation
+} from "./state-operations.js";
 
 type Harness = Readonly<{
   values: ValueTable;
-  actions: Action[];
+  nodes: BodyNode[];
   pending: PendingHarness;
 }>;
 
@@ -45,7 +46,7 @@ type PendingHarness = Readonly<{
   write(channel: InstructionStateChannel, value: ValueId): void;
   has(channel: InstructionStateChannel): boolean;
   beginInstruction(): void;
-  flushesForPath(path: StatePathKind): readonly StateWriteAction[];
+  flushesForPath(path: StatePathKind): readonly StateWriteOperation[];
   readDynamicGpr(index: ValueId, width: OperandWidth, options?: GprReadOptions): ValueId;
   writeDynamicGpr(index: ValueId, width: OperandWidth, value: ValueId): void;
   readDynamicSegmentBase(index: ValueId): ValueId;
@@ -55,20 +56,20 @@ type PendingHarness = Readonly<{
 function createHarness(): Harness {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
-  const actions = body.build().actions as Action[];
+  const nodes = body.build().nodes as BodyNode[];
   const accessConstruction = new StateAccess(cpuState);
   const access = accessConstruction.bind(body);
   const fields = new StateFieldTracker(accessConstruction);
   const gpr = new GprState(values, accessConstruction);
-  const flushesForPath = (path: StatePathKind): readonly StateWriteAction[] => [
-    ...gpr.flushesForPath(access, path).filter(isStateWrite),
-    ...fields.flushesForPath(access, path).filter(isStateWrite)
-  ];
+  const flushesForPath = (path: StatePathKind): readonly StateWriteOperation[] => [
+    ...gpr.flushesForPath(access, path),
+    ...fields.flushesForPath(access, path)
+  ].map((args) => resourceWrite.create(args));
   const segments = new SegmentState(values, fields);
 
   return {
     values,
-    actions,
+    nodes,
     pending: {
       read: (channel, options) => channel.kind === "gpr"
         ? gpr.readChannel(access, channel, options)
@@ -115,9 +116,9 @@ function completedEdgeEntries(
 }
 
 function edgeEntries(
-  actions: readonly StateWriteAction[]
+  writes: readonly StateWriteOperation[]
 ): ReadonlyArray<readonly [ResourceEffect, ValueId]> {
-  return actions.map((action) => [action.op.effect, stateWriteValue(action)] as const);
+  return writes.map((write) => [write.effect, stateWriteValue(write)] as const);
 }
 
 function edgeEntry(
@@ -128,75 +129,75 @@ function edgeEntry(
   return [stateEffect(values, channel), value];
 }
 
-test("a GPR pending hit returns the value with no actions", () => {
-  const { values, actions, pending } = createHarness();
+test("a GPR pending hit returns the value with no nodes", () => {
+  const { values, nodes, pending } = createHarness();
   const value = values.const(0x12345678);
 
   pending.write(gprChannel("eax"), value);
   strictEqual(pending.read(gprChannel("eax")), value);
-  deepStrictEqual(actions, []);
+  deepStrictEqual(nodes, []);
 });
 
 test("a read disjoint from all pendings loads through one cached resource read", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
 
   pending.write(gprChannel("eax"), values.const(1));
 
   const first = pending.read(gprChannel("ebx"));
 
   strictEqual(pending.read(gprChannel("ebx")), first);
-  deepStrictEqual(actions, [stateRead(values, first, gprChannel("ebx"))]);
+  deepStrictEqual(nodes, [stateRead(values, first, gprChannel("ebx"))]);
 });
 
 test("writing a GPR input value back leaves no pending store", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const read = pending.read(gprChannel("eax"));
 
   pending.write(gprChannel("eax"), values.const(1));
   pending.write(gprChannel("eax"), read);
 
   strictEqual(pending.has(gprChannel("eax")), false);
-  actions.push(...pending.flushesForPath("completed"));
+  nodes.push(...pending.flushesForPath("completed"));
 
-  deepStrictEqual(actions, [stateRead(values, read, gprChannel("eax"))]);
+  deepStrictEqual(nodes, [stateRead(values, read, gprChannel("eax"))]);
 });
 
 test("writing a state-field input value back leaves no pending store", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const read = pending.read(flagStateFields.concrete.ZF);
 
   pending.write(flagStateFields.concrete.ZF, values.const(1));
   pending.write(flagStateFields.concrete.ZF, read);
 
   strictEqual(pending.has(flagStateFields.concrete.ZF), false);
-  actions.push(...pending.flushesForPath("completed"));
+  nodes.push(...pending.flushesForPath("completed"));
 
-  deepStrictEqual(actions, [stateRead(values, read, flagStateFields.concrete.ZF)]);
+  deepStrictEqual(nodes, [stateRead(values, read, flagStateFields.concrete.ZF)]);
 });
 
 test("write al then read eax flushes the byte and reloads the word", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const byte = values.const(0x12);
 
   pending.write(gprChannel("al"), byte);
 
   const word = pending.read(gprChannel("eax"));
 
-  deepStrictEqual(actions, [
+  deepStrictEqual(nodes, [
     stateWrite(values, gprChannel("al"), byte),
     stateRead(values, word, gprChannel("eax"))
   ]);
 
   // The flushed al stays pending, clean: it serves reads with no new
-  // actions and never needs storing again.
+  // nodes and never needs storing again.
   strictEqual(pending.has(gprChannel("al")), true);
   strictEqual(pending.read(gprChannel("al")), byte);
   deepStrictEqual(pending.flushesForPath("completed"), []);
-  strictEqual(actions.length, 2);
+  strictEqual(nodes.length, 2);
 });
 
 test("write eax then read al flushes the word and reloads the byte", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const word = values.const(0x12345678);
 
   pending.write(gprChannel("eax"), word);
@@ -205,51 +206,51 @@ test("write eax then read al flushes the word and reloads the byte", () => {
   // truncation; ah always goes through memory.
   const byte = pending.read(gprChannel("al"));
 
-  deepStrictEqual(actions, [
+  deepStrictEqual(nodes, [
     stateWrite(values, gprChannel("eax"), word),
     stateRead(values, byte, gprChannel("al"))
   ]);
 });
 
 test("write eax then read ah reloads through the high-byte channel", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
 
   pending.write(gprChannel("eax"), values.const(0x12345678));
 
   const high = pending.read(gprChannel("ah"));
 
-  strictEqual(actions.length, 2);
-  deepStrictEqual(actions[1], stateRead(values, high, gprChannel("ah")));
+  strictEqual(nodes.length, 2);
+  deepStrictEqual(nodes[1], stateRead(values, high, gprChannel("ah")));
 });
 
 test("a covering write drops the pending with no flush", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const word = values.const(0x12345678);
 
   pending.write(gprChannel("al"), values.const(0x12));
   pending.write(gprChannel("ah"), values.const(0x34));
   pending.write(gprChannel("eax"), word);
 
-  strictEqual(actions.length, 0);
-  actions.push(...pending.flushesForPath("completed"));
-  deepStrictEqual(actions, [stateWrite(values, gprChannel("eax"), word)]);
+  strictEqual(nodes.length, 0);
+  nodes.push(...pending.flushesForPath("completed"));
+  deepStrictEqual(nodes, [stateWrite(values, gprChannel("eax"), word)]);
 });
 
 test("a partially overlapping write flushes the wider pending first", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const word = values.const(0x12345678);
   const byte = values.const(0x9a);
 
   pending.write(gprChannel("ax"), word);
   pending.write(gprChannel("al"), byte);
 
-  deepStrictEqual(actions, [stateWrite(values, gprChannel("ax"), word)]);
-  actions.push(...pending.flushesForPath("completed"));
-  deepStrictEqual(actions[1], stateWrite(values, gprChannel("al"), byte));
+  deepStrictEqual(nodes, [stateWrite(values, gprChannel("ax"), word)]);
+  nodes.push(...pending.flushesForPath("completed"));
+  deepStrictEqual(nodes[1], stateWrite(values, gprChannel("al"), byte));
 });
 
 test("disjoint byte pendings coexist and flush together on an ax read", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const low = values.const(0x12);
   const high = values.const(0x34);
   const flag = values.const(1);
@@ -257,11 +258,11 @@ test("disjoint byte pendings coexist and flush together on an ax read", () => {
   pending.write(flagStateFields.concrete.ID, flag);
   pending.write(gprChannel("al"), low);
   pending.write(gprChannel("ah"), high);
-  deepStrictEqual(actions, []);
+  deepStrictEqual(nodes, []);
 
   const word = pending.read(gprChannel("ax"));
 
-  deepStrictEqual(actions, [
+  deepStrictEqual(nodes, [
     stateWrite(values, gprChannel("al"), low),
     stateWrite(values, gprChannel("ah"), high),
     stateRead(values, word, gprChannel("ax"))
@@ -273,17 +274,17 @@ test("disjoint byte pendings coexist and flush together on an ax read", () => {
 });
 
 test("flag and eip pendings hit exactly and never interact with registers", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const eip = values.const(0x401000);
 
   pending.write(coreStateFields.eip, eip);
   pending.write(gprChannel("eax"), values.const(7));
   strictEqual(pending.read(coreStateFields.eip), eip);
-  deepStrictEqual(actions, []);
+  deepStrictEqual(nodes, []);
 });
 
 test("lazy flag metadata fields are cached state fields", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const kindByte = pending.read(flagStateFields.lazyKind);
   const lazyA = values.const(0x1234_5678);
 
@@ -294,7 +295,7 @@ test("lazy flag metadata fields are cached state fields", () => {
 
   strictEqual(pending.has(flagStateFields.lazyA), true);
   strictEqual(pending.read(flagStateFields.lazyA), lazyA);
-  deepStrictEqual(actions, [
+  deepStrictEqual(nodes, [
     stateRead(values, kindByte, flagStateFields.lazyKind)
   ]);
   deepStrictEqual(pending.flushesForPath("completed"), [
@@ -303,7 +304,7 @@ test("lazy flag metadata fields are cached state fields", () => {
 });
 
 test("segment channels are read-only cached state fields", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const fsBase = pending.read(segmentBaseChannel("fs"));
   const fsSelector = pending.read(segmentSelectorChannel("fs"));
 
@@ -319,27 +320,27 @@ test("segment channels are read-only cached state fields", () => {
     () => pending.write(segmentSelectorChannel("fs"), values.const(0x23)),
     /segment writes must use a segment-load host exit/
   );
-  deepStrictEqual(actions, [
+  deepStrictEqual(nodes, [
     stateRead(values, fsBase, segmentBaseChannel("fs")),
     stateRead(values, fsSelector, segmentSelectorChannel("fs"))
   ]);
 });
 
 test("dynamic segment reads keep selector and base fields separate", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const index = values.const(3);
   const selector = pending.readDynamicSegmentSelector(index);
   const base = pending.readDynamicSegmentBase(index);
 
   strictEqual(values.truncate(16, selector), selector);
-  deepStrictEqual(actions, [
+  deepStrictEqual(nodes, [
     dynamicSegmentRead(values, selector, index, "selector"),
     dynamicSegmentRead(values, base, index, "base")
   ]);
 });
 
 test("flag fields use state-field pending tracking", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const zf = values.const(1);
 
   pending.write(flagStateFields.concrete.ZF, zf);
@@ -350,11 +351,11 @@ test("flag fields use state-field pending tracking", () => {
   deepStrictEqual(pending.flushesForPath("completed"), [
     stateWrite(values, flagStateFields.concrete.ZF, zf)
   ]);
-  deepStrictEqual(actions, []);
+  deepStrictEqual(nodes, []);
 });
 
 test("a flush invalidates read leaves of overlapping channels only", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const eaxRead = pending.read(gprChannel("eax"));
   const ecxRead = pending.read(gprChannel("ecx"));
 
@@ -365,34 +366,34 @@ test("a flush invalidates read leaves of overlapping channels only", () => {
 
   notStrictEqual(reloaded, eaxRead);
   strictEqual(pending.read(gprChannel("ecx")), ecxRead);
-  strictEqual(actions.filter((action) => isStateRead(action)).length, 3);
+  strictEqual(nodes.filter((node) => isStateRead(node)).length, 3);
 });
 
 test("signed and unsigned reads of one channel are separate marked loads", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const unsigned = pending.read(gprChannel("al"));
   const signed = pending.read(gprChannel("al"), { signed: true });
 
   notStrictEqual(signed, unsigned);
   strictEqual(pending.read(gprChannel("al")), unsigned);
   strictEqual(pending.read(gprChannel("al"), { signed: true }), signed);
-  deepStrictEqual(actions, [
+  deepStrictEqual(nodes, [
     stateRead(values, unsigned, gprChannel("al")),
     stateRead(values, signed, gprChannel("al"), true)
   ]);
 });
 
 test("a signed read of a full-width channel is the plain read", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const read = pending.read(gprChannel("eax"), { signed: true });
 
   strictEqual(pending.read(gprChannel("eax")), read);
-  deepStrictEqual(actions, [stateRead(values, read, gprChannel("eax"))]);
+  deepStrictEqual(nodes, [stateRead(values, read, gprChannel("eax"))]);
 });
 
 test("a narrow GPR hit normalizes values whose high bits are unproven", () => {
   const { values, pending } = createHarness();
-  const unproven = values.addActionOutput();
+  const unproven = values.addNodeOutput();
 
   pending.write(gprChannel("al"), unproven);
   strictEqual(pending.read(gprChannel("al")), values.truncate(8, unproven));
@@ -426,7 +427,7 @@ test("completed edge flushes dirty pendings in owner order", () => {
 });
 
 test("fault boundary lists instruction-start values without consuming the map", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const byte = values.const(0x12);
   const eip = values.const(0x1000);
 
@@ -438,7 +439,7 @@ test("fault boundary lists instruction-start values without consuming the map", 
     edgeEntry(values, gprChannel("al"), byte),
     edgeEntry(values, coreStateFields.eip, eip)
   ]);
-  deepStrictEqual(actions, []);
+  deepStrictEqual(nodes, []);
   strictEqual(pending.has(gprChannel("al")), true);
   strictEqual(pending.has(coreStateFields.eip), true);
 });
@@ -528,19 +529,19 @@ test("flushing a channel untouched this instruction keeps it in the fault bounda
 });
 
 test("a covering write drops a clean pending without a store", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const word = values.const(0x12345678);
 
   pending.write(gprChannel("al"), values.const(0x12));
   pending.read(gprChannel("eax"));
   pending.write(gprChannel("eax"), word);
-  actions.push(...pending.flushesForPath("completed"));
+  nodes.push(...pending.flushesForPath("completed"));
 
   // One al store (the flush before the read); the covering eax write drops
   // the clean al, so only eax flushes at the end.
-  strictEqual(isStateWrite(actions[0]!), true);
-  deepStrictEqual(actions[2], stateWrite(values, gprChannel("eax"), word));
-  strictEqual(actions.length, 3);
+  strictEqual(isStateWrite(nodes[0]!), true);
+  deepStrictEqual(nodes[2], stateWrite(values, gprChannel("eax"), word));
+  strictEqual(nodes.length, 3);
 });
 
 test("completed edge lists only dirty pendings", () => {
@@ -559,7 +560,7 @@ test("completed edge lists only dirty pendings", () => {
 });
 
 test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const word = values.const(0x77);
   const flag = values.const(1);
   const index = values.external(0);
@@ -569,7 +570,7 @@ test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
 
   const first = pending.readDynamicGpr(index, 32);
 
-  deepStrictEqual(actions, [
+  deepStrictEqual(nodes, [
     stateWrite(values, gprChannel("eax"), word),
     dynamicGprRead(values, first, index, 32)
   ]);
@@ -581,13 +582,13 @@ test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
   const second = pending.readDynamicGpr(index, 32);
 
   notStrictEqual(second, first);
-  deepStrictEqual(actions[2], dynamicGprRead(values, second, index, 32));
-  strictEqual(actions.length, 3);
+  deepStrictEqual(nodes[2], dynamicGprRead(values, second, index, 32));
+  strictEqual(nodes.length, 3);
   strictEqual(pending.read(flagStateFields.concrete.ID), flag);
 });
 
 test("a dynamic write stores immediately and invalidates every GPR pending", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const word = values.const(0x77);
   const flag = values.const(1);
   const eip = values.const(0x1000);
@@ -599,7 +600,7 @@ test("a dynamic write stores immediately and invalidates every GPR pending", () 
   pending.write(coreStateFields.eip, eip);
   pending.writeDynamicGpr(index, 32, stored);
 
-  deepStrictEqual(actions, [
+  deepStrictEqual(nodes, [
     stateWrite(values, gprChannel("eax"), word),
     dynamicGprWrite(values, index, 32, stored)
   ]);
@@ -608,7 +609,7 @@ test("a dynamic write stores immediately and invalidates every GPR pending", () 
   // while flag and eip pendings ride through.
   const reload = pending.read(gprChannel("eax"));
 
-  deepStrictEqual(actions[2], stateRead(values, reload, gprChannel("eax")));
+  deepStrictEqual(nodes[2], stateRead(values, reload, gprChannel("eax")));
   strictEqual(pending.read(flagStateFields.concrete.DF), flag);
   strictEqual(pending.read(coreStateFields.eip), eip);
 });
@@ -697,12 +698,12 @@ test("a signed cached read serves a destructive flush of its channel", () => {
 });
 
 test("narrow dynamic reads carry their byte length, bounds, and sign marker", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const index = values.external(0);
   const unsigned = pending.readDynamicGpr(index, 8);
   const signed = pending.readDynamicGpr(index, 8, { signed: true });
 
-  deepStrictEqual(actions, [
+  deepStrictEqual(nodes, [
     dynamicGprRead(values, unsigned, index, 8),
     dynamicGprRead(values, signed, index, 8, true)
   ]);
@@ -713,15 +714,15 @@ test("narrow dynamic reads carry their byte length, bounds, and sign marker", ()
 });
 
 test("a signed dynamic word read is the plain read", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const index = values.external(0);
   const read = pending.readDynamicGpr(index, 32, { signed: true });
 
-  deepStrictEqual(actions, [dynamicGprRead(values, read, index, 32)]);
+  deepStrictEqual(nodes, [dynamicGprRead(values, read, index, 32)]);
 });
 
 test("a narrow dynamic write barriers word pendings all the same", () => {
-  const { values, actions, pending } = createHarness();
+  const { values, nodes, pending } = createHarness();
   const word = values.const(0x12345678);
   const byte = values.const(0x9a);
   const index = values.external(0);
@@ -729,12 +730,12 @@ test("a narrow dynamic write barriers word pendings all the same", () => {
   pending.write(gprChannel("eax"), word);
   pending.writeDynamicGpr(index, 8, byte);
 
-  deepStrictEqual(actions, [
+  deepStrictEqual(nodes, [
     stateWrite(values, gprChannel("eax"), word),
     dynamicGprWrite(values, index, 8, byte)
   ]);
 
   const reload = pending.read(gprChannel("eax"));
 
-  deepStrictEqual(actions[2], stateRead(values, reload, gprChannel("eax")));
+  deepStrictEqual(nodes[2], stateRead(values, reload, gprChannel("eax")));
 });

@@ -1,16 +1,15 @@
 import { assert } from "#common/assert.js";
 import type {
   BodyAnalysis,
-  ProducingAction,
   SiteId,
   ValueDemand
 } from "#compiler/analysis/model.js";
 import type { StorageAccess } from "#compiler/ir/effects.js";
+import type { Operation } from "#compiler/ir/operations/index.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { mayAlias } from "#ir/aliasing.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import { actionOperands } from "#ir/traverse.js";
 import { canCaptureAtDeadline } from "./capture-safety.js";
 import { LoopAnchors } from "./loop-anchors.js";
 
@@ -67,7 +66,7 @@ class AnchorPlanner {
       const producer = this.analysis.producer(value);
 
       if (producer !== undefined) {
-        const anchor = this.#producerAnchor(producer.action, producer.site, demands);
+        const anchor = this.#producerAnchor(producer.operation, producer.site, demands);
 
         this.#placeValue(value, anchor, demands);
         for (const input of producer.inputs) {
@@ -105,7 +104,7 @@ class AnchorPlanner {
         anchor = this.#loopAnchors.lift(value, anchor);
         this.#placeValue(value, anchor, demands);
       } else {
-        assert(mode === "reemit", `producer value ${value} has no producer action`);
+        assert(mode === "reemit", `producer value ${value} has no producing operation`);
       }
 
       for (const child of this.block.values.children(value)) {
@@ -192,7 +191,7 @@ class AnchorPlanner {
   }
 
   #producerAnchor(
-    action: ProducingAction,
+    operation: Operation,
     producerSite: SiteId,
     demands: readonly ValueDemand[]
   ): SiteId {
@@ -204,9 +203,9 @@ class AnchorPlanner {
 
     if (
       !this.#isAfterProducer(producerSite, anchor) ||
-      this.analysis.actionEffects(action).writes.length !== 0 ||
-      actionOperands(action).some((input) => !this.block.values.isNonTrapping(input)) ||
-      this.#crossesAliasingWrite(action, producerSite, anchor)
+      operation.directEffects.writes.length !== 0 ||
+      operation.operands.some((input) => !this.block.values.isNonTrapping(input)) ||
+      this.#crossesAliasingWrite(operation, producerSite, anchor)
     ) {
       return producerSite;
     }
@@ -232,7 +231,7 @@ class AnchorPlanner {
     const anchorSite = this.#site(anchor);
 
     if (producerSite.body === anchorSite.body) {
-      return anchorSite.actionIndex > producerSite.actionIndex;
+      return anchorSite.nodeIndex > producerSite.nodeIndex;
     }
 
     const first = this.analysis.path(producerSite.body, anchorSite.body)?.[0];
@@ -242,15 +241,15 @@ class AnchorPlanner {
     }
     const owner = this.#site(first.owner);
 
-    return owner.actionIndex > producerSite.actionIndex;
+    return owner.nodeIndex > producerSite.nodeIndex;
   }
 
   #crossesAliasingWrite(
-    action: ProducingAction,
+    operation: Operation,
     producerSiteId: SiteId,
     anchorId: SiteId
   ): boolean {
-    const reads = this.analysis.actionEffects(action).reads;
+    const reads = operation.directEffects.reads;
 
     if (reads.length === 0) {
       return false;
@@ -261,19 +260,19 @@ class AnchorPlanner {
 
     assert(path !== undefined, "producer anchor leaves its producer scope");
     let body = producerSite.body;
-    let start = producerSite.actionIndex + 1;
+    let start = producerSite.nodeIndex + 1;
 
     for (const step of path) {
       const owner = this.#site(step.owner);
 
-      if (this.#rangeAliases(body, start, owner.actionIndex, reads)) {
+      if (this.#rangeAliases(body, start, owner.nodeIndex, reads)) {
         return true;
       }
       body = step.body;
       start = 0;
     }
 
-    return this.#rangeAliases(body, start, anchor.actionIndex, reads);
+    return this.#rangeAliases(body, start, anchor.nodeIndex, reads);
   }
 
   #rangeAliases(

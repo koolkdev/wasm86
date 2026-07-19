@@ -2,7 +2,6 @@ import { assert } from "#common/assert.js";
 import type { FunctionType } from "#compiler/program/function-type.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import type { Action } from "./actions.js";
 import type { Body } from "./block.js";
 import { RegionBuilder } from "./region-builder.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
@@ -64,38 +63,7 @@ export function buildFunction(
 }
 
 function snapshotBody(body: Body): Body {
-  const actions = body.actions.map(snapshotAction);
+  const nodes = body.nodes.map((node) => node.mapBodies(snapshotBody));
 
-  return body.result === undefined ? { actions } : { actions, result: body.result };
-}
-
-function snapshotAction(action: Action): Action {
-  switch (action.kind) {
-    case "if":
-      return action.elseBody === undefined
-        ? { ...action, thenBody: snapshotBody(action.thenBody) }
-        : {
-            ...action,
-            thenBody: snapshotBody(action.thenBody),
-            elseBody: snapshotBody(action.elseBody)
-          };
-    case "switch":
-      return {
-        ...action,
-        cases: action.cases.map((entry) => ({
-          match: entry.match,
-          body: snapshotBody(entry.body)
-        })),
-        defaultBody: snapshotBody(action.defaultBody)
-      };
-    case "loop":
-      return { ...action, body: snapshotBody(action.body) };
-    case "op":
-    case "call":
-    case "returnCall":
-    case "loopContinue":
-    case "finish":
-    case "return":
-      return action;
-  }
+  return body.result === undefined ? { nodes } : { nodes, result: body.result };
 }

@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { resourceWrite } from "#compiler/ir/operations/resource.js";
+import { returnCallControl } from "#compiler/ir/controls/index.js";
 import {
   resourceRef,
   type ResourceEffect
@@ -27,9 +28,8 @@ import {
   signatureRef
 } from "#compiler/program/refs.js";
 import { FunctionBuilder } from "#ir/function.js";
-import { actionCompletes } from "#ir/actions.js";
+import { nodeCompletes } from "#ir/block.js";
 import { effectsOf } from "#ir/aliasing.js";
-import { actionOperands } from "#ir/traverse.js";
 import { validateIrFunction } from "#ir/validate.js";
 import { emitFunction } from "#wasm/emit/action.js";
 
@@ -45,24 +45,24 @@ const effect: ResourceEffect = {
 };
 
 function writeEffect(fn: FunctionBuilder, value: ValueId): void {
-  fn.region.operation(resourceWrite.create({
+  fn.region.operation(resourceWrite, {
     destination: {
       effect,
       address: { base: fn.values.const(0), displacement: 0 },
       width: 32
     },
     value
-  }));
+  });
 }
 
 test("returnCall closes and emits a typed terminal tail call", async () => {
   const program = new ProgramBuilder();
   const type = functionType(["i32"], ["i32"]);
-  const signature = signatureRef("test.return-call-action-signature");
+  const signature = signatureRef("test.return-call-control-signature");
   const family = new FunctionFamily<number>({
     type,
     effects: () => noEffects,
-    id: (key) => `test.return-call-action-target-${key}`,
+    id: (key) => `test.return-call-control-target-${key}`,
     build: (_key, fn) => {
       const argument = fn.parameters[0];
 
@@ -76,7 +76,7 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
 
   program.signature({ ref: signature, type });
   const caller = program.defineFunction({
-    ref: functionRef("test.return-call-action-caller"),
+    ref: functionRef("test.return-call-control-caller"),
     signature,
     effects: noEffects
   }, (fn) => {
@@ -88,7 +88,7 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
     fn.returnCall(target, [argument]);
   });
   program.exportFunction({
-    ref: exportRef("test.return-call-action-export"),
+    ref: exportRef("test.return-call-control-export"),
     name: "entry",
     target: caller.ref
   });
@@ -100,7 +100,7 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
     throw new Error("missing returnCall caller");
   }
   deepStrictEqual(callerFunction.callTargets, [target]);
-  strictEqual(callerFunction.body.body.actions[0]?.kind, "returnCall");
+  strictEqual(callerFunction.body.body.nodes[0]?.kind, "returnCall");
   const emitted = emitFunction(callerFunction.body, {
     functionIndices: new Map([[target, 1]]),
     resourceIndices: new Map(),
@@ -199,11 +199,10 @@ test("returnCall enforces argument and enclosing-result types", () => {
 
   const forged = new FunctionBuilder(i32Result);
 
-  forged.region.push({
-    kind: "returnCall",
+  forged.region.push(returnCallControl.create({
     target: i64ResultTarget,
     arguments: []
-  });
+  }));
   throws(
     () => validateIrFunction(forged.finish()),
     /target results do not match the enclosing function/
@@ -219,12 +218,12 @@ test("returnCall enforces argument and enclosing-result types", () => {
   const valid = new FunctionBuilder(i32Result);
 
   valid.returnCall(validTarget, []);
-  const action = valid.finish().body.actions[0];
+  const control = valid.finish().body.nodes[0];
 
-  if (action === undefined) {
-    throw new Error("missing valid returnCall action");
+  if (control === undefined) {
+    throw new Error("missing valid returnCall control");
   }
-  strictEqual(actionCompletes(action), true);
-  deepStrictEqual(actionOperands(action), []);
-  deepStrictEqual(effectsOf(action), noEffects);
+  strictEqual(nodeCompletes(control), true);
+  deepStrictEqual(control.operands, []);
+  deepStrictEqual(effectsOf(control), noEffects);
 });

@@ -23,7 +23,7 @@ import { guestMemoryMinimumPages } from "#memory/constants.js";
 import { guestMemoryResource } from "#memory/resource.js";
 import { encodeTransfer } from "./legacy-transfer.js";
 import type { IrBlock } from "#ir/block.js";
-import { walkBodyActions } from "#ir/traverse.js";
+import { walkBodyNodes } from "#ir/traverse.js";
 import {
   jitModuleLinkFallbackExportName,
   type JitLinkLayout
@@ -98,9 +98,9 @@ function prepareJitBlocks(blocks: readonly JitProgramSourceBlock[]): readonly Ji
 export function jitBlockLinkTargets(ir: IrBlock): readonly number[] {
   const targets: number[] = [];
 
-  walkBodyActions(ir.body, (action) => {
-    if (action.kind === "finish" && action.finish.kind === "dispatch") {
-      const target = ir.values.constValue(action.finish.targetEip);
+  walkBodyNodes(ir.body, (node) => {
+    if (node.kind === "finish" && node.finish.kind === "dispatch") {
+      const target = ir.values.constValue(node.finish.targetEip);
 
       if (target !== undefined) {
         targets.push(u32(target));

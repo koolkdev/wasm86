@@ -30,6 +30,11 @@ export function validateResourceOperation(
     `${label} address displacement must be an unsigned 32-bit integer, got ${operation.displacement}`
   );
   validateResourceEffect(operation.effect, label);
+  assert(
+    operation.referencedResources.length === 1 &&
+      operation.referencedResources[0] === operation.effect.resource,
+    `${label} must reference its exact resource binding`
+  );
 
   if (operation.effect.range.slice !== undefined) {
     const transferByteLength = operation.width / 8;
@@ -42,8 +47,8 @@ export function validateResourceOperation(
 
   assert(Array.isArray(operation.inputs), `${label} inputs must be an array`);
   assert(
-    Array.isArray(operation.effects.reads) &&
-      Array.isArray(operation.effects.writes),
+    Array.isArray(operation.directEffects.reads) &&
+      Array.isArray(operation.directEffects.writes),
     `${label} effects must contain read and write arrays`
   );
 
@@ -75,7 +80,8 @@ function validateResourceRead(
   operation: Extract<ResourceOperation, { kind: "resource.read" }>,
   label: string
 ): void {
-  const signed = (operation as { signed?: unknown }).signed;
+  const signed = operation.signed;
+  const result = operation.results[0];
 
   assert(
     signed === undefined || signed === true,
@@ -91,19 +97,21 @@ function validateResourceRead(
     `${label} must have exactly one i32 address input`
   );
   assert(
-    operation.result !== undefined && operation.result.type === "i32",
+    operation.results.length === 1 &&
+      result !== undefined &&
+      result.type === "i32",
     `${label} must have an i32 result`
   );
   assertReadBounds(
-    operation.result.bounds,
+    result.bounds,
     operation.width,
     signed === true,
     label
   );
   assert(
-    operation.effects.reads.length === 1 &&
-      operation.effects.reads[0] === operation.effect &&
-      operation.effects.writes.length === 0,
+    operation.directEffects.reads.length === 1 &&
+      operation.directEffects.reads[0] === operation.effect &&
+      operation.directEffects.writes.length === 0,
     `${label} effects must read its exact resource effect and write nothing`
   );
 }
@@ -117,11 +125,11 @@ function validateResourceWrite(
       operation.inputs.every((input) => input.type === "i32"),
     `${label} must have exactly one i32 address and one i32 value input`
   );
-  assert(operation.result === undefined, `${label} must not have a result`);
+  assert(operation.results.length === 0, `${label} must not have results`);
   assert(
-    operation.effects.reads.length === 0 &&
-      operation.effects.writes.length === 1 &&
-      operation.effects.writes[0] === operation.effect,
+    operation.directEffects.reads.length === 0 &&
+      operation.directEffects.writes.length === 1 &&
+      operation.directEffects.writes[0] === operation.effect,
     `${label} effects must write its exact resource effect and read nothing`
   );
 }

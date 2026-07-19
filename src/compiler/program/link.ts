@@ -94,9 +94,9 @@ function placeLegacyFunctions(
 
       placements.set(entry.block, placement);
       rootPlacements.push(placement);
-      for (const { action } of placement.analysis.calls()) {
-        if (placement.analysis.callActionMustExecute(action)) {
-          liveCalls.push(action.target);
+      for (const { call } of placement.analysis.calls()) {
+        if (placement.analysis.callMustExecute(call)) {
+          liveCalls.push(call.target);
         }
       }
     }
@@ -123,8 +123,8 @@ function linkDefinedFunctions(
 
     assert(signature !== undefined, `function ${definition.ref.id} has no program signature`);
     const callTargets = unique(placement.analysis.calls()
-      .filter(({ action }) => placement.analysis.callActionMustExecute(action))
-      .map(({ action }) => action.target));
+      .filter(({ call }) => placement.analysis.callMustExecute(call))
+      .map(({ call }) => call.target));
     const resources = resourcesUsedBy(placement.analysis);
 
     placements.set(body, placement);
@@ -186,18 +186,11 @@ function declareFunction(
 function resourcesUsedBy(analysis: BodyAnalysis): readonly ResourceRef[] {
   const resources: ResourceRef[] = [];
 
-  for (const { action } of analysis.operations()) {
-    if (!analysis.opActionMustExecute(action)) {
+  for (const { operation } of analysis.operations()) {
+    if (!analysis.operationMustExecute(operation)) {
       continue;
     }
-    for (const access of [
-      ...action.op.effects.reads,
-      ...action.op.effects.writes
-    ]) {
-      if (access.space === "resource") {
-        resources.push(access.resource);
-      }
-    }
+    resources.push(...operation.referencedResources);
   }
   return unique(resources);
 }

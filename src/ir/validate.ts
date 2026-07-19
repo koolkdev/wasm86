@@ -1,54 +1,68 @@
 import { assert } from "#common/assert.js";
+import type {
+  StorageAccess,
+  StorageEffects
+} from "#compiler/ir/effects.js";
 import {
-  actionCompletes,
-  bodyCompletes,
   maxSwitchMatch,
-  type Action,
-  type CallAction,
-  type FunctionCallAction,
-  type IfAction,
-  type LoopAction,
-  type OpAction,
-  type ReturnCallAction,
-  type SwitchAction
-} from "./actions.js";
-import type { Body, IrBlock } from "./block.js";
-import type { IrFunction } from "./function.js";
+  type Control,
+  type IfControl,
+  type ReturnCallControl,
+  type SwitchControl
+} from "#compiler/ir/controls/index.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
-import type { Operation } from "#compiler/ir/operations/index.js";
-import type { CellRef } from "#compiler/refs/cell.js";
-import { actionOperands } from "./traverse.js";
-import { unboundedWidthBounds } from "#compiler/ir/values/width-bounds.js";
+import type {
+  CallOperation,
+  CellReadOperation,
+  CellWriteOperation,
+  Operation
+} from "#compiler/ir/operations/index.js";
 import { valueId } from "#compiler/ir/values/id.js";
-import {
-  type ValueId,
-  type ValueType,
-  type WidthBounds
+import { unboundedWidthBounds } from "#compiler/ir/values/width-bounds.js";
+import type {
+  ValueId,
+  ValueType,
+  WidthBounds
 } from "#compiler/ir/values/types.js";
+import type { CellRef } from "#compiler/refs/cell.js";
+import {
+  bodyCompletes,
+  type Body,
+  type BodyNode,
+  type IrBlock
+} from "./block.js";
+import type { IrFunction } from "./function.js";
+import type { NestedBody } from "./node.js";
+import { validateDeclaredStorageEffects } from "./validate/effects.js";
 import { validateResourceOperation } from "./validate/resource.js";
 
 export type ValidateIrBlockOptions = Readonly<{
   allowImplicitEntryFallthrough?: boolean;
   // Values the embedder consumes at the root body's dispatch/fallthrough
-  // boundary. They are not represented by actions inside IrBlock.
+  // boundary. They are not represented by nodes inside IrBlock.
   exportedOutputs?: Iterable<ValueId>;
 }>;
 
-type ActionSite = Readonly<{
+type BodyNodeSite = Readonly<{
   body: Body;
-  actionIndex: number;
+  nodeIndex: number;
   path: string;
 }>;
 
 type BodyOwner = Readonly<{
   body: Body;
-  actionIndex: number;
+  nodeIndex: number;
 }>;
+
+type LoopScope = Extract<
+  NestedBody["scope"],
+  { kind: "loop" }
+>;
 
 type BodyValidationContext = Readonly<{
   path: string;
   ownerOutput: ValueId | undefined;
-  enclosingLoop: LoopAction | undefined;
+  enclosingLoop: LoopScope | undefined;
 }>;
 
 type FunctionValidation = Readonly<{
@@ -57,9 +71,10 @@ type FunctionValidation = Readonly<{
   results: readonly ValueType[];
 }>;
 
-// Structural checks: bodies terminate consistently and nested bodies are
-// closed where their owner requires it.
-export function validateIrBlock(block: IrBlock, options: ValidateIrBlockOptions = {}): void {
+export function validateIrBlock(
+  block: IrBlock,
+  options: ValidateIrBlockOptions = {}
+): void {
   new IrValidator(block, undefined).validate(options);
 }
 
@@ -77,9 +92,9 @@ export function validateIrFunction(fn: IrFunction): void {
 class IrValidator {
   readonly #block: IrBlock;
   readonly #bodyOwners = new Map<Body, BodyOwner | null>();
-  readonly #producers = new Map<ValueId, ActionSite>();
+  readonly #producers = new Map<ValueId, BodyNodeSite>();
   readonly #loopInputs = new Map<ValueId, Body>();
-  readonly #cellSeeds = new Map<CellRef, ActionSite>();
+  readonly #cellSeeds = new Map<CellRef, BodyNodeSite>();
   readonly #function: FunctionValidation | undefined;
   readonly #parameterValues = new Set<ValueId>();
 
@@ -92,7 +107,7 @@ class IrValidator {
   validate(options: ValidateIrBlockOptions): void {
     this.#validateParameters();
     this.#indexBody(this.#block.body, "body");
-    this.#assertEveryActionOutputHasProducer();
+    this.#assertEveryNodeOutputHasProducer();
     this.#validateBody(this.#block.body, {
       path: "body",
       ownerOutput: undefined,
@@ -101,138 +116,309 @@ class IrValidator {
     this.#validateBoundaryOutputs(options.exportedOutputs ?? []);
 
     assert(
-      bodyCompletes(this.#block.body) || options.allowImplicitEntryFallthrough === true,
+      bodyCompletes(this.#block.body) ||
+        options.allowImplicitEntryFallthrough === true,
       "root body does not complete"
     );
   }
 
-  // Phase 1: index every nested body and record all scoped definitions.
+  // Phase 1 indexes producers and lexical definitions before checking uses.
   #indexBody(body: Body, path: string): void {
-    for (const [actionIndex, action] of body.actions.entries()) {
-      assertKnownAction(action);
-
-      const site = {
+    for (const [nodeIndex, node] of body.nodes.entries()) {
+      const site: BodyNodeSite = {
         body,
-        actionIndex,
-        path: `${path}.${action.kind}[${actionIndex}]`
+        nodeIndex,
+        path: `${path}.${node.kind}[${nodeIndex}]`
       };
 
-      this.#indexActionDefinitions(action, site);
+      this.#indexNodeDefinitions(node, site);
     }
   }
 
-  #indexActionDefinitions(action: Action, site: ActionSite): void {
-    switch (action.kind) {
-      case "op":
-        if (
-          action.op.kind === "resource.read" ||
-          action.op.kind === "resource.write"
-        ) {
-          validateResourceOperation(action.op, site.path);
-        }
-        this.#indexOpProducer(action, site);
-        this.#indexCellDefinition(action, site);
-        return;
-      case "call":
-        this.#indexCallOutputs(action, site);
-        return;
-      case "if":
-        if (action.output !== undefined) {
-          this.#indexIfProducer(action, site);
-        }
-        this.#indexNestedBody(action.thenBody, site, `${site.path}.thenBody`);
-        if (action.elseBody !== undefined) {
-          this.#indexNestedBody(action.elseBody, site, `${site.path}.elseBody`);
-        }
-        return;
-      case "switch":
-        assert(action.defaultBody !== undefined, `${site.path} is missing its default body`);
-        this.#indexSwitchProducer(action, site);
-        for (const [caseIndex, switchCase] of action.cases.entries()) {
-          this.#indexNestedBody(switchCase.body, site, `${site.path}.case[${caseIndex}]`);
-        }
-        this.#indexNestedBody(action.defaultBody, site, `${site.path}.default`);
-        return;
-      case "loop":
-        this.#recordBodyOwner(action.body, site, `${site.path}.body`);
-        this.#indexLoopInputs(action, site);
-        this.#indexBody(action.body, `${site.path}.body`);
-        return;
-      case "loopContinue":
-      case "finish":
-      case "return":
-      case "returnCall":
-        return;
-    }
-  }
-
-  #indexNestedBody(body: Body, owner: ActionSite, path: string): void {
-    this.#recordBodyOwner(body, owner, path);
-    this.#indexBody(body, path);
-  }
-
-  #recordBodyOwner(body: Body, owner: ActionSite, path: string): void {
-    assert(!this.#bodyOwners.has(body), `${path} reuses a Body object that already has an owner`);
-    this.#bodyOwners.set(body, {
-      body: owner.body,
-      actionIndex: owner.actionIndex
-    });
-  }
-
-  #indexOpProducer(action: OpAction, site: ActionSite): void {
-    const operation = action.op;
-
-    if (operation.result === undefined) {
-      assert(action.output === undefined, `${action.op.kind} op action must not declare an output`);
+  #indexNodeDefinitions(node: BodyNode, site: BodyNodeSite): void {
+    if (node.category === "operation") {
+      this.#validateOperationDeclaration(node, site.path);
+      this.#indexOperationOutputs(node, site);
+      this.#indexCellDefinition(node, site);
       return;
     }
 
-    assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
-    assert(
-      operation.effects.writes.length === 0,
-      `${site.path} output-producing op has writes whose execute-when-dead semantics are not modeled`
-    );
-    for (const input of operation.inputs) {
-      assert(
-        input.value < action.output,
-        `producer operand ${input.value} created after its output ${action.output}`
-      );
+    this.#validateControlDeclaration(node, site.path);
+    this.#indexControlOutputs(node, site);
+
+    for (const nested of node.nestedBodies) {
+      this.#indexScopedInputs(nested, site);
+      this.#indexNestedBody(nested.body, site, `${site.path}.${nested.role}`);
     }
-    this.#recordProducer(action.output, site);
   }
 
-  #indexCallOutputs(action: CallAction, site: ActionSite): void {
-    const resultTypes = action.target.type.results;
+  #validateOperationDeclaration(operation: Operation, path: string): void {
+    assert(Array.isArray(operation.inputs), `${path} inputs must be an array`);
+    assert(Array.isArray(operation.results), `${path} results must be an array`);
+
+    const operands = operation.operands;
+    const outputs = operation.outputs;
+
+    assert(Array.isArray(operands), `${path} operands must be an array`);
+    assert(Array.isArray(outputs), `${path} outputs must be an array`);
+    assert(
+      Array.isArray(operation.referencedResources),
+      `${path} referenced resources must be an array`
+    );
+    assert(
+      Array.isArray(operation.nestedBodies) && operation.nestedBodies.length === 0,
+      `${path} operation must not have nested bodies`
+    );
+    assert(
+      operands.length === operation.inputs.length,
+      `${path} declares ${operands.length} operands for ${operation.inputs.length} inputs`
+    );
+    for (const [index, input] of operation.inputs.entries()) {
+      assert(
+        operands[index] === input.value,
+        `${path} operand ${index} does not match its declared input`
+      );
+    }
+    assert(
+      outputs.length === operation.results.length,
+      `${path} declares ${outputs.length} outputs for ${operation.results.length} results`
+    );
+    validateDeclaredStorageEffects(operation.directEffects, path);
+
+    for (const [index, result] of operation.results.entries()) {
+      const output = outputs[index];
+
+      assert(output !== undefined, `${path} has no output ${index}`);
+      validateOperationResult(result, `${path} result ${index}`);
+      assert(
+        this.#block.values.valueType(output) === result.type,
+        `${path} output ${index} must be ${result.type}`
+      );
+      assertOutputBounds(this.#block, operation.kind, output, result);
+    }
+
+    switch (operation.kind) {
+      case "call":
+        this.#validateCallDeclaration(operation, path);
+        return;
+      case "cell.read":
+      case "cell.write":
+        validateCellOperation(operation, path);
+        return;
+      case "resource.read":
+      case "resource.write":
+        validateResourceOperation(operation, path);
+        return;
+    }
+
+    operation satisfies never;
+  }
+
+  #validateCallDeclaration(call: CallOperation, path: string): void {
+    const parameterTypes = call.target.type.parameters;
+    const resultTypes = call.target.type.results;
 
     assert(
-      action.outputs.length === resultTypes.length,
-      `${site.path} declares ${action.outputs.length} outputs for ${resultTypes.length} results`
+      resultTypes.length <= 1,
+      `${path} target has ${resultTypes.length} results; multiple call results are not supported yet`
     );
-    assert(action.outputs.length <= 1, `${site.path} has unsupported multiple call outputs`);
-    for (const [index, output] of action.outputs.entries()) {
+
+    assert(
+      call.inputs.length === parameterTypes.length,
+      `${path} passes ${call.inputs.length} arguments to ${parameterTypes.length} parameters`
+    );
+    for (const [index, input] of call.inputs.entries()) {
+      const expected = parameterTypes[index];
+
+      assert(expected !== undefined, `${path} has no parameter ${index}`);
+      assert(
+        input.type === expected,
+        `${path} argument ${index} declares ${input.type}, expected ${expected}`
+      );
+    }
+    assert(
+      call.results.length === resultTypes.length,
+      `${path} declares ${call.results.length} results for ${resultTypes.length} target results`
+    );
+    for (const [index, result] of call.results.entries()) {
       const expected = resultTypes[index];
 
-      assert(expected !== undefined, `${site.path} has no result ${index}`);
+      assert(expected !== undefined, `${path} target has no result ${index}`);
       assert(
-        this.#block.values.valueType(output) === expected,
-        `${site.path} output ${index} must be ${expected}`
+        result.type === expected,
+        `${path} result ${index} declares ${result.type}, expected ${expected}`
       );
-      for (const argument of action.arguments) {
+      if (result.type === "i32") {
         assert(
-          argument.value < output,
-          `call argument ${argument.value} created after its output ${output}`
+          result.bounds === undefined,
+          `${path} call result ${index} must not invent width bounds`
+        );
+      }
+    }
+    assert(
+      call.directEffects === call.target.effects,
+      `${path} effects do not match its call target`
+    );
+    assert(
+      call.referencedResources.length === 0,
+      `${path} call must not require caller resource bindings`
+    );
+  }
+
+  #validateControlDeclaration(control: Control, path: string): void {
+    const operands = control.operands;
+    const outputs = control.outputs;
+    const nestedBodies = control.nestedBodies;
+    const directEffects = control.directEffects;
+
+    assert(Array.isArray(operands), `${path} operands must be an array`);
+    assert(Array.isArray(outputs), `${path} outputs must be an array`);
+    assert(Array.isArray(nestedBodies), `${path} nested bodies must be an array`);
+    assert(outputs.length <= 1, `${path} control has multiple join outputs`);
+    validateDeclaredStorageEffects(directEffects, path);
+
+    switch (control.kind) {
+      case "if":
+        validateIfControlShape(
+          control,
+          operands,
+          outputs,
+          nestedBodies,
+          directEffects,
+          path
+        );
+        return;
+      case "switch":
+        validateSwitchControlShape(
+          control,
+          operands,
+          outputs,
+          nestedBodies,
+          directEffects,
+          path
+        );
+        return;
+      case "loop":
+        validateLoopControlShape(
+          control,
+          operands,
+          outputs,
+          nestedBodies,
+          directEffects,
+          this.#block,
+          path
+        );
+        return;
+      case "loopContinue":
+        assertNoControlResults(outputs, nestedBodies, path);
+        assertSameValues(
+          operands,
+          control.updates,
+          `${path} operands do not match its updates`
+        );
+        assertNoDirectEffects(directEffects, path);
+        return;
+      case "finish":
+        assertNoControlResults(outputs, nestedBodies, path);
+        assertSameValues(
+          operands,
+          [control.finish.kind === "exit"
+            ? control.finish.result
+            : control.finish.targetEip],
+          `${path} operands do not match its finish value`
+        );
+        assertNoDirectEffects(directEffects, path);
+        return;
+      case "return":
+        assertNoControlResults(outputs, nestedBodies, path);
+        assertSameValues(
+          operands,
+          control.results,
+          `${path} operands do not match its return results`
+        );
+        assertNoDirectEffects(directEffects, path);
+        return;
+      case "returnCall":
+        validateReturnCallControlShape(
+          control,
+          operands,
+          outputs,
+          nestedBodies,
+          directEffects,
+          path
+        );
+        return;
+    }
+  }
+
+  #indexOperationOutputs(
+    operation: Operation,
+    site: BodyNodeSite
+  ): void {
+    const outputs = operation.outputs;
+
+    for (const output of outputs) {
+      for (const input of operation.inputs) {
+        assert(
+          input.value < output,
+          `producer operand ${input.value} created after its output ${output}`
         );
       }
       this.#recordProducer(output, site);
     }
   }
 
+  #indexControlOutputs(control: Control, site: BodyNodeSite): void {
+    const outputs = control.outputs;
+    const operands = control.operands;
+    const nestedBodies = control.nestedBodies;
+
+    for (const output of outputs) {
+      for (const operand of operands) {
+        assert(
+          operand < output,
+          `${control.kind} operand ${operand} created after its output ${output}`
+        );
+      }
+      for (const nested of nestedBodies) {
+        if (nested.scope.kind === "ordinary" && nested.body.result !== undefined) {
+          assert(
+            nested.body.result < output,
+            `${control.kind} result ${nested.body.result} created after its output ${output}`
+          );
+        }
+      }
+      this.#recordProducer(output, site);
+    }
+  }
+
+  #indexNestedBody(
+    body: Body,
+    owner: BodyNodeSite,
+    path: string
+  ): void {
+    this.#recordBodyOwner(body, owner, path);
+    this.#indexBody(body, path);
+  }
+
+  #recordBodyOwner(body: Body, owner: BodyNodeSite, path: string): void {
+    assert(
+      !this.#bodyOwners.has(body),
+      `${path} reuses a Body object that already has an owner`
+    );
+    this.#bodyOwners.set(body, {
+      body: owner.body,
+      nodeIndex: owner.nodeIndex
+    });
+  }
+
   // The seed write is the cell's declaration: the body holding it is the
   // cell's lexical scope, so scoping needs no identity beyond this site.
-  #indexCellDefinition(action: OpAction, site: ActionSite): void {
-    const operation = action.op;
-
-    if (operation.kind !== "cell.write" || operation.initialization !== "seed") {
+  #indexCellDefinition(operation: Operation, site: BodyNodeSite): void {
+    if (
+      operation.kind !== "cell.write" ||
+      operation.initialization !== "seed"
+    ) {
       return;
     }
 
@@ -243,109 +429,82 @@ class IrValidator {
     this.#cellSeeds.set(operation.cell, site);
   }
 
-  #indexSwitchProducer(action: SwitchAction, site: ActionSite): void {
-    this.#recordProducer(action.output, site);
+  #recordProducer(output: ValueId, site: BodyNodeSite): void {
     assert(
-      action.selector < action.output,
-      `switch selector ${action.selector} created after its output ${action.output}`
+      this.#block.values.node(output).kind === "nodeOutput",
+      `${site.path} producer output ${output} is not a nodeOutput value`
     );
-
-    for (const body of [...action.cases.map((switchCase) => switchCase.body), action.defaultBody]) {
-      if (body.result !== undefined) {
-        assert(
-          body.result < action.output,
-          `switch result ${body.result} created after its output ${action.output}`
-        );
-      }
-    }
-  }
-
-  #indexIfProducer(action: IfAction, site: ActionSite): void {
-    const output = action.output;
-
-    assert(output !== undefined, `${site.path} value-producing if is missing its output`);
-    assert(action.elseBody !== undefined, `${site.path} value-producing if is missing its else body`);
-    this.#recordProducer(output, site);
     assert(
-      action.condition < output,
-      `if condition ${action.condition} created after its output ${output}`
+      !this.#producers.has(output),
+      `node output ${output} has more than one producer`
     );
-
-    for (const body of [action.thenBody, action.elseBody]) {
-      if (body.result !== undefined) {
-        assert(
-          body.result < output,
-          `if result ${body.result} created after its output ${output}`
-        );
-      }
-    }
-  }
-
-  #recordProducer(output: ValueId, site: ActionSite): void {
-    assert(
-      this.#block.values.node(output).kind === "actionOutput",
-      `${site.path} producer output ${output} is not an actionOutput value`
-    );
-    assert(!this.#producers.has(output), `action output ${output} has more than one producer`);
     this.#producers.set(output, site);
   }
 
-  #indexLoopInputs(action: LoopAction, site: ActionSite): void {
-    for (const cell of action.carried) {
-      assert(
-        this.#block.values.node(cell.loopInput).kind === "loopInput",
-        `${site.path} carried cell input ${cell.loopInput} is not a loopInput value`
-      );
+  #indexScopedInputs(
+    nested: NestedBody,
+    site: BodyNodeSite
+  ): void {
+    if (nested.scope.kind === "ordinary") {
+      return;
+    }
 
+    for (const input of nested.scope.inputs) {
       assert(
-        !this.#loopInputs.has(cell.loopInput),
-        `${site.path} reuses loop input ${cell.loopInput} across carried cells or loops`
+        this.#block.values.node(input).kind === "loopInput",
+        `${site.path}.${nested.role} scoped input ${input} is not a loopInput value`
       );
-      this.#loopInputs.set(cell.loopInput, action.body);
+      assert(
+        !this.#loopInputs.has(input),
+        `${site.path} reuses loop input ${input} across carried cells or loops`
+      );
+      this.#loopInputs.set(input, nested.body);
     }
   }
 
-  #assertEveryActionOutputHasProducer(): void {
+  #assertEveryNodeOutputHasProducer(): void {
     for (let rawId = 0; rawId < this.#block.values.size(); rawId += 1) {
       const id = valueId(rawId);
 
-      if (this.#block.values.node(id).kind === "actionOutput") {
-        assert(this.#producers.has(id), `action output ${id} has no producer`);
+      if (this.#block.values.node(id).kind === "nodeOutput") {
+        assert(this.#producers.has(id), `node output ${id} has no producer`);
       }
     }
   }
 
-  // A body carries a result exactly when its owner declares an output and the
-  // body itself does not complete. `enclosingLoop` is the innermost loop whose
-  // back edge a continue in this body would take.
-  //
-  // Phase 2: validate action semantics and every value use against phase 1.
+  // A body carries a result exactly when its ordinary owner declares an
+  // output. `enclosingLoop` is the innermost loop whose back edge a continue
+  // in this body would take.
   #validateBody(body: Body, context: BodyValidationContext): void {
     this.#validateBodyResult(body, context);
 
-    for (const [actionIndex, action] of body.actions.entries()) {
-      const site = {
+    for (const [nodeIndex, node] of body.nodes.entries()) {
+      const site: BodyNodeSite = {
         body,
-        actionIndex,
-        path: `${context.path}.${action.kind}[${actionIndex}]`
+        nodeIndex,
+        path: `${context.path}.${node.kind}[${nodeIndex}]`
       };
 
-      this.#validateAction(action, site, context);
+      this.#validateNode(node, site, context);
 
-      if (actionCompletes(action)) {
+      if (node.completes({ bodyCompletes })) {
         assert(
-          actionIndex === body.actions.length - 1,
-          `${context.path} has actions after its terminal ${action.kind} action`
+          nodeIndex === body.nodes.length - 1,
+          `${context.path} has nodes after its terminal ${node.kind} control`
         );
       }
 
-      this.#validateNestedBodies(action, site, context);
+      this.#validateNestedBodies(node, site, context);
     }
 
     if (body.result !== undefined) {
       this.#validateValueUse(
         body.result,
-        { body, actionIndex: body.actions.length, path: `${context.path} fallthrough` },
+        {
+          body,
+          nodeIndex: body.nodes.length,
+          path: `${context.path} fallthrough`
+        },
         `${context.path} result`
       );
     }
@@ -376,84 +535,69 @@ class IrValidator {
       return;
     }
 
-    // Escaping bodies under an output owner are model-valid but have no
-    // producer yet; the emitter cannot lower them.
     assert(context.ownerOutput === undefined, `${context.path} must carry a result`);
   }
 
-  #validateAction(
-    action: Action,
-    site: ActionSite,
+  #validateNode(
+    node: BodyNode,
+    site: BodyNodeSite,
     context: BodyValidationContext
   ): void {
-    if (action.kind === "op") {
-      const operation = action.op;
-
-      validateOpAction(this.#block, action, operation);
-      this.#validateCellAccess(action, site);
-
-      for (const input of operation.inputs) {
-        const actualType = this.#block.values.valueType(input.value);
-
-        assert(
-          actualType === input.type,
-          `${site.path} operand ${input.value} must be ${input.type}, got ${actualType}`
-        );
-        this.#validateValueUse(
-          input.value,
-          site,
-          `${site.path} operand ${input.value}`
-        );
-      }
-    } else if (action.kind === "call" || action.kind === "returnCall") {
-      this.#validateCall(action, site);
-    } else {
-      for (const operand of actionOperands(action)) {
-        this.#validateValueUse(operand, site, `${site.path} operand ${operand}`);
-      }
+    if (node.category === "operation") {
+      this.#validateOperationInputs(node, site);
+      this.#validateCellAccess(node, site);
+      return;
     }
 
-    switch (action.kind) {
+    for (const operand of node.operands) {
+      this.#validateValueUse(operand, site, `${site.path} operand ${operand}`);
+    }
+
+    switch (node.kind) {
+      case "if":
+        assertValueType(this.#block, node.condition, "i32", `${site.path} condition`);
+        return;
       case "switch":
-        validateSwitchCases(action, site.path);
+        assertValueType(this.#block, node.selector, "i32", `${site.path} selector`);
+        validateSwitchCases(node, site.path);
         return;
       case "loop":
         return;
       case "loopContinue":
-        assert(
-          context.enclosingLoop !== undefined,
-          `${site.path} has a loopContinue outside any loop body`
-        );
-        assert(
-          action.updates.length === context.enclosingLoop.carried.length,
-          `${site.path} loopContinue updates do not align with the enclosing loop's carried cells`
-        );
+        this.#validateLoopContinue(node.updates, site, context);
         return;
       case "finish":
-        assert(this.#function === undefined, `${site.path} uses a block finish in a function`);
-        if (action.finish.kind === "exit") {
-          assert(
-            this.#block.values.valueType(action.finish.result) === "i64",
-            `${site.path} exit result must be i64`
-          );
-        }
+        this.#validateFinish(node, site.path);
         return;
       case "return":
-        this.#validateReturn(action.results, site.path);
+        this.#validateReturn(node.results, site.path);
         return;
       case "returnCall":
-        this.#validateReturnCall(action, site.path);
-        return;
-      case "if":
-      case "call":
-      case "op":
+        this.#validateReturnCall(node, site.path);
         return;
     }
   }
 
-  #validateCellAccess(action: OpAction, site: ActionSite): void {
-    const operation = action.op;
+  #validateOperationInputs(
+    operation: Operation,
+    site: BodyNodeSite
+  ): void {
+    for (const input of operation.inputs) {
+      const actualType = this.#block.values.valueType(input.value);
 
+      assert(
+        actualType === input.type,
+        `${site.path} operand ${input.value} must be ${input.type}, got ${actualType}`
+      );
+      this.#validateValueUse(
+        input.value,
+        site,
+        `${site.path} operand ${input.value}`
+      );
+    }
+  }
+
+  #validateCellAccess(operation: Operation, site: BodyNodeSite): void {
     if (operation.kind !== "cell.read" && operation.kind !== "cell.write") {
       return;
     }
@@ -462,16 +606,15 @@ class IrValidator {
 
     assert(seed !== undefined, `${site.path} uses a cell with no seed in this root`);
     if (operation.kind === "cell.write" && operation.initialization === "seed") {
-      // Phase 1 proved seed uniqueness, so this occurrence is the declaration.
       return;
     }
     this.#assertCellSeedDominates(seed, site);
   }
 
-  #assertCellSeedDominates(seed: ActionSite, use: ActionSite): void {
+  #assertCellSeedDominates(seed: BodyNodeSite, use: BodyNodeSite): void {
     if (seed.body === use.body) {
       assert(
-        seed.actionIndex < use.actionIndex,
+        seed.nodeIndex < use.nodeIndex,
         `${use.path} reads or writes a cell before its seed`
       );
       return;
@@ -486,7 +629,7 @@ class IrValidator {
       );
       if (owner.body === seed.body) {
         assert(
-          seed.actionIndex < owner.actionIndex,
+          seed.nodeIndex < owner.nodeIndex,
           `${use.path} reads or writes a cell before its seed`
         );
         return;
@@ -495,58 +638,76 @@ class IrValidator {
     }
   }
 
-  #validateNestedBodies(
-    action: Action,
-    site: ActionSite,
+  #validateLoopContinue(
+    updates: readonly ValueId[],
+    site: BodyNodeSite,
     context: BodyValidationContext
   ): void {
-    switch (action.kind) {
-      case "if":
-        this.#validateBody(action.thenBody, {
-          path: `${site.path}.thenBody`,
-          ownerOutput: action.output,
-          enclosingLoop: context.enclosingLoop
-        });
-        if (action.elseBody !== undefined) {
-          this.#validateBody(action.elseBody, {
-            path: `${site.path}.elseBody`,
-            ownerOutput: action.output,
-            enclosingLoop: context.enclosingLoop
-          });
-        }
+    const loop = context.enclosingLoop;
+
+    assert(loop !== undefined, `${site.path} has a loopContinue outside any loop body`);
+    assert(
+      updates.length === loop.inputs.length,
+      `${site.path} loopContinue updates do not align with the enclosing loop's carried cells`
+    );
+    for (const [index, update] of updates.entries()) {
+      const input = loop.inputs[index];
+
+      assert(input !== undefined, `${site.path} enclosing loop has no input ${index}`);
+      assert(
+        this.#block.values.valueType(update) === this.#block.values.valueType(input),
+        `${site.path} update ${index} does not match its loop input type`
+      );
+    }
+  }
+
+  #validateFinish(
+    control: Extract<Control, { kind: "finish" }>,
+    path: string
+  ): void {
+    assert(this.#function === undefined, `${path} uses a block finish in a function`);
+
+    switch (control.finish.kind) {
+      case "dispatch":
         return;
-      case "switch":
-        for (const [caseIndex, switchCase] of action.cases.entries()) {
-          this.#validateBody(switchCase.body, {
-            path: `${site.path}.case[${caseIndex}]`,
-            ownerOutput: action.output,
-            enclosingLoop: context.enclosingLoop
-          });
-        }
-        this.#validateBody(action.defaultBody, {
-          path: `${site.path}.default`,
-          ownerOutput: action.output,
-          enclosingLoop: context.enclosingLoop
-        });
-        return;
-      case "loop":
-        this.#validateBody(action.body, {
-          path: `${site.path}.body`,
-          ownerOutput: undefined,
-          enclosingLoop: action
-        });
-        return;
-      case "op":
-      case "call":
-      case "loopContinue":
-      case "finish":
-      case "return":
-      case "returnCall":
+      case "exit":
+        assertValueType(this.#block, control.finish.result, "i64", `${path} exit result`);
         return;
     }
   }
 
-  #validateValueUse(value: ValueId, site: ActionSite, path: string): void {
+  #validateNestedBodies(
+    node: BodyNode,
+    site: BodyNodeSite,
+    context: BodyValidationContext
+  ): void {
+    const outputs = node.outputs;
+
+    assert(outputs.length <= 1, `${site.path} has multiple nested-body outputs`);
+    const ownerOutput = outputs[0];
+
+    for (const nested of node.nestedBodies) {
+      if (nested.scope.kind === "loop") {
+        this.#validateBody(nested.body, {
+          path: `${site.path}.${nested.role}`,
+          ownerOutput: undefined,
+          enclosingLoop: nested.scope
+        });
+      } else {
+        this.#validateBody(nested.body, {
+          path: `${site.path}.${nested.role}`,
+          ownerOutput,
+          enclosingLoop: context.enclosingLoop
+        });
+      }
+    }
+  }
+
+  #validateValueUse(
+    value: ValueId,
+    site: BodyNodeSite,
+    path: string
+  ): void {
     const visited = new Set<ValueId>();
 
     const visit = (id: ValueId): void => {
@@ -555,19 +716,19 @@ class IrValidator {
       }
       visited.add(id);
 
-      const node = this.#block.values.node(id);
+      const valueNode = this.#block.values.node(id);
 
-      switch (node.kind) {
+      switch (valueNode.kind) {
         case "parameter":
           assert(
             this.#parameterValues.has(id),
             `function parameter ${id} is used outside its defining function at ${path}`
           );
           return;
-        case "actionOutput": {
+        case "nodeOutput": {
           const producer = this.#producers.get(id);
 
-          assert(producer !== undefined, `action output ${id} used at ${path} has no producer`);
+          assert(producer !== undefined, `node output ${id} used at ${path} has no producer`);
           this.#assertProducerDominatesUse(id, producer, site, path);
           return;
         }
@@ -593,14 +754,14 @@ class IrValidator {
 
   #assertProducerDominatesUse(
     output: ValueId,
-    producer: ActionSite,
-    use: ActionSite,
+    producer: BodyNodeSite,
+    use: BodyNodeSite,
     path: string
   ): void {
     if (producer.body === use.body) {
       assert(
-        producer.actionIndex < use.actionIndex,
-        `action output ${output} produced at ${producer.path} does not dominate ${path}`
+        producer.nodeIndex < use.nodeIndex,
+        `node output ${output} produced at ${producer.path} does not dominate ${path}`
       );
       return;
     }
@@ -610,13 +771,13 @@ class IrValidator {
 
       assert(
         owner !== undefined && owner !== null,
-        `action output ${output} produced at ${producer.path} does not dominate ${path}`
+        `node output ${output} produced at ${producer.path} does not dominate ${path}`
       );
 
       if (owner.body === producer.body) {
         assert(
-          producer.actionIndex < owner.actionIndex,
-          `action output ${output} produced at ${producer.path} does not dominate ${path}`
+          producer.nodeIndex < owner.nodeIndex,
+          `node output ${output} produced at ${producer.path} does not dominate ${path}`
         );
         return;
       }
@@ -641,14 +802,14 @@ class IrValidator {
   }
 
   #validateBoundaryOutputs(outputs: Iterable<ValueId>): void {
-    const actionIndex = bodyCompletes(this.#block.body)
-      ? this.#block.body.actions.length - 1
-      : this.#block.body.actions.length;
+    const nodeIndex = bodyCompletes(this.#block.body)
+      ? this.#block.body.nodes.length - 1
+      : this.#block.body.nodes.length;
 
     for (const output of outputs) {
       this.#validateValueUse(
         output,
-        { body: this.#block.body, actionIndex, path: "body boundary" },
+        { body: this.#block.body, nodeIndex, path: "body boundary" },
         `exported output ${output}`
       );
     }
@@ -696,44 +857,6 @@ class IrValidator {
     }
   }
 
-  #validateCall(action: FunctionCallAction, site: ActionSite): void {
-    const expected = action.target.type.parameters;
-
-    assert(
-      action.arguments.length === expected.length,
-      `${site.path} passes ${action.arguments.length} arguments to ${expected.length} parameters`
-    );
-    for (const [index, argument] of action.arguments.entries()) {
-      const parameterType = expected[index];
-
-      assert(parameterType !== undefined, `${site.path} has no parameter ${index}`);
-      assert(
-        argument.type === parameterType,
-        `${site.path} argument ${index} declares ${argument.type}, expected ${parameterType}`
-      );
-      const actual = this.#block.values.valueType(argument.value);
-
-      assert(
-        actual === parameterType,
-        `${site.path} argument ${index} must be ${parameterType}, got ${actual}`
-      );
-      this.#validateValueUse(argument.value, site, `${site.path} argument ${index}`);
-    }
-  }
-
-  #validateReturnCall(action: ReturnCallAction, path: string): void {
-    const fn = this.#function;
-
-    assert(fn !== undefined, `${path} returns from a block body`);
-    const results = action.target.type.results;
-
-    assert(
-      results.length === fn.results.length &&
-        results.every((type, index) => type === fn.results[index]),
-      `${path} target results do not match the enclosing function`
-    );
-  }
-
   #validateReturn(results: readonly ValueId[], path: string): void {
     const fn = this.#function;
 
@@ -751,12 +874,309 @@ class IrValidator {
       assert(actual === expected, `${path} result ${index} must be ${expected}, got ${actual}`);
     }
   }
+
+  #validateReturnCall(control: ReturnCallControl, path: string): void {
+    const fn = this.#function;
+
+    assert(fn !== undefined, `${path} returns from a block body`);
+    const targetResults = control.target.type.results;
+
+    assert(
+      targetResults.length === fn.results.length &&
+        targetResults.every((type, index) => type === fn.results[index]),
+      `${path} target results do not match the enclosing function`
+    );
+    for (const [index, input] of control.inputs.entries()) {
+      const expected = control.target.type.parameters[index];
+
+      assert(expected !== undefined, `${path} target has no parameter ${index}`);
+      const actual = this.#block.values.valueType(input.value);
+
+      assert(
+        actual === expected,
+        `${path} argument ${index} must be ${expected}, got ${actual}`
+      );
+    }
+  }
 }
 
-function validateSwitchCases(action: SwitchAction, path: string): void {
+function validateOperationResult(result: OperationResult, path: string): void {
+  assert(result !== null && typeof result === "object", `${path} must be an object`);
+
+  switch (result.type) {
+    case "i32":
+      if (result.bounds !== undefined) {
+        validateWidthBounds(result.bounds, path);
+      }
+      return;
+    case "i64":
+      assert(!Object.hasOwn(result, "bounds"), `${path} i64 result must not declare width bounds`);
+      return;
+  }
+}
+
+function validateCellOperation(
+  operation: CellReadOperation | CellWriteOperation,
+  path: string
+): void {
+  assert(
+    operation.referencedResources.length === 0,
+    `${path} cell operation must not require resource bindings`
+  );
+
+  switch (operation.kind) {
+    case "cell.read": {
+      const result = operation.results[0];
+
+      assert(operation.inputs.length === 0, `${path} must not have inputs`);
+      assert(
+        operation.results.length === 1 && result !== undefined,
+        `${path} must have exactly one result`
+      );
+      assert(
+        result.type === operation.cell.type,
+        `${path} result type must match its cell`
+      );
+      assert(
+        result.type !== "i32" || result.bounds === undefined,
+        `${path} result must not refine its cell value bounds`
+      );
+      assert(
+        operation.directEffects.reads.length === 1 &&
+          isCellAccess(operation.directEffects.reads[0], operation.cell) &&
+          operation.directEffects.writes.length === 0,
+        `${path} effects must read its exact cell and write nothing`
+      );
+      return;
+    }
+    case "cell.write": {
+      const input = operation.inputs[0];
+
+      assert(
+        operation.initialization === "seed" ||
+          operation.initialization === "update",
+        `${path} has an invalid cell-write initialization`
+      );
+      assert(
+        operation.inputs.length === 1 &&
+          input !== undefined &&
+          input.value === operation.value &&
+          input.type === operation.cell.type,
+        `${path} must have exactly its cell-typed value input`
+      );
+      assert(operation.results.length === 0, `${path} must not have results`);
+      assert(
+        operation.directEffects.reads.length === 0 &&
+          operation.directEffects.writes.length === 1 &&
+          isCellAccess(operation.directEffects.writes[0], operation.cell),
+        `${path} effects must write its exact cell and read nothing`
+      );
+      return;
+    }
+  }
+}
+
+function isCellAccess(
+  access: StorageAccess | undefined,
+  cell: CellRef
+): boolean {
+  return access?.space === "cell" && access.cell === cell;
+}
+
+function validateIfControlShape(
+  control: IfControl,
+  operands: readonly ValueId[],
+  outputs: readonly ValueId[],
+  nestedBodies: readonly NestedBody[],
+  directEffects: StorageEffects,
+  path: string
+): void {
+  assertSameValues(
+    operands,
+    [control.condition],
+    `${path} operands do not match its condition`
+  );
+  const expectedOutputs = control.output === undefined ? [] : [control.output];
+
+  assertSameValues(outputs, expectedOutputs, `${path} outputs do not match its output field`);
+  assert(
+    control.output === undefined || control.elseBody !== undefined,
+    `${path} value-producing if is missing its else body`
+  );
+  assert(
+    nestedBodies.length === (control.elseBody === undefined ? 1 : 2),
+    `${path} nested bodies do not match its branches`
+  );
+  assertOrdinaryBody(
+    nestedBodies[0],
+    control.thenBody,
+    "thenBody",
+    `${path}.thenBody`
+  );
+  if (control.elseBody !== undefined) {
+    assertOrdinaryBody(
+      nestedBodies[1],
+      control.elseBody,
+      "elseBody",
+      `${path}.elseBody`
+    );
+  }
+  assertNoDirectEffects(directEffects, path);
+}
+
+function validateSwitchControlShape(
+  control: SwitchControl,
+  operands: readonly ValueId[],
+  outputs: readonly ValueId[],
+  nestedBodies: readonly NestedBody[],
+  directEffects: StorageEffects,
+  path: string
+): void {
+  assertSameValues(
+    operands,
+    [control.selector],
+    `${path} operands do not match its selector`
+  );
+  assertSameValues(outputs, [control.output], `${path} outputs do not match its output field`);
+  assert(
+    nestedBodies.length === control.cases.length + 1,
+    `${path} nested bodies do not match its cases and default`
+  );
+  for (const [index, entry] of control.cases.entries()) {
+    assertOrdinaryBody(
+      nestedBodies[index],
+      entry.body,
+      `case[${index}]`,
+      `${path}.case[${index}]`
+    );
+  }
+  assertOrdinaryBody(
+    nestedBodies[control.cases.length],
+    control.defaultBody,
+    "default",
+    `${path}.default`
+  );
+  assertNoDirectEffects(directEffects, path);
+}
+
+function validateLoopControlShape(
+  control: Extract<Control, { kind: "loop" }>,
+  operands: readonly ValueId[],
+  outputs: readonly ValueId[],
+  nestedBodies: readonly NestedBody[],
+  directEffects: StorageEffects,
+  block: IrBlock,
+  path: string
+): void {
+  assertNoOutputs(outputs, path);
+  assertSameValues(
+    operands,
+    control.carried.map((entry) => entry.seed),
+    `${path} operands do not match its carried seeds`
+  );
+  assert(nestedBodies.length === 1, `${path} must have exactly one loop body`);
+  const nested = nestedBodies[0];
+
+  assert(nested !== undefined && nested.body === control.body, `${path} has the wrong loop body`);
+  assert(nested.role === "body", `${path} loop body has the wrong role`);
+  assert(nested.scope.kind === "loop", `${path} body must establish a loop scope`);
+  assertSameValues(
+    nested.scope.inputs,
+    control.carried.map((entry) => entry.loopInput),
+    `${path} loop scope does not match its carried inputs`
+  );
+  for (const [index, carried] of control.carried.entries()) {
+    assert(
+      block.values.valueType(carried.seed) === block.values.valueType(carried.loopInput),
+      `${path} carried cell ${index} seed and input types do not match`
+    );
+  }
+  assertNoDirectEffects(directEffects, path);
+}
+
+function validateReturnCallControlShape(
+  control: ReturnCallControl,
+  operands: readonly ValueId[],
+  outputs: readonly ValueId[],
+  nestedBodies: readonly NestedBody[],
+  directEffects: StorageEffects,
+  path: string
+): void {
+  assertNoControlResults(outputs, nestedBodies, path);
+  assertSameValues(
+    operands,
+    control.inputs.map((input) => input.value),
+    `${path} operands do not match its call inputs`
+  );
+  const parameters = control.target.type.parameters;
+
+  assert(
+    control.inputs.length === parameters.length,
+    `${path} passes ${control.inputs.length} arguments to ${parameters.length} parameters`
+  );
+  for (const [index, input] of control.inputs.entries()) {
+    const expected = parameters[index];
+
+    assert(expected !== undefined, `${path} target has no parameter ${index}`);
+    assert(
+      input.type === expected,
+      `${path} argument ${index} declares ${input.type}, expected ${expected}`
+    );
+  }
+  assert(directEffects === control.target.effects, `${path} effects do not match its call target`);
+  assert(
+    control.completes({ bodyCompletes }),
+    `${path} returnCall must complete its body`
+  );
+}
+
+function assertNoControlResults(
+  outputs: readonly ValueId[],
+  nestedBodies: readonly NestedBody[],
+  path: string
+): void {
+  assertNoOutputs(outputs, path);
+  assert(nestedBodies.length === 0, `${path} must not have nested bodies`);
+}
+
+function assertNoOutputs(outputs: readonly ValueId[], path: string): void {
+  assert(outputs.length === 0, `${path} must not have outputs`);
+}
+
+function assertOrdinaryBody(
+  nested: NestedBody | undefined,
+  body: Body,
+  role: string,
+  path: string
+): void {
+  assert(nested !== undefined && nested.body === body, `${path} has the wrong body`);
+  assert(nested.role === role, `${path} has the wrong role`);
+  assert(nested.scope.kind === "ordinary", `${path} must have ordinary scope`);
+}
+
+function assertNoDirectEffects(effects: StorageEffects, path: string): void {
+  assert(
+    effects.reads.length === 0 && effects.writes.length === 0,
+    `${path} must not have direct effects`
+  );
+}
+
+function assertSameValues(
+  actual: readonly ValueId[],
+  expected: readonly ValueId[],
+  message: string
+): void {
+  assert(
+    actual.length === expected.length &&
+      actual.every((value, index) => value === expected[index]),
+    message
+  );
+}
+
+function validateSwitchCases(control: SwitchControl, path: string): void {
   const seen = new Set<number>();
 
-  for (const { match } of action.cases) {
+  for (const { match } of control.cases) {
     assert(
       Number.isInteger(match) && match >= 0 && match <= maxSwitchMatch,
       `${path} case match ${match} is not an integer in [0, ${maxSwitchMatch}]`
@@ -766,22 +1186,20 @@ function validateSwitchCases(action: SwitchAction, path: string): void {
   }
 }
 
-function validateOpAction(block: IrBlock, action: OpAction, operation: Operation): void {
-  if (operation.result === undefined) {
-    return;
-  }
+function assertValueType(
+  block: IrBlock,
+  value: ValueId,
+  expected: ValueType,
+  path: string
+): void {
+  const actual = block.values.valueType(value);
 
-  assert(action.output !== undefined, `${action.op.kind} op action is missing its output`);
-  assert(
-    block.values.valueType(action.output) === operation.result.type,
-    `${action.op.kind} op action output ${action.output} has the wrong value type`
-  );
-  assertOutputBounds(block, action, action.output, operation.result);
+  assert(actual === expected, `${path} must be ${expected}, got ${actual}`);
 }
 
 function assertOutputBounds(
   block: IrBlock,
-  action: OpAction,
+  operationKind: string,
   output: ValueId,
   expected: OperationResult
 ): void {
@@ -794,7 +1212,20 @@ function assertOutputBounds(
 
   assert(
     boundsEqual(actualBounds, expectedBounds),
-    `${action.op.kind} op action output ${output} has the wrong bounds: expected ${formatBounds(expectedBounds)}, got ${formatBounds(actualBounds)}`
+    `${operationKind} operation output ${output} has the wrong bounds: expected ${formatBounds(expectedBounds)}, got ${formatBounds(actualBounds)}`
+  );
+}
+
+function validateWidthBounds(bounds: WidthBounds, path: string): void {
+  assert(
+    Number.isInteger(bounds.unsignedBits) &&
+      bounds.unsignedBits >= 0 &&
+      bounds.unsignedBits <= 32 &&
+      Number.isInteger(bounds.signedBits) &&
+      bounds.signedBits >= 0 &&
+      bounds.signedBits <= 32 &&
+      bounds.signedBits <= bounds.unsignedBits + 1,
+    `${path} bounds are malformed`
   );
 }
 
@@ -804,21 +1235,4 @@ function boundsEqual(a: WidthBounds, b: WidthBounds): boolean {
 
 function formatBounds(bounds: WidthBounds): string {
   return `{ unsignedBits: ${bounds.unsignedBits}, signedBits: ${bounds.signedBits} }`;
-}
-
-function assertKnownAction(action: Action): void {
-  const kind = (action as { kind?: unknown }).kind;
-
-  assert(
-    kind === "op" ||
-      kind === "call" ||
-      kind === "returnCall" ||
-      kind === "if" ||
-      kind === "switch" ||
-      kind === "loop" ||
-      kind === "loopContinue" ||
-      kind === "finish" ||
-      kind === "return",
-    `unknown IR action kind ${String(kind)}`
-  );
 }

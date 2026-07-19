@@ -16,13 +16,13 @@ test("default builds skip IR validation before placement", () => {
     "--eval",
     "import { ValueTable } from '#compiler/ir/values/table.js'; " +
       "import { placeBody } from '#compiler/placement/place.js'; " +
-      "placeBody({ values: new ValueTable(), body: { actions: [] } });"
+      "placeBody({ values: new ValueTable(), body: { nodes: [] } });"
   ]);
 });
 
 function incompleteBlock(): IrBlock {
   return {
     values: new ValueTable(),
-    body: { actions: [] }
+    body: { nodes: [] }
   };
 }

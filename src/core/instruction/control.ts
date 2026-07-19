@@ -6,10 +6,11 @@ import type {
   SemanticsBuilder
 } from "#core/semantics/builder.js";
 import {
-  type BranchHint,
-  bodyCompletes
-} from "#ir/actions.js";
-import type { Body } from "#ir/block.js";
+  ifControl,
+  type BranchHint
+} from "#compiler/ir/controls/index.js";
+import { resourceWrite } from "#compiler/ir/operations/resource.js";
+import { bodyCompletes, type Body } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { type InstructionStateChannel } from "./state/channels.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -142,13 +143,12 @@ export class ControlEmitter {
       ? undefined
       : this.#buildImplicitElse(parentScope, thenArm.writtenChannels);
 
-    parent.push({
-      kind: "if",
+    parent.push(ifControl.create({
       condition,
       ...(hint !== undefined ? { hint } : {}),
       thenBody: thenArm.region.build(),
       ...(implicitElse !== undefined ? { elseBody: implicitElse } : {})
-    });
+    }));
 
     if (thenArm.outcome === "continues") {
       this.#applyJoinEffects(
@@ -176,13 +176,12 @@ export class ControlEmitter {
       this.#commitMissingJoinChannels(arm, joinedChannels);
     }
 
-    parent.push({
-      kind: "if",
+    parent.push(ifControl.create({
       condition,
       ...(hint !== undefined ? { hint } : {}),
       thenBody: thenArm.region.build(),
       elseBody: elseArm.region.build()
-    });
+    }));
 
     if (continuingArms.length === 0) {
       return "completes";
@@ -254,7 +253,7 @@ export class ControlEmitter {
 
     for (const channel of channels) {
       if (this.#state.isChannelDirty(channel)) {
-        region.push(this.#state.writeAction(
+        region.operation(resourceWrite, this.#state.writeback(
           access,
           channel,
           this.#state.readChannel(access, channel)

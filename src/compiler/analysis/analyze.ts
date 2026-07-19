@@ -1,28 +1,23 @@
 import { assert } from "#common/assert.js";
+import type { StorageAccess } from "#compiler/ir/effects.js";
 import type {
-  StorageEffects,
-  StorageAccess
-} from "#compiler/ir/effects.js";
+  Control,
+  ReturnCallControl
+} from "#compiler/ir/controls/index.js";
+import type {
+  Operation
+} from "#compiler/ir/operations/index.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import {
-  bodyFinal,
-  type Action,
-  type FunctionCallAction,
-  type IfAction,
-  type OpAction,
-  type SwitchAction
-} from "#ir/actions.js";
-import type { Body, IrBlock } from "#ir/block.js";
-import { actionOutput, finishOperands } from "#ir/traverse.js";
+import { bodyFinal, type Body, type BodyNode, type IrBlock } from "#ir/block.js";
 import type {
   BodyAnalysis,
   BodyPathStep,
   BodySite,
   CallSite,
-  ControlProducer,
+  FunctionCall,
+  JoinControlProducer,
   OperationSite,
-  ProducingAction,
   Producer,
   SiteId,
   ValueDemand
@@ -44,7 +39,7 @@ type BodyWalkResult = Readonly<{
 }>;
 
 type ControlProduction = Readonly<{
-  producer: ControlProducer;
+  producer: JoinControlProducer;
   dependencies: readonly ValueDemand[];
 }>;
 
@@ -61,9 +56,9 @@ class BodyAnalyzer implements BodyAnalysis {
   readonly #exportedOutputs: ValueId[];
 
   readonly #operations: OperationSite[] = [];
-  readonly #operationActions = new Set<OpAction>();
+  readonly #operationSet = new Set<Operation>();
   readonly #calls: CallSite[] = [];
-  readonly #callActions = new Set<FunctionCallAction>();
+  readonly #callSet = new Set<FunctionCall>();
 
   constructor(
     block: IrBlock,
@@ -78,7 +73,7 @@ class BodyAnalyzer implements BodyAnalysis {
     this.#recordExportDemands();
     this.#seedRoots();
     this.#propagateUses();
-    if (this.#recordRequiredCallDemands()) {
+    if (this.#recordRequiredOperationDemands()) {
       this.#useCounts.fill(0);
       this.#seedRoots();
       this.#propagateUses();
@@ -95,8 +90,8 @@ class BodyAnalyzer implements BodyAnalysis {
     return this.#siteIndex.sites();
   }
 
-  siteOf(body: Body, actionIndex: number): SiteId {
-    return this.#siteIndex.siteOf(body, actionIndex);
+  siteOf(body: Body, nodeIndex: number): SiteId {
+    return this.#siteIndex.siteOf(body, nodeIndex);
   }
 
   path(ancestor: Body, descendant: Body): readonly BodyPathStep[] | undefined {
@@ -124,7 +119,7 @@ class BodyAnalyzer implements BodyAnalysis {
     return this.#controlProductions.get(output)?.dependencies;
   }
 
-  controlProducer(output: ValueId): ControlProducer | undefined {
+  controlProducer(output: ValueId): JoinControlProducer | undefined {
     this.#block.values.node(output);
     return this.#controlProductions.get(output)?.producer;
   }
@@ -164,58 +159,34 @@ class BodyAnalyzer implements BodyAnalysis {
     return this.#calls;
   }
 
-  actionEffects(action: ProducingAction): StorageEffects {
-    switch (action.kind) {
-      case "op":
-        assert(this.#operationActions.has(action), "operation action is not part of this analysis");
-        return action.op.effects;
-      case "call":
-        assert(this.#callActions.has(action), "call action is not part of this analysis");
-        return action.target.effects;
-    }
+  operationMustExecute(operation: Operation): boolean {
+    assert(this.#operationSet.has(operation), "operation is not part of this analysis");
+    // An operation must execute when an output is used or it writes.
+    return operation.outputs.some((output) => this.#useCounts[output] !== 0) ||
+      operation.directEffects.writes.length !== 0;
   }
 
-  actionMustExecute(action: ProducingAction): boolean {
-    const output = actionOutput(action);
-
-    if (output !== undefined && this.#useCounts[output] !== 0) {
-      return true;
-    }
-    switch (action.kind) {
-      case "op":
-        assert(this.#operationActions.has(action), "operation action is not part of this analysis");
-        return output === undefined;
-      case "call":
-        assert(this.#callActions.has(action), "call action is not part of this analysis");
-        return action.target.effects.writes.length !== 0;
-    }
-  }
-
-  opActionMustExecute(action: OpAction): boolean {
-    return this.actionMustExecute(action);
-  }
-
-  callActionMustExecute(action: FunctionCallAction): boolean {
-    assert(this.#callActions.has(action), "call action is not part of this analysis");
-    return action.kind === "returnCall" || this.actionMustExecute(action);
+  callMustExecute(call: FunctionCall): boolean {
+    assert(this.#callSet.has(call), "call is not part of this analysis");
+    return call.category === "control" || this.operationMustExecute(call);
   }
 
   #walkBody(body: Body): BodyWalkResult {
     const bodyWrites: StorageAccess[] = [];
     let mandatoryResult: ValueDemand | undefined;
 
-    for (const [actionIndex, action] of body.actions.entries()) {
-      const actionSite = this.#siteIndex.addAction(body, actionIndex, action);
+    for (const [nodeIndex, node] of body.nodes.entries()) {
+      const nodeSite = this.#siteIndex.addNode(body, nodeIndex, node);
 
       this.#writesBySite.push(undefined);
       const demand = (value: ValueId): ValueDemand => ({
         value,
-        consumedAt: actionSite
+        consumedAt: nodeSite
       });
-      const actionWrites = this.#walkAction(action, actionSite, demand);
+      const nodeWrites = this.#walkNode(node, nodeSite, demand);
 
-      this.#writesBySite[actionSite] = actionWrites;
-      bodyWrites.push(...actionWrites);
+      this.#writesBySite[nodeSite] = nodeWrites;
+      bodyWrites.push(...nodeWrites);
     }
 
     const endSite = this.#siteIndex.addEnd(body);
@@ -240,103 +211,68 @@ class BodyAnalyzer implements BodyAnalysis {
     };
   }
 
-  #walkAction(
-    action: Action,
+  #walkNode(
+    node: BodyNode,
     site: SiteId,
     demand: (value: ValueId) => ValueDemand
   ): readonly StorageAccess[] {
-    switch (action.kind) {
-      case "op": {
-        this.#operations.push({ action, site });
-        this.#operationActions.add(action);
-        const inputs = action.op.inputs.map((input) => input.value);
-        const output = actionOutput(action);
-
-        if (output === undefined) {
-          this.#roots.push(...inputs.map(demand));
-          return action.op.effects.writes;
-        }
-
-        assert(
-          !this.#producers.has(output) && !this.#controlProductions.has(output),
-          `value ${output} already has a producer`
-        );
-        this.#producers.set(output, { output, action, site, inputs });
-
-        return action.op.effects.writes;
-      }
-      case "call": {
-        this.#calls.push({ action, site });
-        this.#callActions.add(action);
-        const inputs = action.arguments.map((argument) => argument.value);
-        const output = actionOutput(action);
-        const effects = action.target.effects;
-
-        if (output === undefined) {
-          return effects.writes;
-        }
-
-        assert(
-          !this.#producers.has(output) && !this.#controlProductions.has(output),
-          `value ${output} already has a producer`
-        );
-        this.#producers.set(output, { output, action, site, inputs });
-        return effects.writes;
-      }
-      case "returnCall": {
-        this.#calls.push({ action, site });
-        this.#callActions.add(action);
-        this.#roots.push(...action.arguments.map((argument) => demand(argument.value)));
-        return action.target.effects.writes;
-      }
-      case "if": {
-        this.#roots.push(demand(action.condition));
-        const bodies = action.elseBody === undefined
-          ? [action.thenBody]
-          : [action.thenBody, action.elseBody];
-        const walked = bodies.map((body) =>
-          this.#walkNestedBody(body, site)
-        );
-
-        if (action.output !== undefined) {
-          this.#recordControlOutput(action.output, action, site, bodies, walked);
-        }
-
-        return mergeWrites(walked.map((result) => result.writes));
-      }
-      case "switch": {
-        this.#roots.push(demand(action.selector));
-        const bodies = [...action.cases.map((switchCase) => switchCase.body), action.defaultBody];
-        const walked = bodies.map((body) =>
-          this.#walkNestedBody(body, site)
-        );
-
-        this.#recordControlOutput(action.output, action, site, bodies, walked);
-        return mergeWrites(walked.map((result) => result.writes));
-      }
-      case "loop": {
-        for (const cell of action.carried) {
-          this.#roots.push(demand(cell.seed));
-        }
-
-        const walked = this.#walkNestedBody(
-          action.body,
-          site,
-          true
-        );
-
-        return walked.writes;
-      }
-      case "loopContinue":
-        this.#roots.push(...action.updates.map(demand));
-        return noWrites;
-      case "finish":
-        this.#roots.push(...finishOperands(action.finish).map(demand));
-        return noWrites;
-      case "return":
-        this.#roots.push(...action.results.map(demand));
-        return noWrites;
+    if (node.category === "operation") {
+      return this.#walkOperation(node, site, demand);
     }
+
+    this.#roots.push(...node.operands.map(demand));
+    if (node.kind === "returnCall") {
+      this.#recordReturnCall(node, site);
+    }
+    const nested = node.nestedBodies;
+    const bodies = nested.map((entry) => entry.body);
+    const walked = nested.map((entry) =>
+      this.#walkNestedBody(entry.body, site, entry.scope.kind === "loop")
+    );
+    const outputs = node.outputs;
+
+    assert(outputs.length <= 1, `${node.kind} control has multiple join outputs`);
+    if (outputs.length === 1) {
+      this.#recordControlOutput(outputs[0]!, node, site, bodies, walked);
+    }
+
+    return mergeWrites([
+      node.directEffects.writes,
+      ...walked.map((result) => result.writes)
+    ]);
+  }
+
+  #walkOperation(
+    operation: Operation,
+    site: SiteId,
+    demand: (value: ValueId) => ValueDemand
+  ): readonly StorageAccess[] {
+    this.#operations.push({ operation, site });
+    this.#operationSet.add(operation);
+    if (operation.kind === "call") {
+      this.#calls.push({ call: operation, site });
+      this.#callSet.add(operation);
+    }
+    const inputs = operation.operands;
+    const outputs = operation.outputs;
+    const effects = operation.directEffects;
+
+    if (outputs.length === 0 && effects.writes.length !== 0) {
+      this.#roots.push(...inputs.map(demand));
+    }
+    for (const output of outputs) {
+      assert(
+        !this.#producers.has(output) && !this.#controlProductions.has(output),
+        `value ${output} already has a producer`
+      );
+      this.#producers.set(output, { output, operation, site, inputs });
+    }
+    return effects.writes;
+  }
+
+  #recordReturnCall(call: ReturnCallControl, site: SiteId): void {
+    this.#calls.push({ call, site });
+    this.#callSet.add(call);
   }
 
   #walkNestedBody(
@@ -350,7 +286,7 @@ class BodyAnalyzer implements BodyAnalysis {
 
   #recordControlOutput(
     output: ValueId,
-    action: IfAction | SwitchAction,
+    control: Control,
     site: SiteId,
     bodies: readonly Body[],
     walked: readonly BodyWalkResult[]
@@ -361,8 +297,8 @@ class BodyAnalyzer implements BodyAnalysis {
       const result = body.result;
       const bodyResult = walked[index];
 
-      assert(result !== undefined, `${action.kind} arm has no result`);
-      assert(bodyResult !== undefined, `${action.kind} arm was not analyzed`);
+      assert(result !== undefined, `${control.kind} arm has no result`);
+      assert(bodyResult !== undefined, `${control.kind} arm was not analyzed`);
       const end = this.bodyEndSite(body);
       const mandatory = bodyResult.mandatoryResult;
 
@@ -382,42 +318,42 @@ class BodyAnalyzer implements BodyAnalysis {
       `value ${output} already has a control producer`
     );
     this.#controlProductions.set(output, {
-      producer: { action, site },
+      producer: { site },
       dependencies
     });
   }
 
   #recordExportDemands(): void {
     const body = this.#block.body;
-    const lastActionIndex = body.actions.length - 1;
+    const lastNodeIndex = body.nodes.length - 1;
     const site = bodyFinal(body) === undefined
       ? this.bodyEndSite(body)
-      : this.siteOf(body, lastActionIndex);
+      : this.siteOf(body, lastNodeIndex);
 
     for (const output of this.#exportedOutputs) {
       this.#roots.push({ value: output, consumedAt: site });
     }
   }
 
-  #recordRequiredCallDemands(): boolean {
+  #recordRequiredOperationDemands(): boolean {
     let added = false;
 
-    for (const { action, site } of this.#calls) {
-      if (action.kind === "returnCall") {
+    for (const { operation, site } of this.#operations) {
+      const outputs = operation.outputs;
+
+      if (outputs.length === 0) {
         continue;
       }
-      const effects = action.target.effects;
+      const effects = operation.directEffects;
 
       if (effects.writes.length === 0) {
         continue;
       }
-      const output = actionOutput(action);
-
-      if (output !== undefined && this.#useCounts[output] !== 0) {
+      if (outputs.some((output) => this.#useCounts[output] !== 0)) {
         continue;
       }
-      for (const argument of action.arguments) {
-        this.#roots.push({ value: argument.value, consumedAt: site });
+      for (const input of operation.operands) {
+        this.#roots.push({ value: input, consumedAt: site });
         added = true;
       }
     }
@@ -434,6 +370,8 @@ class BodyAnalyzer implements BodyAnalysis {
   // their parent. One descending pass therefore settles both reachability and
   // concrete semantic uses.
   #propagateUses(): void {
+    const propagatedOperations = new Set<Operation>();
+
     for (let rawId = this.#block.values.size() - 1; rawId >= 0; rawId -= 1) {
       const id = valueId(rawId);
 
@@ -444,8 +382,11 @@ class BodyAnalyzer implements BodyAnalysis {
       const producer = this.#producers.get(id);
 
       if (producer !== undefined) {
-        for (const dependency of producer.inputs) {
-          this.#addUse(dependency);
+        if (!propagatedOperations.has(producer.operation)) {
+          propagatedOperations.add(producer.operation);
+          for (const dependency of producer.inputs) {
+            this.#addUse(dependency);
+          }
         }
         continue;
       }

@@ -51,24 +51,30 @@ export function planLocals(
   }
 
   for (const site of analysis.sites()) {
-    if (site.kind !== "action" || site.action.kind !== "loop") {
+    if (site.kind !== "node" || site.node.category === "operation") {
       continue;
     }
-    const end = analysis.bodyEndSite(site.action.body);
 
-    for (const cell of site.action.carried) {
-      assert(
-        placements[cell.loopInput] === undefined,
-        `loop input ${cell.loopInput} has two local claims`
-      );
-      claims.push({
-        type: block.values.valueType(cell.loopInput),
-        start: site.id,
-        end,
-        order: order++,
-        local: -1,
-        assign(local) { valueLocals[cell.loopInput] = local; }
-      });
+    for (const nested of site.node.nestedBodies) {
+      if (nested.scope.kind !== "loop") {
+        continue;
+      }
+      const end = analysis.bodyEndSite(nested.body);
+
+      for (const input of nested.scope.inputs) {
+        assert(
+          placements[input] === undefined,
+          `loop input ${input} has two local claims`
+        );
+        claims.push({
+          type: block.values.valueType(input),
+          start: site.id,
+          end,
+          order: order++,
+          local: -1,
+          assign(local) { valueLocals[input] = local; }
+        });
+      }
     }
   }
 
@@ -103,9 +109,7 @@ function cellLifetimes(
   const seeds = new Map<CellRef, SiteId>();
   const accesses: { cell: CellRef; site: SiteId }[] = [];
 
-  for (const { action, site } of analysis.operations()) {
-    const operation = action.op;
-
+  for (const { operation, site } of analysis.operations()) {
     if (operation.kind !== "cell.read" && operation.kind !== "cell.write") {
       continue;
     }

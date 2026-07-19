@@ -4,10 +4,11 @@ import { test } from "node:test";
 import { buildIrBlock } from "#engines/jit/action-compiler.js";
 import { encodeJitModule } from "#engines/jit/module.js";
 import { compileActionWasmBlockHandle } from "#engines/jit/block-handle.js";
-import type { Action } from "#ir/actions.js";
-import type { IrBlock } from "#ir/block.js";
+import type { BodyNode, IrBlock } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
+import type { Operation } from "#compiler/ir/operations/index.js";
+import { finishControl } from "#compiler/ir/controls/index.js";
 import { flagStateFields } from "#core/flags/layout.js";
 import type { InstructionStateChannel } from "#core/instruction/state/channels.js";
 import { gprChannel } from "#core/state/channels.js";
@@ -32,7 +33,7 @@ import {
   stateWriteValue,
   isStateRead,
   isStateWrite
-} from "#core/instruction/tests/state-actions.js";
+} from "#core/instruction/tests/state-operations.js";
 import { covers } from "#ir/aliasing.js";
 import { buildExit } from "#cpu/exit.js";
 import { trapExit } from "#core/exits.js";
@@ -63,12 +64,12 @@ test("JIT module includes resolver members reached by input flag reads", () => {
 });
 
 test("JIT program closure rejects duplicate normalized block identities", () => {
-  const actions = syntheticBlock(false);
+  const nodes = syntheticBlock(false);
 
   throws(
     () => encodeJitModule([
-      { entryEip: startEip, ir: actions },
-      { entryEip: startEip + 0x1_0000_0000, ir: actions }
+      { entryEip: startEip, ir: nodes },
+      { entryEip: startEip + 0x1_0000_0000, ir: nodes }
     ]),
     /duplicate JIT block module entry EIP/
   );
@@ -107,12 +108,12 @@ test("JIT program validates external link layouts before declaration", () => {
 test("a repeated add compiles to one eax read and one eax write", () => {
   // add eax, 1; add eax, 1.
   const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
-  const actions = entryActions(block);
+  const nodes = entryActions(block);
 
-  strictEqual(actions.filter((action) =>
+  strictEqual(nodes.filter((action) =>
     isStateRead(action) && accessesChannel(block, action, gprChannel("eax"))
   ).length, 1);
-  strictEqual(actions.filter((action) =>
+  strictEqual(nodes.filter((action) =>
     isStateWrite(action) && accessesChannel(block, action, gprChannel("eax"))
   ).length, 1);
 });
@@ -120,30 +121,30 @@ test("a repeated add compiles to one eax read and one eax write", () => {
 test("cross-instruction dead flag writes are absent and Core commits EIP before dispatch", () => {
   // add eax, 1; add eax, 1.
   const block = buildIrBlock(decodeBlock([0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01]).instructions);
-  const actions = entryActions(block);
-  const flagWrites = actions.filter((action) =>
+  const nodes = entryActions(block);
+  const flagWrites = nodes.filter((action) =>
     isStateWrite(action) && x86Flags.some((flag) =>
       accessesChannel(block, action, flagStateFields.concrete[flag])
     )
   );
-  const lazyKindWrites = actions.filter(
+  const lazyKindWrites = nodes.filter(
     (action) => isStateWrite(action) &&
       accessesChannel(block, action, flagStateFields.lazyKind)
   );
 
   strictEqual(flagWrites.length, 0);
   strictEqual(lazyKindWrites.length, 1);
-  strictEqual(actions.filter((action) =>
+  strictEqual(nodes.filter((action) =>
     isStateWrite(action) && accessesChannel(block, action, coreStateFields.eip)
   ).length, 1);
   strictEqual(
-    actions.filter((action) => action.kind === "finish" && action.finish.kind === "dispatch").length,
+    nodes.filter((action) => action.kind === "finish" && action.finish.kind === "dispatch").length,
     1
   );
-  const finishIndex = actions.findIndex(
+  const finishIndex = nodes.findIndex(
     (action) => action.kind === "finish" && action.finish.kind === "dispatch"
   );
-  const eipCommitIndex = actions.findIndex(
+  const eipCommitIndex = nodes.findIndex(
     (action) => isStateWrite(action) && accessesChannel(block, action, coreStateFields.eip)
   );
 
@@ -253,13 +254,13 @@ test("a not-taken forward jcc keeps pre-branch register pendings live inside the
     0xcd, 0x2e
   ]);
   const ir = buildIrBlock(block.instructions);
-  const actions = entryActions(ir);
-  const branchIndex = actions.findIndex((action) => action.kind === "if");
-  const ebxReadIndex = actions.findIndex(
-    (action): action is Action =>
+  const nodes = entryActions(ir);
+  const branchIndex = nodes.findIndex((action) => action.kind === "if");
+  const ebxReadIndex = nodes.findIndex(
+    (action): action is BodyNode =>
       isStateRead(action) && accessesChannel(ir, action, gprChannel("ebx"))
   );
-  const ebxRead = actions[ebxReadIndex];
+  const ebxRead = nodes[ebxReadIndex];
   const memories = createTestWasmMemories();
   const stateView = new DataView(memories.cpuStateMemory.buffer);
   const handle = compileActionWasmBlockHandle([block], {
@@ -277,7 +278,7 @@ test("a not-taken forward jcc keeps pre-branch register pendings live inside the
   strictEqual(branchIndex > 0, true);
   strictEqual(ebxReadIndex > branchIndex, true);
   strictEqual(
-    actions.slice(branchIndex + 1, ebxReadIndex).some((action) => isStateWrite(action)),
+    nodes.slice(branchIndex + 1, ebxReadIndex).some((action) => isStateWrite(action)),
     false
   );
 
@@ -285,23 +286,26 @@ test("a not-taken forward jcc keeps pre-branch register pendings live inside the
     throw new Error("expected ebx read after the branch");
   }
 
-  const ebxWrite = actions.find((action) =>
+  const ebxWrite = nodes.find((action) =>
     isStateWrite(action) && accessesChannel(ir, action, gprChannel("ebx"))
   );
 
   if (ebxWrite === undefined || !isStateWrite(ebxWrite)) {
     throw new Error("expected ebx write after the branch");
   }
+  const ebx = ebxRead.outputs[0];
+
+  ok(ebx !== undefined, "expected ebx read output");
 
   strictEqual(
-    actions.filter((action) =>
+    nodes.filter((action) =>
       isStateWrite(action) && accessesChannel(ir, action, gprChannel("eax"))
     ).length,
     1
   );
   strictEqual(
     stateWriteValue(ebxWrite),
-    ir.values.binary("add", ebxRead.output, ir.values.const(7))
+    ir.values.binary("add", ebx, ir.values.const(7))
   );
 
   writeWasmCpuStateSnapshot(stateView, { eip: startEip, ebx: 0x20, ecx: 1 });
@@ -330,10 +334,10 @@ test("a folded taken jecxz truncates the block and dispatches to its target", ()
   strictEqual(block.instructions.length, 4);
 
   const ir = buildIrBlock(block.instructions);
-  const actions = entryActions(ir);
+  const nodes = entryActions(ir);
 
-  strictEqual(actions.some((action) => action.kind === "if"), false);
-  strictEqual(actions.at(-1)?.kind, "finish");
+  strictEqual(nodes.some((action) => action.kind === "if"), false);
+  strictEqual(nodes.at(-1)?.kind, "finish");
 
   const memories = createTestWasmMemories();
   const stateView = new DataView(memories.cpuStateMemory.buffer);
@@ -497,8 +501,8 @@ function decodeBlock(bytes: readonly number[], eip = startEip): IsaDecodedBlock 
   return decodeIsaBlock(new ByteArrayDecodeReader(Uint8Array.from(bytes), eip), eip);
 }
 
-function entryActions(block: IrBlock): readonly Action[] {
-  return block.body.actions;
+function entryActions(block: IrBlock): readonly BodyNode[] {
+  return block.body.nodes;
 }
 
 function syntheticBlock(withResolver: boolean): IrBlock {
@@ -523,12 +527,11 @@ function syntheticDispatchBlock(targetEip: number): IrBlock {
 
   return {
     body: {
-      actions: [
+      nodes: [
         stateWrite(values, coreStateFields.eip, target),
-        {
-          kind: "finish",
+        finishControl.create({
           finish: { kind: "dispatch", targetEip: target }
-        }
+        })
       ]
     },
     values
@@ -537,11 +540,11 @@ function syntheticDispatchBlock(targetEip: number): IrBlock {
 
 function accessesChannel(
   block: IrBlock,
-  action: Extract<Action, { kind: "op" }>,
+  operation: Operation,
   channel: InstructionStateChannel
 ): boolean {
   const expected = stateEffect(block.values, channel);
-  const actual = action.op.effects.reads[0] ?? action.op.effects.writes[0];
+  const actual = operation.directEffects.reads[0] ?? operation.directEffects.writes[0];
 
   return actual !== undefined &&
     covers(actual, expected) &&

@@ -16,7 +16,7 @@ import {
   type ValueKey
 } from "./definition.js";
 import {
-  actionOutputValue,
+  nodeOutputValue,
   constant64Value,
   constantValue,
   externalValue,
@@ -39,7 +39,7 @@ import {
 import { unboundedWidthBounds } from "./width-bounds.js";
 
 type AnyValueDefinition =
-  | typeof actionOutputValue
+  | typeof nodeOutputValue
   | typeof binaryValue
   | typeof comparisonValue
   | typeof constant64Value
@@ -246,14 +246,14 @@ export class ValueTable implements ValueBuilder {
     return this.#create(parameterValue, { index, type });
   }
 
-  addActionOutput(bounds?: WidthBounds): ValueId {
-    return this.#create(actionOutputValue, { type: "i32" }, bounds ?? unboundedWidthBounds);
+  addNodeOutput(bounds?: WidthBounds): ValueId {
+    return this.#create(nodeOutputValue, { type: "i32" }, bounds ?? unboundedWidthBounds);
   }
 
   // The 64 suffix is the i64 type universe; i64 values carry no i32 width
   // bounds, so the form takes none.
-  addActionOutput64(): ValueId {
-    return this.#create(actionOutputValue, { type: "i64" });
+  addNodeOutput64(): ValueId {
+    return this.#create(nodeOutputValue, { type: "i64" });
   }
 
   addLoopInput(bounds?: WidthBounds): ValueId {

@@ -11,8 +11,8 @@ import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js
 import {
   stateWriteValue,
   writesStateChannel,
-  type StateWriteAction
-} from "./state-actions.js";
+  type StateWriteOperation
+} from "./state-operations.js";
 
 export type LazyRecordExpectation = Readonly<
   | { kind: "ADD" | "SUB"; width: 8 | 16 | 32; left: ValueId; right: ValueId }
@@ -20,12 +20,12 @@ export type LazyRecordExpectation = Readonly<
 >;
 
 export function assertLazyRecord(
-  actions: readonly StateWriteAction[],
+  nodes: readonly StateWriteOperation[],
   values: ValueTable,
   expected: LazyRecordExpectation
 ): void {
   strictEqual(
-    actions.filter((write) =>
+    nodes.filter((write) =>
       x86Flags.some((flag) =>
         writesStateChannel(values, write, flagStateFields.concrete[flag])
       )
@@ -35,43 +35,43 @@ export function assertLazyRecord(
 
   if (expected.kind === "LOGIC_RESULT") {
     strictEqual(
-      stateFieldWriteValue(actions, values, flagStateFields.lazyA),
+      stateFieldWriteValue(nodes, values, flagStateFields.lazyA),
       values.truncate(expected.width, expected.result)
     );
-    strictEqual(stateFieldWriteValue(actions, values, flagStateFields.lazyB), undefined);
+    strictEqual(stateFieldWriteValue(nodes, values, flagStateFields.lazyB), undefined);
   } else {
     strictEqual(
-      stateFieldWriteValue(actions, values, flagStateFields.lazyA),
+      stateFieldWriteValue(nodes, values, flagStateFields.lazyA),
       values.truncate(expected.width, expected.left)
     );
     strictEqual(
-      stateFieldWriteValue(actions, values, flagStateFields.lazyB),
+      stateFieldWriteValue(nodes, values, flagStateFields.lazyB),
       values.truncate(expected.width, expected.right)
     );
   }
 
   strictEqual(
-    stateFieldWriteValue(actions, values, flagStateFields.lazyKind),
+    stateFieldWriteValue(nodes, values, flagStateFields.lazyKind),
     values.const(lazyFlagsKindByte(LAZY_FLAGS_KIND[expected.kind], expected.width))
   );
 }
 
 export function assertOnlyLazyRecord(
-  actions: readonly StateWriteAction[],
+  nodes: readonly StateWriteOperation[],
   values: ValueTable,
   expected: LazyRecordExpectation
 ): void {
-  assertLazyRecord(actions, values, expected);
-  strictEqual(actions.length, expected.kind === "LOGIC_RESULT" ? 2 : 3);
+  assertLazyRecord(nodes, values, expected);
+  strictEqual(nodes.length, expected.kind === "LOGIC_RESULT" ? 2 : 3);
 }
 
 function stateFieldWriteValue(
-  actions: readonly StateWriteAction[],
+  nodes: readonly StateWriteOperation[],
   values: ValueTable,
   field: FlagStateField
 ): ValueId | undefined {
-  const write = actions.find((action) =>
-    writesStateChannel(values, action, field)
+  const write = nodes.find((node) =>
+    writesStateChannel(values, node, field)
   );
 
   return write === undefined ? undefined : stateWriteValue(write);

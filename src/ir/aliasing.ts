@@ -1,5 +1,4 @@
-import type { Action } from "./actions.js";
-import type { Body } from "./block.js";
+import type { Body, BodyNode } from "./block.js";
 import type {
   StorageEffects,
   StorageAccess
@@ -13,41 +12,27 @@ import {
 // their resource identity plus the compiler-owned byte-range algebra.
 // Distinct spaces never alias.
 
-const noEffects: StorageEffects = { reads: [], writes: [] };
-
-// A control action's signature is the union over its bodies — any one may
+// A control's signature is the union over its bodies — any one may
 // be selected. The union is for legality only; demand stays per-body.
-export function effectsOf(action: Action): StorageEffects {
-  switch (action.kind) {
-    case "op":
-      return action.op.effects;
-    case "call":
-    case "returnCall":
-      return action.target.effects;
-    case "if":
-      return bodyEffects(action.thenBody, action.elseBody);
-    case "switch":
-      return bodyEffects(...action.cases.map((switchCase) => switchCase.body), action.defaultBody);
-    case "loop":
-      return bodyEffects(action.body);
-    case "loopContinue":
-    case "finish":
-    case "return":
-      return noEffects;
-  }
+export function effectsOf(node: BodyNode): StorageEffects {
+  const direct = node.directEffects;
+  const nested = bodyEffects(
+    ...node.nestedBodies.map((entry) => entry.body)
+  );
+
+  return {
+    reads: [...direct.reads, ...nested.reads],
+    writes: [...direct.writes, ...nested.writes]
+  };
 }
 
-function bodyEffects(...bodies: readonly (Body | undefined)[]): StorageEffects {
+function bodyEffects(...bodies: readonly Body[]): StorageEffects {
   const reads: StorageAccess[] = [];
   const writes: StorageAccess[] = [];
 
   for (const body of bodies) {
-    if (body === undefined) {
-      continue;
-    }
-
-    for (const action of body.actions) {
-      const effects = effectsOf(action);
+    for (const node of body.nodes) {
+      const effects = effectsOf(node);
 
       reads.push(...effects.reads);
       writes.push(...effects.writes);

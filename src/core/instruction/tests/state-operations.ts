@@ -17,29 +17,26 @@ import type { SegmentStateField } from "#core/state/channels.js";
 import type { InstructionStateChannel } from "../state/channels.js";
 import type { OperandWidth } from "#core/types.js";
 import { cpuState } from "#cpu/state.js";
-import type { Action, OpAction } from "#ir/actions.js";
+import type { BodyNode } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { covers } from "#ir/aliasing.js";
 
 type TestValueId = ValueId | number;
 type OperationOf<Kind extends Operation["kind"]> = Extract<Operation, { kind: Kind }>;
 
-export type StateReadAction = OpAction & Readonly<{
-  op: OperationOf<"resource.read">;
-  output: ValueId;
+export type StateReadOperation = OperationOf<"resource.read"> & Readonly<{
+  outputs: readonly [ValueId];
 }>;
 
-export type StateWriteAction = OpAction & Readonly<{
-  op: OperationOf<"resource.write">;
-}>;
+export type StateWriteOperation = OperationOf<"resource.write">;
 
 export function stateRead(
   values: ValueTable,
   output: TestValueId,
   channel: InstructionStateChannel,
   signed?: true
-): StateReadAction {
-  return readAction(
+): StateReadOperation {
+  return readOperation(
     output,
     channelOperand(accessFor(values), channel),
     signed,
@@ -53,8 +50,8 @@ export function dynamicGprRead(
   index: ValueId,
   width: OperandWidth,
   signed?: true
-): StateReadAction {
-  return readAction(output, accessFor(values).dynamicGpr(index, width), signed);
+): StateReadOperation {
+  return readOperation(output, accessFor(values).dynamicGpr(index, width), signed);
 }
 
 export function dynamicSegmentRead(
@@ -62,16 +59,16 @@ export function dynamicSegmentRead(
   output: TestValueId,
   index: ValueId,
   field: SegmentStateField
-): StateReadAction {
-  return readAction(output, accessFor(values).dynamicSegment(index, field));
+): StateReadOperation {
+  return readOperation(output, accessFor(values).dynamicSegment(index, field));
 }
 
 export function stateWrite(
   values: ValueTable,
   channel: InstructionStateChannel,
   value: TestValueId
-): StateWriteAction {
-  return writeAction(channelOperand(accessFor(values), channel), value);
+): StateWriteOperation {
+  return writeOperation(channelOperand(accessFor(values), channel), value);
 }
 
 export function dynamicGprWrite(
@@ -79,8 +76,8 @@ export function dynamicGprWrite(
   index: ValueId,
   width: OperandWidth,
   value: TestValueId
-): StateWriteAction {
-  return writeAction(accessFor(values).dynamicGpr(index, width), value);
+): StateWriteOperation {
+  return writeOperation(accessFor(values).dynamicGpr(index, width), value);
 }
 
 export function stateEffect(
@@ -108,58 +105,58 @@ export function dynamicSegmentEffect(
 
 export function readsStateChannel(
   values: ValueTable,
-  action: Action,
+  node: BodyNode,
   channel: InstructionStateChannel
-): action is StateReadAction {
-  return isStateRead(action) && effectsEqual(
-    action.op.effect,
+): node is StateReadOperation {
+  return isStateRead(node) && effectsEqual(
+    node.effect,
     stateEffect(values, channel)
   );
 }
 
 export function writesStateChannel(
   values: ValueTable,
-  action: Action,
+  node: BodyNode,
   channel: InstructionStateChannel
-): action is StateWriteAction {
-  return isStateWrite(action) && effectsEqual(
-    action.op.effect,
+): node is StateWriteOperation {
+  return isStateWrite(node) && effectsEqual(
+    node.effect,
     stateEffect(values, channel)
   );
 }
 
 export function readsDynamicGpr(
   values: ValueTable,
-  action: Action,
+  node: BodyNode,
   index: ValueId,
   width: OperandWidth
-): action is StateReadAction {
-  return isStateRead(action) && effectsEqual(
-    action.op.effect,
+): node is StateReadOperation {
+  return isStateRead(node) && effectsEqual(
+    node.effect,
     dynamicGprEffect(values, index, width)
   );
 }
 
 export function writesDynamicGpr(
   values: ValueTable,
-  action: Action,
+  node: BodyNode,
   index: ValueId,
   width: OperandWidth
-): action is StateWriteAction {
-  return isStateWrite(action) && effectsEqual(
-    action.op.effect,
+): node is StateWriteOperation {
+  return isStateWrite(node) && effectsEqual(
+    node.effect,
     dynamicGprEffect(values, index, width)
   );
 }
 
 export function readsDynamicSegment(
   values: ValueTable,
-  action: Action,
+  node: BodyNode,
   index: ValueId,
   field: SegmentStateField
-): action is StateReadAction {
-  return isStateRead(action) && effectsEqual(
-    action.op.effect,
+): node is StateReadOperation {
+  return isStateRead(node) && effectsEqual(
+    node.effect,
     dynamicSegmentEffect(values, index, field)
   );
 }
@@ -172,26 +169,24 @@ export function stateEffectsEqual(
 }
 
 export function isStateRead(
-  action: Action
-): action is StateReadAction {
-  return action.kind === "op" &&
-    action.op.kind === "resource.read" &&
-    action.op.effect.resource === cpuState.resource &&
-    action.output !== undefined;
+  node: BodyNode
+): node is StateReadOperation {
+  return node.kind === "resource.read" &&
+    node.effect.resource === cpuState.resource &&
+    node.outputs.length === 1;
 }
 
 export function isStateWrite(
-  action: Action
-): action is StateWriteAction {
-  return action.kind === "op" &&
-    action.op.kind === "resource.write" &&
-    action.op.effect.resource === cpuState.resource;
+  node: BodyNode
+): node is StateWriteOperation {
+  return node.kind === "resource.write" &&
+    node.effect.resource === cpuState.resource;
 }
 
 export function stateWriteValue(
-  action: StateWriteAction
+  operation: StateWriteOperation
 ): ValueId {
-  const input = action.op.inputs.at(-1);
+  const input = operation.inputs.at(-1);
 
   if (input === undefined) {
     throw new Error("state write has no value input");
@@ -199,34 +194,35 @@ export function stateWriteValue(
   return input.value;
 }
 
-function readAction(
+function readOperation(
   output: TestValueId,
   source: ResourceByteOperand,
   signed?: true,
   singleBit = false
-): StateReadAction {
-  const op = signed === true
-    ? resourceRead.create({ source, mode: { kind: "signed" } })
+): StateReadOperation {
+  const outputId = valueId(output);
+  const operation = signed === true
+    ? resourceRead.create({ source, mode: { kind: "signed" } }, () => outputId)
     : resourceRead.create(
         singleBit
           ? {
               source,
               mode: { kind: "unsigned", bounds: fitsUnsigned(1) }
             }
-          : { source }
+          : { source },
+        () => outputId
       );
 
-  return { kind: "op", output: valueId(output), op };
+  return operation as StateReadOperation;
 }
 
-function writeAction(
+function writeOperation(
   destination: ResourceByteOperand,
   value: TestValueId
-): StateWriteAction {
-  return {
-    kind: "op",
-    op: resourceWrite.create({ destination, value: valueId(value) })
-  };
+): StateWriteOperation {
+  return resourceWrite.create(
+    { destination, value: valueId(value) }
+  );
 }
 
 function accessFor(values: ValueTable): BoundStateAccess {

@@ -9,3 +9,5 @@ export type StorageEffects = Readonly<{
   reads: readonly StorageAccess[];
   writes: readonly StorageAccess[];
 }>;
+
+export const noStorageEffects: StorageEffects = { reads: [], writes: [] };

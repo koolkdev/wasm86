@@ -6,39 +6,40 @@ import {
   type ResourceReadMode
 } from "#compiler/ir/resource.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
-import type { IntegerWidth, WidthBounds } from "#compiler/ir/values/types.js";
 import type {
-  OperationDefinition,
-  OperationNode,
-  OperationResult
+  IntegerWidth,
+  ValueId,
+  ValueInput,
+  WidthBounds
+} from "#compiler/ir/values/types.js";
+import type { ValueUseEmitter } from "#ir/node.js";
+import {
+  OperationBase,
+  type OperationEmitTarget,
+  type OperationFactory,
+  type OperationOutputAllocator,
+  type OperationResult
 } from "./definition.js";
-
-type ResourceReadData = Readonly<{
-  effect: ResourceEffect;
-  displacement: number;
-  width: IntegerWidth;
-  signed?: true;
-}>;
 
 type ResourceReadCreateArgs = Readonly<{
   source: ResourceByteOperand;
   mode?: ResourceReadMode;
 }>;
 
-type ResourceReadOperation = OperationNode<
-  "resource.read",
-  ResourceReadData,
-  OperationResult
->;
+export class ResourceReadOperation extends OperationBase {
+  static readonly kind = "resource.read";
+  readonly kind = ResourceReadOperation.kind;
+  readonly effect: ResourceEffect;
+  readonly displacement: number;
+  readonly width: IntegerWidth;
+  readonly signed?: true;
+  declare readonly inputs: readonly [ValueInput];
+  declare readonly results: readonly [OperationResult];
 
-export const resourceRead: OperationDefinition<
-  ResourceReadCreateArgs,
-  ResourceReadOperation
-> = {
-  kind: "resource.read",
-
-  create(op) {
+  private constructor(
+    op: ResourceReadCreateArgs,
+    allocateOutput: OperationOutputAllocator
+  ) {
     const mode = op.mode;
 
     assert(
@@ -51,42 +52,54 @@ export const resourceRead: OperationDefinition<
     );
     const signed = mode?.kind === "signed";
     const bounds = mode?.kind === "unsigned" ? mode.bounds : undefined;
+    const effect = op.source.effect;
+    const displacement = op.source.address.displacement;
+    const width = op.source.width;
+    const inputs: readonly [ValueInput] = [
+      { value: op.source.address.base, type: "i32" }
+    ];
+    const result = readResult(width, signed, bounds);
+    const results: readonly [OperationResult] = [result];
+    const outputs: readonly [ValueId] = [allocateOutput(result)];
 
-    return {
-      kind: "resource.read",
-      effect: op.source.effect,
-      displacement: op.source.address.displacement,
-      width: op.source.width,
-      ...(signed ? { signed: true } : {}),
-      inputs: [{ value: op.source.address.base, type: "i32" }],
-      result: readResult(
-        op.source.width,
-        signed,
-        bounds
-      ),
-      effects: {
-        reads: [op.source.effect],
-        writes: []
-      }
-    };
-  },
+    super({
+      inputs,
+      results,
+      outputs,
+      directEffects: { reads: [effect], writes: [] },
+      referencedResources: [effect.resource]
+    });
+    this.effect = effect;
+    this.displacement = displacement;
+    this.width = width;
+    if (signed) {
+      this.signed = true;
+    }
+  }
 
-  emit(operation, target, inputs) {
-    inputs.use(0);
+  static create(
+    op: ResourceReadCreateArgs,
+    allocateOutput: OperationOutputAllocator
+  ): ResourceReadOperation {
+    return new ResourceReadOperation(op, allocateOutput);
+  }
+
+  emit(target: OperationEmitTarget, values: ValueUseEmitter): void {
+    values.emitUse(this.inputs[0].value);
     const immediate = resourceImmediate(
-      target.resourceIndex(operation.effect.resource),
-      operation.width,
-      operation.displacement
+      target.resourceIndex(this.effect.resource),
+      this.width,
+      this.displacement
     );
 
-    switch (operation.width) {
+    switch (this.width) {
       case 8:
-        operation.signed === true
+        this.signed
           ? target.body.i32Load8S(immediate)
           : target.body.i32Load8U(immediate);
         return;
       case 16:
-        operation.signed === true
+        this.signed
           ? target.body.i32Load16S(immediate)
           : target.body.i32Load16U(immediate);
         return;
@@ -95,59 +108,62 @@ export const resourceRead: OperationDefinition<
         return;
     }
   }
-};
+}
 
-type ResourceWriteData = Readonly<{
-  effect: ResourceEffect;
-  displacement: number;
-  width: IntegerWidth;
-}>;
+export const resourceRead = ResourceReadOperation satisfies OperationFactory<
+  ResourceReadCreateArgs,
+  ResourceReadOperation
+>;
 
-type ResourceWriteCreateArgs = Readonly<{
+export type ResourceWriteArgs = Readonly<{
   destination: ResourceByteOperand;
   value: ValueId;
 }>;
 
-type ResourceWriteOperation = OperationNode<
-  "resource.write",
-  ResourceWriteData,
-  undefined
->;
+export class ResourceWriteOperation extends OperationBase {
+  static readonly kind = "resource.write";
+  readonly kind = ResourceWriteOperation.kind;
+  readonly effect: ResourceEffect;
+  readonly displacement: number;
+  readonly width: IntegerWidth;
+  declare readonly inputs: readonly [ValueInput, ValueInput];
+  declare readonly results: readonly [];
 
-export const resourceWrite: OperationDefinition<
-  ResourceWriteCreateArgs,
-  ResourceWriteOperation
-> = {
-  kind: "resource.write",
+  private constructor(op: ResourceWriteArgs) {
+    const effect = op.destination.effect;
+    const displacement = op.destination.address.displacement;
+    const width = op.destination.width;
+    const inputs: readonly [ValueInput, ValueInput] = [
+      { value: op.destination.address.base, type: "i32" },
+      { value: op.value, type: "i32" }
+    ];
 
-  create(op) {
-    return {
-      kind: "resource.write",
-      effect: op.destination.effect,
-      displacement: op.destination.address.displacement,
-      width: op.destination.width,
-      inputs: [
-        { value: op.destination.address.base, type: "i32" },
-        { value: op.value, type: "i32" }
-      ],
-      result: undefined,
-      effects: {
-        reads: [],
-        writes: [op.destination.effect]
-      }
-    };
-  },
+    super({
+      inputs,
+      results: [],
+      outputs: [],
+      directEffects: { reads: [], writes: [effect] },
+      referencedResources: [effect.resource]
+    });
+    this.effect = effect;
+    this.displacement = displacement;
+    this.width = width;
+  }
 
-  emit(operation, target, inputs) {
-    inputs.use(0);
-    inputs.use(1);
+  static create(op: ResourceWriteArgs): ResourceWriteOperation {
+    return new ResourceWriteOperation(op);
+  }
+
+  emit(target: OperationEmitTarget, values: ValueUseEmitter): void {
+    values.emitUse(this.inputs[0].value);
+    values.emitUse(this.inputs[1].value);
     const immediate = resourceImmediate(
-      target.resourceIndex(operation.effect.resource),
-      operation.width,
-      operation.displacement
+      target.resourceIndex(this.effect.resource),
+      this.width,
+      this.displacement
     );
 
-    switch (operation.width) {
+    switch (this.width) {
       case 8:
         target.body.i32Store8(immediate);
         return;
@@ -159,11 +175,16 @@ export const resourceWrite: OperationDefinition<
         return;
     }
   }
-};
+}
+
+export const resourceWrite = ResourceWriteOperation satisfies OperationFactory<
+  ResourceWriteArgs,
+  ResourceWriteOperation
+>;
 
 export type ResourceOperation =
-  | ReturnType<typeof resourceRead.create>
-  | ReturnType<typeof resourceWrite.create>;
+  | ResourceReadOperation
+  | ResourceWriteOperation;
 
 const i32Result: OperationResult = { type: "i32" };
 

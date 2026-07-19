@@ -1,35 +1,32 @@
 import type { StorageAccess } from "#compiler/ir/effects.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
 import type {
-  Action,
-  CallAction,
-  FunctionCallAction,
-  IfAction,
-  OpAction,
-  SwitchAction
-} from "#ir/actions.js";
-import type { Body } from "#ir/block.js";
+  CallOperation,
+  Operation
+} from "#compiler/ir/operations/index.js";
+import type { ReturnCallControl } from "#compiler/ir/controls/index.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import type { Body, BodyNode } from "#ir/block.js";
 
 declare const siteIdBrand: unique symbol;
 
 export type SiteId = number & { readonly [siteIdBrand]: "body-analysis-site" };
 
-export type ActionSite = Readonly<{
+export type BodyNodeSite = Readonly<{
   id: SiteId;
-  kind: "action";
+  kind: "node";
   body: Body;
-  actionIndex: number;
-  action: Action;
+  nodeIndex: number;
+  node: BodyNode;
 }>;
 
 export type BodyEndSite = Readonly<{
   id: SiteId;
   kind: "bodyEnd";
   body: Body;
-  actionIndex: number;
+  nodeIndex: number;
 }>;
 
-export type BodySite = ActionSite | BodyEndSite;
+export type BodySite = BodyNodeSite | BodyEndSite;
 
 export type BodyPathStep = Readonly<{
   body: Body;
@@ -41,33 +38,32 @@ export type ValueDemand = Readonly<{
   consumedAt: SiteId;
 }>;
 
-export type ProducingAction = OpAction | CallAction;
-
 export type Producer = Readonly<{
   output: ValueId;
-  action: ProducingAction;
+  operation: Operation;
   site: SiteId;
   inputs: readonly ValueId[];
 }>;
 
-export type ControlProducer = Readonly<{
-  action: IfAction | SwitchAction;
+export type JoinControlProducer = Readonly<{
   site: SiteId;
 }>;
 
 export type OperationSite = Readonly<{
-  action: OpAction;
+  operation: Operation;
   site: SiteId;
 }>;
 
+export type FunctionCall = CallOperation | ReturnCallControl;
+
 export type CallSite = Readonly<{
-  action: FunctionCallAction;
+  call: FunctionCall;
   site: SiteId;
 }>;
 
 export type BodyAnalysis = Readonly<{
   sites(): readonly BodySite[];
-  siteOf(body: Body, actionIndex: number): SiteId;
+  siteOf(body: Body, nodeIndex: number): SiteId;
   path(ancestor: Body, descendant: Body): readonly BodyPathStep[] | undefined;
   isLoopBody(body: Body): boolean;
   dominatingSite(sites: readonly SiteId[]): SiteId;
@@ -75,7 +71,7 @@ export type BodyAnalysis = Readonly<{
 
   roots(): readonly ValueDemand[];
   controlDependencies(output: ValueId): readonly ValueDemand[] | undefined;
-  controlProducer(output: ValueId): ControlProducer | undefined;
+  controlProducer(output: ValueId): JoinControlProducer | undefined;
   producer(output: ValueId): Producer | undefined;
 
   isLive(id: ValueId): boolean;
@@ -85,11 +81,6 @@ export type BodyAnalysis = Readonly<{
 
   operations(): readonly OperationSite[];
   calls(): readonly CallSite[];
-  actionEffects(action: ProducingAction): Readonly<{
-    reads: readonly StorageAccess[];
-    writes: readonly StorageAccess[];
-  }>;
-  actionMustExecute(action: ProducingAction): boolean;
-  opActionMustExecute(action: OpAction): boolean;
-  callActionMustExecute(action: FunctionCallAction): boolean;
+  operationMustExecute(operation: Operation): boolean;
+  callMustExecute(call: FunctionCall): boolean;
 }>;

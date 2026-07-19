@@ -1,7 +1,11 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { IfAction } from "#ir/actions.js";
+import {
+  finishControl,
+  ifControl,
+  type IfControl
+} from "#compiler/ir/controls/index.js";
 import type { IrBlock } from "#ir/block.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { pageFault } from "#core/exceptions.js";
@@ -15,7 +19,7 @@ test("if branch hints come only from the explicit action hint", () => {
   deepStrictEqual(branchHintsForCheckIf("unlikely"), [wasmBranchHint.unlikely]);
 });
 
-function branchHintsForCheckIf(hint: IfAction["hint"]): readonly number[] {
+function branchHintsForCheckIf(hint: IfControl["hint"]): readonly number[] {
   const values = new ValueTable();
   const address = values.const(0x2000);
   const condition = values.const(1);
@@ -27,24 +31,24 @@ function branchHintsForCheckIf(hint: IfAction["hint"]): readonly number[] {
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        {
-          kind: "if",
+      nodes: [
+        ifControl.create({
           condition,
           ...(hint === undefined ? {} : { hint }),
           thenBody: {
-            actions: [
-              {
-                kind: "finish",
+            nodes: [
+              finishControl.create({
                 finish: {
                   kind: "exit",
                   result: pageFaultResult
                 }
-              }
+              })
             ]
           }
-        },
-        { kind: "finish", finish: { kind: "exit", result: fallbackResult } }
+        }),
+        finishControl.create({
+          finish: { kind: "exit", result: fallbackResult }
+        })
       ]
     }
   };

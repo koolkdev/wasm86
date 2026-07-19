@@ -1,83 +1,42 @@
-import { assert } from "#common/assert.js";
-import { cellRead, cellWrite } from "./cells.js";
-import { resourceRead, resourceWrite } from "./resource.js";
+import type { CallOperation } from "./call.js";
 import type {
-  DeclaredOperationInputs,
+  CellReadOperation,
+  CellWriteOperation
+} from "./cells.js";
+import type {
+  ResourceReadOperation,
+  ResourceWriteOperation
+} from "./resource.js";
+
+export { callOperation } from "./call.js";
+export { cellRead, cellWrite } from "./cells.js";
+export { resourceRead, resourceWrite } from "./resource.js";
+
+export type {
+  CallOperation,
+  CallOperationArgs
+} from "./call.js";
+export type {
+  CellReadOperation,
+  CellWriteInitialization,
+  CellWriteOperation
+} from "./cells.js";
+export type {
+  OperationBase,
   OperationEmitTarget,
-  OperationValueEmitter
+  OperationFactory,
+  OperationResult
 } from "./definition.js";
+export type {
+  ResourceOperation,
+  ResourceReadOperation,
+  ResourceWriteArgs,
+  ResourceWriteOperation
+} from "./resource.js";
 
-export type OperationWithResult =
-  | ReturnType<typeof resourceRead.create>
-  | ReturnType<typeof cellRead.create>;
-
-export type OperationWithoutResult =
-  | ReturnType<typeof resourceWrite.create>
-  | ReturnType<typeof cellWrite.create>;
-
-export type Operation = OperationWithResult | OperationWithoutResult;
-
-export function emitOperation(
-  target: OperationEmitTarget,
-  values: OperationValueEmitter,
-  operation: Operation
-): void {
-  const declared = operation.inputs;
-  const consumedInputs = new Set<number>();
-
-  function consumeInput(index: number) {
-    const input = declared[index];
-
-    assert(input !== undefined, `unknown operation input ${index}`);
-    assert(
-      !consumedInputs.has(index),
-      `operation input ${index} is consumed more than once`
-    );
-    consumedInputs.add(index);
-    return input;
-  }
-
-  const inputs: DeclaredOperationInputs = {
-    use(index) {
-      values.emitUse(consumeInput(index).value);
-    },
-    constValue(index) {
-      const input = declared[index];
-
-      assert(input !== undefined, `unknown operation input ${index}`);
-      assert(
-        !consumedInputs.has(index),
-        `operation input ${index} is consumed more than once`
-      );
-      const value = values.constValue(input.value);
-
-      if (value !== undefined) {
-        consumedInputs.add(index);
-      }
-      return value;
-    }
-  };
-
-  switch (operation.kind) {
-    case resourceRead.kind:
-      resourceRead.emit(operation, target, inputs);
-      break;
-    case resourceWrite.kind:
-      resourceWrite.emit(operation, target, inputs);
-      break;
-    case cellRead.kind:
-      cellRead.emit(operation, target, inputs);
-      break;
-    case cellWrite.kind:
-      cellWrite.emit(operation, target, inputs);
-      break;
-    default: {
-      const unhandled: never = operation;
-      assert(false, `unhandled IR operation ${String(unhandled)}`);
-    }
-  }
-
-  for (const index of declared.keys()) {
-    assert(consumedInputs.has(index), `operation input ${index} was not consumed`);
-  }
-}
+export type Operation =
+  | CallOperation
+  | CellReadOperation
+  | CellWriteOperation
+  | ResourceReadOperation
+  | ResourceWriteOperation;

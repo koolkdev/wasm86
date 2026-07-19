@@ -6,36 +6,36 @@ import {
 } from "node:assert";
 import { test } from "node:test";
 
+import {
+  ifControl,
+  loopControl
+} from "#compiler/ir/controls/index.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { placeBody } from "#compiler/placement/place.js";
 import { validatePlacement } from "#compiler/placement/validate.js";
-import type { OpAction } from "#ir/actions.js";
+import type { Operation } from "#compiler/ir/operations/index.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import {
   compilerTestValues,
-  resourceReadAction,
-  resourceWriteAction
+  resourceReadNode,
+  resourceWriteNode
 } from "#ir/tests/storage-op-helpers.js";
 
 function write(
   cell: CellRef,
   value: ValueId,
   initialization: "seed" | "update"
-): OpAction {
-  return {
-    kind: "op",
-    op: cellWrite.create({ cell, value, initialization })
-  };
+): Extract<Operation, { kind: "cell.write" }> {
+  return cellWrite.create({ cell, value, initialization });
 }
 
-function read(cell: CellRef, output: ValueId): OpAction {
-  return {
-    kind: "op",
-    output,
-    op: cellRead.create({ cell })
-  };
+function read(
+  cell: CellRef,
+  output: ValueId
+): Extract<Operation, { kind: "cell.read" }> {
+  return cellRead.create({ cell }, () => output);
 }
 
 function place(block: IrBlock, exports: readonly ValueId[] = []) {
@@ -48,14 +48,14 @@ function place(block: IrBlock, exports: readonly ValueId[] = []) {
 test("a referenced cell receives one typed local", () => {
   const values = compilerTestValues();
   const cell = new CellRef("i32");
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         write(cell, values.const(7), "seed"),
         read(cell, output),
-        resourceWriteAction(values, 0, output)
+        resourceWriteNode(values, 0, output)
       ]
     }
   };
@@ -72,7 +72,7 @@ test("cell locals are allocated when a cell has only writes", () => {
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         write(cell, values.const(0), "seed"),
         write(cell, values.const(1), "update")
       ]
@@ -91,7 +91,7 @@ test("distinct cells receive distinct locals with their scalar types", () => {
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         write(narrow, values.const(1), "seed"),
         write(wide, values.const64(2n), "seed")
       ]
@@ -111,23 +111,23 @@ test("distinct cells receive distinct locals with their scalar types", () => {
 test("nested branch and loop accesses share the declaring cell's local", () => {
   const values = compilerTestValues();
   const cell = new CellRef("i32");
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const loopBody: Body = {
-    actions: [
+    nodes: [
       write(cell, values.const(3), "update"),
       read(cell, output),
-      resourceWriteAction(values, 0, output)
+      resourceWriteNode(values, 0, output)
     ]
   };
   const thenBody: Body = {
-    actions: [{ kind: "loop", carried: [], body: loopBody }]
+    nodes: [loopControl.create({ carried: [], body: loopBody })]
   };
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         write(cell, values.const(1), "seed"),
-        { kind: "if", condition: values.external(0), thenBody }
+        ifControl.create({ condition: values.external(0), thenBody })
       ]
     }
   };
@@ -140,18 +140,18 @@ test("nested branch and loop accesses share the declaring cell's local", () => {
 test("a cell never shares a local with an overlapping value temporary", () => {
   const values = compilerTestValues();
   const cell = new CellRef("i32");
-  const snapshot = values.addActionOutput();
-  const output = values.addActionOutput();
+  const snapshot = values.addNodeOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        resourceReadAction(values, snapshot, 0),
-        resourceWriteAction(values, 0, values.const(9)),
+      nodes: [
+        resourceReadNode(values, snapshot, 0),
+        resourceWriteNode(values, 0, values.const(9)),
         write(cell, values.const(1), "seed"),
         read(cell, output),
-        resourceWriteAction(values, 1, snapshot),
-        resourceWriteAction(values, 2, output)
+        resourceWriteNode(values, 1, snapshot),
+        resourceWriteNode(values, 2, output)
       ]
     }
   };
@@ -183,18 +183,18 @@ test("placement validation rejects overlapping, mistyped, and stale cell locals"
   const values = compilerTestValues();
   const first = new CellRef("i32");
   const second = new CellRef("i32");
-  const firstOut = values.addActionOutput();
-  const secondOut = values.addActionOutput();
+  const firstOut = values.addNodeOutput();
+  const secondOut = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         write(first, values.const(1), "seed"),
         write(second, values.const(2), "seed"),
         read(first, firstOut),
         read(second, secondOut),
-        resourceWriteAction(values, 0, firstOut),
-        resourceWriteAction(values, 1, secondOut)
+        resourceWriteNode(values, 0, firstOut),
+        resourceWriteNode(values, 1, secondOut)
       ]
     }
   };
@@ -238,18 +238,18 @@ test("cells with disjoint lifetimes pool one local", () => {
   const values = compilerTestValues();
   const first = new CellRef("i32");
   const second = new CellRef("i32");
-  const firstOut = values.addActionOutput();
-  const secondOut = values.addActionOutput();
+  const firstOut = values.addNodeOutput();
+  const secondOut = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         write(first, values.const(1), "seed"),
         read(first, firstOut),
-        resourceWriteAction(values, 0, firstOut),
+        resourceWriteNode(values, 0, firstOut),
         write(second, values.const(2), "seed"),
         read(second, secondOut),
-        resourceWriteAction(values, 1, secondOut)
+        resourceWriteNode(values, 1, secondOut)
       ]
     }
   };
@@ -263,23 +263,23 @@ test("a loop-crossing cell stays live through the whole loop", () => {
   const values = compilerTestValues();
   const outer = new CellRef("i32");
   const inner = new CellRef("i32");
-  const outerOut = values.addActionOutput();
-  const innerOut = values.addActionOutput();
+  const outerOut = values.addNodeOutput();
+  const innerOut = values.addNodeOutput();
   const loopBody: Body = {
-    actions: [
+    nodes: [
       read(outer, outerOut),
-      resourceWriteAction(values, 0, outerOut),
+      resourceWriteNode(values, 0, outerOut),
       write(inner, values.const(5), "seed"),
       read(inner, innerOut),
-      resourceWriteAction(values, 1, innerOut)
+      resourceWriteNode(values, 1, innerOut)
     ]
   };
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         write(outer, values.const(1), "seed"),
-        { kind: "loop", carried: [], body: loopBody }
+        loopControl.create({ carried: [], body: loopBody })
       ]
     }
   };

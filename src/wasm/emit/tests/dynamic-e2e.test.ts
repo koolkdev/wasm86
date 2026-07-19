@@ -182,10 +182,10 @@ test("a computed index extracts the registers from a modrm-style external", asyn
   const rm = values.binary("and", modrm, values.const(7));
   const source = state.dynamicGpr(reg, 32);
   const destination = state.dynamicGpr(rm, 32);
-  const loaded = values.addActionOutput();
+  const loaded = values.addNodeOutput();
   const block: IrBlock = {
     body: {
-      actions: [
+      nodes: [
         operandRead(loaded, source),
         operandWrite(destination, loaded)
       ]
@@ -210,10 +210,10 @@ test("a computed index drives byte access on both the read and the write path", 
   const rm = values.binary("and", modrm, values.const(7));
   const source = state.dynamicGpr(reg, 8);
   const destination = state.dynamicGpr(rm, 8);
-  const loaded = values.addActionOutput(fitsUnsigned(8));
+  const loaded = values.addNodeOutput(fitsUnsigned(8));
   const block: IrBlock = {
     body: {
-      actions: [
+      nodes: [
         operandRead(loaded, source),
         operandWrite(destination, loaded)
       ]
@@ -253,11 +253,11 @@ test("static segment ranges round-trip selectors and loaded hidden state", async
   const sourceOperands = fields.map((field) => state.segment("es", field));
   const destinationOperands = fields.map((field) => state.segment("gs", field));
   const inputs = fields.map((_, index) => values.external(index));
-  const loaded = fields.map((field) => values.addActionOutput(field === "selector" ? fitsUnsigned(16) : undefined));
+  const loaded = fields.map((field) => values.addNodeOutput(field === "selector" ? fitsUnsigned(16) : undefined));
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         ...sourceOperands.map((operand, index) =>
           operandWrite(operand, inputs[index]!)
         ),
@@ -291,11 +291,11 @@ test("dynamic segment accesses use separate contiguous arrays for every loaded f
     state.dynamicSegment(targetIndex, field)
   );
   const destinationOperands = fields.map((field) => state.segment("fs", field));
-  const loaded = fields.map((field) => values.addActionOutput(field === "selector" ? fitsUnsigned(16) : undefined));
+  const loaded = fields.map((field) => values.addNodeOutput(field === "selector" ? fitsUnsigned(16) : undefined));
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         ...operands.map((operand, index) =>
           operandWrite(operand, inputs[index]!)
         ),

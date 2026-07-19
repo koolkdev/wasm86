@@ -13,8 +13,8 @@ type Const64Node = Readonly<Const64Args & { kind: "const64" }>;
 type UnreachableArgs = Readonly<{ type: ValueType }>;
 type UnreachableNode = Readonly<UnreachableArgs & { kind: "unreachable" }>;
 
-type ActionOutputArgs = Readonly<{ type: ValueType }>;
-type ActionOutputNode = Readonly<ActionOutputArgs & { kind: "actionOutput" }>;
+type NodeOutputArgs = Readonly<{ type: ValueType }>;
+type NodeOutputNode = Readonly<NodeOutputArgs & { kind: "nodeOutput" }>;
 type LoopInputNode = Readonly<{ kind: "loopInput" }>;
 
 type ExternalArgs = Readonly<{ external: ExternalValueId }>;
@@ -56,16 +56,16 @@ export const unreachableValue: ValueDefinition<UnreachableArgs, UnreachableNode>
   emit: (_id, _node, target) => target.body.unreachable()
 };
 
-export const actionOutputValue: ValueDefinition<ActionOutputArgs, ActionOutputNode> = {
-  create: ({ type }) => ({ kind: "actionOutput", type }),
+export const nodeOutputValue: ValueDefinition<NodeOutputArgs, NodeOutputNode> = {
+  create: ({ type }) => ({ kind: "nodeOutput", type }),
   internKey: () => undefined,
   resultType: (node) => node.type,
   widthBounds: (node) => {
-    assert(node.type === "i32", "width bounds requested for i64 action output");
+    assert(node.type === "i32", "width bounds requested for i64 node output");
     return unboundedWidthBounds;
   },
   captureMode: "producer",
-  emit: (id, _node, target) => target.emitActionOutput(id)
+  emit: (id, _node, target) => target.emitNodeOutput(id)
 };
 
 export const loopInputValue: ValueDefinition<undefined, LoopInputNode> = {

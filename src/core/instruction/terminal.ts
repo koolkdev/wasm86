@@ -5,8 +5,11 @@ import {
   segmentExit,
   trapExit
 } from "#core/exits.js";
+import {
+  resourceWrite,
+  type ResourceWriteArgs
+} from "#compiler/ir/operations/resource.js";
 import type { RegionBuilder } from "#ir/region-builder.js";
-import type { Action } from "#ir/actions.js";
 import type { StatePathKind } from "./state/pending-buffer.js";
 import type { InstructionState } from "./state/state.js";
 import type { BoundStateAccess } from "#core/state/access.js";
@@ -67,7 +70,7 @@ export class InstructionTerminator {
     targetEip: ValueId
   ): void {
     assert(this.#state.eip.has(), "dispatch requires a completed pending eip");
-    this.#flush(region, this.#state.flushesForPath(access, "completed"));
+    this.#emitWritebacks(region, this.#state.flushesForPath(access, "completed"));
     this.#terminals.dispatch(region, targetEip);
   }
 
@@ -104,13 +107,16 @@ export class InstructionTerminator {
     result: ValueId,
     path: StatePathKind
   ): void {
-    this.#flush(region, this.#state.flushesForPath(access, path));
+    this.#emitWritebacks(region, this.#state.flushesForPath(access, path));
     this.#terminals.returnExit(region, result);
   }
 
-  #flush(region: RegionBuilder, flushes: readonly Action[]): void {
-    for (const action of flushes) {
-      region.push(action);
+  #emitWritebacks(
+    region: RegionBuilder,
+    writebacks: readonly ResourceWriteArgs[]
+  ): void {
+    for (const writeback of writebacks) {
+      region.operation(resourceWrite, writeback);
     }
   }
 }

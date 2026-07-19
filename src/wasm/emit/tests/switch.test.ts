@@ -18,6 +18,11 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { instantiateIrBlock, irBlockBody, irBlockCompleted } from "./harness.js";
+import {
+  finishControl,
+  ifControl,
+  switchControl
+} from "#compiler/ir/controls/index.js";
 
 // The value switch: br_table dispatch over one block per case plus default
 // plus a join, with the selected arm's result delivered as the output.
@@ -30,21 +35,20 @@ test("a switch selects arms by match and falls back to the default", async () =>
   const first = values.const(11);
   const second = values.const(42);
   const fallback = values.const(99);
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        {
-          kind: "switch",
+      nodes: [
+        switchControl.create({
           selector,
           output,
           cases: [
-            { match: 0, body: { actions: [], result: first } },
-            { match: 2, body: { actions: [], result: second } }
+            { match: 0, body: { nodes: [], result: first } },
+            { match: 2, body: { nodes: [], result: second } }
           ],
-          defaultBody: { actions: [], result: fallback }
-        },
+          defaultBody: { nodes: [], result: fallback }
+        }),
         operandWrite(state.gpr("eax"), output)
       ]
     }
@@ -78,27 +82,25 @@ test("sequential switch joins reuse one physical local", async () => {
   const firstFallback = values.const(12);
   const secondCase = values.const(21);
   const secondFallback = values.const(22);
-  const firstOutput = values.addActionOutput();
-  const secondOutput = values.addActionOutput();
+  const firstOutput = values.addNodeOutput();
+  const secondOutput = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        {
-          kind: "switch",
+      nodes: [
+        switchControl.create({
           selector,
           output: firstOutput,
-          cases: [{ match: 0, body: { actions: [], result: firstCase } }],
-          defaultBody: { actions: [], result: firstFallback }
-        },
+          cases: [{ match: 0, body: { nodes: [], result: firstCase } }],
+          defaultBody: { nodes: [], result: firstFallback }
+        }),
         operandWrite(state.gpr("eax"), firstOutput),
-        {
-          kind: "switch",
+        switchControl.create({
           selector,
           output: secondOutput,
-          cases: [{ match: 0, body: { actions: [], result: secondCase } }],
-          defaultBody: { actions: [], result: secondFallback }
-        },
+          cases: [{ match: 0, body: { nodes: [], result: secondCase } }],
+          defaultBody: { nodes: [], result: secondFallback }
+        }),
         operandWrite(state.gpr("ebx"), secondOutput)
       ]
     }
@@ -125,18 +127,17 @@ test("an impossible default lowers to unreachable and traps", async () => {
   const selector = values.external(0);
   const first = values.const(11);
   const impossible = values.unreachable();
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        {
-          kind: "switch",
+      nodes: [
+        switchControl.create({
           selector,
           output,
-          cases: [{ match: 0, body: { actions: [], result: first } }],
-          defaultBody: { actions: [], result: impossible }
-        },
+          cases: [{ match: 0, body: { nodes: [], result: first } }],
+          defaultBody: { nodes: [], result: impossible }
+        }),
         operandWrite(state.gpr("eax"), output)
       ]
     }
@@ -153,26 +154,25 @@ test("an arm-local compound over an arm-local read computes inside the arm", asy
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.external(0);
-  const read = values.addActionOutput();
+  const read = values.addNodeOutput();
   const formula = values.binary("add", read, values.const(1));
   const fallback = values.const(99);
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        {
-          kind: "switch",
+      nodes: [
+        switchControl.create({
           selector,
           output,
           cases: [
             {
               match: 0,
-              body: { actions: [operandRead(read, state.gpr("ebx"))], result: formula }
+              body: { nodes: [operandRead(read, state.gpr("ebx"))], result: formula }
             }
           ],
-          defaultBody: { actions: [], result: fallback }
-        },
+          defaultBody: { nodes: [], result: fallback }
+        }),
         operandWrite(state.gpr("eax"), output)
       ]
     }
@@ -199,21 +199,20 @@ test("a parent compound consumed by two arms captures once before the switch", a
   const selector = values.external(0);
   const shared = values.binary("add", values.external(1), values.const(5));
   const fallback = values.const(99);
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        {
-          kind: "switch",
+      nodes: [
+        switchControl.create({
           selector,
           output,
           cases: [
-            { match: 0, body: { actions: [], result: shared } },
-            { match: 1, body: { actions: [], result: shared } }
+            { match: 0, body: { nodes: [], result: shared } },
+            { match: 1, body: { nodes: [], result: shared } }
           ],
-          defaultBody: { actions: [], result: fallback }
-        },
+          defaultBody: { nodes: [], result: fallback }
+        }),
         operandWrite(state.gpr("eax"), output)
       ]
     }
@@ -235,23 +234,22 @@ test("a switch captures a state snapshot before the selected arm writes it", asy
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.external(0);
-  const snapshot = values.addActionOutput();
+  const snapshot = values.addNodeOutput();
   const caseResult = values.const(10);
   const defaultResult = values.const(11);
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         operandRead(snapshot, state.gpr("eax")),
-        {
-          kind: "switch",
+        switchControl.create({
           selector,
           output,
           cases: [{
             match: 0,
             body: {
-              actions: [
+              nodes: [
                 operandWrite(state.gpr("eax"), values.const(5)),
                 operandWrite(state.gpr("ebx"), snapshot)
               ],
@@ -259,13 +257,13 @@ test("a switch captures a state snapshot before the selected arm writes it", asy
             }
           }],
           defaultBody: {
-            actions: [
+            nodes: [
               operandWrite(state.gpr("eax"), values.const(9)),
               operandWrite(state.gpr("ecx"), snapshot)
             ],
             result: defaultResult
           }
-        },
+        }),
         operandWrite(state.gpr("edx"), output)
       ]
     }
@@ -294,28 +292,27 @@ test("a dead switch output emits no arm values but keeps the impossible default"
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
   const selector = values.external(0);
-  const read = values.addActionOutput();
+  const read = values.addNodeOutput();
   const readFormula = values.binary("add", read, values.const(1));
   const shared = values.binary("add", values.external(1), values.const(5));
   const impossible = values.unreachable();
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        {
-          kind: "switch",
+      nodes: [
+        switchControl.create({
           selector,
           output,
           cases: [
             {
               match: 0,
-              body: { actions: [operandRead(read, state.gpr("ebx"))], result: readFormula }
+              body: { nodes: [operandRead(read, state.gpr("ebx"))], result: readFormula }
             },
-            { match: 1, body: { actions: [], result: shared } }
+            { match: 1, body: { nodes: [], result: shared } }
           ],
-          defaultBody: { actions: [], result: impossible }
-        }
+          defaultBody: { nodes: [], result: impossible }
+        })
       ]
     }
   };
@@ -344,37 +341,37 @@ test("a dispatch inside an arm escapes through the switch's labels", async () =>
   const target = values.const(0x2000);
   const delivered = values.const(7);
   const fallback = values.const(99);
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        {
-          kind: "switch",
+      nodes: [
+        switchControl.create({
           selector,
           output,
           cases: [
             {
               match: 0,
               body: {
-                actions: [
-                  {
-                    kind: "if",
+                nodes: [
+                  ifControl.create({
                     condition,
                     thenBody: {
-                      actions: [
+                      nodes: [
                         operandWrite(state.field(coreStateFields.eip), target),
-                        { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
+                        finishControl.create({
+                          finish: { kind: "dispatch", targetEip: target }
+                        })
                       ]
                     }
-                  }
+                  })
                 ],
                 result: delivered
               }
             }
           ],
-          defaultBody: { actions: [], result: fallback }
-        },
+          defaultBody: { nodes: [], result: fallback }
+        }),
         operandWrite(state.gpr("eax"), output)
       ]
     }

@@ -4,7 +4,6 @@ import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { mayAlias } from "#ir/aliasing.js";
 import type { IrBlock } from "#ir/block.js";
-import { actionOutput } from "#ir/traverse.js";
 import { LoopAnchors } from "../loop-anchors.js";
 import type { PlacementPlan } from "../model.js";
 import type { PlacementProof } from "./uses.js";
@@ -74,11 +73,11 @@ function validateProducer(
     ? []
     : analysis.path(authored.body, anchor.body);
 
-  assert(authored.kind === "action", `producer ${producer.output} has no action site`);
+  assert(authored.kind === "node", `producer ${producer.output} has no node site`);
   assert(path !== undefined, `producer ${producer.output} leaves its definition scope`);
   if (authored.body === anchor.body) {
     assert(
-      anchor.actionIndex >= authored.actionIndex,
+      anchor.nodeIndex >= authored.nodeIndex,
       `producer ${producer.output} is anchored before its definition`
     );
   } else {
@@ -86,7 +85,7 @@ function validateProducer(
 
     assert(first !== undefined, `producer ${producer.output} has no placement path`);
     assert(
-      getSite(analysis, first.owner).actionIndex > authored.actionIndex,
+      getSite(analysis, first.owner).nodeIndex > authored.nodeIndex,
       `producer ${producer.output} enters a region before its definition`
     );
     for (const step of path) {
@@ -98,7 +97,7 @@ function validateProducer(
   }
   if (anchor.id !== authored.id) {
     assert(
-      analysis.actionEffects(producer.action).writes.length === 0,
+      producer.operation.directEffects.writes.length === 0,
       `producer ${producer.output} moves an effectful realization`
     );
     assert(
@@ -107,26 +106,26 @@ function validateProducer(
     );
   }
 
-  const reads = analysis.actionEffects(producer.action).reads;
+  const reads = producer.operation.directEffects.reads;
   let body = authored.body;
-  let start = authored.actionIndex + 1;
+  let start = authored.nodeIndex + 1;
   const stableThrough = (end: number): void => {
     for (let index = start; index < end; index += 1) {
       const writes = analysis.writesAt(analysis.siteOf(body, index));
 
       assert(
         !writes.some((write) => reads.some((read) => mayAlias(read, write))),
-        `producer ${actionOutput(producer.action)} crosses an aliasing write`
+        `producer ${producer.output} crosses an aliasing write`
       );
     }
   };
 
   for (const step of path) {
-    stableThrough(getSite(analysis, step.owner).actionIndex);
+    stableThrough(getSite(analysis, step.owner).nodeIndex);
     body = step.body;
     start = 0;
   }
-  stableThrough(anchor.actionIndex);
+  stableThrough(anchor.nodeIndex);
 }
 
 function getSite(analysis: BodyAnalysis, id: SiteId): BodySite {

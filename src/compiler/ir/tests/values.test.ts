@@ -34,7 +34,7 @@ test("value table exposes nodes by id", () => {
 test("value table forks preserve the prefix and isolate later allocation", () => {
   const table = new ValueTable();
   const constant = table.const(7);
-  const input = table.addActionOutput(fitsUnsigned(8));
+  const input = table.addNodeOutput(fitsUnsigned(8));
   const sum = table.binary("add", input, constant);
   const wide = table.const64(9n);
 
@@ -54,7 +54,7 @@ test("value table forks preserve the prefix and isolate later allocation", () =>
   strictEqual(fork.binary("add", input, constant), sum);
 
   const forkOnly = fork.const(11);
-  fork.addActionOutput();
+  fork.addNodeOutput();
   strictEqual(table.size(), parentSize, "fork allocations do not mutate the parent");
   const parentOnly = table.const(11);
 
@@ -68,14 +68,14 @@ test("value table forks preserve the prefix and isolate later allocation", () =>
   strictEqual(table.const(7), constant, "fork interning does not mutate the parent trie");
 });
 
-test("action outputs retain their declared scalar type", () => {
+test("node outputs retain their declared scalar type", () => {
   const table = new ValueTable();
-  const narrow = table.addActionOutput();
-  const wide = table.addActionOutput64();
+  const narrow = table.addNodeOutput();
+  const wide = table.addNodeOutput64();
 
   strictEqual(table.valueType(narrow), "i32");
   strictEqual(table.valueType(wide), "i64");
-  throws(() => table.widthBounds(wide), /i64 action output/);
+  throws(() => table.widthBounds(wide), /i64 node output/);
 });
 
 test("unreachable values re-emit but retain their semantic identity", () => {
@@ -89,7 +89,7 @@ test("unreachable values re-emit but retain their semantic identity", () => {
 
 test("building the same expression twice yields the same node id", () => {
   const table = new ValueTable();
-  const a = table.addActionOutput();
+  const a = table.addNodeOutput();
   const b = table.external(0);
   const add = table.binary("add", a, b);
 
@@ -101,7 +101,7 @@ test("building the same expression twice yields the same node id", () => {
 
 test("multiply expressions intern and fold as i32 low products", () => {
   const table = new ValueTable();
-  const a = table.addActionOutput();
+  const a = table.addNodeOutput();
   const b = table.external(0);
   const product = table.binary("mul", a, b);
 
@@ -114,7 +114,7 @@ test("multiply expressions intern and fold as i32 low products", () => {
 
 test("signed right shift is a distinct binary operator", () => {
   const table = new ValueTable();
-  const a = table.addActionOutput();
+  const a = table.addNodeOutput();
   const b = table.const(2);
   const shifted = table.binary("shr_s", a, b);
 
@@ -124,7 +124,7 @@ test("signed right shift is a distinct binary operator", () => {
 
 test("each compound kind deduplicates on its full key", () => {
   const table = new ValueTable();
-  const a = table.addActionOutput();
+  const a = table.addNodeOutput();
   const b = table.external(0);
 
   const extend = table.extend(8, a, true);
@@ -154,7 +154,7 @@ test("each compound kind deduplicates on its full key", () => {
 
 test("i64 values deduplicate on their typed operation keys", () => {
   const table = new ValueTable();
-  const a = table.addActionOutput();
+  const a = table.addNodeOutput();
   const b = table.external(0);
   const extendedA = table.extend64(32, a, true);
   const extendedB = table.extend64(32, b, true);
@@ -236,7 +236,7 @@ test("binary operations fold constant operands", () => {
 
 test("binary operations fold local identities", () => {
   const table = new ValueTable();
-  const value = table.addActionOutput();
+  const value = table.addNodeOutput();
   const zero = table.const(0);
   const minusOne = table.const(-1);
 
@@ -291,7 +291,7 @@ test("extend folds constants", () => {
 
 test("compares fold constants and same-value predicates", () => {
   const table = new ValueTable();
-  const value = table.addActionOutput();
+  const value = table.addNodeOutput();
   const one = table.const(1);
   const two = table.const(2);
   const minusOne = table.const(-1);
@@ -308,7 +308,7 @@ test("compares fold constants and same-value predicates", () => {
 
 test("compare lowers narrow widths by predicate class", () => {
   const table = new ValueTable();
-  const a = table.addActionOutput();
+  const a = table.addNodeOutput();
   const b = table.external(0);
 
   strictEqual(
@@ -323,7 +323,7 @@ test("compare lowers narrow widths by predicate class", () => {
 
 test("widthAdjusted extends when signed and truncates otherwise", () => {
   const table = new ValueTable();
-  const value = table.addActionOutput();
+  const value = table.addNodeOutput();
 
   strictEqual(table.widthAdjusted(8, value, true), table.extend(8, value, true));
   strictEqual(table.widthAdjusted(8, value, false), table.truncate(8, value));
@@ -332,8 +332,8 @@ test("widthAdjusted extends when signed and truncates otherwise", () => {
 
 test("select folds constant conditions and equal arms", () => {
   const table = new ValueTable();
-  const condition = table.addActionOutput();
-  const value = table.addActionOutput();
+  const condition = table.addNodeOutput();
+  const value = table.addNodeOutput();
   const fallback = table.external(0);
 
   strictEqual(table.select(table.const(1), value, fallback), value);
@@ -342,10 +342,10 @@ test("select folds constant conditions and equal arms", () => {
   strictEqual(table.select(condition, value, value), value);
 });
 
-test("action outputs are distinct leaves, never deduped", () => {
+test("node outputs are distinct leaves, never deduped", () => {
   const table = new ValueTable();
-  const first = table.addActionOutput();
-  const second = table.addActionOutput();
+  const first = table.addNodeOutput();
+  const second = table.addNodeOutput();
 
   notStrictEqual(first, second);
   strictEqual(table.valueType(first), "i32");
@@ -409,7 +409,7 @@ test("extend folds constants and elides extensions covered by bounds", () => {
 
 test("truncate64 folds matching signed and unsigned extensions", () => {
   const table = new ValueTable();
-  const source = table.addActionOutput();
+  const source = table.addNodeOutput();
   const low16 = table.truncate(16, source);
 
   strictEqual(table.node(low16).kind, "truncate");
@@ -419,8 +419,8 @@ test("truncate64 folds matching signed and unsigned extensions", () => {
 
 test("compare results fit a single bit either way", () => {
   const table = new ValueTable();
-  const compare = table.compare(32, "eq", table.addActionOutput(), table.external(0));
-  const wide = table.extend64(32, table.addActionOutput(), true);
+  const compare = table.compare(32, "eq", table.addNodeOutput(), table.external(0));
+  const wide = table.extend64(32, table.addNodeOutput(), true);
   const product = table.binary64("mul", wide, table.extend64(32, table.external(1), true));
   const i64Compare = table.compare64("ne", wide, product);
 
@@ -432,7 +432,7 @@ test("compare results fit a single bit either way", () => {
 
 test("truncations and extensions cover follow-up requests they imply", () => {
   const table = new ValueTable();
-  const unproven = table.addActionOutput();
+  const unproven = table.addNodeOutput();
   const low8 = table.truncate(8, unproven);
 
   // An 8-bit truncation fits unsigned 16 and is sign-extended from 9 bits up.
@@ -446,20 +446,20 @@ test("truncations and extensions cover follow-up requests they imply", () => {
   strictEqual(table.node(table.truncate(8, extended)).kind, "truncate");
 });
 
-test("action outputs carry their declared bounds", () => {
+test("node outputs carry their declared bounds", () => {
   const table = new ValueTable();
-  const byteRead = table.addActionOutput(fitsUnsigned(8));
+  const byteRead = table.addNodeOutput(fitsUnsigned(8));
 
   strictEqual(table.truncate(8, byteRead), byteRead);
   strictEqual(table.node(table.extend(8, byteRead, true)).kind, "extend");
 
-  const signedRead = table.addActionOutput(signExtended(8));
+  const signedRead = table.addNodeOutput(signExtended(8));
 
   strictEqual(table.extend(8, signedRead, true), signedRead);
   strictEqual(table.extend(16, signedRead, true), signedRead);
   strictEqual(table.node(table.truncate(8, signedRead)).kind, "truncate");
 
-  const opaque = table.addActionOutput();
+  const opaque = table.addNodeOutput();
 
   strictEqual(table.node(table.truncate(8, opaque)).kind, "truncate");
   strictEqual(table.node(table.extend(8, opaque, true)).kind, "extend");
@@ -467,8 +467,8 @@ test("action outputs carry their declared bounds", () => {
 
 test("unbounded results stay wrapped", () => {
   const table = new ValueTable();
-  const sum = table.binary("add", table.addActionOutput(), table.const(2));
-  const byte = table.addActionOutput(fitsUnsigned(8));
+  const sum = table.binary("add", table.addNodeOutput(), table.const(2));
+  const byte = table.addNodeOutput(fitsUnsigned(8));
   const signedShift = table.binary("shr_s", byte, table.const(2));
 
   strictEqual(table.node(table.truncate(8, sum)).kind, "truncate");
@@ -479,8 +479,8 @@ test("unbounded results stay wrapped", () => {
 
 test("bitwise results inherit their operands' bounds", () => {
   const table = new ValueTable();
-  const opaque = table.addActionOutput();
-  const byte = table.addActionOutput(fitsUnsigned(8));
+  const opaque = table.addNodeOutput();
+  const byte = table.addNodeOutput(fitsUnsigned(8));
 
   const masked = table.binary("and", opaque, table.const(0xff));
 
@@ -500,7 +500,7 @@ test("bitwise results inherit their operands' bounds", () => {
   deepStrictEqual(table.widthBounds(topBit), fitsUnsigned(1));
 
   // not al: xor with -1 keeps sign extension.
-  const signedByte = table.addActionOutput(signExtended(8));
+  const signedByte = table.addNodeOutput(signExtended(8));
   const inverted = table.binary("xor", signedByte, table.const(-1));
 
   strictEqual(table.extend(8, inverted, true), inverted);
@@ -509,7 +509,7 @@ test("bitwise results inherit their operands' bounds", () => {
 
 test("a select is bounded by the weaker of its arms", () => {
   const table = new ValueTable();
-  const condition = table.addActionOutput();
+  const condition = table.addNodeOutput();
   const bit = table.select(condition, table.const(1), table.const(0));
 
   strictEqual(table.truncate(8, bit), bit);
@@ -534,7 +534,7 @@ test("loop inputs are opaque i32 leaves with their creation bounds", () => {
 
 test("value inputs preserve repeated uses exactly", () => {
   const table = new ValueTable();
-  const value = table.addActionOutput();
+  const value = table.addNodeOutput();
   const doubled = table.binary("add", value, value);
   const emitted: ValueId[] = [];
 
@@ -542,7 +542,7 @@ test("value inputs preserve repeated uses exactly", () => {
   table.emit(doubled, {
     body: new WasmFunctionBodyEncoder(),
     emitUse: (input) => emitted.push(input),
-    emitActionOutput: () => {},
+    emitNodeOutput: () => {},
     emitExternal: () => {},
     emitParameter: () => {},
     emitLoopInput: () => {}
@@ -553,15 +553,15 @@ test("value inputs preserve repeated uses exactly", () => {
 test("emission visits stored inputs once in their declared order", () => {
   const table = new ValueTable();
   const condition = table.external(0);
-  const whenTrue = table.addActionOutput();
-  const whenFalse = table.addActionOutput();
+  const whenTrue = table.addNodeOutput();
+  const whenFalse = table.addNodeOutput();
   const selected = table.select(condition, whenTrue, whenFalse);
   const emitted: ValueId[] = [];
 
   table.emit(selected, {
     body: new WasmFunctionBodyEncoder(),
     emitUse: (value) => emitted.push(value),
-    emitActionOutput: () => {},
+    emitNodeOutput: () => {},
     emitExternal: () => {},
     emitParameter: () => {},
     emitLoopInput: () => {}
@@ -573,8 +573,8 @@ test("emission visits stored inputs once in their declared order", () => {
 test("select joins arm bounds", () => {
   const table = new ValueTable();
   const condition = table.external(0);
-  const whenTrue = table.addActionOutput(fitsUnsigned(1));
-  const whenFalse = table.addActionOutput(fitsUnsigned(8));
+  const whenTrue = table.addNodeOutput(fitsUnsigned(1));
+  const whenFalse = table.addNodeOutput(fitsUnsigned(8));
   const selected = table.select(condition, whenTrue, whenFalse);
 
   strictEqual(table.valueType(selected), "i32");
@@ -583,7 +583,7 @@ test("select joins arm bounds", () => {
 
 test("division trap detection uses i32 and i64 constants", () => {
   const table = new ValueTable();
-  const dividend32 = table.addActionOutput();
+  const dividend32 = table.addNodeOutput();
   const minusOne32 = table.const(-1);
   const zero32 = table.const(0);
   const seventeen32 = table.const(17);
@@ -623,7 +623,7 @@ test("division trap detection uses i32 and i64 constants", () => {
 
 test("every scalar operator constructs and realizes its supported value types", () => {
   const table = new ValueTable();
-  const a = table.addActionOutput();
+  const a = table.addNodeOutput();
   const b = table.external(0);
   const a64 = table.extend64(32, a, true);
   const b64 = table.extend64(32, b, true);
@@ -631,7 +631,7 @@ test("every scalar operator constructs and realizes its supported value types", 
   const emitContext: ValueEmitContext = {
     body,
     emitUse: () => {},
-    emitActionOutput: () => {},
+    emitNodeOutput: () => {},
     emitExternal: () => {},
     emitParameter: () => {},
     emitLoopInput: () => {}

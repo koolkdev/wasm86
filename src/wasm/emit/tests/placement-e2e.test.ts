@@ -1,13 +1,12 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import type { Action } from "#ir/actions.js";
-import type { IrBlock } from "#ir/block.js";
+import type { BodyNode, IrBlock } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { gprChannel } from "#core/state/channels.js";
 import { cpuStateAccess } from "#cpu/state.js";
 import {
-  memoryRead,
+  memoryReadOperation,
   operandRead,
   operandWrite
 } from "#ir/tests/storage-op-helpers.js";
@@ -23,6 +22,10 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { instantiateIrBlock, irBlockBody, irBlockCompleted } from "./harness.js";
+import {
+  finishControl,
+  ifControl
+} from "#compiler/ir/controls/index.js";
 
 test("a single nested-body demand executes inside the selected body", async () => {
   const values = new ValueTable();
@@ -30,17 +33,16 @@ test("a single nested-body demand executes inside the selected body", async () =
   const state = cpuStateAccess.bind(new RegionBuilder(values));
   const condition = values.external(0);
   const address = values.external(1);
-  const loaded = values.addActionOutput();
+  const loaded = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        memoryRead(loaded, address, 32),
-        {
-          kind: "if",
+      nodes: [
+        memoryReadOperation(loaded, address, 32),
+        ifControl.create({
           condition,
-          thenBody: { actions: [operandWrite(state.gpr("eax"), loaded)] }
-        }
+          thenBody: { nodes: [operandWrite(state.gpr("eax"), loaded)] }
+        })
       ]
     }
   };
@@ -64,17 +66,16 @@ test("a selected-body producer keeps its compound input in the body", () => {
   const condition = values.external(0);
   const base = values.external(1);
   const address = values.binary("add", base, values.const(4));
-  const loaded = values.addActionOutput();
+  const loaded = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        memoryRead(loaded, address, 32),
-        {
-          kind: "if",
+      nodes: [
+        memoryReadOperation(loaded, address, 32),
+        ifControl.create({
           condition,
-          thenBody: { actions: [operandWrite(state.gpr("eax"), loaded)] }
-        }
+          thenBody: { nodes: [operandWrite(state.gpr("eax"), loaded)] }
+        })
       ]
     }
   };
@@ -95,20 +96,19 @@ test("a producer declared inside a body executes only on that selected body", as
   const state = cpuStateAccess.bind(new RegionBuilder(values));
   const condition = values.external(0);
   const address = values.const(0x100);
-  const loaded = values.addActionOutput();
+  const loaded = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [{
-        kind: "if",
+      nodes: [ifControl.create({
         condition,
         thenBody: {
-          actions: [
-            memoryRead(loaded, address, 32),
+          nodes: [
+            memoryReadOperation(loaded, address, 32),
             operandWrite(state.gpr("eax"), loaded)
           ]
         }
-      }]
+      })]
     }
   };
   const { guestView, stateView, run } = await instantiateIrBlock(block, 1);
@@ -122,10 +122,10 @@ test("a producer declared inside a body executes only on that selected body", as
 test("an unused memory read is omitted without a placement", async () => {
   const values = new ValueTable();
   const address = values.const(0x100);
-  const loaded = values.addActionOutput();
+  const loaded = values.addNodeOutput();
   const block: IrBlock = {
     values,
-    body: { actions: [memoryRead(loaded, address, 32)] }
+    body: { nodes: [memoryReadOperation(loaded, address, 32)] }
   };
   const encoded = irBlockBody(block).bytes;
   const opcodes = wasmBodyOpcodes(encoded);
@@ -144,10 +144,10 @@ test("an unused state read emits neither its opcode nor an output local", () => 
   const values = new ValueTable();
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
-  const read = values.addActionOutput();
+  const read = values.addNodeOutput();
   const block: IrBlock = {
     values,
-    body: { actions: [operandRead(read, state.gpr("eax"))] }
+    body: { nodes: [operandRead(read, state.gpr("eax"))] }
   };
   const encoded = irBlockBody(block).bytes;
   const opcodes = wasmBodyOpcodes(encoded);
@@ -162,11 +162,11 @@ test("a live single-use output materializes directly at its use", () => {
   const values = new ValueTable();
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
-  const read = values.addActionOutput();
+  const read = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         operandRead(read, state.gpr("eax")),
         operandWrite(state.gpr("ebx"), read)
       ]
@@ -184,17 +184,16 @@ test("a condition use tees once for a later selected-body use", async () => {
   const values = new ValueTable();
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
-  const condition = values.addActionOutput();
+  const condition = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         operandRead(condition, state.gpr("eax")),
-        {
-          kind: "if",
+        ifControl.create({
           condition,
-          thenBody: { actions: [operandWrite(state.gpr("ebx"), condition)] }
-        }
+          thenBody: { nodes: [operandWrite(state.gpr("ebx"), condition)] }
+        })
       ]
     }
   };
@@ -230,12 +229,11 @@ test("an i32 control header preserves a pending i64 capture", async () => {
   const block: IrBlock = {
     values,
     body: {
-      actions: [{
-        kind: "if",
+      nodes: [ifControl.create({
         condition,
-        thenBody: { actions: [operandWrite(state.gpr("eax"), low)] },
-        elseBody: { actions: [operandWrite(state.gpr("ebx"), high)] }
-      }]
+        thenBody: { nodes: [operandWrite(state.gpr("eax"), low)] },
+        elseBody: { nodes: [operandWrite(state.gpr("ebx"), high)] }
+      })]
     }
   };
   const encoded = irBlockBody(block, 2).bytes;
@@ -267,23 +265,21 @@ test("a trapping producer input still evaluates before a selected early exit", a
   const condition = values.external(0);
   const index = values.binary("div_u", values.const(1), values.external(1));
   const source = state.dynamicGpr(index, 32);
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const exitResult = values.const64(0n);
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         operandRead(output, source),
-        {
-          kind: "if",
+        ifControl.create({
           condition,
           thenBody: {
-            actions: [{
-              kind: "finish",
+            nodes: [finishControl.create({
               finish: { kind: "exit", result: exitResult }
-            }]
+            })]
           }
-        },
+        }),
         operandWrite(state.gpr("eax"), output)
       ]
     }
@@ -303,12 +299,12 @@ test("an output local preserves a read snapshot across an overlapping write", as
   const values = new ValueTable();
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
-  const snapshot = values.addActionOutput();
+  const snapshot = values.addNodeOutput();
   const replacement = values.const(5);
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         operandRead(snapshot, state.gpr("eax")),
         operandWrite(state.gpr("eax"), replacement),
         operandWrite(state.gpr("ebx"), snapshot)
@@ -327,19 +323,19 @@ test("a long straight-line sequence materializes each output directly", () => {
   const values = new ValueTable();
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
-  const actions: Action[] = [];
+  const nodes: BodyNode[] = [];
   const outputCount = 64;
 
   for (let index = 0; index < outputCount; index += 1) {
-    const output = values.addActionOutput();
+    const output = values.addNodeOutput();
 
-    actions.push(
+    nodes.push(
       operandRead(output, state.gpr("eax")),
       operandWrite(state.gpr("ebx"), output)
     );
   }
 
-  const encoded = irBlockBody({ values, body: { actions } }).bytes;
+  const encoded = irBlockBody({ values, body: { nodes } }).bytes;
   const localInstructions = wasmBodyInstructions(encoded)
     .filter((instruction) => instruction.local !== undefined);
 
@@ -361,32 +357,30 @@ test("sibling bodies reuse a local after the earlier binding's final reference",
   const state = cpuStateAccess.bind(new RegionBuilder(values));
   const firstCondition = values.external(0);
   const secondCondition = values.external(1);
-  const first = values.addActionOutput();
-  const second = values.addActionOutput();
+  const first = values.addNodeOutput();
+  const second = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        {
-          kind: "if",
+      nodes: [
+        ifControl.create({
           condition: firstCondition,
           thenBody: {
-            actions: [
+            nodes: [
               operandRead(first, state.gpr("eax")),
               operandWrite(state.gpr("ebx"), first)
             ]
           }
-        },
-        {
-          kind: "if",
+        }),
+        ifControl.create({
           condition: secondCondition,
           thenBody: {
-            actions: [
+            nodes: [
               operandRead(second, state.gpr("ecx")),
               operandWrite(state.gpr("edx"), second)
             ]
           }
-        }
+        })
       ]
     }
   };
@@ -412,25 +406,23 @@ test("an output used by both siblings cannot recycle between them", async () => 
   const state = cpuStateAccess.bind(new RegionBuilder(values));
   const firstCondition = values.external(0);
   const secondCondition = values.external(1);
-  const snapshot = values.addActionOutput();
-  const interloper = values.addActionOutput();
+  const snapshot = values.addNodeOutput();
+  const interloper = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         operandRead(snapshot, state.gpr("eax")),
-        {
-          kind: "if",
+        ifControl.create({
           condition: firstCondition,
-          thenBody: { actions: [operandWrite(state.gpr("ebx"), snapshot)] }
-        },
+          thenBody: { nodes: [operandWrite(state.gpr("ebx"), snapshot)] }
+        }),
         operandRead(interloper, state.gpr("ecx")),
         operandWrite(state.gpr("edx"), interloper),
-        {
-          kind: "if",
+        ifControl.create({
           condition: secondCondition,
-          thenBody: { actions: [operandWrite(state.gpr("esi"), snapshot)] }
-        }
+          thenBody: { nodes: [operandWrite(state.gpr("esi"), snapshot)] }
+        })
       ]
     }
   };
@@ -461,19 +453,18 @@ test("dead nested producers do not recapture an already consumed output", () => 
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
   const condition = values.external(0);
-  const base = values.addActionOutput();
-  const deadLoad = values.addActionOutput();
+  const base = values.addNodeOutput();
+  const deadLoad = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
+      nodes: [
         operandRead(base, state.gpr("eax")),
         operandWrite(state.gpr("ebx"), base),
-        {
-          kind: "if",
+        ifControl.create({
           condition,
-          thenBody: { actions: [memoryRead(deadLoad, base, 32)] }
-        }
+          thenBody: { nodes: [memoryReadOperation(deadLoad, base, 32)] }
+        })
       ]
     }
   };

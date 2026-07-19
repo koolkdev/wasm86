@@ -1,9 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { BodyAnalysis, SiteId } from "#compiler/analysis/model.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { bodyFinal } from "#ir/actions.js";
-import type { IrBlock } from "#ir/block.js";
-import { actionOperands } from "#ir/traverse.js";
+import { bodyFinal, type IrBlock } from "#ir/block.js";
 
 // A capture at an ordinary site runs on entry. Structured headers first emit
 // their operands, so captured recipes may also replay locals materialized by
@@ -22,10 +20,8 @@ export function canCaptureAtDeadline(
 
   assert(record !== undefined, `unknown capture site ${site}`);
   if (
-    record.kind !== "action" ||
-    (record.action.kind !== "if" &&
-      record.action.kind !== "switch" &&
-      record.action.kind !== "loop")
+    record.kind !== "node" ||
+    record.node.nestedBodies.length === 0
   ) {
     return canEvaluateWithoutTrap(block, value, isAvailableAtCapture);
   }
@@ -82,7 +78,7 @@ export function canCaptureAtDeadline(
       visitDirectUse(output);
     }
   }
-  for (const operand of actionOperands(record.action)) {
+  for (const operand of record.node.operands) {
     visitDirectUse(operand);
   }
 
@@ -103,7 +99,7 @@ function exportSite(block: IrBlock, analysis: BodyAnalysis): SiteId | undefined 
   }
   return bodyFinal(block.body) === undefined
     ? analysis.bodyEndSite(block.body)
-    : analysis.siteOf(block.body, block.body.actions.length - 1);
+    : analysis.siteOf(block.body, block.body.nodes.length - 1);
 }
 
 function canEvaluateWithoutTrap(

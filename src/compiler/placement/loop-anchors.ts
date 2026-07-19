@@ -2,11 +2,7 @@ import { assert } from "#common/assert.js";
 import type { BodyAnalysis, SiteId } from "#compiler/analysis/model.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { Body, IrBlock } from "#ir/block.js";
-import {
-  actionOutput,
-  nestedBodies,
-  valueDependsOn
-} from "#ir/traverse.js";
+import { valueDependsOn } from "#ir/traverse.js";
 
 type LoopBoundary = Readonly<{
   owner: SiteId;
@@ -29,29 +25,29 @@ export class LoopAnchors {
       }
     };
     const visit = (body: Body, loops: readonly LoopBoundary[]): void => {
-      for (const [index, action] of body.actions.entries()) {
-        const output = actionOutput(action);
-
-        if (output !== undefined) {
+      for (const [index, node] of body.nodes.entries()) {
+        for (const output of node.outputs) {
           addScoped(output, loops);
         }
-        if (action.kind === "loop") {
-          const inputs = action.carried.map((cell) => cell.loopInput);
-          const loop: LoopBoundary = {
-            owner: analysis.siteOf(body, index),
-            scoped: new Set(inputs)
-          };
-
-          this.#loops.set(action.body, loop);
-          for (const input of inputs) {
-            addScoped(input, loops);
-          }
-          visit(action.body, [...loops, loop]);
+        if (node.category === "operation") {
           continue;
         }
 
-        for (const nested of nestedBodies(action)) {
-          visit(nested, loops);
+        for (const nested of node.nestedBodies) {
+          if (nested.scope.kind !== "loop") {
+            visit(nested.body, loops);
+            continue;
+          }
+          const loop: LoopBoundary = {
+            owner: analysis.siteOf(body, index),
+            scoped: new Set(nested.scope.inputs)
+          };
+
+          this.#loops.set(nested.body, loop);
+          for (const input of nested.scope.inputs) {
+            addScoped(input, loops);
+          }
+          visit(nested.body, [...loops, loop]);
         }
       }
     };

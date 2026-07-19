@@ -596,14 +596,16 @@ function validateLegacyFunction(
     );
     retainedBodies.add(entry.block);
 
-    for (const { action } of placement.analysis.calls()) {
-      if (!placement.analysis.callActionMustExecute(action)) {
+    for (const { call } of placement.analysis.calls()) {
+      if (!placement.analysis.callMustExecute(call)) {
         continue;
       }
+      const target = call.target;
+
       assert(
-        fn.callTargets.includes(action.target) &&
-          fn.calls.includes(action.target.ref),
-        `legacy function ${fn.ref.id} omitted live call ${action.target.ref.id}`
+        fn.callTargets.includes(target) &&
+          fn.calls.includes(target.ref),
+        `legacy function ${fn.ref.id} omitted live call ${target.ref.id}`
       );
     }
     for (const resource of resourcesUsedBy(placement.analysis)) {
@@ -635,8 +637,8 @@ function validateDefinedFunction(
 
   const callTargets = unique(
     placement.analysis.calls()
-      .filter(({ action }) => placement.analysis.callActionMustExecute(action))
-      .map(({ action }) => action.target)
+      .filter(({ call }) => placement.analysis.callMustExecute(call))
+      .map(({ call }) => call.target)
   );
   const resources = resourcesUsedBy(placement.analysis);
 
@@ -654,18 +656,11 @@ function validateDefinedFunction(
 function resourcesUsedBy(analysis: BodyAnalysis): readonly ResourceRef[] {
   const resources: ResourceRef[] = [];
 
-  for (const { action } of analysis.operations()) {
-    if (!analysis.opActionMustExecute(action)) {
+  for (const { operation } of analysis.operations()) {
+    if (!analysis.operationMustExecute(operation)) {
       continue;
     }
-    for (const access of [
-      ...action.op.effects.reads,
-      ...action.op.effects.writes
-    ]) {
-      if (access.space === "resource") {
-        resources.push(access.resource);
-      }
-    }
+    resources.push(...operation.referencedResources);
   }
   return unique(resources);
 }
@@ -684,16 +679,20 @@ function inferEffects(analysis: BodyAnalysis): StorageEffects {
   const reads = new Set<StorageAccess>();
   const writes = new Set<StorageAccess>();
 
-  for (const { action } of analysis.operations()) {
-    if (analysis.actionMustExecute(action)) {
-      addExternalEffects(action.op.effects.reads, reads);
-      addExternalEffects(action.op.effects.writes, writes);
+  for (const { operation } of analysis.operations()) {
+    if (analysis.operationMustExecute(operation)) {
+      const effects = operation.directEffects;
+
+      addExternalEffects(effects.reads, reads);
+      addExternalEffects(effects.writes, writes);
     }
   }
-  for (const { action } of analysis.calls()) {
-    if (analysis.callActionMustExecute(action)) {
-      addExternalEffects(action.target.effects.reads, reads);
-      addExternalEffects(action.target.effects.writes, writes);
+  for (const { call } of analysis.calls()) {
+    // Call operations were covered by the operation pass above. Terminal
+    // calls are controls, so their target effects enter through this pass.
+    if (call.category === "control" && analysis.callMustExecute(call)) {
+      addExternalEffects(call.target.effects.reads, reads);
+      addExternalEffects(call.target.effects.writes, writes);
     }
   }
   return { reads: [...reads], writes: [...writes] };

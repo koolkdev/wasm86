@@ -24,8 +24,13 @@ import type { CpuException } from "#core/exceptions.js";
 import type { IfBody, SemanticBranchHint } from "#core/semantics/builder.js";
 import { type InstructionStateChannel } from "./state/channels.js";
 import type { ResourceEffect } from "#compiler/ir/resource.js";
-import type { Action, OpAction } from "#ir/actions.js";
-import { RegionBuilder, type BodyActionSink } from "#ir/region-builder.js";
+import {
+  resourceRead,
+  resourceWrite
+} from "#compiler/ir/operations/resource.js";
+import type { Operation } from "#compiler/ir/operations/index.js";
+import type { BodyNode } from "#ir/block.js";
+import { RegionBuilder, type BodyNodeSink } from "#ir/region-builder.js";
 import type { OperandResolver } from "./operand-resolver.js";
 import type { InstructionState } from "./state/state.js";
 import {
@@ -45,8 +50,8 @@ export type LoopBuilderContext = Readonly<{
   parentRegion: RegionBuilder;
 }>;
 
-// One loop under construction: the carried state, entry-hoisted actions, the
-// body's action sink, and the accesses the scope polices.
+// One loop under construction: the carried state, entry-hoisted operations,
+// the body's node sink, and the accesses the scope polices.
 export class LoopBuilder {
   readonly #parent: RegionBuilder;
   readonly #state: InstructionState;
@@ -95,35 +100,35 @@ export class LoopBuilder {
     this.#region.if(condition, (taken) => taken.loopContinue(exitValues));
 
     // The exit path's one commit per carried channel.
-    for (const action of this.#scope.commitExitValues(access, exitValues)) {
-      this.#region.push(action);
+    for (const writeback of this.#scope.exitWritebacks(access, exitValues)) {
+      this.#region.operation(resourceWrite, writeback);
     }
 
-    this.#parent.extend(this.#bodySink.entryActions());
+    this.#parent.extend(this.#bodySink.entryOperations());
     this.#parent.loop(
       this.#carried.map(({ seed, loopInput }) => ({ seed, loopInput })),
-      (body) => body.extend(this.#region.build().actions)
+      (body) => body.extend(this.#region.build().nodes)
     );
     this.#scope.close();
   }
 }
 
-class LoopBodySink implements BodyActionSink {
+class LoopBodySink implements BodyNodeSink {
   readonly #scope: StateLoopScope;
-  readonly #entryActions: Action[] = [];
-  readonly #bodyActions: Action[] = [];
+  readonly #entryOperations: Operation[] = [];
+  readonly #bodyNodes: BodyNode[] = [];
 
   constructor(scope: StateLoopScope) {
     this.#scope = scope;
   }
 
-  push(action: Action): void {
-    if (action.kind !== "op") {
-      this.#bodyActions.push(action);
+  push(node: BodyNode): void {
+    if (node.category !== "operation") {
+      this.#bodyNodes.push(node);
       return;
     }
 
-    const read = loopInvariantResourceRead(action);
+    const read = loopInvariantResourceRead(node);
 
     if (read !== undefined && this.#scope.isExecutionStateEffect(read)) {
       // Dynamic GPR reads flush tracked GPR state - asserted away at their
@@ -131,30 +136,30 @@ class LoopBodySink implements BodyActionSink {
       // non-carried channel, since segment loads are rejected inside loop
       // bodies and end the block outside them.
       this.#scope.assertHoistableRead(read);
-      this.#entryActions.push(action);
+      this.#entryOperations.push(node);
       return;
     }
 
-    this.#bodyActions.push(action);
+    this.#bodyNodes.push(node);
   }
 
-  actions(): readonly Action[] {
-    return this.#bodyActions;
+  nodes(): readonly BodyNode[] {
+    return this.#bodyNodes;
   }
 
-  entryActions(): readonly Action[] {
-    return this.#entryActions;
+  entryOperations(): readonly Operation[] {
+    return this.#entryOperations;
   }
 }
 
-// Loop-entry hoisting deliberately recognizes only a single state read with
-// no writes. Keeping that policy named makes new effect shapes opt into this
-// transformation explicitly during review.
-function loopInvariantResourceRead(action: OpAction): ResourceEffect | undefined {
-  const { reads, writes } = action.op.effects;
-  const read = reads.length === 1 ? reads[0] : undefined;
+// Loop-entry hoisting explicitly recognizes resource reads. A new operation
+// cannot become movable merely by declaring the same effect shape.
+function loopInvariantResourceRead(operation: Operation): ResourceEffect | undefined {
+  if (operation.kind !== resourceRead.kind) {
+    return undefined;
+  }
 
-  return read?.space === "resource" && writes.length === 0 ? read : undefined;
+  return operation.effect;
 }
 
 // The loop body's semantic surface: the host's operations behind the scope's

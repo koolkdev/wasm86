@@ -38,22 +38,28 @@ export function validatePlacementLocals(
   };
 
   for (const site of analysis.sites()) {
-    if (site.kind !== "action" || site.action.kind !== "loop") {
+    if (site.kind !== "node" || site.node.category === "operation") {
       continue;
     }
-    const end = analysis.bodyEndSite(site.action.body);
 
-    for (const cell of site.action.carried) {
-      const placement = plan.values[cell.loopInput];
+    for (const nested of site.node.nestedBodies) {
+      if (nested.scope.kind !== "loop") {
+        continue;
+      }
+      const end = analysis.bodyEndSite(nested.body);
 
-      assert(placement?.kind === "loopInput", `loop input ${cell.loopInput} has no local`);
-      claim(
-        placement.local,
-        block.values.valueType(cell.loopInput),
-        site.id,
-        end,
-        `loop input ${cell.loopInput}`
-      );
+      for (const input of nested.scope.inputs) {
+        const placement = plan.values[input];
+
+        assert(placement?.kind === "loopInput", `loop input ${input} has no local`);
+        claim(
+          placement.local,
+          block.values.valueType(input),
+          site.id,
+          end,
+          `loop input ${input}`
+        );
+      }
     }
   }
 
@@ -115,9 +121,7 @@ function claimCellLocals(
   const seeds = new Map<CellRef, SiteId>();
   const accesses = new Map<CellRef, SiteId[]>();
 
-  for (const { action, site } of analysis.operations()) {
-    const operation = action.op;
-
+  for (const { operation, site } of analysis.operations()) {
     if (operation.kind !== "cell.read" && operation.kind !== "cell.write") {
       continue;
     }

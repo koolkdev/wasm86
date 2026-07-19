@@ -2,6 +2,11 @@ import { doesNotThrow, throws } from "node:assert";
 import { test } from "node:test";
 
 import { analyzeBody } from "#compiler/analysis/analyze.js";
+import {
+  ifControl,
+  loopContinueControl,
+  loopControl
+} from "#compiler/ir/controls/index.js";
 import type {
   PlacementPlan,
   ValuePlacement
@@ -11,8 +16,8 @@ import { validatePlacement } from "#compiler/placement/validate.js";
 import type { Body, IrBlock } from "#ir/block.js";
 import {
   compilerTestValues,
-  resourceReadAction,
-  resourceWriteAction
+  resourceReadNode,
+  resourceWriteNode
 } from "#ir/tests/storage-op-helpers.js";
 
 test("accepts condition-frontier and earlier-frontier captures", () => {
@@ -24,20 +29,19 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
   );
   const adjusted = values.binary("add", quotient, values.const(1));
   const firstThen: Body = {
-    actions: [resourceWriteAction(values, 0, adjusted)]
+    nodes: [resourceWriteNode(values, 0, adjusted)]
   };
   const firstElse: Body = {
-    actions: [resourceWriteAction(values, 1, adjusted)]
+    nodes: [resourceWriteNode(values, 1, adjusted)]
   };
   const block: IrBlock = {
     values,
     body: {
-      actions: [{
-        kind: "if",
+      nodes: [ifControl.create({
         condition: quotient,
         thenBody: firstThen,
         elseBody: firstElse
-      }]
+      })]
     }
   };
   const analysis = analyzeBody(block);
@@ -58,22 +62,21 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
   );
   const condition = laterValues.external(2);
   const laterThen: Body = {
-    actions: [resourceWriteAction(laterValues, 0, laterAdjusted)]
+    nodes: [resourceWriteNode(laterValues, 0, laterAdjusted)]
   };
   const laterElse: Body = {
-    actions: [resourceWriteAction(laterValues, 1, laterAdjusted)]
+    nodes: [resourceWriteNode(laterValues, 1, laterAdjusted)]
   };
   const laterBlock: IrBlock = {
     values: laterValues,
     body: {
-      actions: [
-        resourceWriteAction(laterValues, 2, earlierQuotient),
-        {
-          kind: "if",
+      nodes: [
+        resourceWriteNode(laterValues, 2, earlierQuotient),
+        ifControl.create({
           condition,
           thenBody: laterThen,
           elseBody: laterElse
-        }
+        })
       ]
     }
   };
@@ -92,15 +95,15 @@ test("rejects a raw trapping value hoisted above sibling arms", () => {
     values.external(2)
   );
   const thenBody: Body = {
-    actions: [resourceWriteAction(values, 0, quotient)]
+    nodes: [resourceWriteNode(values, 0, quotient)]
   };
   const elseBody: Body = {
-    actions: [resourceWriteAction(values, 1, quotient)]
+    nodes: [resourceWriteNode(values, 1, quotient)]
   };
   const block: IrBlock = {
     values,
     body: {
-      actions: [{ kind: "if", condition, thenBody, elseBody }]
+      nodes: [ifControl.create({ condition, thenBody, elseBody })]
     }
   };
   const analysis = analyzeBody(block);
@@ -127,11 +130,11 @@ test("rejects at-use placement without a direct demand", () => {
   const values = compilerTestValues();
   const condition = values.external(0);
   const quotient = values.binary("div_u", values.external(1), values.external(2));
-  const thenBody: Body = { actions: [resourceWriteAction(values, 0, quotient)] };
-  const elseBody: Body = { actions: [resourceWriteAction(values, 1, quotient)] };
+  const thenBody: Body = { nodes: [resourceWriteNode(values, 0, quotient)] };
+  const elseBody: Body = { nodes: [resourceWriteNode(values, 1, quotient)] };
   const block: IrBlock = {
     values,
-    body: { actions: [{ kind: "if", condition, thenBody, elseBody }] }
+    body: { nodes: [ifControl.create({ condition, thenBody, elseBody })] }
   };
   const analysis = analyzeBody(block);
   const placements = new Array<ValuePlacement | undefined>(values.size());
@@ -153,14 +156,14 @@ test("rejects at-use placement without a direct demand", () => {
 
 test("rejects a producer anchor before its authored definition", () => {
   const values = compilerTestValues();
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        resourceWriteAction(values, 2, values.const(0)),
-        resourceReadAction(values, output, 0),
-        resourceWriteAction(values, 1, output)
+      nodes: [
+        resourceWriteNode(values, 2, values.const(0)),
+        resourceReadNode(values, output, 0),
+        resourceWriteNode(values, 1, output)
       ]
     }
   };
@@ -187,19 +190,19 @@ test("rejects a producer anchor before its authored definition", () => {
 test("rejects an anchor that does not dominate every selected use", () => {
   const values = compilerTestValues();
   const condition = values.external(0);
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const thenBody: Body = {
-    actions: [resourceWriteAction(values, 0, output)]
+    nodes: [resourceWriteNode(values, 0, output)]
   };
   const elseBody: Body = {
-    actions: [resourceWriteAction(values, 1, output)]
+    nodes: [resourceWriteNode(values, 1, output)]
   };
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        resourceReadAction(values, output, 2),
-        { kind: "if", condition, thenBody, elseBody }
+      nodes: [
+        resourceReadNode(values, output, 2),
+        ifControl.create({ condition, thenBody, elseBody })
       ]
     }
   };
@@ -224,14 +227,14 @@ test("rejects an anchor that does not dominate every selected use", () => {
 
 test("rejects producer movement across an alias but accepts a live snapshot", () => {
   const values = compilerTestValues();
-  const output = values.addActionOutput();
+  const output = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        resourceReadAction(values, output, 0),
-        resourceWriteAction(values, 0, values.const(7)),
-        resourceWriteAction(values, 1, output)
+      nodes: [
+        resourceReadNode(values, output, 0),
+        resourceWriteNode(values, 0, values.const(7)),
+        resourceWriteNode(values, 1, output)
       ]
     }
   };
@@ -259,18 +262,18 @@ test("rejects producer movement across an alias but accepts a live snapshot", ()
 
 test("rejects overlapping value lifetimes assigned to one local", () => {
   const values = compilerTestValues();
-  const first = values.addActionOutput();
-  const second = values.addActionOutput();
+  const first = values.addNodeOutput();
+  const second = values.addNodeOutput();
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        resourceReadAction(values, first, 0),
-        resourceReadAction(values, second, 3),
-        resourceWriteAction(values, 1, first),
-        resourceWriteAction(values, 2, second),
-        resourceWriteAction(values, 4, first),
-        resourceWriteAction(values, 5, second)
+      nodes: [
+        resourceReadNode(values, first, 0),
+        resourceReadNode(values, second, 3),
+        resourceWriteNode(values, 1, first),
+        resourceWriteNode(values, 2, second),
+        resourceWriteNode(values, 4, first),
+        resourceWriteNode(values, 5, second)
       ]
     }
   };
@@ -288,23 +291,23 @@ test("rejects overlapping value lifetimes assigned to one local", () => {
 
 test("keeps an outer capture live through repeated loop uses", () => {
   const values = compilerTestValues();
-  const outer = values.addActionOutput();
-  const inner = values.addActionOutput();
+  const outer = values.addNodeOutput();
+  const inner = values.addNodeOutput();
   const loopBody: Body = {
-    actions: [
-      resourceWriteAction(values, 1, outer),
-      resourceReadAction(values, inner, 2),
-      resourceWriteAction(values, 3, inner),
-      resourceWriteAction(values, 4, inner),
-      { kind: "loopContinue", updates: [] }
+    nodes: [
+      resourceWriteNode(values, 1, outer),
+      resourceReadNode(values, inner, 2),
+      resourceWriteNode(values, 3, inner),
+      resourceWriteNode(values, 4, inner),
+      loopContinueControl.create({ updates: [] })
     ]
   };
   const block: IrBlock = {
     values,
     body: {
-      actions: [
-        resourceReadAction(values, outer, 0),
-        { kind: "loop", carried: [], body: loopBody }
+      nodes: [
+        resourceReadNode(values, outer, 0),
+        loopControl.create({ carried: [], body: loopBody })
       ]
     }
   };
@@ -327,19 +330,18 @@ test("rejects hoisting a loop-dependent recipe to the preheader", () => {
   const loopInput = values.addLoopInput();
   const current = values.binary("add", loopInput, values.const(1));
   const loopBody: Body = {
-    actions: [
-      resourceWriteAction(values, 0, current),
-      { kind: "loopContinue", updates: [loopInput] }
+    nodes: [
+      resourceWriteNode(values, 0, current),
+      loopContinueControl.create({ updates: [loopInput] })
     ]
   };
   const block: IrBlock = {
     values,
     body: {
-      actions: [{
-        kind: "loop",
+      nodes: [loopControl.create({
         carried: [{ seed: values.const(0), loopInput }],
         body: loopBody
-      }]
+      })]
     }
   };
   const analysis = analyzeBody(block);
@@ -366,15 +368,15 @@ test("accepts leaving a loop-invariant recipe at its use", () => {
   const values = compilerTestValues();
   const invariant = values.binary("add", values.external(0), values.const(1));
   const loopBody: Body = {
-    actions: [
-      resourceWriteAction(values, 0, invariant),
-      { kind: "loopContinue", updates: [] }
+    nodes: [
+      resourceWriteNode(values, 0, invariant),
+      loopContinueControl.create({ updates: [] })
     ]
   };
   const block: IrBlock = {
     values,
     body: {
-      actions: [{ kind: "loop", carried: [], body: loopBody }]
+      nodes: [loopControl.create({ carried: [], body: loopBody })]
     }
   };
   const analysis = analyzeBody(block);

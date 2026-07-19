@@ -52,10 +52,10 @@ function entries<K extends string, V>(record: Readonly<Record<K, V>>): readonly 
 test("classifies every i32 and i64 binary operator", () => {
   for (const [operator, expected] of entries(binaryOperatorNonTrapping)) {
     const values = new ValueTable();
-    const a = values.addActionOutput();
+    const a = values.addNodeOutput();
     const b = values.external(0);
     const binary32 = values.binary(operator, a, b);
-    const a64 = values.extend64(32, values.addActionOutput(), true);
+    const a64 = values.extend64(32, values.addNodeOutput(), true);
     const b64 = values.extend64(32, values.external(1), false);
     const binary64 = values.binary64(operator, a64, b64);
 
@@ -111,7 +111,7 @@ test("classifies constants and runtime-bound values as nontrapping leaves", () =
     values.const(1),
     values.const64(2n),
     values.external(0),
-    values.addActionOutput(),
+    values.addNodeOutput(),
     values.addLoopInput()
   ];
 
@@ -136,15 +136,15 @@ test("propagates trapping children through every nontrapping binary wrapper", ()
     }
 
     const values = new ValueTable();
-    const safe = values.addActionOutput();
+    const safe = values.addNodeOutput();
     const divisor = values.external(0);
     const trapping = values.binary("div_u", safe, divisor);
     const trapping64 = values.binary64(
       "div_u",
-      values.extend64(32, values.addActionOutput(), true),
+      values.extend64(32, values.addNodeOutput(), true),
       values.extend64(32, values.external(1), false)
     );
-    const safe64 = values.extend64(32, values.addActionOutput(), true);
+    const safe64 = values.extend64(32, values.addNodeOutput(), true);
     const left32 = values.binary(operator, trapping, safe);
     const right32 = values.binary(operator, safe, trapping);
     const left64 = values.binary64(operator, trapping64, safe64);
@@ -159,7 +159,7 @@ test("propagates trapping children through every nontrapping binary wrapper", ()
 
 test("propagates trapping children through every unary wrapper", () => {
   const values = new ValueTable();
-  const safe = values.addActionOutput();
+  const safe = values.addNodeOutput();
   const trapping = values.binary("rem_s", safe, values.external(0));
   const wrapped = entries(unaryOperators).map(([operator]) => (
     [operator, values.unary(operator, safe), values.unary(operator, trapping)] as const
@@ -174,15 +174,15 @@ test("propagates trapping children through every unary wrapper", () => {
 test("propagates either trapping operand through every i32 and i64 compare", () => {
   for (const [operator] of entries(compareOperators)) {
     const values = new ValueTable();
-    const safe = values.addActionOutput();
+    const safe = values.addNodeOutput();
     const otherSafe = values.external(2);
     const trapping = values.binary("div_s", safe, values.external(0));
     const trapping64 = values.binary64(
       "rem_u",
-      values.extend64(32, values.addActionOutput(), true),
+      values.extend64(32, values.addNodeOutput(), true),
       values.extend64(32, values.external(1), false)
     );
-    const safe64 = values.extend64(32, values.addActionOutput(), true);
+    const safe64 = values.extend64(32, values.addNodeOutput(), true);
     const otherSafe64 = values.extend64(32, values.external(3), false);
     const safe32 = values.compare(32, operator, safe, otherSafe);
     const safeComparison64 = values.compare64(operator, safe64, otherSafe64);
@@ -202,10 +202,10 @@ test("propagates either trapping operand through every i32 and i64 compare", () 
 
 test("propagates trapping children through truncate and extend wrappers", () => {
   const values = new ValueTable();
-  const trapping = values.binary("div_u", values.addActionOutput(), values.external(0));
+  const trapping = values.binary("div_u", values.addNodeOutput(), values.external(0));
   const trapping64 = values.binary64(
     "div_s",
-    values.extend64(32, values.addActionOutput(), true),
+    values.extend64(32, values.addNodeOutput(), true),
     values.extend64(32, values.external(1), false)
   );
   const wrappers: readonly ValueId[] = [
@@ -225,11 +225,11 @@ test("propagates trapping children through truncate and extend wrappers", () => 
 test("requires all three eager select children to be nontrapping", () => {
   const values = new ValueTable();
   const safeCondition = values.external(0);
-  const safeTrue = values.addActionOutput();
+  const safeTrue = values.addNodeOutput();
   const safeFalse = values.addLoopInput();
-  const trappingCondition = values.binary("div_u", values.addActionOutput(), values.external(1));
-  const trappingTrue = values.binary("rem_s", values.addActionOutput(), values.external(2));
-  const trappingFalse = values.binary("div_s", values.addActionOutput(), values.external(3));
+  const trappingCondition = values.binary("div_u", values.addNodeOutput(), values.external(1));
+  const trappingTrue = values.binary("rem_s", values.addNodeOutput(), values.external(2));
+  const trappingFalse = values.binary("div_s", values.addNodeOutput(), values.external(3));
   const allSafe = values.select(safeCondition, safeTrue, safeFalse);
   const unsafeCondition = values.select(trappingCondition, safeTrue, safeFalse);
   const unsafeTrue = values.select(safeCondition, trappingTrue, safeFalse);

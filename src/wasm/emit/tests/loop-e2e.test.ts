@@ -7,9 +7,8 @@ import { memBinding, staticMemSegment } from "#core/instruction/bindings.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
 import { cpuStateAccess } from "#cpu/state.js";
-import type { Action } from "#ir/actions.js";
+import type { BodyNode, IrBlock } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
-import type { IrBlock } from "#ir/block.js";
 import {
   operandRead,
   operandWrite
@@ -28,6 +27,12 @@ import {
   wasmBodyOpcodes
 } from "#compiler/encoder/tests/body-opcodes.js";
 import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import {
+  finishControl,
+  ifControl,
+  loopContinueControl,
+  loopControl
+} from "#compiler/ir/controls/index.js";
 
 // The loop machinery end to end: carried cells in locals, the continue's
 // parallel back-edge assignment, loop-invariant hoisting, and the fused rep
@@ -35,17 +40,19 @@ import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js"
 
 const dispatchEip = 0x2000;
 
-function loopBlock(values: ValueTable, actions: readonly Action[]): IrBlock {
+function loopBlock(values: ValueTable, nodes: readonly BodyNode[]): IrBlock {
   const state = cpuStateAccess.bind(new RegionBuilder(values));
   const eip = values.const(dispatchEip);
 
   return {
     values,
     body: {
-      actions: [
-        ...actions,
+      nodes: [
+        ...nodes,
         operandWrite(state.field(coreStateFields.eip), eip),
-        { kind: "finish", finish: { kind: "dispatch", targetEip: eip } }
+        finishControl.create({
+          finish: { kind: "dispatch", targetEip: eip }
+        })
       ]
     }
   };
@@ -57,9 +64,9 @@ function swapLoopBlock(): IrBlock {
   const values = new ValueTable();
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
-  const aSeed = values.addActionOutput();
-  const bSeed = values.addActionOutput();
-  const nSeed = values.addActionOutput();
+  const aSeed = values.addNodeOutput();
+  const bSeed = values.addNodeOutput();
+  const nSeed = values.addNodeOutput();
   const aInput = values.addLoopInput();
   const bInput = values.addLoopInput();
   const nInput = values.addLoopInput();
@@ -69,26 +76,28 @@ function swapLoopBlock(): IrBlock {
     operandRead(aSeed, state.gpr("eax")),
     operandRead(bSeed, state.gpr("ebx")),
     operandRead(nSeed, state.gpr("ecx")),
-    {
-      kind: "loop",
+    loopControl.create({
       carried: [
         { seed: aSeed, loopInput: aInput },
         { seed: bSeed, loopInput: bInput },
         { seed: nSeed, loopInput: nInput }
       ],
       body: {
-        actions: [
-          {
-            kind: "if",
+        nodes: [
+          ifControl.create({
             condition: values.compare(32, "ne", remaining, values.const(0)),
-            thenBody: { actions: [{ kind: "loopContinue", updates: [bInput, aInput, remaining] }] }
-          },
+            thenBody: {
+              nodes: [loopContinueControl.create({
+                updates: [bInput, aInput, remaining]
+              })]
+            }
+          }),
           operandWrite(state.gpr("eax"), bInput),
           operandWrite(state.gpr("ebx"), aInput),
           operandWrite(state.gpr("ecx"), remaining)
         ]
       }
-    }
+    })
   ]);
 }
 
@@ -119,9 +128,9 @@ test("a hoisted loop-invariant value stays live across iterations", async () => 
   const values = new ValueTable();
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
-  const invariant = values.addActionOutput();
-  const sumSeed = values.addActionOutput();
-  const nSeed = values.addActionOutput();
+  const invariant = values.addNodeOutput();
+  const sumSeed = values.addNodeOutput();
+  const nSeed = values.addNodeOutput();
   const sumInput = values.addLoopInput();
   const nInput = values.addLoopInput();
   const total = values.binary("add", sumInput, invariant);
@@ -130,24 +139,26 @@ test("a hoisted loop-invariant value stays live across iterations", async () => 
     operandRead(invariant, state.gpr("edx")),
     operandRead(sumSeed, state.gpr("eax")),
     operandRead(nSeed, state.gpr("ecx")),
-    {
-      kind: "loop",
+    loopControl.create({
       carried: [
         { seed: sumSeed, loopInput: sumInput },
         { seed: nSeed, loopInput: nInput }
       ],
       body: {
-        actions: [
-          {
-            kind: "if",
+        nodes: [
+          ifControl.create({
             condition: values.compare(32, "ne", remaining, values.const(0)),
-            thenBody: { actions: [{ kind: "loopContinue", updates: [total, remaining] }] }
-          },
+            thenBody: {
+              nodes: [loopContinueControl.create({
+                updates: [total, remaining]
+              })]
+            }
+          }),
           operandWrite(state.gpr("eax"), total),
           operandWrite(state.gpr("ecx"), remaining)
         ]
       }
-    }
+    })
   ]);
   const { stateView, run } = await instantiateIrBlock(block);
 
@@ -162,28 +173,26 @@ test("a pure invariant evaluates before the loop", async () => {
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
   const invariant = values.binary("add", values.external(0), values.const(1));
-  const countSeed = values.addActionOutput();
+  const countSeed = values.addNodeOutput();
   const countInput = values.addLoopInput();
   const remaining = values.binary("sub", countInput, values.const(1));
   const block = loopBlock(values, [
     operandRead(countSeed, state.gpr("ecx")),
-    {
-      kind: "loop",
+    loopControl.create({
       carried: [{ seed: countSeed, loopInput: countInput }],
       body: {
-        actions: [
+        nodes: [
           operandWrite(state.gpr("eax"), invariant),
-          {
-            kind: "if",
+          ifControl.create({
             condition: values.compare(32, "ne", remaining, values.const(0)),
             thenBody: {
-              actions: [{ kind: "loopContinue", updates: [remaining] }]
+              nodes: [loopContinueControl.create({ updates: [remaining] })]
             }
-          },
+          }),
           operandWrite(state.gpr("ecx"), remaining)
         ]
       }
-    }
+    })
   ]);
   const opcodes = wasmBodyOpcodes(irBlockBody(block, 1).bytes);
 
@@ -200,7 +209,7 @@ test("an outer value captures at each inner loop entry", async () => {
   const values = new ValueTable();
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
-  const outerSeed = values.addActionOutput();
+  const outerSeed = values.addNodeOutput();
   const outerInput = values.addLoopInput();
   const innerInput = values.addLoopInput();
   const one = values.const(1);
@@ -209,38 +218,38 @@ test("an outer value captures at each inner loop entry", async () => {
   const innerRemaining = values.binary("sub", innerInput, one);
   const block = loopBlock(values, [
     operandRead(outerSeed, state.gpr("ecx")),
-    {
-      kind: "loop",
+    loopControl.create({
       carried: [{ seed: outerSeed, loopInput: outerInput }],
       body: {
-        actions: [
-          {
-            kind: "loop",
+        nodes: [
+          loopControl.create({
             carried: [{ seed: values.const(2), loopInput: innerInput }],
             body: {
-              actions: [
+              nodes: [
                 operandWrite(state.gpr("eax"), adjusted),
-                {
-                  kind: "if",
+                ifControl.create({
                   condition: values.compare(32, "ne", innerRemaining, values.const(0)),
                   thenBody: {
-                    actions: [{ kind: "loopContinue", updates: [innerRemaining] }]
+                    nodes: [loopContinueControl.create({
+                      updates: [innerRemaining]
+                    })]
                   }
-                }
+                })
               ]
             }
-          },
-          {
-            kind: "if",
+          }),
+          ifControl.create({
             condition: values.compare(32, "ne", outerRemaining, values.const(0)),
             thenBody: {
-              actions: [{ kind: "loopContinue", updates: [outerRemaining] }]
+              nodes: [loopContinueControl.create({
+                updates: [outerRemaining]
+              })]
             }
-          },
+          }),
           operandWrite(state.gpr("ecx"), outerRemaining)
         ]
       }
-    }
+    })
   ]);
   const opcodes = wasmBodyOpcodes(irBlockBody(block).bytes);
   const loops = opcodes
@@ -262,9 +271,9 @@ test("an outer capture survives nested loops and both back edges", async () => {
   const values = new ValueTable();
   values.const(0);
   const state = cpuStateAccess.bind(new RegionBuilder(values));
-  const invariant = values.addActionOutput();
-  const outerSeed = values.addActionOutput();
-  const transient = values.addActionOutput();
+  const invariant = values.addNodeOutput();
+  const outerSeed = values.addNodeOutput();
+  const transient = values.addNodeOutput();
   const outerInput = values.addLoopInput();
   const innerInput = values.addLoopInput();
   const outerRemaining = values.binary("sub", outerInput, values.const(1));
@@ -272,22 +281,19 @@ test("an outer capture survives nested loops and both back edges", async () => {
   const block = loopBlock(values, [
     operandRead(invariant, state.gpr("edx")),
     operandRead(outerSeed, state.gpr("ecx")),
-    {
-      kind: "loop",
+    loopControl.create({
       carried: [{ seed: outerSeed, loopInput: outerInput }],
       body: {
-        actions: [
-          {
-            kind: "loop",
+        nodes: [
+          loopControl.create({
             carried: [{ seed: values.const(2), loopInput: innerInput }],
             body: {
-              actions: [
+              nodes: [
                 operandWrite(state.gpr("ebx"), invariant),
                 operandRead(transient, state.gpr("esi")),
                 operandWrite(state.gpr("edi"), transient),
                 operandWrite(state.gpr("ebp"), transient),
-                {
-                  kind: "if",
+                ifControl.create({
                   condition: values.compare(
                     32,
                     "ne",
@@ -295,17 +301,15 @@ test("an outer capture survives nested loops and both back edges", async () => {
                     values.const(0)
                   ),
                   thenBody: {
-                    actions: [{
-                      kind: "loopContinue",
+                    nodes: [loopContinueControl.create({
                       updates: [innerRemaining]
-                    }]
+                    })]
                   }
-                }
+                })
               ]
             }
-          },
-          {
-            kind: "if",
+          }),
+          ifControl.create({
             condition: values.compare(
               32,
               "ne",
@@ -313,16 +317,15 @@ test("an outer capture survives nested loops and both back edges", async () => {
               values.const(0)
             ),
             thenBody: {
-              actions: [{
-                kind: "loopContinue",
+              nodes: [loopContinueControl.create({
                 updates: [outerRemaining]
-              }]
+              })]
             }
-          },
+          }),
           operandWrite(state.gpr("eax"), invariant)
         ]
       }
-    }
+    })
   ]);
   const { stateView, run } = await instantiateIrBlock(block);
 

@@ -28,6 +28,10 @@ import {
   flatMemoryOperand
 } from "#memory/flat.js";
 import { guestMemoryResource } from "#memory/resource.js";
+import {
+  finishControl,
+  ifControl
+} from "#compiler/ir/controls/index.js";
 
 // Fragments emitted inline in hand-written function bodies. The fragments
 // here are decode reads — a guarded one-byte instruction fetch at eip+k with a
@@ -54,9 +58,11 @@ function dispatchFragment(targetEip: number): IrBlock {
 
   return {
     body: {
-      actions: [
+      nodes: [
         operandWrite(eip, target),
-        { kind: "finish", finish: { kind: "dispatch", targetEip: target } }
+        finishControl.create({
+          finish: { kind: "dispatch", targetEip: target }
+        })
       ]
     },
     values
@@ -87,26 +93,24 @@ function decodeReadFragment(k: number): DecodeReadFragment {
       )
     )
   );
-  builder.push({
-    kind: "if",
+  builder.push(ifControl.create({
     condition: access.faulted,
     hint: "unlikely",
     thenBody: {
-      actions: [
+      nodes: [
         operandWrite(eip, eipValue),
-        {
-          kind: "finish",
+        finishControl.create({
           finish: {
             kind: "exit",
             result: faultResult
           }
-        }
+        })
       ]
     }
-  });
-  const fetched = builder.operation(resourceRead.create({
-    source: flatMemoryOperand(values, access, values.const(0), 8)
   }));
+  const fetched = builder.operation(resourceRead, {
+    source: flatMemoryOperand(values, access, values.const(0), 8)
+  });
   const block: IrBlock = { body: builder.build(), values };
 
   return { block, fetched };
@@ -162,12 +166,12 @@ test("a dispatching fragment requires a dispatch embedding", () => {
         resourceIndices: stateResourceIndices,
         embedding: {}
       }),
-    /dispatch action requires embedding\.dispatch/
+    /dispatch control requires embedding\.dispatch/
   );
   scratch.assertClear();
 });
 
-test("dispatch br target skips later enclosing harness-style actions", async () => {
+test("dispatch br target skips later enclosing harness-style nodes", async () => {
   const body = new WasmFunctionBodyEncoder();
   const scratch = new WasmLocalScratchAllocator(body);
 

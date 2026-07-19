@@ -208,9 +208,10 @@ export class BoundStateAccess {
       "a 32-bit state read has no signed extension"
     );
 
-    return this.#region.operation(resourceRead.create(
+    return this.#region.operation(
+      resourceRead,
       mode === undefined ? { source: operand } : { source: operand, mode }
-    ));
+    );
   }
 
   readField<TWidth extends LayoutWidth>(
@@ -222,7 +223,7 @@ export class BoundStateAccess {
 
   write(operand: ResourceByteOperand, value: ValueId): void {
     assert(this.owns(operand.effect), "operand belongs to another resource");
-    this.#region.operation(resourceWrite.create({ destination: operand, value }));
+    this.#region.operation(resourceWrite, { destination: operand, value });
   }
 
   #arrayElement<TWidth extends LayoutWidth>(

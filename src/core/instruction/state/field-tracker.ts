@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import { resourceWrite } from "#compiler/ir/operations/resource.js";
+import type { ResourceWriteArgs } from "#compiler/ir/operations/resource.js";
 import type { StorageAccess } from "#compiler/ir/effects.js";
 import type {
   ResourceByteOperand,
@@ -8,7 +8,6 @@ import type {
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { type ValueId, type WidthBounds } from "#compiler/ir/values/types.js";
 import { isConcreteFlagStateField } from "#core/flags/layout.js";
-import type { Action } from "#ir/actions.js";
 import { mayAlias } from "#ir/aliasing.js";
 import type {
   BoundStateAccess,
@@ -109,9 +108,9 @@ export class StateFieldTracker {
   flushesForPath(
     access: BoundStateAccess,
     path: StatePathKind
-  ): readonly Action[] {
+  ): readonly ResourceWriteArgs[] {
     return this.#buffer.entriesForPath(path).map(
-      ([channel, value]) => this.writeAction(access, channel, value)
+      ([channel, value]) => this.writeback(access, channel, value)
     );
   }
 
@@ -133,17 +132,14 @@ export class StateFieldTracker {
     }
   }
 
-  writeAction(
+  writeback(
     access: BoundStateAccess,
     channel: StateFieldChannel,
     value: ValueId
-  ): Action {
+  ): ResourceWriteArgs {
     return {
-      kind: "op",
-      op: resourceWrite.create({
-        destination: this.#operandWith(access, channel),
-        value
-      })
+      destination: this.#operandWith(access, channel),
+      value
     };
   }
 

@@ -7,7 +7,6 @@ import { test } from "node:test";
 
 import type { Operation } from "#compiler/ir/operations/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import type { OpAction } from "#ir/actions.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { guestMemoryAccess } from "#memory/access.js";
 import { guestMemoryResource } from "#memory/resource.js";
@@ -17,9 +16,7 @@ type OperationOf<Kind extends Operation["kind"]> = Extract<
   { kind: Kind }
 >;
 
-type ResourceAction<Kind extends Operation["kind"]> = OpAction & Readonly<{
-  op: OperationOf<Kind>;
-}>;
+type ResourceOperation<Kind extends Operation["kind"]> = OperationOf<Kind>;
 
 test("Memory access construction expands one WRITE access into generic RMW operations", () => {
   const values = new ValueTable();
@@ -35,34 +32,34 @@ test("Memory access construction expands one WRITE access into generic RMW opera
   deepStrictEqual(access.range, { start, byteLength });
   deepStrictEqual(access.fault, { address: start, intent: "write" });
 
-  const read = resourceActions(body, "resource.read")[0];
-  const write = resourceActions(body, "resource.write")[0];
+  const read = resourceOperations(body, "resource.read")[0];
+  const write = resourceOperations(body, "resource.write")[0];
 
   ok(read !== undefined);
   ok(write !== undefined);
-  strictEqual(read.op.effect.resource, guestMemoryResource);
-  strictEqual(write.op.effect.resource, guestMemoryResource);
-  strictEqual(read.op.width, 16);
-  strictEqual(read.op.signed, true);
-  strictEqual(read.op.displacement, 0);
-  strictEqual(write.op.width, 32);
-  strictEqual(write.op.displacement, 4);
-  strictEqual(read.op.effect.range.basis.kind, "dynamic");
-  strictEqual(write.op.effect.range.basis.kind, "dynamic");
+  strictEqual(read.effect.resource, guestMemoryResource);
+  strictEqual(write.effect.resource, guestMemoryResource);
+  strictEqual(read.width, 16);
+  strictEqual(read.signed, true);
+  strictEqual(read.displacement, 0);
+  strictEqual(write.width, 32);
+  strictEqual(write.displacement, 4);
+  strictEqual(read.effect.range.basis.kind, "dynamic");
+  strictEqual(write.effect.range.basis.kind, "dynamic");
 
   if (
-    read.op.effect.range.basis.kind === "dynamic" &&
-    write.op.effect.range.basis.kind === "dynamic"
+    read.effect.range.basis.kind === "dynamic" &&
+    write.effect.range.basis.kind === "dynamic"
   ) {
-    strictEqual(read.op.effect.range.basis.origin, access.origin);
-    strictEqual(write.op.effect.range.basis.origin, access.origin);
+    strictEqual(read.effect.range.basis.origin, access.origin);
+    strictEqual(write.effect.range.basis.origin, access.origin);
   }
 
-  deepStrictEqual(read.op.effect.range.slice, {
+  deepStrictEqual(read.effect.range.slice, {
     byteOffset: 0,
     byteLength: 2
   });
-  deepStrictEqual(write.op.effect.range.slice, {
+  deepStrictEqual(write.effect.range.slice, {
     byteOffset: 4,
     byteLength: 4
   });
@@ -79,15 +76,15 @@ test("Memory access construction gives constant instruction fetches absolute ran
 
   memory.read(access, values.const(2), 16, { signed: true });
 
-  const read = resourceActions(body, "resource.read")[0];
+  const read = resourceOperations(body, "resource.read")[0];
 
   ok(read !== undefined);
-  deepStrictEqual(read.op.effect.range, {
+  deepStrictEqual(read.effect.range, {
     basis: { kind: "resource" },
     slice: { byteOffset: 0x2002, byteLength: 2 }
   });
-  strictEqual(read.op.displacement, 2);
-  strictEqual(read.op.signed, true);
+  strictEqual(read.displacement, 2);
+  strictEqual(read.signed, true);
   deepStrictEqual(access.fault, {
     address: access.range.start,
     intent: "instructionFetch"
@@ -105,16 +102,15 @@ test("a parent-created access emits through the child region that consumes it", 
 
   guestMemoryAccess.bind(child).read(access, values.const(0), 32);
 
-  strictEqual(parent.build().actions.length, 0);
-  strictEqual(resourceActions(child, "resource.read").length, 1);
+  strictEqual(parent.build().nodes.length, 0);
+  strictEqual(resourceOperations(child, "resource.read").length, 1);
 });
 
-function resourceActions<Kind extends Operation["kind"]>(
+function resourceOperations<Kind extends Operation["kind"]>(
   body: RegionBuilder,
   kind: Kind
-): readonly ResourceAction<Kind>[] {
-  return body.build().actions.filter(
-    (action): action is ResourceAction<Kind> =>
-      action.kind === "op" && action.op.kind === kind
-  );
+): readonly ResourceOperation<Kind>[] {
+  return body.build().nodes.filter(
+    (node) => node.category === "operation" && node.kind === kind
+  ) as unknown as readonly ResourceOperation<Kind>[];
 }

@@ -93,11 +93,12 @@ class FlatMemoryAccessBuilder implements MemoryAccessOperations {
     );
     const signed = options.signed === true && width !== 32;
 
-    return region.operation(resourceRead.create(
+    return region.operation(
+      resourceRead,
       signed
         ? { source, mode: { kind: "signed" } }
         : { source }
-    ));
+    );
   }
 
   write(
@@ -114,6 +115,6 @@ class FlatMemoryAccessBuilder implements MemoryAccessOperations {
       width
     );
 
-    region.operation(resourceWrite.create({ destination, value }));
+    region.operation(resourceWrite, { destination, value });
   }
 }

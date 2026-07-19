@@ -4,25 +4,21 @@ import type {
   BodySite,
   SiteId
 } from "#compiler/analysis/model.js";
-import {
-  emitOperation as emitCompilerOperation,
-  type Operation
-} from "#compiler/ir/operations/index.js";
+import type { Operation } from "#compiler/ir/operations/index.js";
 import type { CellRef } from "#compiler/refs/cell.js";
 import type {
-  OperationEmitTarget,
-  OperationValueEmitter
+  OperationEmitTarget
 } from "#compiler/ir/operations/definition.js";
 import type { ValueEmitContext } from "#compiler/ir/values/definition.js";
 import type { ExternalValueId, ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { PlacementIndex } from "#compiler/placement/index.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
-import type { CallAction, ReturnCallAction } from "#ir/actions.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
+import type { ValueUseEmitter } from "#ir/node.js";
 
 export type ValueEmitterContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -40,7 +36,7 @@ export type ValueEmitterContext = Readonly<{
 
 // Executes a placement plan mechanically. Mutable state records only which
 // planned sources have already been emitted and the current structural site.
-export class ValueEmitter implements OperationValueEmitter {
+export class ValueEmitter implements ValueUseEmitter {
   readonly #context: ValueEmitterContext;
   readonly #body: WasmFunctionBodyEncoder;
   readonly #values: ValueTable;
@@ -70,12 +66,13 @@ export class ValueEmitter implements OperationValueEmitter {
     this.#operationTarget = {
       body: context.body,
       cellLocal: (cell) => this.#cellLocal(cell),
-      resourceIndex: (resource) => context.resourceIndex(resource)
+      resourceIndex: (resource) => context.resourceIndex(resource),
+      functionIndex: (target) => context.functionIndex(target)
     };
     this.#valueContext = {
       body: context.body,
       emitUse: (id) => this.emitUse(id),
-      emitActionOutput: (id) => this.#emitSource(id),
+      emitNodeOutput: (id) => this.#emitSource(id),
       emitExternal: (external) => {
         const local = context.externalLocals.get(external);
 
@@ -93,7 +90,7 @@ export class ValueEmitter implements OperationValueEmitter {
     assert(record !== undefined && record.id === site, `unknown placement site ${site}`);
     this.#sites.push(site);
     try {
-      if (!isStructuredHeader(record)) {
+      if (!capturesAfterOperands(record)) {
         this.#emitCapturesAt(site);
       }
       emit();
@@ -103,34 +100,23 @@ export class ValueEmitter implements OperationValueEmitter {
   }
 
   emitOperation(operation: Operation): void {
-    emitCompilerOperation(this.#operationTarget, this, operation);
-  }
-
-  emitCall(action: CallAction): void {
-    for (const argument of action.arguments) {
-      this.emitUse(argument.value);
-    }
-    this.#body.callFunction(this.#context.functionIndex(action.target));
-  }
-
-  emitReturnCall(action: ReturnCallAction): void {
-    for (const argument of action.arguments) {
-      this.emitUse(argument.value);
-    }
-    this.#body.returnCallFunction(this.#context.functionIndex(action.target));
+    operation.emit(this.#operationTarget, this);
   }
 
   constValue(value: ValueId): number | undefined {
     return this.#values.constValue(value);
   }
 
-  // Structured actions call this after all header operands and before control
-  // selects or enters a nested body.
+  // Nodes with child bodies call this after their header operands and before
+  // selecting or entering a child.
   emitCaptures(): void {
     const site = this.#currentSite();
     const record = this.#analysis.sites()[site];
 
-    assert(record !== undefined && isStructuredHeader(record), `site ${site} is not structured`);
+    assert(
+      record !== undefined && capturesAfterOperands(record),
+      `site ${site} has no nested bodies`
+    );
     this.#emitCapturesAt(site);
   }
 
@@ -239,15 +225,9 @@ export class ValueEmitter implements OperationValueEmitter {
       case "producer": {
         const producer = this.#analysis.producer(value);
 
-        assert(producer !== undefined, `action output ${value} has no producer`);
-        switch (producer.action.kind) {
-          case "op":
-            this.emitOperation(producer.action.op);
-            return;
-          case "call":
-            this.emitCall(producer.action);
-            return;
-        }
+        assert(producer !== undefined, `node output ${value} has no producer`);
+        this.emitOperation(producer.operation);
+        return;
       }
       case "compute":
         this.#values.emit(value, this.#valueContext);
@@ -276,9 +256,6 @@ export function wasmTypeForValue(type: ValueType): WasmValueType {
   return type === "i32" ? wasmValueType.i32 : wasmValueType.i64;
 }
 
-function isStructuredHeader(site: BodySite): boolean {
-  return site.kind === "action" &&
-    (site.action.kind === "if" ||
-      site.action.kind === "switch" ||
-      site.action.kind === "loop");
+function capturesAfterOperands(site: BodySite): boolean {
+  return site.kind === "node" && site.node.nestedBodies.length !== 0;
 }

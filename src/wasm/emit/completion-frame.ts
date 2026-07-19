@@ -1,14 +1,14 @@
 import { assert } from "#common/assert.js";
-import type { DispatchFinish, ExitFinish } from "#ir/actions.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { u32 } from "#core/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { encodeTransfer } from "#engines/jit/legacy-transfer.js";
 import type { DispatchTarget, FallthroughTarget, LinkCompletion } from "./embed.js";
 
-// Exit and completion lowering for nested bodies emitted inline by emit.ts.
+// Exit and completion lowering for nested bodies emitted inline by the action
+// emitter.
 
-export type ControlFrameContext = Readonly<{
+export type CompletionFrameContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   dispatch: DispatchTarget | undefined;
   fallthrough: FallthroughTarget | undefined;
@@ -16,10 +16,10 @@ export type ControlFrameContext = Readonly<{
   constValue(id: ValueId): number | undefined;
 }>;
 
-export type ControlFrame = Readonly<{
-  emitExit(exit: ExitFinish): void;
-  // Applies the embedding's dispatch target for dispatch.targetEip.
-  emitDispatch(dispatch: DispatchFinish): void;
+export type CompletionFrame = Readonly<{
+  emitExit(result: ValueId): void;
+  // Applies the embedding's dispatch target for targetEip.
+  emitDispatch(targetEip: ValueId): void;
   // Applies the embedding to a natural action-body fallthrough.
   emitFallthrough(): void;
   // Runs emitBody while completions account for `labels` enclosing Wasm
@@ -41,7 +41,9 @@ type LinkedTarget = Readonly<
 // while this helper owns exit and completion lowering. A `br` completion
 // inside an inline if must skip that if before it can target the embedder's
 // label.
-export function createControlFrame(context: ControlFrameContext): ControlFrame {
+export function createCompletionFrame(
+  context: CompletionFrameContext
+): CompletionFrame {
   const { body } = context;
   let inlineControlDepth = 0;
   // Each mark is the inline depth just inside its loop block.
@@ -61,17 +63,17 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     }
   }
 
-  function emitDispatch(dispatch: DispatchFinish): void {
+  function emitDispatch(targetEip: ValueId): void {
     const target = context.dispatch;
 
-    assert(target !== undefined, "dispatch action requires embedding.dispatch");
+    assert(target !== undefined, "dispatch control requires embedding.dispatch");
 
     switch (target.kind) {
       case "br":
         body.br(target.depth + inlineControlDepth);
         return;
       case "link":
-        emitLinkedCompletion(resolveLinkedTarget(target, dispatch.targetEip));
+        emitLinkedCompletion(resolveLinkedTarget(target, targetEip));
         return;
     }
   }
@@ -114,8 +116,8 @@ export function createControlFrame(context: ControlFrameContext): ControlFrame {
     }
   }
 
-  function emitExit(exit: ExitFinish): void {
-    context.emitValue(exit.result);
+  function emitExit(result: ValueId): void {
+    context.emitValue(result);
     body.returnFromFunction();
   }
 

@@ -1,11 +1,10 @@
 import { deepStrictEqual, doesNotThrow, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import type { Action } from "#ir/actions.js";
+import { ifControl } from "#compiler/ir/controls/index.js";
 import { resourceRead } from "#compiler/ir/operations/resource.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
-import { actionOutput } from "#ir/traverse.js";
 import { validateIrBlock } from "#ir/validate.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
@@ -15,7 +14,7 @@ import {
   compilerTestValues
 } from "#ir/tests/storage-op-helpers.js";
 
-function readOperation(
+function readArgs(
   values: ValueTable,
   region: number,
   width: IntegerWidth,
@@ -28,8 +27,8 @@ function readOperation(
   };
 
   return signed === true
-    ? resourceRead.create({ source, mode: { kind: "signed" } })
-    : resourceRead.create({ source });
+    ? { source, mode: { kind: "signed" as const } }
+    : { source };
 }
 
 test("ifValue joins its arm results into one output", () => {
@@ -40,21 +39,22 @@ test("ifValue joins its arm results into one output", () => {
   let elseResult!: ValueId;
   const output = body.ifValue(
     condition,
-    (then) => (thenResult = then.operation(readOperation(then.values, 0, 8))),
+    (then) => (thenResult = then.operation(resourceRead, readArgs(then.values, 0, 8))),
     (otherwise) => (elseResult = otherwise.operation(
-      readOperation(otherwise.values, 0, 16, true)
+      resourceRead,
+      readArgs(otherwise.values, 0, 16, true)
     )),
     { hint: "unlikely" }
   );
   const block = { values, body: body.build() };
-  const action = block.body.actions[0];
+  const control = block.body.nodes[0];
 
-  ok(action?.kind === "if" && action.output !== undefined && action.elseBody !== undefined);
-  strictEqual(action.output, output);
-  strictEqual(action.hint, "unlikely");
-  strictEqual(action.thenBody.result, thenResult);
-  strictEqual(action.elseBody.result, elseResult);
-  strictEqual(actionOutput(action), output);
+  ok(control?.kind === "if" && control.output !== undefined && control.elseBody !== undefined);
+  strictEqual(control.output, output);
+  strictEqual(control.hint, "unlikely");
+  strictEqual(control.thenBody.result, thenResult);
+  strictEqual(control.elseBody.result, elseResult);
+  strictEqual(control.outputs[0], output);
   ok(thenResult < output);
   ok(elseResult < output);
   deepStrictEqual(values.widthBounds(output), {
@@ -80,26 +80,24 @@ test("ifValue ignores an unreachable arm when joining bounds", () => {
 test("validation rejects a control output narrower than an arm result", () => {
   const values = compilerTestValues();
   const condition = values.const(1);
-  const armResult = values.addActionOutput();
+  const armResult = values.addNodeOutput();
   const fallback = values.const(0);
-  const output = values.addActionOutput(fitsUnsigned(8));
+  const output = values.addNodeOutput(fitsUnsigned(8));
   const block: IrBlock = {
     values,
     body: {
-      actions: [{
-        kind: "if",
+      nodes: [ifControl.create({
         condition,
         output,
         thenBody: {
-          actions: [{
-            kind: "op",
-            output: armResult,
-            op: readOperation(values, 0, 32)
-          }],
+          nodes: [resourceRead.create(
+            readArgs(values, 0, 32),
+            () => armResult
+          )],
           result: armResult
         },
-        elseBody: { actions: [], result: fallback }
-      }]
+        elseBody: { nodes: [], result: fallback }
+      })]
     }
   };
 
@@ -113,37 +111,35 @@ test("a value-producing if requires an else body and arm results", () => {
   const missingElseValues = new ValueTable();
   const condition = missingElseValues.const(1);
   const result = missingElseValues.const(7);
-  const output = missingElseValues.addActionOutput();
-  const missingElse = {
-    kind: "if",
+  const output = missingElseValues.addNodeOutput();
+  const missingElse = ifControl.create({
     condition,
     output,
-    thenBody: { actions: [], result }
-  } as unknown as Action;
+    thenBody: { nodes: [], result }
+  });
 
   throws(
     () => validateIrBlock({
       values: missingElseValues,
-      body: { actions: [missingElse] }
+      body: { nodes: [missingElse] }
     }, { allowImplicitEntryFallthrough: true }),
     /value-producing if is missing its else body/
   );
 
   const missingResultValues = new ValueTable();
   const missingResultCondition = missingResultValues.const(1);
-  const missingResultOutput = missingResultValues.addActionOutput();
-  const missingResult: Action = {
-    kind: "if",
+  const missingResultOutput = missingResultValues.addNodeOutput();
+  const missingResult = ifControl.create({
     condition: missingResultCondition,
     output: missingResultOutput,
-    thenBody: { actions: [] },
-    elseBody: { actions: [], result: missingResultCondition }
-  };
+    thenBody: { nodes: [] },
+    elseBody: { nodes: [], result: missingResultCondition }
+  });
 
   throws(
     () => validateIrBlock({
       values: missingResultValues,
-      body: { actions: [missingResult] }
+      body: { nodes: [missingResult] }
     }, { allowImplicitEntryFallthrough: true }),
     /thenBody must carry a result/
   );
