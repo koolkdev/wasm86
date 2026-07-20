@@ -69,9 +69,16 @@ export class InstructionTerminator {
     access: BoundStateAccess,
     targetEip: ValueId
   ): void {
-    assert(this.#state.eip.has(), "dispatch requires a completed pending eip");
-    this.#emitWritebacks(region, this.#state.flushesForPath(access, "completed"));
+    this.publishCompletedState(region, access);
     this.#terminals.dispatch(region, targetEip);
+  }
+
+  publishCompletedState(
+    region: RegionBuilder,
+    access: BoundStateAccess
+  ): void {
+    assert(this.#state.eip.has(), "completion requires a completed pending eip");
+    this.#emitWritebacks(region, this.#state.flushesForPath(access, "completed"));
   }
 
   hostTrap(

@@ -96,7 +96,7 @@ test("trapping switch arm results evaluate only when selected", async () => {
             selector,
             output,
             cases: [{
-              match: 0,
+              matches: [0],
               body: { nodes: [], result: trappingArm === "case" ? quotient : safeResult }
             }],
             defaultBody: {
@@ -236,8 +236,8 @@ test("switch arms share a wrapper captured after its trapping selector", async (
           selector,
           output,
           cases: [
-            { match: 0, body: { nodes: [], result: wrapped } },
-            { match: 1, body: { nodes: [], result: wrapped } }
+            { matches: [0], body: { nodes: [], result: wrapped } },
+            { matches: [1], body: { nodes: [], result: wrapped } }
           ],
           defaultBody: { nodes: [], result: fallback }
         }),

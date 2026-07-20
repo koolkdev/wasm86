@@ -2,6 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { startAddress } from "#test/support/addresses.js";
+import { invalidOpcode } from "#core/exceptions.js";
 import {
   createWasmCpuStateSnapshot,
   wasmCpuStatusFlagsOf,
@@ -10,21 +11,19 @@ import {
 import type { RunStop } from "#cpu/cpu.js";
 import {
   assertInterpreterStateEquals,
-  readInterpreterState,
-  writeInterpreterState,
-  type InterpreterModuleInstance
-} from "./interpreter-helpers.js";
-import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
-  instantiateWasmInterpreter,
-  writeGuestBytes
-} from "./support.js";
+  instantiateInterpreter,
+  readInterpreterState,
+  writeInterpreterState,
+  writeGuestBytes,
+  type InterpreterHarness
+} from "./harness.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
 type MemoryRunResult = Readonly<{
-  interpreter: InterpreterModuleInstance;
+  interpreter: InterpreterHarness;
   exit: RunStop;
   state: WasmCpuStateSnapshot;
 }>;
@@ -34,13 +33,13 @@ async function executeMemoryInstruction(
   initialState: WasmCpuStateSnapshot,
   setupGuest?: (view: DataView) => void
 ): Promise<MemoryRunResult> {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, initialState.eip, bytes);
   setupGuest?.(interpreter.guestView);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
   const state = readInterpreterState(interpreter.stateView);
 
   return { interpreter, exit, state };
@@ -109,6 +108,6 @@ test("LEA m32 form rejects register ModRM", async () => {
   });
   const { interpreter, exit } = await executeMemoryInstruction([0x8d, 0xc0], initialState);
 
-  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
+  deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

@@ -29,15 +29,15 @@ export type IsaDecodedInstruction = Readonly<{
   raw: readonly number[];
 }>;
 
-export type IsaDecodeByteResult =
-  | Readonly<{ kind: "byte"; value: number }>
+export type IsaDecodeReadResult =
+  | Readonly<{ kind: "value"; value: number }>
   | Readonly<{
-      kind: "cpuException";
+      kind: "exception";
       exception: CpuException<number>;
     }>;
 
 export type IsaDecodeReader = Readonly<{
-  readU8(eip: number): IsaDecodeByteResult;
+  readU8(eip: number): IsaDecodeReadResult;
 }>;
 
 export type IsaDecodeExceptionResult = Readonly<{

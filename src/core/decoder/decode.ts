@@ -76,7 +76,7 @@ class IsaDecodeCursor {
     );
     const fetched = this.source.readU8(u32(this.instructionStart + relativeOffset));
 
-    if (fetched.kind === "cpuException") {
+    if (fetched.kind === "exception") {
       throw new CpuExceptionSignal(fetched.exception);
     }
     const value = fetched.value;

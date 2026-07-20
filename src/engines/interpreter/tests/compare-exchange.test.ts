@@ -7,18 +7,17 @@ import {
   wasmCpuStatusFlagsOf
 } from "#test/support/cpu-state.js";
 import { writePageFaultStop } from "#cpu/tests/stop-fixtures.js";
+import { invalidOpcode } from "#core/exceptions.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
   assertInterpreterStateEquals,
-  writeInterpreterState
-} from "./interpreter-helpers.js";
-import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
   executeInstruction,
-  instantiateWasmInterpreter,
+  instantiateInterpreter,
+  writeInterpreterState,
   writeGuestBytes
-} from "./support.js";
+} from "./harness.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 const mixedFlags = { CF: 1, PF: 0, AF: 1, ZF: 0, SF: 1, OF: 1 } as const;
@@ -213,7 +212,7 @@ test("executes CMPXCHG8B success and failure paths", async () => {
 });
 
 test("CMPXCHG memory destination fault leaves architectural state unchanged", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
   const faultAddress = interpreter.guestView.byteLength - 3;
   const initialState = createWasmCpuStateSnapshot({
     eax: 5,
@@ -226,14 +225,14 @@ test("CMPXCHG memory destination fault leaves architectural state unchanged", as
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0x0f, 0xb1, 0x1d, ...dwordBytes(faultAddress)]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   deepStrictEqual(exit, writePageFaultStop(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
-test("LOCK-prefixed compare-exchange opcodes remain unsupported", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+test("LOCK-prefixed compare-exchange opcodes raise #UD", async () => {
+  const interpreter = await instantiateInterpreter();
   const initialState = createWasmCpuStateSnapshot({
     eax: 5,
     ebx: 9,
@@ -244,9 +243,9 @@ test("LOCK-prefixed compare-exchange opcodes remain unsupported", async () => {
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0xf0, 0x0f, 0xb1, 0xd8]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
-  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
+  deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

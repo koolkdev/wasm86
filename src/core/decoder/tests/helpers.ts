@@ -13,7 +13,7 @@ import {
 import { registerAlias } from "#core/registers.js";
 import type {
   IsaDecodedInstruction,
-  IsaDecodeByteResult,
+  IsaDecodeReadResult,
   IsaDecodeExceptionResult,
   IsaDecodeReader,
   IsaDecodeResult,
@@ -56,7 +56,7 @@ export class ByteArrayDecodeReader implements IsaDecodeReader {
     this.#bytes = values instanceof Uint8Array ? values : Uint8Array.from(values);
   }
 
-  readU8(eip: number): IsaDecodeByteResult {
+  readU8(eip: number): IsaDecodeReadResult {
     const index = eip - this.baseAddress;
 
     if (!Number.isInteger(index) || index < 0 || index >= this.#bytes.length) {
@@ -69,7 +69,7 @@ export class ByteArrayDecodeReader implements IsaDecodeReader {
       throw testReaderFailure(eip);
     }
 
-    return { kind: "byte", value };
+    return { kind: "value", value };
   }
 }
 

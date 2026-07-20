@@ -42,11 +42,8 @@ export function buildExit(
 export function decodeExit(encoded: bigint): RunStop {
   const result = decodeVariant(exitLayout, encoded);
 
-  if (result.variant === interpreterExits.budget) {
+  if (result.variant === interpreterExits.instructionLimit) {
     return { kind: "instructionLimit" };
-  }
-  if (result.variant === interpreterExits.miss) {
-    return { kind: "unsupported", reason: "unsupportedOpcode" };
   }
   if (result.variant === coreExits.trap) {
     return {

@@ -3,10 +3,9 @@ import type { MemRef, SegmentRef } from "#core/semantics/refs.js";
 import type { SegmentRegister } from "#core/types.js";
 import type {
   EffectiveAddressTerms,
-  MemDynamicOperandBinding,
+  MemDynamicBaseOperandBinding,
   MemSegmentBinding,
-  OperandBinding,
-  RegDynamicOperandBinding
+  OperandBinding
 } from "./bindings.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
@@ -80,8 +79,8 @@ export class OperandResolver {
     const binding = this.binding(index);
 
     return binding.kind === "mem" ||
-      binding.kind === "memStatic" ||
-      binding.kind === "memDynamic";
+      binding.kind === "memOffset" ||
+      binding.kind === "memDynamicBase";
   }
 
   segment(index: number): SegmentRef {
@@ -93,21 +92,18 @@ export class OperandResolver {
       case "segmentDynamic":
         return {
           kind: "dynamic",
-          index: this.#values.external(binding.index)
+          index: binding.index
         };
       default:
         assert(false, `${binding.kind} operand is not a segment register`);
     }
   }
 
-  dynamicGprIndex(binding: RegDynamicOperandBinding): ValueId {
-    return this.#values.external(binding.index);
-  }
-
   operandUsesDynamicGpr(index: number): boolean {
     const binding = this.binding(index);
 
-    return binding.kind === "regDynamic" || binding.kind === "memDynamic";
+    return binding.kind === "regDynamic" ||
+      binding.kind === "memDynamicBase";
   }
 }
 
@@ -170,52 +166,56 @@ export class ScopedOperandResolver {
     return this.#segmentLinearAddress(memory.segment, memory.offset);
   }
 
-  dynamicGprIndex(binding: RegDynamicOperandBinding): ValueId {
-    return this.#owner.dynamicGprIndex(binding);
-  }
-
   operandUsesDynamicGpr(index: number): boolean {
     return this.#owner.operandUsesDynamicGpr(index);
   }
 
   #bindingAddress(binding: OperandBinding): ValueId {
     assert(
-      binding.kind === "mem" || binding.kind === "memStatic" || binding.kind === "memDynamic",
+      binding.kind === "mem" ||
+        binding.kind === "memOffset" ||
+        binding.kind === "memDynamicBase",
       `address of a ${binding.kind} operand binding`
     );
 
     switch (binding.kind) {
       case "mem":
         return this.#effectiveAddress(binding.address);
-      case "memStatic":
-        return this.#values.external(binding.address);
-      case "memDynamic":
-        return this.#dynamicAddress(binding);
+      case "memOffset":
+        return binding.offset;
+      case "memDynamicBase":
+        return this.#dynamicBaseAddress(binding);
     }
   }
 
   #bindingMemoryReference(index: number, binding: OperandBinding): MemRef {
     assert(
-      binding.kind === "mem" || binding.kind === "memStatic" || binding.kind === "memDynamic",
+      binding.kind === "mem" ||
+        binding.kind === "memOffset" ||
+        binding.kind === "memDynamicBase",
       `memory reference of a ${binding.kind} operand binding`
     );
 
     switch (binding.kind) {
       case "mem":
-      case "memStatic":
-      case "memDynamic":
+      case "memOffset":
+      case "memDynamicBase":
         return this.#memReference(binding.segment, this.address(index));
     }
   }
 
-  #dynamicAddress(binding: MemDynamicOperandBinding): ValueId {
+  #dynamicBaseAddress(binding: MemDynamicBaseOperandBinding): ValueId {
     const base = this.#state.gpr.readDynamic(
       this.#access,
-      this.#values.external(binding.base),
+      binding.baseRegisterIndex,
       32
     );
 
-    return this.#values.binary("add", base, this.#values.external(binding.offset));
+    return this.#values.binary(
+      "add",
+      base,
+      binding.offset
+    );
   }
 
   #effectiveAddress(ea: EffectiveAddressTerms): ValueId {
@@ -265,7 +265,10 @@ export class ScopedOperandResolver {
         };
       case "dynamic":
         return {
-          segment: { kind: "dynamic", index: this.#values.external(segment.value) },
+          segment: {
+            kind: "dynamic",
+            index: segment.index
+          },
           offset
         };
     }

@@ -43,6 +43,10 @@ export type BodyNodeSink = Readonly<{
 }>;
 
 export type SwitchArm = Readonly<{ match: number; build: BuildResult }>;
+export type SwitchControlArm = Readonly<{
+  matches: readonly number[];
+  build: BuildBody;
+}>;
 
 export type IfOptions = Readonly<{
   hint?: BranchHint;
@@ -218,7 +222,10 @@ export class RegionBuilder {
     arms: readonly SwitchArm[],
     defaultBuild: BuildResult
   ): ValueId {
-    const cases = arms.map(({ match, build }) => ({ match, body: this.#childResultBody(build) }));
+    const cases = arms.map(({ match, build }) => ({
+      matches: [match],
+      body: this.#childResultBody(build)
+    }));
     const defaultBody = this.#childResultBody(defaultBuild);
     const output = this.#addControlOutput([
       ...cases.map((entry) => entry.body),
@@ -227,6 +234,23 @@ export class RegionBuilder {
 
     this.#emit(switchControl.create({ selector, output, cases, defaultBody }));
     return output;
+  }
+
+  switchControl(
+    selector: ValueId,
+    arms: readonly SwitchControlArm[],
+    defaultBuild: BuildBody
+  ): void {
+    for (const [index, arm] of arms.entries()) {
+      assert(arm.matches.length > 0, `control-only switch arm ${index} has no matches`);
+    }
+    const cases = arms.map(({ matches, build }) => ({
+      matches,
+      body: this.#childBody(build)
+    }));
+    const defaultBody = this.#childBody(defaultBuild);
+
+    this.#emit(switchControl.create({ selector, cases, defaultBody }));
   }
 
   // Terminates this body: fault arms, trap arms, the root.

@@ -1,19 +1,27 @@
 import { assert } from "#common/assert.js";
+import { createLayoutHostView } from "#compiler/layout/host-view.js";
+import { instructionLimitField } from "#cpu/instruction-count.js";
+import { cpuState } from "#cpu/state.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import { encodeInterpreterModule } from "./module.js";
 
-export type WasmInterpreterBinding = Readonly<{
-  instance: WebAssembly.Instance;
-  run: (fuel: number) => bigint;
+export type InterpreterBinding = Readonly<{
+  setInstructionLimit(limit: number): void;
+  run: () => bigint;
+}>;
+
+export type InterpreterBindingOptions = Readonly<{
+  guestMemory: WebAssembly.Memory;
+  cpuStateMemory: WebAssembly.Memory;
 }>;
 
 let compiledInterpreterModule: WebAssembly.Module | undefined;
 
-export function bindWasmInterpreter(
-  guestMemory: WebAssembly.Memory,
-  cpuStateMemory: WebAssembly.Memory
-): WasmInterpreterBinding {
-  compiledInterpreterModule ??= new WebAssembly.Module(encodeInterpreterModule().bytes);
+export function bindInterpreter({
+  guestMemory,
+  cpuStateMemory
+}: InterpreterBindingOptions): InterpreterBinding {
+  compiledInterpreterModule ??= new WebAssembly.Module(encodeInterpreterModule());
 
   const instance = new WebAssembly.Instance(compiledInterpreterModule, {
     [wasmImport.namespace]: {
@@ -22,10 +30,13 @@ export function bindWasmInterpreter(
     }
   });
   const entry = instance.exports[wasmBlockExportName];
+  const state = createLayoutHostView(cpuStateMemory, cpuState.layout);
 
   assert(typeof entry === "function", `expected exported function '${wasmBlockExportName}'`);
   return {
-    instance,
-    run: entry as (fuel: number) => bigint
+    setInstructionLimit(limit: number): void {
+      state.writeField(instructionLimitField, limit);
+    },
+    run: entry as () => bigint
   };
 }

@@ -3,22 +3,20 @@ import { test } from "node:test";
 
 import { createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import {
-  readInterpreterState,
-  writeInterpreterState,
   assertInterpreterStateEquals,
-  type InterpreterModuleInstance
-} from "./interpreter-helpers.js";
-import { startAddress } from "#test/support/addresses.js";
-import {
   assertSingleInstructionExit,
   executeProgram,
-  instantiateWasmInterpreter,
-  writeGuestBytes
-} from "./support.js";
+  instantiateInterpreter,
+  readInterpreterState,
+  writeInterpreterState,
+  writeGuestBytes,
+  type InterpreterHarness
+} from "./harness.js";
+import { startAddress } from "#test/support/addresses.js";
 import { readPageFaultStop, writePageFaultStop } from "#cpu/tests/stop-fixtures.js";
 
 type ControlRunResult = Readonly<{
-  interpreter: InterpreterModuleInstance;
+  interpreter: InterpreterHarness;
   state: WasmCpuStateSnapshot;
 }>;
 
@@ -27,13 +25,13 @@ async function executeControlInstruction(
   initialState: WasmCpuStateSnapshot,
   setupGuest?: (view: DataView) => void
 ): Promise<ControlRunResult> {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, initialState.eip, bytes);
   setupGuest?.(interpreter.guestView);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   assertSingleInstructionExit(exit);
   return {
@@ -339,7 +337,7 @@ test("nested ENTER level 2 reads an outer local through the display", async () =
 });
 
 test("ENTER write guard fault leaves architectural state unchanged", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
   const faultAddress = interpreter.guestView.byteLength - 2;
   const initialState = createWasmCpuStateSnapshot({
     esp: interpreter.guestView.byteLength + 2,
@@ -351,14 +349,14 @@ test("ENTER write guard fault leaves architectural state unchanged", async () =>
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0xc8, 0x00, 0x00, 0x00]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   deepStrictEqual(exit, writePageFaultStop(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
 test("ENTER read guard fault leaves architectural state unchanged", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
   const faultAddress = interpreter.guestView.byteLength - 2;
   const initialState = createWasmCpuStateSnapshot({
     esp: 0x80,
@@ -370,7 +368,7 @@ test("ENTER read guard fault leaves architectural state unchanged", async () => 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0xc8, 0x00, 0x00, 0x02]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   deepStrictEqual(exit, readPageFaultStop(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);

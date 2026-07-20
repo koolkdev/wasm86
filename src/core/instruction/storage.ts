@@ -238,7 +238,7 @@ export class ScopedInstructionStorage {
       const binding = this.#operands.binding(target.index);
 
       assert(
-        binding.kind !== "imm" && binding.kind !== "immExternal",
+        binding.kind !== "imm" && binding.kind !== "immDynamic",
         "an immediate operand is not writable"
       );
     }
@@ -330,10 +330,10 @@ export class ScopedInstructionStorage {
               this.#region.values.const(binding.value),
               signed
             );
-          case "immExternal":
+          case "immDynamic":
             return this.#region.values.widthAdjusted(
               width,
-              this.#region.values.external(binding.value),
+              binding.value,
               signed
             );
           case "reg":
@@ -353,20 +353,20 @@ export class ScopedInstructionStorage {
           case "regDynamic":
             return this.#state.gpr.readDynamic(
               this.#access,
-              this.#operands.dynamicGprIndex(binding),
+              binding.index,
               width,
               options
             );
           case "segmentDynamic":
             return this.#state.segments.readDynamicSelector(
               this.#access,
-              this.#region.values.external(binding.index),
+              binding.index,
               width,
               options
             );
           case "mem":
-          case "memStatic":
-          case "memDynamic":
+          case "memOffset":
+          case "memDynamicBase":
             assert(false, "memory operand reached non-memory read");
         }
       }
@@ -399,17 +399,17 @@ export class ScopedInstructionStorage {
           case "regDynamic":
             this.#state.gpr.writeDynamic(
               this.#access,
-              this.#operands.dynamicGprIndex(binding),
+              binding.index,
               width,
               value
             );
             return;
           case "imm":
-          case "immExternal":
+          case "immDynamic":
             assert(false, "an immediate operand is not writable");
           case "mem":
-          case "memStatic":
-          case "memDynamic":
+          case "memOffset":
+          case "memDynamicBase":
             assert(false, "memory operand reached non-memory write");
         }
       }

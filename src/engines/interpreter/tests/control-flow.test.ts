@@ -4,18 +4,16 @@ import { test } from "node:test";
 import { createWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import {
   assertInterpreterStateEquals,
-  readInterpreterState,
-  writeInterpreterState
-} from "./interpreter-helpers.js";
-import { startAddress } from "#test/support/addresses.js";
-import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
-import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
   executeInstruction,
-  instantiateWasmInterpreter,
+  instantiateInterpreter,
+  readInterpreterState,
+  writeInterpreterState,
   writeGuestBytes
-} from "./support.js";
+} from "./harness.js";
+import { startAddress } from "#test/support/addresses.js";
+import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 
 
 test("executes JMP rel8 to nextEip plus signed displacement", async () => {
@@ -30,8 +28,8 @@ test("executes JMP rel8 to nextEip plus signed displacement", async () => {
   assertCompletedInstruction(state, startAddress + 4, 8);
 });
 
-test("continues the interpreter loop after JMP while fuel remains", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+test("continues the interpreter loop after JMP while the instruction budget remains", async () => {
+  const interpreter = await instantiateInterpreter();
   const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
@@ -43,7 +41,7 @@ test("continues the interpreter loop after JMP while fuel remains", async () => 
     0xb8, 0x78, 0x56, 0x34, 0x12
   ]);
 
-  const exit = interpreter.run(2);
+  const exit = interpreter.runFor(2);
   const state = readInterpreterState(interpreter.stateView);
 
   assertSingleInstructionExit(exit);
@@ -137,8 +135,8 @@ test("executes JNE rel32 with the same condition as rel8", async () => {
   assertCompletedInstruction(state, startAddress + 8, 8);
 });
 
-test("truncated JMP rel32 returns decode fault without changing architectural state", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+test("truncated JMP rel32 raises instruction-fetch #PF without changing architectural state", async () => {
+  const interpreter = await instantiateInterpreter();
   const eip = interpreter.guestView.byteLength - 4;
   const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
@@ -149,8 +147,8 @@ test("truncated JMP rel32 returns decode fault without changing architectural st
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, eip, [0xe9, 0x01, 0x02, 0x03]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
-  deepStrictEqual(exit, fetchPageFaultStop(eip + 1));
+  deepStrictEqual(exit, fetchPageFaultStop(eip + 4));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

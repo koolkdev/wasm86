@@ -393,7 +393,7 @@ test("switch builds every arm before allocating the shared output", () => {
   ok(control?.kind === "switch");
   strictEqual(control.selector, selector);
   deepStrictEqual(control.outputs, [output]);
-  strictEqual(control.cases[0]?.match, 3);
+  deepStrictEqual(control.cases[0]?.matches, [3]);
   strictEqual(control.cases[0]?.body.result, armResult);
   const [call] = control.cases[0]?.body.nodes ?? [];
 
@@ -413,6 +413,58 @@ test("switch derives its output bounds from reachable arms", () => {
   );
 
   deepStrictEqual(values.widthBounds(output), { unsignedBits: 1, signedBits: 1 });
+});
+
+test("control-only switch shares one body across all matches in an arm", () => {
+  const values = new ValueTable();
+  const builder = new RegionBuilder(values);
+  const selector = values.external(0);
+  let armBuilds = 0;
+
+  builder.switchControl(
+    selector,
+    [{
+      matches: [1, 3, 5],
+      build: (arm) => {
+        armBuilds += 1;
+        arm.operation(resourceWrite, writeArgs(arm.values, arm.values.const(7)));
+      }
+    }],
+    (fallback) => fallback.operation(
+      resourceWrite,
+      writeArgs(fallback.values, fallback.values.const(9))
+    )
+  );
+
+  strictEqual(armBuilds, 1);
+  const [control] = builder.build().nodes;
+
+  ok(control?.kind === "switch");
+  strictEqual(control.output, undefined);
+  deepStrictEqual(control.outputs, []);
+  deepStrictEqual(control.cases[0]?.matches, [1, 3, 5]);
+  strictEqual(control.cases[0]?.body.nodes.length, 1);
+  strictEqual(control.cases[0]?.body.result, undefined);
+  strictEqual(control.defaultBody.result, undefined);
+  strictEqual(control.cases[0]?.body.nodes[0]?.kind, "resource.write");
+  strictEqual(control.defaultBody.nodes[0]?.kind, "resource.write");
+});
+
+test("control-only switch rejects an arm without matches before building bodies", () => {
+  const values = new ValueTable();
+  const builder = new RegionBuilder(values);
+  let built = false;
+
+  throws(
+    () => builder.switchControl(
+      values.const(0),
+      [{ matches: [], build: () => { built = true; } }],
+      () => { built = true; }
+    ),
+    /control-only switch arm 0 has no matches/
+  );
+  strictEqual(built, false);
+  deepStrictEqual(builder.build().nodes, []);
 });
 
 test("loop bodies take the back edge through loopContinue and validate", () => {

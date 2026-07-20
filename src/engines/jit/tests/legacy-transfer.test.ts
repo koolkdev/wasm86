@@ -14,10 +14,7 @@ import {
   pageFault
 } from "#core/exceptions.js";
 import { exitLayout } from "#cpu/exit.js";
-import {
-  budgetExit,
-  missExit
-} from "#engines/interpreter/exits.js";
+import { instructionLimitExit } from "#engines/interpreter/exits.js";
 import {
   decodeTransfer,
   encodeTransfer,
@@ -71,8 +68,7 @@ test("legacy JIT transfers are disjoint from Cpu exits", () => {
     ),
     encodeVariant(exitLayout, trapExit(0xff)),
     encodeVariant(exitLayout, segmentExit(5, 0xffff)),
-    encodeVariant(exitLayout, budgetExit()),
-    encodeVariant(exitLayout, missExit())
+    encodeVariant(exitLayout, instructionLimitExit())
   ];
 
   for (const exit of exits) {

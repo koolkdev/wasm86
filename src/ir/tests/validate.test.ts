@@ -909,8 +909,8 @@ function switchBlock(
     selector: valueId(0),
     output: values.addNodeOutput(),
     cases: [
-      { match: 0, body: { nodes: [], result: valueId(2) } },
-      { match: 2, body: { nodes: [], result: valueId(3) } }
+      { matches: [0], body: { nodes: [], result: valueId(2) } },
+      { matches: [2], body: { nodes: [], result: valueId(3) } }
     ],
     defaultBody: { nodes: [], result: valueId(4) },
     ...overrides
@@ -924,13 +924,57 @@ test("a switch whose bodies all carry results validates", () => {
   doesNotThrow(() => validateIrBlock(switchBlock({})));
 });
 
-test("an escaping switch body is rejected until a producer arrives", () => {
+test("a control-only switch accepts fallthrough bodies without results", () => {
+  const values = new ValueTable();
+  const selector = values.const(0);
+  const selection = switchControl.create({
+    selector,
+    cases: [{
+      matches: [0, 2, 4],
+      body: { nodes: [] }
+    }],
+    defaultBody: { nodes: [] }
+  });
+
+  doesNotThrow(() => validateIrBlock({
+    values,
+    body: { nodes: [selection, finishExit(values)] }
+  }));
+});
+
+test("a control-only switch accepts bodies that all escape", () => {
+  const values = new ValueTable();
+  const selection = switchControl.create({
+    selector: values.const(0),
+    cases: [{ matches: [0], body: { nodes: [finishExit(values)] } }],
+    defaultBody: { nodes: [finishExit(values)] }
+  });
+
+  doesNotThrow(() => validateIrBlock({ values, body: { nodes: [selection] } }));
+});
+
+test("a value-producing switch still requires every body result", () => {
   throws(
     () =>
       validateIrBlock(switchBlock((values) => ({
-        cases: [{ match: 0, body: { nodes: [finishExit(values)] } }]
+        cases: [{ matches: [0], body: { nodes: [finishExit(values)] } }]
       }))),
     /case\[0\] must carry a result/
+  );
+});
+
+test("a control-only switch rejects a body result", () => {
+  const values = new ValueTable();
+  const result = values.const(1);
+  const selection = switchControl.create({
+    selector: values.const(0),
+    cases: [{ matches: [0], body: { nodes: [], result } }],
+    defaultBody: { nodes: [] }
+  });
+
+  throws(
+    () => validateIrBlock({ values, body: { nodes: [selection, finishExit(values)] } }),
+    /case\[0\] carries a result without an owner output/
   );
 });
 
@@ -964,7 +1008,7 @@ test("a result on a completing body is rejected", () => {
   throws(
     () =>
       validateIrBlock(switchBlock((values) => ({
-        cases: [{ match: 0, body: { nodes: [finishExit(values)], result: valueId(2) } }]
+        cases: [{ matches: [0], body: { nodes: [finishExit(values)], result: valueId(2) } }]
       }))),
     /case\[0\] carries a result but completes/
   );
@@ -984,8 +1028,8 @@ test("a duplicate switch case match is rejected", () => {
       validateIrBlock(
         switchBlock({
           cases: [
-            { match: 1, body: { nodes: [], result: valueId(2) } },
-            { match: 1, body: { nodes: [], result: valueId(3) } }
+            { matches: [1], body: { nodes: [], result: valueId(2) } },
+            { matches: [1], body: { nodes: [], result: valueId(3) } }
           ]
         })
       ),
@@ -993,21 +1037,39 @@ test("a duplicate switch case match is rejected", () => {
   );
 });
 
+test("an overlapping switch case match is rejected", () => {
+  throws(
+    () =>
+      validateIrBlock(
+        switchBlock({
+          cases: [
+            {
+              matches: [1, 2, 3],
+              body: { nodes: [], result: valueId(2) }
+            },
+            { matches: [3], body: { nodes: [], result: valueId(3) } }
+          ]
+        })
+      ),
+    /has a duplicate case match 3/
+  );
+});
+
 test("a negative switch case match is rejected", () => {
   throws(
     () =>
-      validateIrBlock(switchBlock({ cases: [{ match: -1, body: { nodes: [], result: valueId(2) } }] })),
+      validateIrBlock(switchBlock({ cases: [{ matches: [-1], body: { nodes: [], result: valueId(2) } }] })),
     /case match -1 is not an integer in \[0, 255\]/
   );
 });
 
 test("a switch case match beyond the dense-table bound is rejected", () => {
   doesNotThrow(() =>
-    validateIrBlock(switchBlock({ cases: [{ match: maxSwitchMatch, body: { nodes: [], result: valueId(2) } }] }))
+    validateIrBlock(switchBlock({ cases: [{ matches: [maxSwitchMatch], body: { nodes: [], result: valueId(2) } }] }))
   );
   throws(
     () =>
-      validateIrBlock(switchBlock({ cases: [{ match: maxSwitchMatch + 1, body: { nodes: [], result: valueId(2) } }] })),
+      validateIrBlock(switchBlock({ cases: [{ matches: [maxSwitchMatch + 1], body: { nodes: [], result: valueId(2) } }] })),
     /case match 256 is not an integer in \[0, 255\]/
   );
 });
@@ -1413,7 +1475,7 @@ test("duplicate operation producers and operation-vs-switch producers are reject
           switchControl.create({
             selector,
             output: mixedOutput,
-            cases: [{ match: 0, body: { nodes: [], result } }],
+            cases: [{ matches: [0], body: { nodes: [], result } }],
             defaultBody: { nodes: [], result }
           }),
           finishExit(mixedValues)
@@ -1600,7 +1662,7 @@ test("a switch output cannot be its own selector or arm result", () => {
           switchControl.create({
             selector: selectorOutput,
             output: selectorOutput,
-            cases: [{ match: 0, body: { nodes: [], result: selectorResult } }],
+            cases: [{ matches: [0], body: { nodes: [], result: selectorResult } }],
             defaultBody: { nodes: [], result: selectorResult }
           }),
           finishExit(selectorValues)
@@ -1620,7 +1682,7 @@ test("a switch output cannot be its own selector or arm result", () => {
           switchControl.create({
             selector: resultSelector,
             output: resultOutput,
-            cases: [{ match: 0, body: { nodes: [], result: resultOutput } }],
+            cases: [{ matches: [0], body: { nodes: [], result: resultOutput } }],
             defaultBody: { nodes: [], result: resultSelector }
           }),
           finishExit(resultValues)
@@ -1642,7 +1704,7 @@ test("a valid switch output can be used after the switch", () => {
         switchControl.create({
           selector,
           output,
-          cases: [{ match: 0, body: { nodes: [], result } }],
+          cases: [{ matches: [0], body: { nodes: [], result } }],
           defaultBody: { nodes: [], result }
         }),
         resourceWriteNode(values, 0, output),
@@ -1670,7 +1732,7 @@ test("an ancestor producer can feed nested if, switch-result, and loop-body uses
         switchControl.create({
           selector: condition,
           output: switchOutput,
-          cases: [{ match: 0, body: { nodes: [], result: output } }],
+          cases: [{ matches: [0], body: { nodes: [], result: output } }],
           defaultBody: { nodes: [], result: fallback }
         }),
         loopControl.create({
@@ -1699,7 +1761,7 @@ test("a body-local producer can feed its body result", () => {
           output: switchOutput,
           cases: [
             {
-              match: 0,
+              matches: [0],
               body: {
                 nodes: [resourceReadNode(values, armOutput, 0)],
                 result: formula

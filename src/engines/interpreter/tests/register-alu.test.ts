@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { assertLazyFlagState, createWasmCpuStateSnapshot, wasmCpuStatusFlagsOf } from "#test/support/cpu-state.js";
 import { startAddress } from "#test/support/addresses.js";
-import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
+import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./harness.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 

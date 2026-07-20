@@ -16,10 +16,7 @@ import {
   invalidOpcode,
   pageFault
 } from "#core/exceptions.js";
-import {
-  budgetExit,
-  missExit
-} from "#engines/interpreter/exits.js";
+import { instructionLimitExit } from "#engines/interpreter/exits.js";
 import { encodeTransfer } from "#engines/jit/legacy-transfer.js";
 
 const validExits: readonly Readonly<{
@@ -29,18 +26,13 @@ const validExits: readonly Readonly<{
 }>[] = [
   {
     name: "instruction-limit",
-    exit: budgetExit(),
+    exit: instructionLimitExit(),
     stop: { kind: "instructionLimit" }
   },
   {
     name: "host-trap",
     exit: trapExit(0xcd),
     stop: { kind: "hostTrap", vector: 0xcd }
-  },
-  {
-    name: "unsupported-opcode",
-    exit: missExit(),
-    stop: { kind: "unsupported", reason: "unsupportedOpcode" }
   },
   {
     name: "segment-load",
@@ -87,7 +79,7 @@ for (const fixture of validExits) {
 test("Cpu exit decoder rejects zero, unknown tags, and noncanonical payload bits", () => {
   const instructionLimit = encodeVariant(
     exitLayout,
-    budgetExit()
+    instructionLimitExit()
   );
   const unknownTag = 0xffn << BigInt(exitLayout.tagOffset * 8);
 

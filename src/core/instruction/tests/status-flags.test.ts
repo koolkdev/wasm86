@@ -451,7 +451,7 @@ test("input-backed compare-family condition builds a lazy SUB switch", () => {
     true
   );
   deepStrictEqual(
-    switchControl.cases.map((entry) => entry.match),
+    switchControl.cases.flatMap((entry) => entry.matches),
     [8, 16, 32].map((width) => lazyFlagsKindByte(LAZY_FLAGS_KIND.SUB, width as 8 | 16 | 32))
   );
   const [kindRead, aRead, bRead] = nodes.filter(isStateRead);
@@ -537,7 +537,10 @@ test("input-backed equality condition builds lazy cases from one captured record
 
   ok(switchControl !== undefined, "expected lazy condition switch");
   strictEqual(condition, switchControl.output);
-  deepStrictEqual(switchControl.cases.map((entry) => entry.match), expectedLazyConditionCases("E"));
+  deepStrictEqual(
+    switchControl.cases.flatMap((entry) => entry.matches),
+    expectedLazyConditionCases("E")
+  );
   const [, aRead, bRead] = nodes.filter(isStateRead);
 
   ok(aRead !== undefined && bRead !== undefined, "expected captured lazy operands");
@@ -546,8 +549,10 @@ test("input-backed equality condition builds lazy cases from one captured record
 
   ok(a !== undefined && b !== undefined, "expected captured lazy operand outputs");
   for (const switchCase of switchControl.cases) {
-    const kind = switchCase.match & 0b11;
-    const width = lazyWidth(switchCase.match);
+    strictEqual(switchCase.matches.length, 1);
+    const match = switchCase.matches[0]!;
+    const kind = match & 0b11;
+    const width = lazyWidth(match);
     const rightOperand: ValueId = kind === LAZY_FLAGS_KIND.LOGIC_RESULT
       ? values.const(0)
       : b;

@@ -151,9 +151,9 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       emitExit: (result) => frame.emitExit(result),
       emitDispatch: (targetEip) => frame.emitDispatch(targetEip),
       sealCompletedStructuredControl() {
-        if (embedding.dispatch?.kind === "link") {
-          body.unreachable();
-        }
+        // Wasm cannot infer that every lowered arm exits through its nested
+        // control flow, so make the structured join explicitly unreachable.
+        body.unreachable();
       }
     };
 

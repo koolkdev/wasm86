@@ -5,19 +5,14 @@ import {
 } from "#compiler/layout/variant.js";
 
 export const interpreterExits = {
-  budget: new VariantRef("interpreter.exit.budget-exhausted", []),
-  miss: new VariantRef("interpreter.exit.decode-miss", [])
+  instructionLimit: new VariantRef("interpreter.exit.instruction-limit", [])
 } as const;
 
 export const interpreterExitSet = variantSet(
   "interpreter.exit",
-  [interpreterExits.budget, interpreterExits.miss]
+  [interpreterExits.instructionLimit]
 );
 
-export function budgetExit(): VariantValue<never> {
-  return { variant: interpreterExits.budget, payload: [] };
-}
-
-export function missExit(): VariantValue<never> {
-  return { variant: interpreterExits.miss, payload: [] };
+export function instructionLimitExit(): VariantValue<never> {
+  return { variant: interpreterExits.instructionLimit, payload: [] };
 }

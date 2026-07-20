@@ -1,9 +1,12 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
-import { regDynamicBinding, immBinding, regBinding } from "#core/instruction/bindings.js";
+import {
+  createInstructionBuilder,
+  staticInstructionLocation as loc,
+  type InstructionBuilder
+} from "#core/instruction/builder.js";
+import { immBinding, regBinding, regDynamicBinding } from "#core/instruction/bindings.js";
 import {
   gprChannel,
   segmentAccessChannel,
@@ -27,7 +30,11 @@ import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { operandRead, operandWrite } from "#ir/tests/storage-op-helpers.js";
 import { flatMemoryResolution } from "#memory/flat.js";
-import { cpuStateAccess } from "#cpu/state.js";
+import { guestMemoryAccess } from "#memory/access.js";
+import { instructionCountField } from "#cpu/instruction-count.js";
+import { buildExit } from "#cpu/exit.js";
+import { cpuStateAccess, cpuStatusFlagResolvers } from "#cpu/state.js";
+import type { InstructionTerminals } from "#core/instruction/terminal.js";
 
 // One emitted handler body per op+width, with the register indices arriving
 // as wasm params at run time.
@@ -38,6 +45,33 @@ function readRegister(view: DataView, name: RegName): number {
 
 function assertCompleted(exit: bigint): void {
   strictEqual(exit, irBlockCompleted);
+}
+
+function buildValueInstructionBlock(
+  build: (instructions: InstructionBuilder, values: ValueTable) => void
+): IrBlock {
+  const values = new ValueTable();
+  const region = new RegionBuilder(values);
+  const terminals: InstructionTerminals = {
+    dispatch: (body, targetEip) => body.finish({ kind: "dispatch", targetEip }),
+    returnExit: (body, result) => body.finish({ kind: "exit", result })
+  };
+  const instructions = createInstructionBuilder(region, {
+    stateAccess: cpuStateAccess,
+    statusFlagResolvers: cpuStatusFlagResolvers,
+    memory: guestMemoryAccess,
+    instructionCountField,
+    buildExit,
+    terminals
+  });
+
+  build(instructions, values);
+  const finalFallthrough = instructions.finish();
+
+  if (finalFallthrough !== undefined) {
+    region.finish({ kind: "dispatch", targetEip: finalFallthrough });
+  }
+  return { body: region.build(), values };
 }
 
 function segmentChannel(reg: "es" | "fs" | "gs", field: SegmentStateField): InstructionStateChannel {
@@ -54,11 +88,14 @@ function segmentChannel(reg: "es" | "fs" | "gs", field: SegmentStateField): Inst
 }
 
 test("one add r/m32, r32 body serves several runtime register pairs", async () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
-
-  const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
+  const block = buildValueInstructionBlock((builder, values) => {
+    builder.add(
+      aluSemantic("add", 32),
+      [regDynamicBinding(values.external(0)), regDynamicBinding(values.external(1))],
+      loc(0x1000, 0x1002)
+    );
+  });
+  const { stateView, run } = await instantiateIrBlock(block, 2);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 5, ecx: 7 });
   assertCompleted(run(0, 1));
@@ -81,11 +118,14 @@ test("one add r/m32, r32 body serves several runtime register pairs", async () =
 });
 
 test("dst == src reads the original value for the result and the flags", async () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
-
-  const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
+  const block = buildValueInstructionBlock((builder, values) => {
+    builder.add(
+      aluSemantic("add", 32),
+      [regDynamicBinding(values.external(0)), regDynamicBinding(values.external(1))],
+      loc(0x1000, 0x1002)
+    );
+  });
+  const { stateView, run } = await instantiateIrBlock(block, 2);
 
   writeWasmCpuStateSnapshot(stateView, { ebx: 0x21 });
   assertCompleted(run(3, 3));
@@ -101,12 +141,15 @@ test("dst == src reads the original value for the result and the flags", async (
 });
 
 test("a static read before a dynamic write to the same register keeps the old value", async () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(movSemantic(32), [regBinding("ecx"), regBinding("ebx")], loc(0x1000, 0x1002));
-  builder.add(movSemantic(32), [regDynamicBinding(0), immBinding(0x99)], loc(0x1002, 0x1008));
-
-  const { stateView, run } = await instantiateIrBlock(builder.finish(), 1);
+  const block = buildValueInstructionBlock((builder, values) => {
+    builder.add(movSemantic(32), [regBinding("ecx"), regBinding("ebx")], loc(0x1000, 0x1002));
+    builder.add(
+      movSemantic(32),
+      [regDynamicBinding(values.external(0)), immBinding(0x99)],
+      loc(0x1002, 0x1008)
+    );
+  });
+  const { stateView, run } = await instantiateIrBlock(block, 1);
 
   writeWasmCpuStateSnapshot(stateView, { ebx: 0x42, ecx: 0 });
   assertCompleted(run(3));
@@ -115,11 +158,14 @@ test("a static read before a dynamic write to the same register keeps the old va
 });
 
 test("xchg r/mDyn, ebx swaps through the dynamic register access", async () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(xchgSemantic(32), [regDynamicBinding(0), regBinding("ebx")], loc(0x1000, 0x1002));
-
-  const { stateView, run } = await instantiateIrBlock(builder.finish(), 1);
+  const block = buildValueInstructionBlock((builder, values) => {
+    builder.add(
+      xchgSemantic(32),
+      [regDynamicBinding(values.external(0)), regBinding("ebx")],
+      loc(0x1000, 0x1002)
+    );
+  });
+  const { stateView, run } = await instantiateIrBlock(block, 1);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0x111, ebx: 0x222 });
   assertCompleted(run(0));
@@ -133,11 +179,14 @@ test("xchg r/mDyn, ebx swaps through the dynamic register access", async () => {
 });
 
 test("one add r/m8, r8 body serves low and high byte registers", async () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(aluSemantic("add", 8), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
-
-  const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
+  const block = buildValueInstructionBlock((builder, values) => {
+    builder.add(
+      aluSemantic("add", 8),
+      [regDynamicBinding(values.external(0)), regDynamicBinding(values.external(1))],
+      loc(0x1000, 0x1002)
+    );
+  });
+  const { stateView, run } = await instantiateIrBlock(block, 2);
 
   // al += cl: only the low byte of eax changes.
   writeWasmCpuStateSnapshot(stateView, { eax: 0x11111105, ecx: 0x22222203 });
@@ -232,11 +281,14 @@ test("a computed index drives byte access on both the read and the write path", 
 });
 
 test("a 16-bit dynamic access touches two bytes of the indexed word", async () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(aluSemantic("add", 16), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
-
-  const { stateView, run } = await instantiateIrBlock(builder.finish(), 2);
+  const block = buildValueInstructionBlock((builder, values) => {
+    builder.add(
+      aluSemantic("add", 16),
+      [regDynamicBinding(values.external(0)), regDynamicBinding(values.external(1))],
+      loc(0x1000, 0x1002)
+    );
+  });
+  const { stateView, run } = await instantiateIrBlock(block, 2);
 
   // si += dx wraps the word; the upper halves stay untouched.
   writeWasmCpuStateSnapshot(stateView, { esi: 0xaaaa8001, edx: 0xbbbb8002 });

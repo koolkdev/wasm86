@@ -24,18 +24,18 @@ for (const fixture of CPU_PROGRAM_FIXTURES) {
   });
 }
 
-test("Cpu calls its interpreter once with unchanged fuel and propagates its exception", () => {
+test("Cpu calls its parameterless interpreter once and propagates its exception", () => {
   const realWasmInstance = WebAssembly.Instance;
   const expected = new WebAssembly.RuntimeError("interpreter trap");
-  const fuels: number[] = [];
+  const calls: unknown[][] = [];
 
   Object.defineProperty(WebAssembly, "Instance", {
     configurable: true,
     value: function MockWasmInstance() {
       return {
         exports: {
-          run(fuel: number): bigint {
-            fuels.push(fuel);
+          run(...parameters: unknown[]): bigint {
+            calls.push(parameters);
             throw expected;
           }
         }
@@ -47,10 +47,10 @@ test("Cpu calls its interpreter once with unchanged fuel and propagates its exce
     const cpu = createMachine({ memoryByteLength: 0x1000 }).cpu;
 
     throws(
-      () => cpu.run({ instructionBudget: 0xffff_ffff }),
+      () => cpu.run({ instructionBudget: 0x7fff_ffff }),
       (error: unknown) => error === expected
     );
-    deepStrictEqual(fuels, [0xffff_ffff]);
+    deepStrictEqual(calls, [[]]);
   } finally {
     Object.defineProperty(WebAssembly, "Instance", {
       configurable: true,
@@ -90,7 +90,7 @@ test("Cpu propagates exit decoder exceptions", () => {
   }
 });
 
-test("Cpu exhausts fuel and resumes only on a later explicit run", () => {
+test("Cpu exhausts its instruction budget and resumes only on a later explicit run", () => {
   const machine = createMachine({ memoryByteLength: 0x2000 });
   const bytes = new Uint8Array(machine.memory.buffer);
 
@@ -213,7 +213,7 @@ test("Cpu preserves the instruction start when fetch is truncated at guest-memor
   strictEqual(machine.cpu.state.instructionCount, 0);
 });
 
-test("Cpu accepts zero fuel without entering an instruction", () => {
+test("Cpu accepts a zero instruction budget without entering an instruction", () => {
   const machine = createMachine({ memoryByteLength: 0x1000 });
 
   machine.cpu.state.core.eip = startAddress;
@@ -225,7 +225,7 @@ test("Cpu accepts zero fuel without entering an instruction", () => {
   strictEqual(machine.cpu.state.instructionCount, 0);
 });
 
-test("Cpu rejects invalid fuel before calling the interpreter", () => {
+test("Cpu rejects budgets outside the supported modular deadline range", () => {
   const cpu = createMachine({ memoryByteLength: 0x1000 }).cpu;
 
   cpu.state.core.eip = startAddress;
@@ -235,11 +235,13 @@ test("Cpu rejects invalid fuel before calling the interpreter", () => {
     1.5,
     Number.NaN,
     Number.POSITIVE_INFINITY,
+    0x8000_0000,
+    0xffff_ffff,
     0x1_0000_0000
   ]) {
     throws(
       () => cpu.run({ instructionBudget }),
-      /instructionBudget must be a valid Wasm i32 fuel value/
+      /instructionBudget must be an integer in the supported modular deadline range/
     );
   }
 

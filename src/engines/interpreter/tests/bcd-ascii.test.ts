@@ -7,7 +7,7 @@ import {
 } from "#test/support/cpu-state.js";
 import { startAddress } from "#test/support/addresses.js";
 import { divideErrorStop } from "#cpu/tests/stop-fixtures.js";
-import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
+import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./harness.js";
 
 test("executes DAA with low and high decimal adjustment", async () => {
   const { exit, state } = await executeInstruction(

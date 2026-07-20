@@ -10,14 +10,14 @@ import {
   type StatusFlagResolverFamily
 } from "#core/flags/lazy/resolvers.js";
 import { coreStateLayout } from "#core/state/layout.js";
-import { instructionCountLayout } from "./instruction-count.js";
+import { instructionCounterLayout } from "./instruction-count.js";
 
 export const cpuState: StateResource = {
   resource: resourceRef("cpu.state"),
   layout: createLayout("execution-state", [
     coreStateLayout,
     flagStateLayout,
-    instructionCountLayout
+    instructionCounterLayout
   ])
 };
 

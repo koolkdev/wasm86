@@ -79,7 +79,7 @@ function fixture() {
   const selection = switchControl.create({
     selector,
     output: switchOutput,
-    cases: [{ match: 2, body: caseBody }],
+    cases: [{ matches: [2], body: caseBody }],
     defaultBody
   });
   const loop = loopControl.create({
@@ -144,7 +144,7 @@ test("control owners construct complete final nodes", () => {
 
   strictEqual(controls.selection.selector, values.selector);
   strictEqual(controls.selection.output, values.switchOutput);
-  deepStrictEqual(controls.selection.cases, [{ match: 2, body: bodies.caseBody }]);
+  deepStrictEqual(controls.selection.cases, [{ matches: [2], body: bodies.caseBody }]);
   strictEqual(controls.selection.defaultBody, bodies.defaultBody);
 
   deepStrictEqual(controls.loop.carried, [
@@ -308,11 +308,85 @@ test("direct completion methods use nested body completion", () => {
     switchControl.create({
       selector: values.selector,
       output: values.switchOutput,
-      cases: [{ match: 0, body: bodies.caseBody }],
+      cases: [{ matches: [0], body: bodies.caseBody }],
       defaultBody: { nodes: [] }
     }).completes(completion),
     false
   );
+});
+
+test("a control-only switch owns no output and shares a body across matches", () => {
+  const selector = valueId(30);
+  const selected: Body = { nodes: [] };
+  const fallback: Body = { nodes: [] };
+  const selection = switchControl.create({
+    selector,
+    cases: [{
+      matches: [1, 3, 5],
+      body: selected
+    }],
+    defaultBody: fallback
+  });
+
+  strictEqual(selection.output, undefined);
+  deepStrictEqual(selection.outputs, []);
+  deepStrictEqual(selection.operands, [selector]);
+  deepStrictEqual(selection.cases, [{
+    matches: [1, 3, 5],
+    body: selected
+  }]);
+  deepStrictEqual(
+    selection.nestedBodies.map((entry) => entry.body),
+    [selected, fallback]
+  );
+  strictEqual(
+    selection.completes({ bodyCompletes: (body) => body === selected || body === fallback }),
+    true
+  );
+
+  const replacement: Body = { nodes: [] };
+  const mapped = selection.mapBodies((body) => body === selected ? replacement : body);
+
+  strictEqual(mapped.output, undefined);
+  deepStrictEqual(mapped.outputs, []);
+  strictEqual(mapped.cases[0]?.body, replacement);
+  deepStrictEqual(mapped.cases[0]?.matches, [1, 3, 5]);
+});
+
+test("a completing control-only switch seals its enclosing emission path", () => {
+  const selector = valueId(30);
+  const selected: Body = { nodes: [] };
+  const fallback: Body = { nodes: [] };
+  const selection = switchControl.create({
+    selector,
+    cases: [{ matches: [1, 3], body: selected }],
+    defaultBody: fallback
+  });
+  const body = new WasmFunctionBodyEncoder();
+  const emittedBodies: Body[] = [];
+  let sealed = 0;
+
+  selection.emit({
+    ...rawControlTarget(body),
+    bodyCompletes: () => true,
+    emitCaptures: () => {},
+    emitBody: (nested, outputLocal) => {
+      strictEqual(outputLocal, undefined);
+      emittedBodies.push(nested);
+    },
+    withNestedControl: (emit) => emit(),
+    sealCompletedStructuredControl: () => { sealed += 1; }
+  }, {
+    emitUse(value) {
+      strictEqual(value, selector);
+      body.i32Const(0);
+    }
+  });
+  const encoded = body.finish();
+
+  deepStrictEqual(emittedBodies, [selected, fallback]);
+  strictEqual(sealed, 1);
+  strictEqual(wasmBodyOpcodes(encoded.bytes).includes(wasmOpcode.brTable), true);
 });
 
 test("direct body mapping follows each control's owned structure", () => {

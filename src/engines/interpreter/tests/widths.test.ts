@@ -2,6 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { startAddress } from "#test/support/addresses.js";
+import { invalidOpcode } from "#core/exceptions.js";
 import {
   assertLazyFlagState,
   createWasmCpuStateSnapshot,
@@ -10,17 +11,15 @@ import {
 } from "#test/support/cpu-state.js";
 import {
   assertInterpreterStateEquals,
-  readInterpreterState,
-  writeInterpreterState,
-  type InterpreterModuleInstance
-} from "./interpreter-helpers.js";
-import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
   executeInstruction,
-  instantiateWasmInterpreter,
-  writeGuestBytes
-} from "./support.js";
+  instantiateInterpreter,
+  readInterpreterState,
+  writeInterpreterState,
+  writeGuestBytes,
+  type InterpreterHarness
+} from "./harness.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
@@ -146,8 +145,8 @@ test("materializes representative 8/16-bit ALU flags", async () => {
   assertLazyFlagState(test16.state, { kind: "LOGIC_RESULT", width: 16, a: 0x8000 });
 });
 
-test("unsupported prefixed opcode streams terminate without changing architectural state", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+test("undefined prefixed opcode streams raise #UD without changing architectural state", async () => {
+  const interpreter = await instantiateInterpreter();
   const initialState = createWasmCpuStateSnapshot({
     eax: 0x1122_3344,
     eip: startAddress,
@@ -157,9 +156,9 @@ test("unsupported prefixed opcode streams terminate without changing architectur
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0x66, 0x66, 0x62]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
-  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
+  deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -168,17 +167,17 @@ async function executeWithGuest(
   initialState: WasmCpuStateSnapshot,
   setupGuest?: (view: DataView) => void
 ): Promise<Readonly<{
-  exit: ReturnType<InterpreterModuleInstance["run"]>;
-  interpreter: InterpreterModuleInstance;
+  exit: ReturnType<InterpreterHarness["runFor"]>;
+  interpreter: InterpreterHarness;
   state: WasmCpuStateSnapshot;
 }>> {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, initialState.eip, bytes);
   setupGuest?.(interpreter.guestView);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   return {
     exit,

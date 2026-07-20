@@ -4,19 +4,17 @@ import { test } from "node:test";
 import { createWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import {
   assertInterpreterStateEquals,
+  assertSingleInstructionExit,
+  instantiateInterpreter,
   readInterpreterState,
-  writeInterpreterState
-} from "./interpreter-helpers.js";
+  writeInterpreterState,
+  writeGuestBytes
+} from "./harness.js";
 import { startAddress } from "#test/support/addresses.js";
 import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
-import {
-  assertSingleInstructionExit,
-  instantiateWasmInterpreter,
-  writeGuestBytes
-} from "./support.js";
 
 test("interpreter binds MOV 8B ModRM.reg as the destination", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
   const initialState = createWasmCpuStateSnapshot({
     ebx: 0x1234_5678,
     eip: startAddress,
@@ -25,7 +23,7 @@ test("interpreter binds MOV 8B ModRM.reg as the destination", async () => {
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0x8b, 0xc3]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
   const state = readInterpreterState(interpreter.stateView);
 
   assertSingleInstructionExit(exit);
@@ -34,7 +32,7 @@ test("interpreter binds MOV 8B ModRM.reg as the destination", async () => {
 });
 
 test("interpreter binds MOV 89 ModRM.rm as the destination", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
   const initialState = createWasmCpuStateSnapshot({
     eax: 0xaaaa_aaaa,
     ebx: 0x1234_5678,
@@ -44,7 +42,7 @@ test("interpreter binds MOV 89 ModRM.rm as the destination", async () => {
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0x89, 0xd8]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
   const state = readInterpreterState(interpreter.stateView);
 
   assertSingleInstructionExit(exit);
@@ -52,8 +50,8 @@ test("interpreter binds MOV 89 ModRM.rm as the destination", async () => {
   strictEqual(state.ebx, initialState.ebx);
 });
 
-test("truncated ModRM returns decode fault without changing architectural state", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+test("a truncated ModRM raises instruction-fetch #PF without changing architectural state", async () => {
+  const interpreter = await instantiateInterpreter();
   const eip = interpreter.guestView.byteLength - 1;
   const initialState = createWasmCpuStateSnapshot({
     eax: 0xaaaa_aaaa,
@@ -64,7 +62,7 @@ test("truncated ModRM returns decode fault without changing architectural state"
   writeInterpreterState(interpreter.stateView, initialState);
   interpreter.guestView.setUint8(eip, 0x8b);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   deepStrictEqual(exit, fetchPageFaultStop(eip + 1));
   assertInterpreterStateEquals(interpreter.stateView, initialState);

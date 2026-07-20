@@ -317,7 +317,7 @@ test("a switch retains arm recipes exactly when its output is live", () => {
         selector,
         output,
         cases: [{
-          match: 0,
+          matches: [0],
           body: {
             nodes: [resourceReadNode(values, read, 0)],
             result: firstResult
@@ -342,6 +342,52 @@ test("a switch retains arm recipes exactly when its output is live", () => {
   strictEqual(live.useCount(read), 1);
   strictEqual(live.useCount(one), 1);
   strictEqual(live.useCount(defaultResult), 1);
+});
+
+test("a control-only switch retains selector and arm effects without a join output", () => {
+  const values = compilerTestValues();
+  const selector = values.external(0);
+  const selectedValue = values.const(11);
+  const fallbackValue = values.const(22);
+  const selectedBody: Body = {
+    nodes: [resourceWriteNode(values, 0, selectedValue)]
+  };
+  const defaultBody: Body = {
+    nodes: [resourceWriteNode(values, 1, fallbackValue)]
+  };
+  const block: IrBlock = {
+    values,
+    body: {
+      nodes: [switchControl.create({
+        selector,
+        cases: [{
+          matches: [1, 3, 5],
+          body: selectedBody
+        }],
+        defaultBody
+      })]
+    }
+  };
+  const analysis = analyzeBody(block);
+
+  strictEqual(analysis.isLive(selector), true);
+  strictEqual(analysis.isLive(selectedValue), true);
+  strictEqual(analysis.isLive(fallbackValue), true);
+  deepStrictEqual(
+    analysis.writesAt(analysis.siteOf(block.body, 0)),
+    [compilerTestResourceEffect(0), compilerTestResourceEffect(1)]
+  );
+  deepStrictEqual(
+    analysis.sites().map((site) => [site.kind, site.nodeIndex]),
+    [
+      ["node", 0],
+      ["node", 0],
+      ["bodyEnd", 1],
+      ["node", 0],
+      ["bodyEnd", 1],
+      ["bodyEnd", 1]
+    ]
+  );
 });
 
 test("export roots preserve order and use the terminal boundary", () => {

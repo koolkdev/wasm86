@@ -13,6 +13,14 @@ import {
 } from "#ir/tests/storage-op-helpers.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { wasmBodyLocalCount, wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
+import { ProgramBuilder } from "#compiler/program/builder.js";
+import { encodeProgram } from "#compiler/program/encode.js";
+import { functionType } from "#compiler/program/function-type.js";
+import {
+  exportRef,
+  functionRef,
+  signatureRef
+} from "#compiler/program/refs.js";
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
@@ -44,8 +52,8 @@ test("a switch selects arms by match and falls back to the default", async () =>
           selector,
           output,
           cases: [
-            { match: 0, body: { nodes: [], result: first } },
-            { match: 2, body: { nodes: [], result: second } }
+            { matches: [0], body: { nodes: [], result: first } },
+            { matches: [2], body: { nodes: [], result: second } }
           ],
           defaultBody: { nodes: [], result: fallback }
         }),
@@ -73,6 +81,100 @@ test("a switch selects arms by match and falls back to the default", async () =>
   }
 });
 
+test("a control-only switch routes several matches through one emitted body", async () => {
+  const values = new ValueTable();
+  const builder = new RegionBuilder(values);
+  const selector = values.external(0);
+
+  builder.switchControl(
+    selector,
+    [{
+      matches: [1, 3, 5],
+      build: (arm) => {
+        const state = cpuStateAccess.bind(arm);
+
+        state.write(state.gpr("eax"), arm.values.const(11));
+      }
+    }],
+    (fallback) => {
+      const state = cpuStateAccess.bind(fallback);
+
+      state.write(state.gpr("eax"), fallback.values.const(99));
+    }
+  );
+
+  const block: IrBlock = { values, body: builder.build() };
+  const encoded = irBlockBody(block, 1).bytes;
+  const opcodes = wasmBodyOpcodes(encoded);
+
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.brTable).length, 1);
+  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32Store).length, 2);
+  strictEqual(wasmBodyLocalCount(encoded), 0);
+
+  const { stateView, run } = await instantiateIrBlock(block, 1);
+
+  for (const selectorValue of [1, 3, 5]) {
+    writeWasmCpuStateSnapshot(stateView, { eax: 0 });
+    strictEqual(run(selectorValue), irBlockCompleted);
+    strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 11);
+  }
+  for (const selectorValue of [0, 2, 4, 7]) {
+    writeWasmCpuStateSnapshot(stateView, { eax: 0 });
+    strictEqual(run(selectorValue), irBlockCompleted);
+    strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 99);
+  }
+});
+
+test("nested completing switches seal a defined function result", async () => {
+  const program = new ProgramBuilder();
+  const entryType = functionType(["i32"], ["i64"]);
+  const entrySignature = signatureRef("test.completing-switch-signature");
+
+  program.signature({ ref: entrySignature, type: entryType });
+  const entry = program.defineFunction({
+    ref: functionRef("test.completing-switch"),
+    signature: entrySignature,
+    effects: { reads: [], writes: [] }
+  }, (fn) => {
+    const selector = fn.parameters[0];
+
+    if (selector === undefined) {
+      throw new Error("missing switch selector");
+    }
+    fn.region.switchControl(selector, [{
+      matches: [1, 3],
+      build: (outerArm) => outerArm.switchControl(selector, [{
+        matches: [1],
+        build: (innerArm) => innerArm.return([innerArm.values.const64(11n)])
+      }], (innerDefault) => {
+        innerDefault.return([innerDefault.values.const64(13n)]);
+      })
+    }], (outerDefault) => {
+      outerDefault.return([outerDefault.values.const64(99n)]);
+    });
+  });
+  program.exportFunction({
+    ref: exportRef("test.completing-switch-export"),
+    name: "run",
+    target: entry.ref
+  });
+
+  const encoded = encodeProgram(program.finish());
+
+  strictEqual(WebAssembly.validate(encoded), true);
+  const instance = await WebAssembly.instantiate(
+    await WebAssembly.compile(encoded)
+  );
+  const run = instance.exports.run;
+
+  if (typeof run !== "function") {
+    throw new Error("missing completing-switch export");
+  }
+  strictEqual(run(1), 11n);
+  strictEqual(run(3), 13n);
+  strictEqual(run(7), 99n);
+});
+
 test("sequential switch joins reuse one physical local", async () => {
   const values = new ValueTable();
   values.const(0);
@@ -91,14 +193,14 @@ test("sequential switch joins reuse one physical local", async () => {
         switchControl.create({
           selector,
           output: firstOutput,
-          cases: [{ match: 0, body: { nodes: [], result: firstCase } }],
+          cases: [{ matches: [0], body: { nodes: [], result: firstCase } }],
           defaultBody: { nodes: [], result: firstFallback }
         }),
         operandWrite(state.gpr("eax"), firstOutput),
         switchControl.create({
           selector,
           output: secondOutput,
-          cases: [{ match: 0, body: { nodes: [], result: secondCase } }],
+          cases: [{ matches: [0], body: { nodes: [], result: secondCase } }],
           defaultBody: { nodes: [], result: secondFallback }
         }),
         operandWrite(state.gpr("ebx"), secondOutput)
@@ -135,7 +237,7 @@ test("an impossible default lowers to unreachable and traps", async () => {
         switchControl.create({
           selector,
           output,
-          cases: [{ match: 0, body: { nodes: [], result: first } }],
+          cases: [{ matches: [0], body: { nodes: [], result: first } }],
           defaultBody: { nodes: [], result: impossible }
         }),
         operandWrite(state.gpr("eax"), output)
@@ -167,7 +269,7 @@ test("an arm-local compound over an arm-local read computes inside the arm", asy
           output,
           cases: [
             {
-              match: 0,
+              matches: [0],
               body: { nodes: [operandRead(read, state.gpr("ebx"))], result: formula }
             }
           ],
@@ -208,8 +310,8 @@ test("a parent compound consumed by two arms captures once before the switch", a
           selector,
           output,
           cases: [
-            { match: 0, body: { nodes: [], result: shared } },
-            { match: 1, body: { nodes: [], result: shared } }
+            { matches: [0], body: { nodes: [], result: shared } },
+            { matches: [1], body: { nodes: [], result: shared } }
           ],
           defaultBody: { nodes: [], result: fallback }
         }),
@@ -247,7 +349,7 @@ test("a switch captures a state snapshot before the selected arm writes it", asy
           selector,
           output,
           cases: [{
-            match: 0,
+            matches: [0],
             body: {
               nodes: [
                 operandWrite(state.gpr("eax"), values.const(5)),
@@ -306,10 +408,10 @@ test("a dead switch output emits no arm values but keeps the impossible default"
           output,
           cases: [
             {
-              match: 0,
+              matches: [0],
               body: { nodes: [operandRead(read, state.gpr("ebx"))], result: readFormula }
             },
-            { match: 1, body: { nodes: [], result: shared } }
+            { matches: [1], body: { nodes: [], result: shared } }
           ],
           defaultBody: { nodes: [], result: impossible }
         })
@@ -351,7 +453,7 @@ test("a dispatch inside an arm escapes through the switch's labels", async () =>
           output,
           cases: [
             {
-              match: 0,
+              matches: [0],
               body: {
                 nodes: [
                   ifControl.create({

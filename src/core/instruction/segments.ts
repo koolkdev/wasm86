@@ -43,6 +43,6 @@ function segmentIndex(
     case "segment":
       return values.const(segmentRegisterIndex(binding.reg));
     case "segmentDynamic":
-      return values.external(binding.index);
+      return binding.index;
   }
 }

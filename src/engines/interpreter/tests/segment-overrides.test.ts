@@ -12,7 +12,7 @@ import {
   executeInstruction,
   type ExecutedInstruction,
   type GuestMemoryBytes
-} from "./support.js";
+} from "./harness.js";
 
 test("unprefixed EBP and ESP based ModRM memory loads default to SS", async () => {
   const ebpLoad = await executeInstruction(

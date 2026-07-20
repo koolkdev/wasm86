@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
 import type {
-  IsaDecodeByteResult,
+  IsaDecodeReadResult,
   IsaDecodeReader
 } from "#core/decoder/types.js";
 import {
@@ -73,8 +73,8 @@ test("a reader CPU exception retains the bytes admitted before its fault", () =>
     readU8(address) {
       requests.push(address);
       return address === startAddress
-        ? { kind: "byte", value: 0xb8 }
-        : { kind: "cpuException", exception };
+        ? { kind: "value", value: 0xb8 }
+        : { kind: "exception", exception };
     }
   };
   const decoded = cpuException(
@@ -182,10 +182,10 @@ test("instruction-byte addresses wrap as u32", () => {
       requests.push(address);
 
       if (address === wrappedStart) {
-        return { kind: "byte", value: 0x66 };
+        return { kind: "value", value: 0x66 };
       }
       if (address === 0) {
-        return { kind: "byte", value: 0x90 };
+        return { kind: "value", value: 0x90 };
       }
 
       throw new Error(`unexpected wrapped decode address: ${address}`);
@@ -225,7 +225,7 @@ class TrackingDecodeReader implements IsaDecodeReader {
     this.#source = new ByteArrayDecodeReader(values, startAddress);
   }
 
-  readU8(address: number): IsaDecodeByteResult {
+  readU8(address: number): IsaDecodeReadResult {
     this.requests.push(address);
     return this.#source.readU8(address);
   }

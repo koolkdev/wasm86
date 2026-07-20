@@ -2,17 +2,19 @@ import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import {
-  externalInstructionLocation,
-  staticInstructionLocation as loc
+  createInstructionBuilder,
+  staticInstructionLocation as loc,
+  valueInstructionLocation,
+  type InstructionBuilder
 } from "#core/instruction/builder.js";
 import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
 import {
-  dynamicMemSegment,
   immBinding,
-  immExternalBinding,
+  immDynamicBinding,
   memBinding,
-  memDynamicBinding,
-  memStaticBinding,
+  memDynamicBaseBinding,
+  dynamicMemSegment,
+  memOffsetBinding,
   regBinding,
   regDynamicBinding,
   segmentBinding,
@@ -36,7 +38,7 @@ import {
 import type { BodyNode, Body, IrBlock } from "#ir/block.js";
 import { validateIrBlock } from "#ir/validate.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { ValueNode, ValueTable } from "#compiler/ir/values/table.js";
+import { ValueTable, type ValueNode } from "#compiler/ir/values/table.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
@@ -52,6 +54,7 @@ import type {
   MemoryAccess,
   MemoryDataAccessIntent
 } from "#memory/access.js";
+import { guestMemoryAccess } from "#memory/access.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#core/flags/definitions.js";
 import { aluSemantic, unaryAluSemantic } from "#core/semantics/alu.js";
 import { cmpSemantic } from "#core/semantics/cmp.js";
@@ -68,6 +71,10 @@ import { defaultSegmentForBase, segmentRegisterIndex } from "#core/segments.js";
 import type { EffectiveAddress, OperandWidth } from "#core/types.js";
 import { buildExit } from "#cpu/exit.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
+import {
+  cpuStateAccess,
+  cpuStatusFlagResolvers
+} from "#cpu/state.js";
 import {
   exceptionExit as coreExceptionExit,
   segmentExit,
@@ -104,6 +111,8 @@ import {
   type StateReadOperation,
   type StateWriteOperation
 } from "./state-operations.js";
+import { RegionBuilder } from "#ir/region-builder.js";
+import type { InstructionTerminals } from "../terminal.js";
 
 function outputOf(node: BodyNode): ValueId {
   const output = node.outputs[0];
@@ -179,6 +188,47 @@ function entryNodes(block: IrBlock): readonly BodyNode[] {
 
 function rawEntryNodes(block: IrBlock): readonly BodyNode[] {
   return block.body.nodes;
+}
+
+type CompletionEvent = Readonly<{
+  kind: "fallthrough" | "dispatch";
+  targetEip: ValueId;
+}>;
+
+function buildValueInstructionBlock(
+  values: ValueTable,
+  build: (instructions: InstructionBuilder) => void,
+  completionEvents: CompletionEvent[] = []
+): IrBlock {
+  const region = new RegionBuilder(values);
+  const finishDispatch = (
+    kind: CompletionEvent["kind"],
+    body: RegionBuilder,
+    targetEip: ValueId
+  ): void => {
+    completionEvents.push({ kind, targetEip });
+    body.finish({ kind: "dispatch", targetEip });
+  };
+  const terminals: InstructionTerminals = {
+    dispatch: (body, targetEip) => finishDispatch("dispatch", body, targetEip),
+    returnExit: (body, result) => body.finish({ kind: "exit", result })
+  };
+  const instructions = createInstructionBuilder(region, {
+    stateAccess: cpuStateAccess,
+    statusFlagResolvers: cpuStatusFlagResolvers,
+    memory: guestMemoryAccess,
+    instructionCountField,
+    buildExit,
+    terminals
+  });
+
+  build(instructions);
+  const finalFallthrough = instructions.finish();
+
+  if (finalFallthrough !== undefined) {
+    finishDispatch("fallthrough", region, finalFallthrough);
+  }
+  return { body: region.build(), values };
 }
 
 type TerminatingBodyView = Readonly<{
@@ -1414,15 +1464,15 @@ test("a constant-true invalid-CS arm stops before building the segment-load tail
 });
 
 test("a dynamic MOV-to-segment guards CS before reading its source", () => {
-  const builder = createLegacyInstructionBlock({ segmentMode: "flat32" });
-
-  builder.add(
-    movToSregSemantic(),
-    [segmentDynamicBinding(0), regBinding("ax")],
-    loc(0x1000, 0x1002)
-  );
-
-  const block = builder.finish();
+  const values = new ValueTable();
+  const segmentIndex = values.external(0);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movToSregSemantic(),
+      [segmentDynamicBinding(segmentIndex), regBinding("ax")],
+      loc(0x1000, 0x1002)
+    );
+  });
   const v = block.values;
   const nodes = entryNodes(block);
   const guard = ifNode(block);
@@ -1434,7 +1484,7 @@ test("a dynamic MOV-to-segment guards CS before reading its source", () => {
     condition: v.compare(
       32,
       "eq",
-      v.external(0),
+      segmentIndex,
       v.const(segmentRegisterIndex("cs"))
     ),
     hint: "unlikely",
@@ -2164,14 +2214,17 @@ test("writes to immediate operand bindings fail loudly", () => {
     s.write(s.operand(0), v.const(1), { width: 32 });
   };
 
-  for (const binding of [immBinding(0), immExternalBinding(0)]) {
+  for (const dynamic of [false, true]) {
+    const values = new ValueTable();
+    const binding = dynamic
+      ? immDynamicBinding(values.external(0))
+      : immBinding(0);
+
     throws(
       () =>
-        createLegacyInstructionBlock().add(
-          setImm,
-          [binding],
-          loc(0x1000, 0x1006)
-        ),
+        buildValueInstructionBlock(values, (builder) => {
+          builder.add(setImm, [binding], loc(0x1000, 0x1006));
+        }),
       /immediate operand is not writable/
     );
   }
@@ -2182,14 +2235,17 @@ test("updates reject immediate operand bindings before returning a handle", () =
     s.update(s.operand(0), { width: 32 });
   };
 
-  for (const binding of [immBinding(0), immExternalBinding(0)]) {
+  for (const dynamic of [false, true]) {
+    const values = new ValueTable();
+    const binding = dynamic
+      ? immDynamicBinding(values.external(0))
+      : immBinding(0);
+
     throws(
       () =>
-        createLegacyInstructionBlock().add(
-          updateImm,
-          [binding],
-          loc(0x1000, 0x1006)
-        ),
+        buildValueInstructionBlock(values, (builder) => {
+          builder.add(updateImm, [binding], loc(0x1000, 0x1006));
+        }),
       /immediate operand is not writable/
     );
   }
@@ -3180,14 +3236,17 @@ test("a guard after flushing a channel first written this instruction fails loud
 });
 
 test("add r/m32, r32 with both operands dynamic reads, then writes, in one block", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(aluSemantic("add", 32), [regDynamicBinding(0), regDynamicBinding(1)], loc(0x1000, 0x1002));
-
-  const block = builder.finish();
+  const values = new ValueTable();
+  const dst = values.external(0);
+  const src = values.external(1);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      aluSemantic("add", 32),
+      [regDynamicBinding(dst), regDynamicBinding(src)],
+      loc(0x1000, 0x1002)
+    );
+  });
   const v = block.values;
-  const dst = v.external(0);
-  const src = v.external(1);
   const nodes = entryNodes(block);
   const reads = stateReads(nodes);
   const sum = v.binary("add", outputOf(reads[0]!), outputOf(reads[1]!));
@@ -3204,28 +3263,36 @@ test("add r/m32, r32 with both operands dynamic reads, then writes, in one block
 });
 
 test("a static register read keeps its order across a dynamic write", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(movSemantic(32), [regDynamicBinding(0), regBinding("ebx")], loc(0x1000, 0x1002));
-
-  const block = builder.finish();
+  const values = new ValueTable();
+  const dynamicReg = values.external(0);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movSemantic(32),
+      [regDynamicBinding(dynamicReg), regBinding("ebx")],
+      loc(0x1000, 0x1002)
+    );
+  });
   const v = block.values;
   const read = stateReadFor(block, entryNodes(block), gprChannel("ebx"))!;
 
   deepStrictEqual(entryNodes(block), [
     stateRead(v, outputOf(read), gprChannel("ebx")),
-    dynamicGprWrite(v, v.external(0), 32, outputOf(read)),
+    dynamicGprWrite(v, dynamicReg, 32, outputOf(read)),
     finishDispatch(v.const(0x1002))
   ]);
 });
 
 test("dirty GPR pendings flush before dynamic access; flags and eip ride through", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
-  builder.add(movSemantic(32), [regDynamicBinding(0), regBinding("ecx")], loc(0x1003, 0x1005));
-
-  const block = builder.finish();
+  const values = new ValueTable();
+  const dynamicReg = values.external(0);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
+    builder.add(
+      movSemantic(32),
+      [regDynamicBinding(dynamicReg), regBinding("ecx")],
+      loc(0x1003, 0x1005)
+    );
+  });
   const v = block.values;
   const eax = outputOf(stateReadFor(block, entryNodes(block), gprChannel("eax"))!);
   const sum = v.binary("add", eax, v.const(5));
@@ -3234,7 +3301,7 @@ test("dirty GPR pendings flush before dynamic access; flags and eip ride through
     writesStateChannel(v, node, gprChannel("eax"))
   );
   const dynamicWrite = nodes.findIndex((node) =>
-    writesDynamicGpr(v, node, v.external(0), 32)
+    writesDynamicGpr(v, node, dynamicReg, 32)
   );
   const lazyKindFlush = nodes.findIndex((node) =>
     writesStateChannel(v, node, flagStateFields.lazyKind)
@@ -3260,20 +3327,20 @@ test("dirty GPR pendings flush before dynamic access; flags and eip ride through
 });
 
 test("a dynamic write invalidates static GPR pendings for later instructions", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
-  builder.add(movSemantic(32), [regDynamicBinding(0), immBinding(5)], loc(0x1005, 0x100b));
-  builder.add(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x100b, 0x100d));
-
-  const block = builder.finish();
+  const values = new ValueTable();
+  const dynamicReg = values.external(0);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
+    builder.add(movSemantic(32), [regDynamicBinding(dynamicReg), immBinding(5)], loc(0x1005, 0x100b));
+    builder.add(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x100b, 0x100d));
+  });
   const nodes = entryNodes(block);
   const eaxReads = nodes.filter(
     (node): node is StateReadOperation =>
       readsStateChannel(block.values, node, gprChannel("eax"))
   );
   const dynamicWrite = nodes.findIndex(
-    (node) => writesDynamicGpr(block.values, node, block.values.external(0), 32)
+    (node) => writesDynamicGpr(block.values, node, dynamicReg, 32)
   );
 
   // The dynamic write may have hit eax's word, so the third mov reloads it.
@@ -3286,13 +3353,13 @@ test("a dynamic write invalidates static GPR pendings for later instructions", (
 });
 
 test("a dynamic read leaves flushed pendings serving later static reads", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
-  builder.add(movSemantic(32), [regBinding("ebx"), regDynamicBinding(0)], loc(0x1005, 0x100b));
-  builder.add(movSemantic(32), [regBinding("ecx"), regBinding("eax")], loc(0x100b, 0x100d));
-
-  const block = builder.finish();
+  const values = new ValueTable();
+  const dynamicReg = values.external(0);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
+    builder.add(movSemantic(32), [regBinding("ebx"), regDynamicBinding(dynamicReg)], loc(0x1005, 0x100b));
+    builder.add(movSemantic(32), [regBinding("ecx"), regBinding("eax")], loc(0x100b, 0x100d));
+  });
   const v = block.values;
   const nodes = entryNodes(block);
 
@@ -3317,11 +3384,11 @@ test("a dynamic read leaves flushed pendings serving later static reads", () => 
 });
 
 test("pop r/mDyn flushes the incremented esp before the dynamic store, after the guard", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(popSemantic(), [regDynamicBinding(0)], loc(0x1000, 0x1002));
-
-  const block = builder.finish();
+  const values = new ValueTable();
+  const dynamicReg = values.external(0);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(popSemantic(), [regDynamicBinding(dynamicReg)], loc(0x1000, 0x1002));
+  });
   const v = block.values;
   const esp = outputOf(stateReadFor(block, entryNodes(block), gprChannel("esp"))!);
   const popValue = outputOf(entryNodes(block).find(
@@ -3338,62 +3405,74 @@ test("pop r/mDyn flushes the incremented esp before the dynamic store, after the
     ...memoryGuard(block, 1, esp, 4, "read"),
     memoryReadOperation(popValue, esp, 32),
     stateWrite(v, gprChannel("esp"), nextEsp),
-    dynamicGprWrite(v, v.external(0), 32, popValue),
+    dynamicGprWrite(v, dynamicReg, 32, popValue),
     finishDispatch(v.const(0x1002))
   ]);
 });
 
 test("an 8-bit template width lowers a one-byte dynamic slot", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(movSemantic(8), [regBinding("bl"), regDynamicBinding(0)], loc(0x1000, 0x1002));
-
-  const block = builder.finish();
+  const values = new ValueTable();
+  const dynamicReg = values.external(0);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movSemantic(8),
+      [regBinding("bl"), regDynamicBinding(dynamicReg)],
+      loc(0x1000, 0x1002)
+    );
+  });
   const v = block.values;
   const read = entryNodes(block).find(
     (node): node is StateReadOperation =>
-      readsDynamicGpr(v, node, v.external(0), 8)
+      readsDynamicGpr(v, node, dynamicReg, 8)
   );
 
   ok(read !== undefined, "expected a dynamic byte-register read");
 
   deepStrictEqual(entryNodes(block), [
-    dynamicGprRead(v, outputOf(read), v.external(0), 8),
+    dynamicGprRead(v, outputOf(read), dynamicReg, 8),
     stateWrite(v, gprChannel("bl"), outputOf(read)),
     finishDispatch(v.const(0x1002))
   ]);
 });
 
 test("a 16-bit set through a dynamic register stores a two-byte slot", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(movSemantic(16), [regDynamicBinding(0), immBinding(0x1234)], loc(0x1000, 0x1004));
-
-  const block = builder.finish();
+  const values = new ValueTable();
+  const dynamicReg = values.external(0);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movSemantic(16),
+      [regDynamicBinding(dynamicReg), immBinding(0x1234)],
+      loc(0x1000, 0x1004)
+    );
+  });
   const v = block.values;
 
   deepStrictEqual(
     entryNodes(block)[0],
-    dynamicGprWrite(v, v.external(0), 16, v.const(0x1234))
+    dynamicGprWrite(v, dynamicReg, 16, v.const(0x1234))
   );
 });
 
 test("movsx r32, r8 from a dynamic register marks the read signed with no extra extend", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(movsxSemantic(8, 32), [regBinding("eax"), regDynamicBinding(0)], loc(0x1000, 0x1003));
-
-  const block = builder.finish();
+  const values = new ValueTable();
+  const dynamicReg = values.external(0);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movsxSemantic(8, 32),
+      [regBinding("eax"), regDynamicBinding(dynamicReg)],
+      loc(0x1000, 0x1003)
+    );
+  });
   const v = block.values;
   const read = entryNodes(block).find(
     (node): node is StateReadOperation =>
-      readsDynamicGpr(v, node, v.external(0), 8)
+      readsDynamicGpr(v, node, dynamicReg, 8)
   );
 
   ok(read !== undefined, "expected a signed dynamic byte-register read");
   deepStrictEqual(
     entryNodes(block)[0],
-    dynamicGprRead(v, outputOf(read), v.external(0), 8, true)
+    dynamicGprRead(v, outputOf(read), dynamicReg, 8, true)
   );
   strictEqual(
     stateWriteValue(stateWriteFor(block, stateWrites(block), gprChannel("eax"))!),
@@ -3408,10 +3487,18 @@ test("a guard after a dynamic flush of an instruction-written register fails lou
     s.read(s.operand(0), { width: 32 });
     guardDsMemory(s, s.read(s.reg("ecx"), { width: 32 }), v.const(4), "read");
   };
+  const values = new ValueTable();
+  const dynamicReg = values.external(0);
 
   throws(
     () =>
-      createLegacyInstructionBlock().add(setThenDynamicRead, [regDynamicBinding(0)], loc(0x1000, 0x1002)),
+      buildValueInstructionBlock(values, (builder) => {
+        builder.add(
+          setThenDynamicRead,
+          [regDynamicBinding(dynamicReg)],
+          loc(0x1000, 0x1002)
+        );
+      }),
     /unrestorable/
   );
 });
@@ -3421,29 +3508,235 @@ test("a guard after a dynamic write fails loudly", () => {
     s.write(s.operand(0), v.const(0x222), { width: 32 });
     guardDsMemory(s, s.read(s.reg("ebx"), { width: 32 }), v.const(4), "write");
   };
+  const values = new ValueTable();
+  const dynamicReg = values.external(0);
 
   throws(
     () =>
-      createLegacyInstructionBlock().add(dynamicWriteThenGuard, [regDynamicBinding(0)], loc(0x1000, 0x1002)),
+      buildValueInstructionBlock(values, (builder) => {
+        builder.add(
+          dynamicWriteThenGuard,
+          [regDynamicBinding(dynamicReg)],
+          loc(0x1000, 0x1002)
+        );
+      }),
     /unrestorable/
   );
 });
 
-test("Core commits an external next EIP before dispatch", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(
-    movSemantic(32),
-    [regBinding("eax"), immBinding(5)],
-    externalInstructionLocation(0, 1)
+test("ValueId register, immediate, and location bindings stay function-local", () => {
+  const values = new ValueTable();
+  const regIndex = values.parameter(0, "i32");
+  const immediate = values.parameter(1, "i32");
+  const instructionStart = values.parameter(2, "i32");
+  const nextEip = values.parameter(3, "i32");
+  const completions: CompletionEvent[] = [];
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movSemantic(32),
+      [regDynamicBinding(regIndex), immDynamicBinding(immediate)],
+      valueInstructionLocation(instructionStart, nextEip)
+    );
+  }, completions);
+  const write = entryNodes(block).find(
+    (node): node is StateWriteOperation =>
+      writesDynamicGpr(values, node, regIndex, 32)
   );
 
-  const block = builder.finish();
+  deepStrictEqual(write, dynamicGprWrite(values, regIndex, 32, immediate));
+  deepStrictEqual(completions, [{ kind: "fallthrough", targetEip: nextEip }]);
+  ok(!nodeKinds(block).includes("external"));
+});
+
+test("ValueId memory sources resolve without external-value rematerialization", () => {
+  const values = new ValueTable();
+  const instructionStart = values.parameter(0, "i32");
+  const nextEip = values.parameter(1, "i32");
+  const offset = values.parameter(2, "i32");
+  const segmentIndex = values.parameter(3, "i32");
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movSemantic(32),
+      [
+        regBinding("eax"),
+        memOffsetBinding(offset, dynamicMemSegment(segmentIndex))
+      ],
+      valueInstructionLocation(instructionStart, nextEip)
+    );
+  });
+  const segmentBase = dynamicSegmentBaseRead(block, segmentIndex);
+  const address = values.binary("add", outputOf(segmentBase), offset);
+  const load = entryNodes(block).find(
+    (node): node is MemoryReadOperation => isMemoryRead(node)
+  );
+  const faultEip = stateWriteFor(
+    block,
+    nestedBodyView(block, 1).flushes,
+    coreStateFields.eip
+  );
+
+  ok(load !== undefined, "expected a memory read");
+  ok(faultEip !== undefined, "expected the fault path to restore eip");
+  strictEqual(load.inputs[0]?.value, address);
+  strictEqual(stateWriteValue(faultEip), instructionStart);
+  ok(!nodeKinds(block).includes("external"));
+});
+
+test("a ValueId deferred memory base is read inside the instruction", () => {
+  const values = new ValueTable();
+  const baseIndex = values.parameter(0, "i32");
+  const offset = values.parameter(1, "i32");
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      leaSemantic(32),
+      [
+        regBinding("eax"),
+        memDynamicBaseBinding(
+          baseIndex,
+          offset,
+          staticMemSegment("ds")
+        )
+      ],
+      loc(0x1000, 0x1003)
+    );
+  });
+  const baseRead = entryNodes(block).find(
+    (node): node is StateReadOperation =>
+      readsDynamicGpr(values, node, baseIndex, 32)
+  );
+
+  ok(baseRead !== undefined, "expected a dynamic base-register read");
+  strictEqual(
+    stateWriteValue(stateWriteFor(block, stateWrites(block), gprChannel("eax"))!),
+    values.binary("add", outputOf(baseRead), offset)
+  );
+  ok(!nodeKinds(block).includes("external"));
+});
+
+test("a ValueId segment binding reaches segment selection and load", () => {
+  const values = new ValueTable();
+  const segmentIndex = values.parameter(0, "i32");
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movToSregSemantic(),
+      [segmentDynamicBinding(segmentIndex), regBinding("ax")],
+      loc(0x1000, 0x1002)
+    );
+  });
+  const source = stateReadFor(block, entryNodes(block), gprChannel("ax"));
+
+  ok(source !== undefined, "expected a selector source read");
+  deepStrictEqual(
+    entryNodes(block).at(-1),
+    finishSegmentLoad(values, segmentIndex, outputOf(source))
+  );
+  ok(!nodeKinds(block).includes("external"));
+});
+
+test("finish publishes final fallthrough without choosing its continuation", () => {
+  const values = new ValueTable();
+  const region = new RegionBuilder(values);
+  const instructionStart = values.parameter(0, "i32");
+  const nextEip = values.parameter(1, "i32");
+  const terminalEvents: CompletionEvent[] = [];
+  const builder = createInstructionBuilder(region, {
+    stateAccess: cpuStateAccess,
+    statusFlagResolvers: cpuStatusFlagResolvers,
+    memory: guestMemoryAccess,
+    instructionCountField,
+    buildExit,
+    terminals: {
+      dispatch: (body, targetEip) => {
+        terminalEvents.push({ kind: "dispatch", targetEip });
+        body.finish({ kind: "dispatch", targetEip });
+      },
+      returnExit: (body, result) => body.finish({ kind: "exit", result })
+    }
+  });
+
+  strictEqual(builder.add(
+    movSemantic(32),
+    [regBinding("eax"), immBinding(1)],
+    valueInstructionLocation(instructionStart, nextEip)
+  ), true);
+  strictEqual(builder.finish(), nextEip);
+
+  const openBody = region.build();
+  const eipWrite = openBody.nodes.find((node) =>
+    writesStateChannel(values, node, coreStateFields.eip)
+  );
+
+  ok(eipWrite !== undefined, "final fallthrough did not publish eip");
+  strictEqual(stateWriteValue(eipWrite), nextEip);
+  deepStrictEqual(terminalEvents, []);
+  ok(!openBody.nodes.some((node) => node.kind === "finish"));
+
+  region.finish({ kind: "dispatch", targetEip: nextEip });
+  deepStrictEqual(region.build().nodes.at(-1), finishDispatch(nextEip));
+});
+
+test("Core distinguishes ordinary fallthrough from taken dispatch", () => {
+  const fallthroughValues = new ValueTable();
+  const instructionStart = fallthroughValues.parameter(0, "i32");
+  const nextEip = fallthroughValues.parameter(1, "i32");
+  const fallthroughs: CompletionEvent[] = [];
+
+  buildValueInstructionBlock(fallthroughValues, (builder) => {
+    builder.add(
+      movSemantic(32),
+      [regBinding("eax"), immBinding(1)],
+      valueInstructionLocation(instructionStart, nextEip)
+    );
+  }, fallthroughs);
+  deepStrictEqual(fallthroughs, [{ kind: "fallthrough", targetEip: nextEip }]);
+
+  const jumpValues = new ValueTable();
+  const jumpTarget = jumpValues.parameter(0, "i32");
+  const rootDispatches: CompletionEvent[] = [];
+
+  buildValueInstructionBlock(jumpValues, (builder) => {
+    builder.add(
+      jmpSemantic(),
+      [immDynamicBinding(jumpTarget)],
+      loc(0x1000, 0x1005)
+    );
+  }, rootDispatches);
+  deepStrictEqual(rootDispatches, [{ kind: "dispatch", targetEip: jumpTarget }]);
+
+  const armValues = new ValueTable();
+  const armDispatches: CompletionEvent[] = [];
+  const jumpFromArm: SemanticTemplate = (s, v) => {
+    s.if(
+      s.read(s.reg("eax"), { width: 32 }),
+      (then) => then.jump(v.const(0x2000))
+    );
+  };
+
+  buildValueInstructionBlock(armValues, (builder) => {
+    builder.add(jumpFromArm, [], loc(0x1000, 0x1005));
+  }, armDispatches);
+  deepStrictEqual(armDispatches, [
+    { kind: "dispatch", targetEip: armValues.const(0x2000) },
+    { kind: "fallthrough", targetEip: armValues.const(0x1005) }
+  ]);
+});
+
+test("Core commits a runtime next EIP before dispatch", () => {
+  const values = new ValueTable();
+  const instructionStart = values.external(0);
+  const nextEip = values.external(1);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movSemantic(32),
+      [regBinding("eax"), immBinding(5)],
+      valueInstructionLocation(instructionStart, nextEip)
+    );
+  });
   const v = block.values;
 
   deepStrictEqual(entryNodes(block), [
     stateWrite(v, gprChannel("eax"), v.const(5)),
-    finishDispatch(v.external(1))
+    finishDispatch(nextEip)
   ]);
   const rawNodes = rawEntryNodes(block);
   const finishIndex = rawNodes.length - 1;
@@ -3454,25 +3747,26 @@ test("Core commits an external next EIP before dispatch", () => {
   ok(eipCommitIndex >= 0 && eipCommitIndex < finishIndex);
   deepStrictEqual(
     rawNodes[eipCommitIndex],
-    stateWrite(v, coreStateFields.eip, v.external(1))
+    stateWrite(v, coreStateFields.eip, nextEip)
   );
 });
 
-test("a fault edge restores an external eip", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(
-    movSemantic(32),
-    [regBinding("eax"), mem({ base: "ebx", scale: 1, disp: 0 })],
-    externalInstructionLocation(4, 5)
-  );
-
-  const block = builder.finish();
+test("a fault edge restores a runtime eip", () => {
+  const values = new ValueTable();
+  const instructionStart = values.external(4);
+  const nextEip = values.external(5);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movSemantic(32),
+      [regBinding("eax"), mem({ base: "ebx", scale: 1, disp: 0 })],
+      valueInstructionLocation(instructionStart, nextEip)
+    );
+  });
   const v = block.values;
   const address = outputOf(stateReadFor(block, entryNodes(block), gprChannel("ebx"))!);
 
   deepStrictEqual(nestedBodyView(block, 1).flushes, [
-    stateWrite(v, coreStateFields.eip, v.external(4))
+    stateWrite(v, coreStateFields.eip, instructionStart)
   ]);
   deepStrictEqual(
     nestedBodyView(block, 1).terminator,
@@ -3483,12 +3777,12 @@ test("a fault edge restores an external eip", () => {
       (node): node is StateWriteOperation =>
         writesStateChannel(v, node, coreStateFields.eip)
     ),
-    [stateWrite(v, coreStateFields.eip, v.external(5))]
+    [stateWrite(v, coreStateFields.eip, nextEip)]
   );
-  deepStrictEqual(entryNodes(block).at(-1), finishDispatch(v.external(5)));
+  deepStrictEqual(entryNodes(block).at(-1), finishDispatch(nextEip));
 });
 
-// The memDynamic address: the in-block base register read plus the
+// The memDynamicBase address: the in-block base register read plus the
 // pre-summed offset external.
 function dynamicAddress(block: IrBlock, baseRead: StateReadOperation): ValueId {
   const v = block.values;
@@ -3524,18 +3818,21 @@ function dynamicSegmentBaseRead(
   return read;
 }
 
-test("a memStatic operand guards and accesses the external address", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(
-    movSemantic(32),
-    [regBinding("eax"), memStaticBinding(7, staticMemSegment("ds"))],
-    loc(0x1000, 0x1006)
-  );
-
-  const block = builder.finish();
+test("a memOffset operand guards and accesses the external address", () => {
+  const values = new ValueTable();
+  const runtimeAddress = values.external(7);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movSemantic(32),
+      [
+        regBinding("eax"),
+        memOffsetBinding(runtimeAddress, staticMemSegment("ds"))
+      ],
+      loc(0x1000, 0x1006)
+    );
+  });
   const v = block.values;
-  const address = v.external(7);
+  const address = runtimeAddress;
   const load = entryNodes(block).find(
     (node): node is MemoryReadOperation => isMemoryRead(node)
   )!;
@@ -3549,25 +3846,29 @@ test("a memStatic operand guards and accesses the external address", () => {
   deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultStop(v, "read", address));
 });
 
-test("a segmented memStatic operand adds the selected segment base", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(
-    movSemantic(32),
-    [regBinding("eax"), memStaticBinding(7, dynamicMemSegment(8))],
-    loc(0x1000, 0x1006)
-  );
-
-  const block = builder.finish();
+test("a segmented memOffset operand adds the selected segment base", () => {
+  const values = new ValueTable();
+  const offset = values.external(7);
+  const segmentIndex = values.external(8);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movSemantic(32),
+      [
+        regBinding("eax"),
+        memOffsetBinding(offset, dynamicMemSegment(segmentIndex))
+      ],
+      loc(0x1000, 0x1006)
+    );
+  });
   const v = block.values;
-  const segmentBase = dynamicSegmentBaseRead(block, v.external(8));
-  const address = v.binary("add", outputOf(segmentBase), v.external(7));
+  const segmentBase = dynamicSegmentBaseRead(block, segmentIndex);
+  const address = v.binary("add", outputOf(segmentBase), offset);
   const load = entryNodes(block).find(
     (node): node is MemoryReadOperation => isMemoryRead(node)
   )!;
 
   deepStrictEqual(entryNodes(block), [
-    dynamicSegmentRead(v, outputOf(segmentBase), v.external(8), "base"),
+    dynamicSegmentRead(v, outputOf(segmentBase), segmentIndex, "base"),
     ...memoryGuard(block, 1, address, 4, "read"),
     memoryReadOperation(outputOf(load), address, 32),
     stateWrite(v, gprChannel("eax"), outputOf(load)),
@@ -3576,16 +3877,20 @@ test("a segmented memStatic operand adds the selected segment base", () => {
   deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultStop(v, "read", address));
 });
 
-test("a memDynamic operand reads the base register inside the block", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(
-    movSemantic(32),
-    [regBinding("eax"), memDynamicBinding(0, 1, staticMemSegment("ds"))],
-    loc(0x1000, 0x1006)
-  );
-
-  const block = builder.finish();
+test("a memDynamicBase operand reads the base register inside the block", () => {
+  const values = new ValueTable();
+  const baseIndex = values.external(0);
+  const runtimeOffset = values.external(1);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movSemantic(32),
+      [
+        regBinding("eax"),
+        memDynamicBaseBinding(baseIndex, runtimeOffset, staticMemSegment("ds"))
+      ],
+      loc(0x1000, 0x1006)
+    );
+  });
   const v = block.values;
   const baseRead = dynamicBaseRead(block);
   const address = dynamicAddress(block, baseRead);
@@ -3594,7 +3899,7 @@ test("a memDynamic operand reads the base register inside the block", () => {
   )!;
 
   deepStrictEqual(entryNodes(block), [
-    dynamicGprRead(v, outputOf(baseRead), v.external(0), 32),
+    dynamicGprRead(v, outputOf(baseRead), baseIndex, 32),
     ...memoryGuard(block, 1, address, 4, "read"),
     memoryReadOperation(outputOf(load), address, 32),
     stateWrite(v, gprChannel("eax"), outputOf(load)),
@@ -3603,26 +3908,30 @@ test("a memDynamic operand reads the base register inside the block", () => {
   deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultStop(v, "read", address));
 });
 
-test("fs memDynamic operands add the segment base to the dynamic effective address", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(
-    aluSemantic("add", 32),
-    [memDynamicBinding(0, 1, staticMemSegment("fs")), immBinding(5)],
-    loc(0x1000, 0x1003)
-  );
-
-  const block = builder.finish();
+test("fs memDynamicBase operands add the segment base to the dynamic effective address", () => {
+  const values = new ValueTable();
+  const baseIndex = values.external(0);
+  const runtimeOffset = values.external(1);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      aluSemantic("add", 32),
+      [
+        memDynamicBaseBinding(baseIndex, runtimeOffset, staticMemSegment("fs")),
+        immBinding(5)
+      ],
+      loc(0x1000, 0x1003)
+    );
+  });
   const nodes = entryNodes(block);
   const baseRead = dynamicBaseRead(block);
   const fsBase = stateReadFor(block, nodes, segmentBaseChannel("fs"))!;
-  const offset = dynamicAddress(block, baseRead);
-  const address = block.values.binary("add", outputOf(fsBase), offset);
+  const effectiveOffset = dynamicAddress(block, baseRead);
+  const address = block.values.binary("add", outputOf(fsBase), effectiveOffset);
   const load = nodes.find((node): node is MemoryReadOperation => isMemoryRead(node))!;
   const store = nodes.find((node): node is MemoryWriteOperation => isMemoryWrite(node))!;
 
   strictEqual(
-    nodes.filter((node) => readsDynamicGpr(block.values, node, block.values.external(0), 32)).length,
+    nodes.filter((node) => readsDynamicGpr(block.values, node, baseIndex, 32)).length,
     1
   );
   strictEqual(
@@ -3636,28 +3945,33 @@ test("fs memDynamic operands add the segment base to the dynamic effective addre
   strictEqual(store.inputs[0]!.value, address);
 });
 
-test("dynamic memDynamic segments read the selected segment base", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(
-    aluSemantic("add", 32),
-    [memDynamicBinding(0, 1, dynamicMemSegment(2)), immBinding(5)],
-    loc(0x1000, 0x1003)
-  );
-
-  const block = builder.finish();
+test("dynamic memDynamicBase segments read the selected segment base", () => {
+  const values = new ValueTable();
+  const baseIndex = values.external(0);
+  const runtimeOffset = values.external(1);
+  const segmentIndex = values.external(2);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      aluSemantic("add", 32),
+      [
+        memDynamicBaseBinding(baseIndex, runtimeOffset, dynamicMemSegment(segmentIndex)),
+        immBinding(5)
+      ],
+      loc(0x1000, 0x1003)
+    );
+  });
   const v = block.values;
   const nodes = entryNodes(block);
   const baseRead = dynamicBaseRead(block);
-  const segmentBase = dynamicSegmentBaseRead(block, v.external(2));
-  const offset = dynamicAddress(block, baseRead);
-  const address = v.binary("add", outputOf(segmentBase), offset);
+  const segmentBase = dynamicSegmentBaseRead(block, segmentIndex);
+  const effectiveOffset = dynamicAddress(block, baseRead);
+  const address = v.binary("add", outputOf(segmentBase), effectiveOffset);
   const load = nodes.find((node): node is MemoryReadOperation => isMemoryRead(node))!;
   const store = nodes.find((node): node is MemoryWriteOperation => isMemoryWrite(node))!;
 
   strictEqual(
     nodes.filter((node) =>
-      readsDynamicSegment(v, node, v.external(2), "base")
+      readsDynamicSegment(v, node, segmentIndex, "base")
     ).length,
     1
   );
@@ -3670,40 +3984,48 @@ test("dynamic memDynamic segments read the selected segment base", () => {
   strictEqual(store.inputs[0]!.value, address);
 });
 
-test("lea with memDynamic uses the dynamic effective address without segment bases", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(
-    leaSemantic(32),
-    [regBinding("eax"), memDynamicBinding(0, 1, staticMemSegment("fs"))],
-    loc(0x1000, 0x1003)
-  );
-
-  const block = builder.finish();
+test("lea with memDynamicBase uses the dynamic effective address without segment bases", () => {
+  const values = new ValueTable();
+  const baseIndex = values.external(0);
+  const offset = values.external(1);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      leaSemantic(32),
+      [
+        regBinding("eax"),
+        memDynamicBaseBinding(baseIndex, offset, staticMemSegment("fs"))
+      ],
+      loc(0x1000, 0x1003)
+    );
+  });
   const v = block.values;
   const baseRead = dynamicBaseRead(block);
   const address = dynamicAddress(block, baseRead);
 
   deepStrictEqual(entryNodes(block), [
-    dynamicGprRead(v, outputOf(baseRead), v.external(0), 32),
+    dynamicGprRead(v, outputOf(baseRead), baseIndex, 32),
     stateWrite(v, gprChannel("eax"), address),
     finishDispatch(v.const(0x1003))
   ]);
 });
 
-test("a read+write memDynamic operand reads the base once and reuses the address", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(
-    aluSemantic("add", 32),
-    [memDynamicBinding(0, 1, staticMemSegment("ds")), immBinding(5)],
-    loc(0x1000, 0x1003)
-  );
-
-  const block = builder.finish();
+test("a read+write memDynamicBase operand reads the base once and reuses the address", () => {
+  const values = new ValueTable();
+  const baseIndex = values.external(0);
+  const offset = values.external(1);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      aluSemantic("add", 32),
+      [
+        memDynamicBaseBinding(baseIndex, offset, staticMemSegment("ds")),
+        immBinding(5)
+      ],
+      loc(0x1000, 0x1003)
+    );
+  });
   const nodes = entryNodes(block);
   const baseReads = nodes.filter(
-    (node) => readsDynamicGpr(block.values, node, block.values.external(0), 32)
+    (node) => readsDynamicGpr(block.values, node, baseIndex, 32)
   );
   const load = nodes.find((node): node is MemoryReadOperation => isMemoryRead(node))!;
   const store = nodes.find((node): node is MemoryWriteOperation => isMemoryWrite(node))!;
@@ -3713,16 +4035,17 @@ test("a read+write memDynamic operand reads the base once and reuses the address
   strictEqual(store.inputs[0]!.value, load.inputs[0]!.value);
 });
 
-test("pop [memDynamic] flushes esp before the base read and restores it on the write edge", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(
-    popSemantic(),
-    [memDynamicBinding(0, 1, staticMemSegment("ds"))],
-    loc(0x1000, 0x1003)
-  );
-
-  const block = builder.finish();
+test("pop [memDynamicBase] flushes esp before the base read and restores it on the write edge", () => {
+  const values = new ValueTable();
+  const baseIndex = values.external(0);
+  const offset = values.external(1);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      popSemantic(),
+      [memDynamicBaseBinding(baseIndex, offset, staticMemSegment("ds"))],
+      loc(0x1000, 0x1003)
+    );
+  });
   const v = block.values;
   const esp = outputOf(stateReadFor(block, entryNodes(block), gprChannel("esp"))!);
   const popValue = outputOf(entryNodes(block).find(
@@ -3741,7 +4064,7 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
     ...memoryGuard(block, 1, esp, 4, "read"),
     memoryReadOperation(popValue, esp, 32),
     stateWrite(v, gprChannel("esp"), nextEsp),
-    dynamicGprRead(v, outputOf(baseRead), v.external(0), 32),
+    dynamicGprRead(v, outputOf(baseRead), baseIndex, 32),
     ...memoryGuard(block, 2, address, 4, "write"),
     memoryWriteOperation(address, popValue, 32),
     finishDispatch(v.const(0x1003))
@@ -3761,29 +4084,38 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
   deepStrictEqual(nestedBodyView(block, 2).terminator, pageFaultStop(v, "write", address));
 });
 
-test("a guard after a memDynamic flush of a never-read register fails loudly", () => {
+test("a guard after a memDynamicBase flush of a never-read register fails loudly", () => {
   const blindWriteThenDynamicAddress: SemanticTemplate = (s, v) => {
     s.write(s.reg("ebx"), v.const(0x111), { width: 32 });
     guardDsMemory(s, s.address(s.operand(0)), v.const(4), "write");
   };
+  const values = new ValueTable();
+  const baseIndex = values.external(0);
+  const offset = values.external(1);
 
   throws(
     () =>
-      createLegacyInstructionBlock().add(
-        blindWriteThenDynamicAddress,
-        [memDynamicBinding(0, 1, staticMemSegment("ds"))],
-        loc(0x1000, 0x1002)
-      ),
+      buildValueInstructionBlock(values, (builder) => {
+        builder.add(
+          blindWriteThenDynamicAddress,
+          [memDynamicBaseBinding(baseIndex, offset, staticMemSegment("ds"))],
+          loc(0x1000, 0x1002)
+        );
+      }),
     /unrestorable/
   );
 });
 
-test("a narrow immExternal get truncates to the access width", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(movSemantic(8), [regBinding("bl"), immExternalBinding(0)], loc(0x1000, 0x1002));
-
-  const block = builder.finish();
+test("a narrow runtime immediate truncates to the access width", () => {
+  const values = new ValueTable();
+  const immediate = values.external(0);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movSemantic(8),
+      [regBinding("bl"), immDynamicBinding(immediate)],
+      loc(0x1000, 0x1002)
+    );
+  });
   const v = block.values;
   const write = stateWriteFor(block, stateWrites(block), gprChannel("bl"));
 
@@ -3791,16 +4123,20 @@ test("a narrow immExternal get truncates to the access width", () => {
     kind: "truncate",
     inputType: "i32",
     width: 8,
-    value: v.external(0)
+    value: immediate
   });
 });
 
-test("a signed immExternal get sign-extends instead of masking", () => {
-  const builder = createLegacyInstructionBlock();
-
-  builder.add(movsxSemantic(8, 32), [regBinding("eax"), immExternalBinding(0)], loc(0x1000, 0x1003));
-
-  const block = builder.finish();
+test("a signed runtime immediate sign-extends instead of masking", () => {
+  const values = new ValueTable();
+  const immediate = values.external(0);
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      movsxSemantic(8, 32),
+      [regBinding("eax"), immDynamicBinding(immediate)],
+      loc(0x1000, 0x1003)
+    );
+  });
   const v = block.values;
   const write = stateWriteFor(block, stateWrites(block), gprChannel("eax"));
 
@@ -3808,7 +4144,7 @@ test("a signed immExternal get sign-extends instead of masking", () => {
     kind: "extend",
     resultType: "i32",
     width: 8,
-    value: v.external(0),
+    value: immediate,
     signed: true
   });
 });

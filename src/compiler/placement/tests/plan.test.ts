@@ -643,8 +643,8 @@ test("an unrelated trap shared by only some switch arms has no deadline", () => 
           selector,
           output,
           cases: [
-            { match: 0, body: { nodes: [], result: quotient } },
-            { match: 1, body: { nodes: [], result: quotient } }
+            { matches: [0], body: { nodes: [], result: quotient } },
+            { matches: [1], body: { nodes: [], result: quotient } }
           ],
           defaultBody: { nodes: [], result: fallback }
         }),

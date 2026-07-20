@@ -33,18 +33,7 @@ export function decodeJitBlock(
   const maxInstructions = options.maxInstructions ?? defaultMaxInstructions;
   const memoryReader = guestMemoryAccess.bindHost(memory);
   const reader: IsaDecodeReader = {
-    readU8(address) {
-      const read = memoryReader.readByte(address, "instructionFetch");
-
-      if (read.kind === "value") {
-        return { kind: "byte", value: read.value };
-      }
-
-      return {
-        kind: "cpuException",
-        exception: read.exception
-      };
-    }
+    readU8: (address) => memoryReader.readByte(address, "instructionFetch")
   };
   let eip = u32(startEip);
 

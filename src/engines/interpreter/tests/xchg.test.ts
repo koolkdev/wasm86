@@ -12,7 +12,7 @@ import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
   executeInstruction
-} from "./support.js";
+} from "./harness.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 

@@ -4,22 +4,20 @@ import { test } from "node:test";
 import { assertLazyFlagState, createWasmCpuStateSnapshot, type WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import {
   assertInterpreterStateEquals,
+  assertCompletedInstruction,
+  assertSingleInstructionExit,
+  instantiateInterpreter,
   readInterpreterState,
   writeInterpreterState,
-  type InterpreterModuleInstance
-} from "./interpreter-helpers.js";
+  writeGuestBytes,
+  type InterpreterHarness
+} from "./harness.js";
 import { startAddress } from "#test/support/addresses.js";
 import { readPageFaultStop, writePageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { x86Flags, type X86Flag } from "#core/flags/definitions.js";
-import {
-  assertCompletedInstruction,
-  assertSingleInstructionExit,
-  instantiateWasmInterpreter,
-  writeGuestBytes
-} from "./support.js";
 
 type StackRunResult = Readonly<{
-  interpreter: InterpreterModuleInstance;
+  interpreter: InterpreterHarness;
   state: WasmCpuStateSnapshot;
 }>;
 
@@ -46,13 +44,13 @@ async function executeStackInstruction(
   initialState: WasmCpuStateSnapshot,
   setupGuest?: (view: DataView) => void
 ): Promise<StackRunResult> {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, initialState.eip, bytes);
   setupGuest?.(interpreter.guestView);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   assertSingleInstructionExit(exit);
   return {
@@ -131,13 +129,13 @@ test("POP segment exits without committing ESP or the selector", async () => {
     eip: startAddress,
     instructionCount: 7
   });
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0x1f]);
   interpreter.guestView.setUint32(0x40, 0xabcd_1234, true);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
   const state = readInterpreterState(interpreter.stateView);
 
   deepStrictEqual(exit, {
@@ -169,7 +167,7 @@ test("executes operand-size PUSH immediates as word stack cells", async () => {
     eip: startAddress,
     instructionCount: 7
   });
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [
@@ -177,7 +175,7 @@ test("executes operand-size PUSH immediates as word stack cells", async () => {
     0x66, 0x6a, 0xff
   ]);
 
-  const exit = interpreter.run(2);
+  const exit = interpreter.runFor(2);
   const state = readInterpreterState(interpreter.stateView);
 
   assertSingleInstructionExit(exit);
@@ -339,13 +337,13 @@ test("executes POPFD/PUSHFD as a stored-flag round trip", async () => {
     eip: startAddress,
     instructionCount: 7
   });
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0x9d, 0x9c]);
   interpreter.guestView.setUint32(0x40, image, true);
 
-  const exit = interpreter.run(2);
+  const exit = interpreter.runFor(2);
   const state = readInterpreterState(interpreter.stateView);
 
   assertSingleInstructionExit(exit);
@@ -365,13 +363,13 @@ test("executes POPF/PUSHF as a low-flags round trip while preserving AC/ID", asy
     eip: startAddress,
     instructionCount: 7
   });
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0x66, 0x9d, 0x66, 0x9c]);
   interpreter.guestView.setUint16(0x40, image, true);
 
-  const exit = interpreter.run(2);
+  const exit = interpreter.runFor(2);
   const state = readInterpreterState(interpreter.stateView);
 
   assertSingleInstructionExit(exit);
@@ -388,7 +386,7 @@ test("executes the AC and ID POPFD toggle detection idiom", async () => {
       eip: startAddress,
       instructionCount: 7
     });
-    const interpreter = await instantiateWasmInterpreter();
+    const interpreter = await instantiateInterpreter();
 
     writeInterpreterState(interpreter.stateView, initialState);
     writeGuestBytes(interpreter.guestView, startAddress, [
@@ -399,7 +397,7 @@ test("executes the AC and ID POPFD toggle detection idiom", async () => {
       0x58
     ]);
 
-    const exit = interpreter.run(5);
+    const exit = interpreter.runFor(5);
     const state = readInterpreterState(interpreter.stateView);
 
     assertSingleInstructionExit(exit);
@@ -416,12 +414,12 @@ test("a faulting PUSHFD write reports its eip with prior state flushed", async (
     eip: startAddress,
     instructionCount: 7
   });
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0x83, 0xc0, 0x01, 0x9c]);
 
-  const exit = interpreter.run(2);
+  const exit = interpreter.runFor(2);
   const state = readInterpreterState(interpreter.stateView);
 
   deepStrictEqual(exit, writePageFaultStop(0xffff_fffe));
@@ -443,12 +441,12 @@ test("a faulting POPFD read reports its eip with prior state flushed", async () 
     eip: startAddress,
     instructionCount: 7
   });
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0x83, 0xc0, 0x01, 0x9d]);
 
-  const exit = interpreter.run(2);
+  const exit = interpreter.runFor(2);
   const state = readInterpreterState(interpreter.stateView);
 
   deepStrictEqual(exit, readPageFaultStop(0xffff_fffe));
@@ -725,16 +723,16 @@ test("a faulting POP [mem] write leaves ESP, EIP, and the stack untouched", asyn
     eip: startAddress,
     instructionCount: 7
   });
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, initialState.eip, [0x8f, 0x03]);
   interpreter.guestView.setUint32(0x40, 0x5566_7788, true);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
-  // The destination write guard faults after the handler already advanced
-  // esp on the main path; the fault edge must restore it.
+  // The destination write guard faults after instruction construction already
+  // advanced esp on the main path; the fault edge must restore it.
   deepStrictEqual(exit, writePageFaultStop(0xfffd));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
   strictEqual(interpreter.guestView.getUint32(0x40, true), 0x5566_7788);
@@ -747,13 +745,13 @@ test("a faulting POP word [mem] write leaves ESP, EIP, and the stack untouched",
     eip: startAddress,
     instructionCount: 7
   });
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, initialState.eip, [0x66, 0x8f, 0x03]);
   interpreter.guestView.setUint16(0x40, 0xbeef, true);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   deepStrictEqual(exit, writePageFaultStop(0xffff));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
@@ -805,12 +803,12 @@ test("a faulting PUSH r16 write reports a word-sized fault", async () => {
     eip: startAddress,
     instructionCount: 7
   });
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, initialState.eip, [0x66, 0x50]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   deepStrictEqual(exit, writePageFaultStop(0xffff_ffff));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
@@ -822,12 +820,12 @@ test("a faulting POP r16 read reports a word-sized fault", async () => {
     eip: startAddress,
     instructionCount: 7
   });
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, initialState.eip, [0x66, 0x58]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   deepStrictEqual(exit, readPageFaultStop(0xffff));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
@@ -860,12 +858,12 @@ test("faulting stack-all range guards leave architectural state unchanged", asyn
       readPageFaultStop(0xfff8)
     ]
   ] as const) {
-    const interpreter = await instantiateWasmInterpreter();
+    const interpreter = await instantiateInterpreter();
 
     writeInterpreterState(interpreter.stateView, state);
     writeGuestBytes(interpreter.guestView, state.eip, bytes);
 
-    const exit = interpreter.run(1);
+    const exit = interpreter.runFor(1);
 
     deepStrictEqual(exit, expectedExit, name);
     assertInterpreterStateEquals(interpreter.stateView, state);

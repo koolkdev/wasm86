@@ -32,8 +32,8 @@ export type LegacyInstructionBlockOptions = Readonly<{
   segmentMode?: SegmentMode;
 }>;
 
-// Raw Interpreter and JIT frontends still embed IrBlock/Finish. This bridge
-// owns that temporary outer shape; all x86 construction stays in Core.
+// The JIT still embeds IrBlock/Finish. This bridge owns that temporary outer
+// shape; all x86 construction stays in Core.
 export function createLegacyInstructionBlock(
   options: LegacyInstructionBlockOptions = {}
 ): LegacyInstructionBlock {
@@ -70,6 +70,10 @@ function buildLegacyBlock(
   region: RegionBuilder,
   values: ValueTable
 ): IrBlock {
-  builder.finish();
+  const finalFallthrough = builder.finish();
+
+  if (finalFallthrough !== undefined) {
+    region.finish({ kind: "dispatch", targetEip: finalFallthrough });
+  }
   return { body: region.build(), values };
 }

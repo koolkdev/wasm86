@@ -14,7 +14,7 @@ import {
 import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
 import type {
   IsaDecodedInstruction,
-  IsaDecodeByteResult,
+  IsaDecodeReadResult,
   IsaDecodeReader
 } from "#core/decoder/types.js";
 import {
@@ -35,7 +35,7 @@ import {
   cpuStateAccess,
   cpuStatusFlagResolvers
 } from "#cpu/state.js";
-import { budgetExit } from "#engines/interpreter/exits.js";
+import { instructionLimitExit } from "#engines/interpreter/exits.js";
 import { guestMemoryAccess } from "#memory/access.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
 import { readBackingByte, writeBackingBytes } from "#memory/bytes.js";
@@ -167,7 +167,7 @@ function buildInstructionProgram(
     signature: dispatchSignature,
     effects: noEffects
   }, (fn) => {
-    fn.return([buildVariant(fn.values, exitLayout, budgetExit())]);
+    fn.return([buildVariant(fn.values, exitLayout, instructionLimitExit())]);
   });
   const entry = program.defineFunction({
     ref: functionRef("test.compiled-instruction.entry"),
@@ -182,7 +182,6 @@ function buildInstructionProgram(
       buildExit,
       terminals: instructionFunctionTerminals(dispatch)
     });
-
     for (const instruction of instructions) {
       if (!builder.add(
         instruction.spec.semantics,
@@ -192,7 +191,11 @@ function buildInstructionProgram(
         break;
       }
     }
-    builder.finish();
+    const finalFallthrough = builder.finish();
+
+    if (finalFallthrough !== undefined) {
+      fn.returnCall(dispatch, [finalFallthrough]);
+    }
   });
 
   program.exportFunction({
@@ -235,7 +238,7 @@ class FiniteInstructionReader implements IsaDecodeReader {
     this.#bytes = Uint8Array.from(bytes);
   }
 
-  readU8(address: number): IsaDecodeByteResult {
+  readU8(address: number): IsaDecodeReadResult {
     const index = address - this.baseAddress;
     const value = this.#bytes[index];
 
@@ -244,7 +247,7 @@ class FiniteInstructionReader implements IsaDecodeReader {
       `compiled instruction fixture has no byte at 0x${address.toString(16)}`
     );
 
-    return { kind: "byte", value };
+    return { kind: "value", value };
   }
 }
 

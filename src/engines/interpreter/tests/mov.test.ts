@@ -4,19 +4,17 @@ import { test } from "node:test";
 import { createWasmCpuStateSnapshot, wasmCpuStatusFlagsOf } from "#test/support/cpu-state.js";
 import {
   assertInterpreterStateEquals,
+  assertCompletedInstruction,
+  assertSingleInstructionExit,
+  executeInstruction,
+  instantiateInterpreter,
   readInterpreterState,
-  writeInterpreterState
-} from "./interpreter-helpers.js";
+  writeInterpreterState,
+  writeGuestBytes
+} from "./harness.js";
 import { startAddress } from "#test/support/addresses.js";
 import { fetchPageFaultStop, readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { invalidOpcode } from "#core/exceptions.js";
-import {
-  assertCompletedInstruction,
-  executeInstruction,
-  assertSingleInstructionExit,
-  instantiateWasmInterpreter,
-  writeGuestBytes
-} from "./support.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
@@ -24,7 +22,7 @@ const zeroFlag = { CF: 0, PF: 0, AF: 0, ZF: 1, SF: 0, OF: 0 } as const;
 const noFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 
 test("interpreter binds MOV opcode low bits to EDI", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
   const initialState = createWasmCpuStateSnapshot({
     eax: 0x1122_3344,
     eip: startAddress,
@@ -33,7 +31,7 @@ test("interpreter binds MOV opcode low bits to EDI", async () => {
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0xbf, 0x01, 0x00, 0x00, 0x00]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
   const state = readInterpreterState(interpreter.stateView);
 
   assertSingleInstructionExit(exit);
@@ -104,7 +102,7 @@ test("MOV to CS raises invalid-opcode before segment-load handling", async () =>
 });
 
 test("interpreter dispatches the C7 /0 register form", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
   const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
@@ -112,7 +110,7 @@ test("interpreter dispatches the C7 /0 register form", async () => {
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0xc7, 0xc0, 0x78, 0x56, 0x34, 0x12]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
   const state = readInterpreterState(interpreter.stateView);
 
   assertSingleInstructionExit(exit);
@@ -241,8 +239,59 @@ test("executes multi-byte NOP without reading memory or modifying flags", async 
   assertCompletedInstruction(word.state, startAddress + 4, 8);
 });
 
-test("truncated MOV r32, imm32 returns decode fault without changing architectural state", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+test("executes segment-overridden moffs32 loads and stores", async () => {
+  const offset = 0x20;
+  const fsBase = 0x2000;
+  const address = fsBase + offset;
+  const offsetBytes = [offset, 0x00, 0x00, 0x00] as const;
+  const load = await executeInstruction(
+    [0x64, 0xa1, ...offsetBytes],
+    createWasmCpuStateSnapshot({
+      eax: 0xaaaa_aaaa,
+      fsBase,
+      eip: startAddress,
+      instructionCount: 7
+    }),
+    [{ address, bytes: [0x78, 0x56, 0x34, 0x12] }]
+  );
+  const store = await executeInstruction(
+    [0x64, 0xa3, ...offsetBytes],
+    createWasmCpuStateSnapshot({
+      eax: 0x89ab_cdef,
+      fsBase,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+
+  assertSingleInstructionExit(load.exit);
+  strictEqual(load.state.eax, 0x1234_5678);
+  assertCompletedInstruction(load.state, startAddress + 6, 8);
+
+  assertSingleInstructionExit(store.exit);
+  strictEqual(store.guestView.getUint32(address, true), 0x89ab_cdef);
+  assertCompletedInstruction(store.state, startAddress + 6, 8);
+});
+
+test("truncated moffs32 raises instruction-fetch #PF at the first unavailable byte", async () => {
+  const interpreter = await instantiateInterpreter();
+  const eip = interpreter.guestView.byteLength - 4;
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0x1122_3344,
+    eip,
+    instructionCount: 7
+  });
+  writeInterpreterState(interpreter.stateView, initialState);
+  writeGuestBytes(interpreter.guestView, eip, [0xa1, 0x20, 0x00, 0x00]);
+
+  const exit = interpreter.runFor(1);
+
+  deepStrictEqual(exit, fetchPageFaultStop(eip + 4));
+  assertInterpreterStateEquals(interpreter.stateView, initialState);
+});
+
+test("truncated MOV r32, imm32 raises instruction-fetch #PF without changing architectural state", async () => {
+  const interpreter = await instantiateInterpreter();
   const eip = interpreter.guestView.byteLength - 3;
   const initialState = createWasmCpuStateSnapshot({
     eax: 0x1122_3344,
@@ -252,8 +301,8 @@ test("truncated MOV r32, imm32 returns decode fault without changing architectur
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, eip, [0xb8, 0x01, 0x02]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
-  deepStrictEqual(exit, fetchPageFaultStop(eip + 1));
+  deepStrictEqual(exit, fetchPageFaultStop(eip + 3));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

@@ -10,18 +10,22 @@ import {
   type ControlEmitTarget
 } from "./definition.js";
 
-export type SwitchCase = Readonly<{ match: number; body: Body }>;
+export type SwitchCase = Readonly<{
+  // Every match routes to this one body without repeating it.
+  matches: readonly number[];
+  body: Body;
+}>;
 
 // Matches lower to a dense br_table, so they stay byte-sized.
 export const maxSwitchMatch = 255;
 
-// Selects one body by selector match, the default when none matches; the
-// selected body's fallthrough result becomes `output`. The occurrence derives
-// the dense br_table from the match values during emission.
+// Selects one body by selector match, the default when none matches. A
+// value-producing switch joins the selected body's fallthrough result through
+// `output`; a control-only switch has neither arm results nor an output. The
+// occurrence derives the dense br_table from the match values during emission.
 export type SwitchControlArgs = Readonly<{
   selector: ValueId;
-  // Required until a control-only switch has a producer.
-  output: ValueId;
+  output?: ValueId;
   cases: readonly SwitchCase[];
   defaultBody: Body;
 }>;
@@ -30,12 +34,12 @@ export class SwitchControl extends ControlBase {
   static readonly kind = "switch";
   readonly kind = SwitchControl.kind;
   readonly selector: ValueId;
-  readonly output: ValueId;
+  declare readonly output?: ValueId;
   readonly cases: readonly SwitchCase[];
   readonly defaultBody: Body;
   readonly operands: readonly [ValueId];
   readonly nestedBodies: readonly NestedBody[];
-  readonly outputs: readonly [ValueId];
+  readonly outputs: readonly ValueId[];
 
   private constructor({
     selector,
@@ -45,7 +49,9 @@ export class SwitchControl extends ControlBase {
   }: SwitchControlArgs) {
     super();
     this.selector = selector;
-    this.output = output;
+    if (output !== undefined) {
+      this.output = output;
+    }
     this.cases = cases;
     this.defaultBody = defaultBody;
     this.operands = [selector];
@@ -61,7 +67,7 @@ export class SwitchControl extends ControlBase {
         scope: { kind: "ordinary" }
       }
     ];
-    this.outputs = [output];
+    this.outputs = output === undefined ? [] : [output];
   }
 
   static create(args: SwitchControlArgs): SwitchControl {
@@ -76,9 +82,9 @@ export class SwitchControl extends ControlBase {
   mapBodies(map: (body: Body) => Body): SwitchControl {
     return SwitchControl.create({
       selector: this.selector,
-      output: this.output,
-      cases: this.cases.map((entry) => ({
-        match: entry.match,
+      ...(this.output === undefined ? {} : { output: this.output }),
+      cases: this.cases.map((entry): SwitchCase => ({
+        matches: entry.matches,
         body: map(entry.body)
       })),
       defaultBody: map(this.defaultBody)
@@ -86,7 +92,9 @@ export class SwitchControl extends ControlBase {
   }
 
   emit(target: ControlEmitTarget, values: ValueUseEmitter): void {
-    const outputLocal = target.controlOutputLocal(this.output);
+    const outputLocal = this.output === undefined
+      ? undefined
+      : target.controlOutputLocal(this.output);
     const caseCount = this.cases.length;
 
     // Open order: join, default, case n-1 .. case 0.
@@ -114,8 +122,11 @@ export class SwitchControl extends ControlBase {
     );
     target.body.endBlock();
 
-    if (outputLocal !== undefined) {
+    if (this.output !== undefined && outputLocal !== undefined) {
       target.markControlOutput(this.output);
+    }
+    if (this.completes(target)) {
+      target.sealCompletedStructuredControl();
     }
   }
 }
@@ -123,11 +134,19 @@ export class SwitchControl extends ControlBase {
 export const switchControl = SwitchControl;
 
 function switchLabelDepths(cases: readonly SwitchCase[]): number[] {
-  const size = cases.reduce((max, entry) => Math.max(max, entry.match + 1), 0);
+  let size = 0;
+
+  for (const entry of cases) {
+    for (const match of entry.matches) {
+      size = Math.max(size, match + 1);
+    }
+  }
   const table = new Array<number>(size).fill(cases.length);
 
   for (const [depth, entry] of cases.entries()) {
-    table[entry.match] = depth;
+    for (const match of entry.matches) {
+      table[match] = depth;
+    }
   }
   return table;
 }

@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
-import type { ExternalValueId, ValueId } from "#compiler/ir/values/types.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   type CpuException
 } from "#core/exceptions.js";
@@ -48,18 +48,9 @@ import {
   type BuildExit,
   type InstructionTerminals
 } from "./terminal.js";
-
-// Instruction addresses are known at block-compile time for JIT blocks, but
-// interpreter handlers receive them from host locals so one handler can serve
-// many decoded instructions.
-export type InstructionAddressSource =
-  | Readonly<{ kind: "const"; address: number }>
-  | Readonly<{ kind: "external"; external: ExternalValueId }>;
-
-export type InstructionLocation = Readonly<{
-  eip: InstructionAddressSource;
-  nextEip: InstructionAddressSource;
-}>;
+export type InstructionLocation =
+  | Readonly<{ kind: "static"; eip: number; nextEip: number }>
+  | Readonly<{ kind: "value"; eip: ValueId; nextEip: ValueId }>;
 
 type InstructionLocationValues = Readonly<{ eip(): ValueId; nextEip(): ValueId }>;
 
@@ -69,7 +60,7 @@ export type InstructionBuilder = Readonly<{
     bindings: readonly OperandBinding[],
     location: InstructionLocation
   ): boolean;
-  finish(): void;
+  finish(): ValueId | undefined;
 }>;
 
 export type InstructionBuilderOptions = Readonly<{
@@ -95,20 +86,14 @@ export function createInstructionBuilder(
 }
 
 export function staticInstructionLocation(eip: number, nextEip: number): InstructionLocation {
-  return {
-    eip: { kind: "const", address: eip },
-    nextEip: { kind: "const", address: nextEip }
-  };
+  return { kind: "static", eip, nextEip };
 }
 
-export function externalInstructionLocation(
-  eip: ExternalValueId,
-  nextEip: ExternalValueId
+export function valueInstructionLocation(
+  eip: ValueId,
+  nextEip: ValueId
 ): InstructionLocation {
-  return {
-    eip: { kind: "external", external: eip },
-    nextEip: { kind: "external", external: nextEip }
-  };
+  return { kind: "value", eip, nextEip };
 }
 
 // Coordinates one instruction-construction transaction. Semantic callbacks
@@ -181,7 +166,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     ));
 
     if (!this.#scopes.root.isTerminated()) {
-      this.#completeFallthrough(this.#scopes.root);
+      this.#completeRootFallthrough();
     }
 
     // Cleared only on success: a template that throws leaves the instruction
@@ -191,13 +176,21 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     return !this.#isTerminated();
   }
 
-  finish(): void {
+  finish(): ValueId | undefined {
     assert(!this.#finished, "instruction builder is already finished");
     assert(this.#instructionLocation === undefined, "instruction builder has an incomplete instruction");
     this.#finished = true;
 
     switch (this.#blockEnd) {
-      case "fallthrough":
+      case "fallthrough": {
+        const storage = this.#storageFor(this.#scopes.root);
+
+        assert(this.#storage.state.eip.has(), "instruction builder did not advance eip; no instructions were added");
+        const nextEip = this.#storage.state.eip.read(storage.access);
+
+        this.#terminator.publishCompletedState(this.#region, storage.access);
+        return nextEip;
+      }
       case "jump": {
         const storage = this.#storageFor(this.#scopes.root);
 
@@ -205,10 +198,10 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
         const targetEip = this.#storage.state.eip.read(storage.access);
 
         this.#terminator.dispatch(this.#region, storage.access, targetEip);
-        break;
+        return undefined;
       }
       case "terminated":
-        break;
+        return undefined;
     }
   }
 
@@ -230,7 +223,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   jump(scope: SemanticRegionScope, target: TargetInput): void {
     this.assertActive(scope);
     this.#completeInstruction(scope, target);
-    this.#dispatch(scope, "jump");
+    this.#completeDispatch(scope);
     scope.complete();
   }
 
@@ -341,9 +334,11 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     return this.#blockEnd !== "fallthrough";
   }
 
-  #completeFallthrough(scope: SemanticRegionScope): void {
+  #completeRootFallthrough(): void {
+    const scope = this.#scopes.root;
+
     this.#completeInstruction(scope, this.#location().nextEip());
-    this.#dispatch(scope, "fallthrough");
+    this.#endBlock(scope, "fallthrough");
   }
 
   #completeIf(scope: SemanticRegionScope, outcome: IfOutcome): void {
@@ -402,24 +397,18 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     this.#storage.state.eip.write(target);
   }
 
-  // A completed flow ends in a dispatch: an arm's body finishes in place,
-  // while the root body defers to finish() so the block can keep extending.
-  #dispatch(
-    scope: SemanticRegionScope,
-    rootEnd: "fallthrough" | "jump"
-  ): void {
+  // A dispatching arm terminates where it occurs. The root records the
+  // dispatch until finish() publishes its completed state and terminal.
+  #completeDispatch(scope: SemanticRegionScope): void {
     switch (scope.kind) {
       case "root":
-        this.#endBlock(scope, rootEnd);
+        this.#endBlock(scope, "jump");
         return;
       case "arm": {
         const storage = this.#storageFor(scope);
+        const targetEip = this.#storage.state.eip.read(storage.access);
 
-        this.#terminator.dispatch(
-          scope.region,
-          storage.access,
-          this.#storage.state.eip.read(storage.access)
-        );
+        this.#terminator.dispatch(scope.region, storage.access, targetEip);
         return;
       }
       case "loop":
@@ -482,18 +471,17 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   }
 
   #locationValues(location: InstructionLocation): InstructionLocationValues {
-    return {
-      eip: this.#locationValue(location.eip),
-      nextEip: this.#locationValue(location.nextEip)
-    };
-  }
-
-  #locationValue(source: InstructionAddressSource): () => ValueId {
-    switch (source.kind) {
-      case "const":
-        return () => this.#values.const(source.address);
-      case "external":
-        return () => this.#values.external(source.external);
+    switch (location.kind) {
+      case "static":
+        return {
+          eip: () => this.#values.const(location.eip),
+          nextEip: () => this.#values.const(location.nextEip)
+        };
+      case "value":
+        return {
+          eip: () => location.eip,
+          nextEip: () => location.nextEip
+        };
     }
   }
 

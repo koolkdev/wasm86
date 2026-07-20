@@ -1,239 +1,300 @@
 import { assert } from "#common/assert.js";
-import {
-  WasmFunctionBodyEncoder,
-  type EncodedWasmFunctionBody
-} from "#compiler/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
-import { wasmValueType } from "#compiler/encoder/types.js";
-import type { ModuleBindings } from "#compiler/program/bindings.js";
-import { functionType } from "#compiler/program/function-type.js";
-import {
-  emitRmAddressFragment,
-  emitSibFetch,
-  type DecodeCursor,
-  type RmAddressParts
-} from "./fragments.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import { CellRef } from "#compiler/refs/cell.js";
+import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
 import type {
-  InterpreterLocals,
-  ModRmScratch,
-  RmAddressScratch
-} from "./locals.js";
+  DecodeCandidate,
+  InstructionForm,
+  OpcodeLeaf,
+  OpcodeNode
+} from "#core/decoder/model/types.js";
+import { invalidOpcode } from "#core/exceptions.js";
+import { exceptionExit } from "#core/exits.js";
+import type { InstructionSpec } from "#core/isa/spec.js";
+import type { OperandBinding } from "#core/instruction/bindings.js";
+import type { BuildExit } from "#core/instruction/terminal.js";
+import type { StateAccess } from "#core/state/access.js";
+import type { RegionBuilder, SwitchControlArm } from "#ir/region-builder.js";
+import type { MemoryAccessConstruction } from "#memory/access.js";
+import { ModRmAddressDecoder } from "./decode/address.js";
+import {
+  memoryFormDispatch,
+  modRmCandidateCases
+} from "./decode/forms.js";
+import {
+  OperandDecoder,
+  type DecodedRm
+} from "./decode/operands.js";
+import { PrefixDecoder } from "./decode/prefixes.js";
+import { InstructionByteStream } from "./decode/stream.js";
 
-// The memory form of a ModRM rm operand, shared as one module-level helper
-// function per opcode length so every fragment offset stays static. The
-// mod/rm/SIB case split is genuine control structure and stays hand-written;
-// each case's loads are action fragments. The decoded base register field,
-// the summed state-independent address terms, and the cursor after the
-// address bytes (opcode + ModRM + SIB + displacement) leave through the
-// module globals.
+type SelectedDecodeCandidate = Exclude<
+  DecodeCandidate,
+  Readonly<{ kind: "empty" }>
+>;
 
-// Reported in the base global by ModRM's two base-less cases (mod 0 rm 101,
-// SIB mod 0 base 101), which put the whole sum in offset.
-export const noBaseRegister = 8;
-
-// (eip, mod, rm) -> the encoded exit, 0 on success. The i64-only result
-// keeps the fragments' fault returns valid unchanged inside the helper, and
-// 0 never collides with a fault: resolved exit tags are nonzero.
-export const rmDecodeFunctionType = functionType(
-  ["i32", "i32", "i32"],
-  ["i64"]
-);
-
-export type RmDecodeGlobals = Readonly<{ base: number; offset: number; cursor: number }>;
-
-export type ResolvedRmDecodeFunction = Readonly<{
-  opcodeLength: number;
-  functionIndex: number;
+export type DecodedInstruction = Readonly<{
+  instruction: InstructionSpec;
+  instructionStart: ValueId;
+  nextEip: ValueId;
+  bindings: readonly OperandBinding[];
 }>;
 
-export type RmDecodeCallContext = Readonly<{
-  body: WasmFunctionBodyEncoder;
-  scratch: WasmLocalScratchAllocator;
-  locals: InterpreterLocals;
-  modRm: ModRmScratch;
-  rmAddress: RmAddressScratch;
+export type BuildDecodedInstruction = (
+  region: RegionBuilder,
+  instruction: DecodedInstruction
+) => void;
+
+export type InterpreterDecodeOptions = Readonly<{
+  stateAccess: StateAccess;
+  memory: MemoryAccessConstruction;
+  buildExit: BuildExit;
+  buildInstruction: BuildDecodedInstruction;
 }>;
 
-// One closed program's resolved rm-decode helpers. Program construction owns
-// their finite R/M length set and module layout; raw dispatch can only call
-// one of the bindings supplied here.
-export class RmDecodeHelpers {
-  readonly #functions: readonly ResolvedRmDecodeFunction[];
-  readonly #globals: RmDecodeGlobals;
+// Emits decode and instruction construction into the enclosing function;
+// decode/* classes organize author-time construction, not generated calls.
+export function buildDecodeAndDispatch(
+  region: RegionBuilder,
+  instructionStart: ValueId,
+  options: InterpreterDecodeOptions
+): void {
+  new InterpreterDecoder(region, instructionStart, options).build();
+}
 
-  constructor(functions: readonly ResolvedRmDecodeFunction[], globals: RmDecodeGlobals) {
-    this.#functions = functions.map((binding) => ({ ...binding }));
-    this.#globals = { ...globals };
-  }
+class InterpreterDecoder {
+  readonly #root: RegionBuilder;
+  readonly #instructionStart: ValueId;
+  readonly #options: InterpreterDecodeOptions;
+  readonly #stream: InstructionByteStream;
+  readonly #prefixes: PrefixDecoder;
+  readonly #memoryFormPage: CellRef;
+  readonly #memoryFormIndex: CellRef;
+  readonly #modRmByte: CellRef;
+  readonly #address: ModRmAddressDecoder;
+  readonly #operands: OperandDecoder;
 
-  // A fault result returns as-is, so exception fields and the unadvanced eip
-  // match the inline emission exactly.
-  emitMemoryAddressDecode(context: RmDecodeCallContext, opcodeLength: number): void {
-    const { body, locals, modRm, rmAddress } = context;
-    const helper = this.#functions.find((candidate) => candidate.opcodeLength === opcodeLength);
+  constructor(
+    region: RegionBuilder,
+    instructionStart: ValueId,
+    options: InterpreterDecodeOptions
+  ) {
+    const invalidSelection = region.values.const(-1);
 
-    assert(helper !== undefined, `unlisted interpreter R/M opcode length: ${opcodeLength}`);
-
-    body.localGet(locals.eip).localGet(modRm.mod).localGet(modRm.rm).callFunction(helper.functionIndex);
-    context.scratch.withLocals([wasmValueType.i64], ([status]) => {
-      body.localTee(status).i64Eqz().ifBlock();
-      body.globalGet(this.#globals.base).localSet(rmAddress.base);
-      body.globalGet(this.#globals.offset).localSet(rmAddress.offset);
-      body.globalGet(this.#globals.cursor).localSet(rmAddress.addressCursor);
-      body.elseBlock();
-      body.localGet(status).returnFromFunction();
-      body.endBlock();
+    this.#root = region;
+    this.#instructionStart = instructionStart;
+    this.#options = options;
+    this.#stream = new InstructionByteStream(
+      region,
+      instructionStart,
+      options.memory,
+      options.buildExit
+    );
+    this.#prefixes = new PrefixDecoder(region, this.#stream);
+    this.#memoryFormPage = region.cell(invalidSelection);
+    this.#memoryFormIndex = region.cell(invalidSelection);
+    this.#modRmByte = region.cell(region.values.const(0x100));
+    this.#operands = new OperandDecoder({
+      instructionStart,
+      stream: this.#stream,
+      segmentOverride: this.#prefixes.segmentOverride,
+      modRmByte: this.#modRmByte
+    });
+    this.#address = new ModRmAddressDecoder(region, {
+      stream: this.#stream,
+      stateAccess: options.stateAccess,
+      segmentOverride: this.#prefixes.segmentOverride,
+      unreachable: (unreachable) => this.#unreachable(unreachable)
     });
   }
-}
 
-type HelperLocals = Readonly<{
-  eip: number;
-  mod: number;
-  rm: number;
-  scaledIndex: number;
-  sibBase: number;
-  offset: number;
-}>;
+  build(): void {
+    const root = this.#root;
 
-type HelperContext = Readonly<{
-  body: WasmFunctionBodyEncoder;
-  scratch: WasmLocalScratchAllocator;
-  bindings: ModuleBindings;
-  locals: HelperLocals;
-  globals: RmDecodeGlobals;
-}>;
+    this.#prefixes.decode(root);
+    this.#dispatchOpcode(
+      root,
+      X86_32_DECODE_MODEL.opcodeRoot,
+      this.#prefixes.firstOpcodeByte(root)
+    );
 
-export function encodeRmDecodeHelperBody(
-  opcodeLength: number,
-  globals: RmDecodeGlobals,
-  bindings: ModuleBindings
-): EncodedWasmFunctionBody {
-  const body = new WasmFunctionBodyEncoder(rmDecodeFunctionType.parameters.length);
-  const scratch = new WasmLocalScratchAllocator(body);
-  const context: HelperContext = {
-    body,
-    scratch,
-    bindings,
-    locals: {
-      eip: 0,
-      mod: 1,
-      rm: 2,
-      scaledIndex: body.addLocal(wasmValueType.i32),
-      sibBase: body.addLocal(wasmValueType.i32),
-      offset: body.addLocal(wasmValueType.i32)
-    },
-    globals
-  };
-  const cursorAfterModRm: DecodeCursor = { kind: "static", offset: opcodeLength + 1 };
+    // Plain and register forms terminate inside opcode dispatch. Memory forms
+    // alone fall through with a selected form and share this address decoder.
+    this.#address.decode(root, root.read(this.#modRmByte));
+    this.#dispatchSelectedMemoryForm(root);
+  }
 
-  body.localGet(context.locals.rm).i32Const(0b100).i32Eq().ifBlock();
-  emitSibAddressCases(context, cursorAfterModRm);
-  body.elseBlock();
-  emitPlainAddressCases(context, cursorAfterModRm);
-  body.endBlock();
-  scratch.assertClear();
-  return body.i64Const(0n).finish();
-}
+  #dispatchOpcode(
+    region: RegionBuilder,
+    node: OpcodeNode,
+    byte: ValueId
+  ): void {
+    const arms: SwitchControlArm[] = [];
 
-function emitPlainAddressCases(context: HelperContext, cursor: DecodeCursor): void {
-  const { body, locals } = context;
+    node.next.forEach((next, match) => {
+      if (next === undefined) {
+        return;
+      }
+      arms.push({
+        matches: [match],
+        build: (opcode) => {
+          if (next.leaf !== undefined) {
+            this.#dispatchOpcodeLeaf(opcode, next.leaf);
+            return;
+          }
+          this.#dispatchOpcode(
+            opcode,
+            next,
+            this.#stream.readByte(opcode)
+          );
+        }
+      });
+    });
+    region.switchControl(byte, arms, (invalid) => this.#invalidOpcode(invalid));
+  }
 
-  emitModCases(context, {
-    mod0: () => {
-      body.localGet(locals.rm).i32Const(0b101).i32Eq().ifBlock();
-      emitAddressCase(context, undefined, { displacement: { width: 32 } }, cursor);
-      body.elseBlock();
-      emitAddressCase(context, locals.rm, {}, cursor);
-      body.endBlock();
-    },
-    mod1: () => emitAddressCase(context, locals.rm, { displacement: { width: 8 } }, cursor),
-    mod2: () => emitAddressCase(context, locals.rm, { displacement: { width: 32 } }, cursor)
-  });
-}
+  #dispatchOpcodeLeaf(region: RegionBuilder, leaf: OpcodeLeaf): void {
+    const flags = region.values.binary(
+      "and",
+      this.#prefixes.flags(region),
+      region.values.const(X86_32_DECODE_MODEL.prefixes.flagMask)
+    );
+    const arms: SwitchControlArm[] = [];
 
-function emitSibAddressCases(context: HelperContext, cursor: DecodeCursor): void {
-  const { body, locals } = context;
+    leaf.byPrefix.forEach((candidate, match) => {
+      if (candidate.kind !== "empty") {
+        arms.push({
+          matches: [match],
+          build: (selected) => this.#dispatchCandidate(selected, candidate)
+        });
+      }
+    });
+    region.switchControl(flags, arms, (invalid) => this.#invalidOpcode(invalid));
+  }
 
-  const cursorAfterSib = emitSibFetch(context, locals.eip, cursor, {
-    scaledIndexLocal: locals.scaledIndex,
-    baseLocal: locals.sibBase
-  });
+  #dispatchCandidate(
+    region: RegionBuilder,
+    candidate: SelectedDecodeCandidate
+  ): void {
+    switch (candidate.kind) {
+      case "plain":
+        assert(
+          candidate.form.modrm === undefined,
+          `${candidate.form.id} unexpectedly reads ModRM`
+        );
+        this.#buildInstruction(region, candidate.form, { kind: "none" });
+        return;
+      case "modRm": {
+        const byte = this.#stream.readByte(region);
+        const arms: SwitchControlArm[] = [];
 
-  emitModCases(context, {
-    mod0: () => {
-      body.localGet(locals.sibBase).i32Const(0b101).i32Eq().ifBlock();
-      emitAddressCase(
-        context,
-        undefined,
-        { scaledIndexLocal: locals.scaledIndex, displacement: { width: 32 } },
-        cursorAfterSib
-      );
-      body.elseBlock();
-      emitAddressCase(context, locals.sibBase, { scaledIndexLocal: locals.scaledIndex }, cursorAfterSib);
-      body.endBlock();
-    },
-    mod1: () =>
-      emitAddressCase(
-        context,
-        locals.sibBase,
-        { scaledIndexLocal: locals.scaledIndex, displacement: { width: 8 } },
-        cursorAfterSib
-      ),
-    mod2: () =>
-      emitAddressCase(
-        context,
-        locals.sibBase,
-        { scaledIndexLocal: locals.scaledIndex, displacement: { width: 32 } },
-        cursorAfterSib
+        for (const candidateCase of modRmCandidateCases(candidate)) {
+          if (candidateCase.registerMatches.length > 0) {
+            arms.push({
+              matches: candidateCase.registerMatches,
+              build: (register) => {
+                register.write(this.#modRmByte, byte);
+                this.#buildInstruction(register, candidateCase.form, {
+                  kind: "register",
+                  registerIndex: register.values.binary(
+                    "and",
+                    byte,
+                    register.values.const(0b111)
+                  )
+                });
+              }
+            });
+          }
+          if (candidateCase.memoryMatches.length > 0) {
+            arms.push({
+              matches: candidateCase.memoryMatches,
+              build: (memory) => {
+                memory.write(this.#modRmByte, byte);
+                this.#selectMemoryForm(memory, candidateCase.form);
+              }
+            });
+          }
+        }
+        region.switchControl(
+          byte,
+          arms,
+          (invalid) => this.#invalidOpcode(invalid)
+        );
+        return;
+      }
+    }
+  }
+
+  #selectMemoryForm(region: RegionBuilder, form: InstructionForm): void {
+    const location = memoryFormDispatch.locations.get(form.id);
+
+    assert(
+      location !== undefined,
+      `decode model omitted memory form ${form.id}`
+    );
+    region.write(this.#memoryFormPage, region.values.const(location.page));
+    region.write(this.#memoryFormIndex, region.values.const(location.index));
+  }
+
+  #dispatchSelectedMemoryForm(region: RegionBuilder): void {
+    region.switchControl(
+      region.read(this.#memoryFormPage),
+      memoryFormDispatch.pages.map((forms, page) => ({
+        matches: [page],
+        build: (pageArm) => pageArm.switchControl(
+          pageArm.read(this.#memoryFormIndex),
+          forms.map((form, index) => ({
+            matches: [index],
+            build: (formArm) => this.#buildMemoryInstruction(formArm, form)
+          })),
+          (unreachable) => this.#unreachable(unreachable)
+        )
+      })),
+      (unreachable) => this.#unreachable(unreachable)
+    );
+  }
+
+  #buildMemoryInstruction(
+    region: RegionBuilder,
+    form: InstructionForm
+  ): void {
+    this.#address.withAddress(
+      region,
+      (addressArm, address) =>
+        this.#buildInstruction(addressArm, form, address)
+    );
+  }
+
+  #buildInstruction(
+    region: RegionBuilder,
+    form: InstructionForm,
+    rm: DecodedRm
+  ): void {
+    const bindings = this.#operands.buildBindings(region, form, rm);
+    const nextEip = region.values.binary(
+      "add",
+      this.#instructionStart,
+      this.#stream.offset(region)
+    );
+
+    this.#options.buildInstruction(region, {
+      instruction: form.instruction,
+      instructionStart: this.#instructionStart,
+      nextEip,
+      bindings
+    });
+  }
+
+  #invalidOpcode(region: RegionBuilder): void {
+    region.return([
+      this.#options.buildExit(
+        region.values,
+        exceptionExit(invalidOpcode())
       )
-  });
-}
-
-// mod 3 is the caller's register form; the memory cases split 0/1/2 here.
-function emitModCases(
-  context: HelperContext,
-  cases: Readonly<{ mod0: () => void; mod1: () => void; mod2: () => void }>
-): void {
-  const { body, locals } = context;
-
-  body.localGet(locals.mod).i32Eqz().ifBlock();
-  cases.mod0();
-  body.elseBlock();
-  body.localGet(locals.mod).i32Const(1).i32Eq().ifBlock();
-  cases.mod1();
-  body.elseBlock();
-  cases.mod2();
-  body.endBlock();
-  body.endBlock();
-}
-
-function emitAddressCase(
-  context: HelperContext,
-  baseLocal: number | undefined,
-  parts: RmAddressParts,
-  cursor: DecodeCursor
-): void {
-  const { body, locals, globals } = context;
-
-  if (baseLocal === undefined) {
-    body.i32Const(noBaseRegister).globalSet(globals.base);
-  } else {
-    body.localGet(baseLocal).globalSet(globals.base);
+    ]);
   }
 
-  const cursorAfterAddress = emitRmAddressFragment(context, locals.eip, parts, cursor, locals.offset);
-
-  body.localGet(locals.offset).globalSet(globals.offset);
-
-  switch (cursorAfterAddress.kind) {
-    case "static":
-      body.i32Const(cursorAfterAddress.offset);
-      break;
-    case "local":
-      body.localGet(cursorAfterAddress.local);
-      break;
+  #unreachable(region: RegionBuilder): void {
+    region.return([region.values.unreachable("i64")]);
   }
-
-  body.globalSet(globals.cursor);
 }

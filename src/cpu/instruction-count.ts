@@ -6,6 +6,12 @@ export const instructionCountField = new FieldRef(
   "u32"
 );
 
-export const instructionCountLayout = layoutStructure("cpu.execution", [
-  instructionCountField
+export const instructionLimitField = new FieldRef(
+  "cpu.execution.instruction-limit",
+  "u32"
+);
+
+export const instructionCounterLayout = layoutStructure("cpu.execution", [
+  instructionCountField,
+  instructionLimitField
 ]);

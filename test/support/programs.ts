@@ -222,7 +222,7 @@ export const UNSUPPORTED_OPCODE = {
   bytes: [0x62],
   initialState: { eip: startAddress },
   expected: {
-    stop: { kind: "unsupported", reason: "unsupportedOpcode" },
+    stop: { kind: "cpuException", exception: { kind: "UD" } },
     state: {
       eip: startAddress,
       instructionCount: 0

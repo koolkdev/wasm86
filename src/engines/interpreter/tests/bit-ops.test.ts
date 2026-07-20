@@ -8,7 +8,7 @@ import {
 } from "#test/support/cpu-state.js";
 import { readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { startAddress } from "#test/support/addresses.js";
-import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./support.js";
+import { assertCompletedInstruction, assertSingleInstructionExit, executeInstruction } from "./harness.js";
 
 const preservedBitFlags = { CF: 1, PF: 0, AF: 1, ZF: 0, SF: 1, OF: 0 } as const;
 

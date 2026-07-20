@@ -4,18 +4,17 @@ import { test } from "node:test";
 import { assertLazyFlagState, createWasmCpuStateSnapshot, wasmCpuStatusFlagsOf } from "#test/support/cpu-state.js";
 import {
   assertInterpreterStateEquals,
-  writeInterpreterState
-} from "./interpreter-helpers.js";
-import { startAddress } from "#test/support/addresses.js";
-import { readPageFaultStop, writePageFaultStop } from "#cpu/tests/stop-fixtures.js";
-import {
   assertCompletedInstruction,
   assertSingleInstructionExit,
   executeInstruction,
   executeProgram,
-  instantiateWasmInterpreter,
+  instantiateInterpreter,
+  writeInterpreterState,
   writeGuestBytes
-} from "./support.js";
+} from "./harness.js";
+import { startAddress } from "#test/support/addresses.js";
+import { invalidOpcode } from "#core/exceptions.js";
+import { readPageFaultStop, writePageFaultStop } from "#cpu/tests/stop-fixtures.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
@@ -520,7 +519,7 @@ test("SETcc after SBB observes new CF and OF instead of the old carry input", as
 });
 
 test("ADC memory destination fault leaves architectural state unchanged", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
   const faultAddress = interpreter.guestView.byteLength - 3;
   const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
@@ -532,14 +531,14 @@ test("ADC memory destination fault leaves architectural state unchanged", async 
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0x83, 0x15, ...disp32(faultAddress), 0x01]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   deepStrictEqual(exit, writePageFaultStop(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
 test("SBB memory source fault leaves architectural state unchanged", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+  const interpreter = await instantiateInterpreter();
   const faultAddress = interpreter.guestView.byteLength - 3;
   const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
@@ -551,14 +550,14 @@ test("SBB memory source fault leaves architectural state unchanged", async () =>
   writeInterpreterState(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, startAddress, [0x1b, 0x05, ...disp32(faultAddress)]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
   deepStrictEqual(exit, readPageFaultStop(faultAddress));
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
-test("unsupported F7 /1 group returns unsupported after ModRM dispatch", async () => {
-  const interpreter = await instantiateWasmInterpreter();
+test("undefined F7 /1 group raises #UD before decoding its memory address", async () => {
+  const interpreter = await instantiateInterpreter();
   const eip = interpreter.guestView.byteLength - 2;
   const initialState = createWasmCpuStateSnapshot({
     eax: 0x1234_5678,
@@ -567,11 +566,11 @@ test("unsupported F7 /1 group returns unsupported after ModRM dispatch", async (
     instructionCount: 7
   });
   writeInterpreterState(interpreter.stateView, initialState);
-  writeGuestBytes(interpreter.guestView, eip, [0xf7, 0xc8]);
+  writeGuestBytes(interpreter.guestView, eip, [0xf7, 0x0d]);
 
-  const exit = interpreter.run(1);
+  const exit = interpreter.runFor(1);
 
-  deepStrictEqual(exit, { kind: "unsupported", reason: "unsupportedOpcode" });
+  deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 

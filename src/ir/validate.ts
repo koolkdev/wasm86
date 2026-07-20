@@ -1024,7 +1024,9 @@ function validateSwitchControlShape(
     [control.selector],
     `${path} operands do not match its selector`
   );
-  assertSameValues(outputs, [control.output], `${path} outputs do not match its output field`);
+  const expectedOutputs = control.output === undefined ? [] : [control.output];
+
+  assertSameValues(outputs, expectedOutputs, `${path} outputs do not match its output field`);
   assert(
     nestedBodies.length === control.cases.length + 1,
     `${path} nested bodies do not match its cases and default`
@@ -1235,13 +1237,17 @@ function assertSameInputs(
 function validateSwitchCases(control: SwitchControl, path: string): void {
   const seen = new Set<number>();
 
-  for (const { match } of control.cases) {
-    assert(
-      Number.isInteger(match) && match >= 0 && match <= maxSwitchMatch,
-      `${path} case match ${match} is not an integer in [0, ${maxSwitchMatch}]`
-    );
-    assert(!seen.has(match), `${path} has a duplicate case match ${match}`);
-    seen.add(match);
+  for (const entry of control.cases) {
+    assert(entry.matches.length > 0, `${path} has a case with no matches`);
+
+    for (const match of entry.matches) {
+      assert(
+        Number.isInteger(match) && match >= 0 && match <= maxSwitchMatch,
+        `${path} case match ${match} is not an integer in [0, ${maxSwitchMatch}]`
+      );
+      assert(!seen.has(match), `${path} has a duplicate case match ${match}`);
+      seen.add(match);
+    }
   }
 }
 
