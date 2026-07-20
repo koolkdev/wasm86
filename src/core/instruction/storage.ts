@@ -13,6 +13,7 @@ import type {
   StateAccess
 } from "#core/state/access.js";
 import type {
+  AccessFault,
   SemanticReadOptions,
   SemanticUpdate,
   SemanticVar,
@@ -34,8 +35,7 @@ import type {
 } from "#core/types.js";
 import type { RegionBuilder } from "#ir/region-builder.js";
 import type {
-  MemoryAccessConstruction,
-  MemoryAccessFailure
+  MemoryAccessConstruction
 } from "#memory/access.js";
 import type {
   OperandBinding,
@@ -66,7 +66,7 @@ type InstructionStorageOptions = Readonly<{
 }>;
 
 type ScopedInstructionStorageOptions = Readonly<{
-  terminateMemoryFailure(failure: MemoryAccessFailure): void;
+  raiseAccessFault(fault: AccessFault): void;
   writeSegmentSelector: WriteSegmentSelector;
 }>;
 
@@ -111,7 +111,7 @@ export class InstructionStorage {
         this.#memoryConstruction,
         operands,
         {
-          terminateFailure: options.terminateMemoryFailure,
+          raiseFault: options.raiseAccessFault,
           recordWrite: () => scope.recordMemoryWrite()
         }
       ),
@@ -198,25 +198,18 @@ export class ScopedInstructionStorage {
   }
 
   read(source: StorageInput, options: SemanticReadOptions): Value {
+    const signed = options.signed ?? false;
+
     if (source.kind === "operand" && this.#operands.isMemory(source.index)) {
       const width = options.memory?.width ?? options.width;
       const reference = this.memory.operand(
         source,
         options.memory?.addressOffset?.()
       );
-      const access = this.memory.access({
-        reference,
-        byteLength: this.#region.values.const(width / 8),
-        intent: "read"
-      });
-
-      return this.memory.read(
-        access,
-        options.signed === true ? { width, signed: true } : { width }
-      );
+      return this.memory.read(reference, { width, signed });
     }
 
-    return this.#readStorage(source, options.width, options.signed === true);
+    return this.#readStorage(source, options.width, signed);
   }
 
   write(
@@ -230,13 +223,7 @@ export class ScopedInstructionStorage {
         target,
         options.memory?.addressOffset?.()
       );
-      const access = this.memory.access({
-        reference,
-        byteLength: this.#region.values.const(width / 8),
-        intent: "write"
-      });
-
-      this.memory.write(access, { width, value });
+      this.memory.write(reference, { width, value });
       return;
     }
 
@@ -262,15 +249,15 @@ export class ScopedInstructionStorage {
         target,
         options.memory?.addressOffset?.()
       );
-      const access = this.memory.access({
+      const access = this.memory.guard({
         reference,
         byteLength: this.#region.values.const(width / 8),
         intent: "write"
       });
 
       return {
-        read: (region) => region.memory.read(access, { width }),
-        write: (region, value) => region.memory.write(access, { width, value })
+        read: (region) => region.memory.load(access, { width }),
+        write: (region, value) => region.memory.store(access, { width, value })
       };
     }
 

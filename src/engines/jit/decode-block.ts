@@ -31,21 +31,18 @@ export function decodeJitBlock(
 ): JitDecodedBlock {
   const instructions: IsaDecodedInstruction[] = [];
   const maxInstructions = options.maxInstructions ?? defaultMaxInstructions;
-  const memoryAccess = guestMemoryAccess.bindHost(memory);
+  const memoryReader = guestMemoryAccess.bindHost(memory);
   const reader: IsaDecodeReader = {
     readU8(address) {
-      const resolved = memoryAccess.resolveByte(address, "instructionFetch");
+      const read = memoryReader.readByte(address, "instructionFetch");
 
-      if (resolved.kind === "access") {
-        return {
-          kind: "byte",
-          value: memoryAccess.readByte(resolved.access)
-        };
+      if (read.kind === "value") {
+        return { kind: "byte", value: read.value };
       }
 
       return {
         kind: "cpuException",
-        exception: resolved.exception
+        exception: read.exception
       };
     }
   };

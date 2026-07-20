@@ -28,15 +28,15 @@ test("Memory access construction expands one WRITE access into generic RMW opera
   const memory = guestMemoryAccess.bind(body);
   const start = values.external(0);
   const byteLength = values.const(8);
-  const access = memory.resolve({ start, byteLength }, "write");
-  const loaded = memory.read(access, values.const(0), 16, { signed: true });
+  const { access, fault } = memory.resolve({ start, byteLength }, "write");
+  const loaded = memory.load(access, values.const(0), 16, { signed: true });
 
-  memory.write(access, values.const(4), loaded, 32);
+  memory.store(access, values.const(4), loaded, 32);
 
   deepStrictEqual(access.range, { start, byteLength });
   strictEqual(access.intent, "write");
   deepStrictEqual(
-    access.failure.exception,
+    fault.exception,
     pageFault(start, values.const(PageFaultErrorCode.WRITE))
   );
 
@@ -77,12 +77,12 @@ test("Memory access construction gives constant instruction fetches absolute ran
   const values = new ValueTable();
   const body = new RegionBuilder(values);
   const memory = guestMemoryAccess.bind(body);
-  const access = memory.resolve(
+  const { access, fault } = memory.resolve(
     { start: values.const(0x2000), byteLength: values.const(4) },
     "instructionFetch"
   );
 
-  memory.read(access, values.const(2), 16, { signed: true });
+  memory.load(access, values.const(2), 16, { signed: true });
 
   const read = resourceOperations(body, "resource.read")[0];
 
@@ -95,7 +95,7 @@ test("Memory access construction gives constant instruction fetches absolute ran
   strictEqual(read.signed, true);
   strictEqual(access.intent, "instructionFetch");
   deepStrictEqual(
-    access.failure.exception,
+    fault.exception,
     pageFault(
       access.range.start,
       values.const(PageFaultErrorCode.INSTRUCTION_FETCH)
@@ -107,12 +107,12 @@ test("a parent-created access emits through the child region that consumes it", 
   const values = new ValueTable();
   const parent = new RegionBuilder(values);
   const child = parent.child();
-  const access = guestMemoryAccess.bind(parent).resolve(
+  const { access } = guestMemoryAccess.bind(parent).resolve(
     { start: values.external(0), byteLength: values.const(4) },
     "read"
   );
 
-  guestMemoryAccess.bind(child).read(access, values.const(0), 32);
+  guestMemoryAccess.bind(child).load(access, values.const(0), 32);
 
   strictEqual(parent.build().nodes.length, 0);
   strictEqual(resourceOperations(child, "resource.read").length, 1);

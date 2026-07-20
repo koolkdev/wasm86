@@ -37,11 +37,7 @@ export function pushStack(
 ): void {
   const esp = s.read(s.reg("esp"), { width: 32 });
   const nextEsp = v.binary("sub", esp, v.const(stackByteLength(width)));
-  const stack = s.memory.access({
-    reference: s.memory.reference("ss", nextEsp),
-    byteLength: v.const(stackByteLength(width)),
-    intent: "write"
-  });
+  const stack = s.memory.reference("ss", nextEsp);
 
   s.memory.write(stack, { width, value });
   s.write(s.reg("esp"), nextEsp, { width: 32 });
@@ -53,12 +49,7 @@ export function popStack(
   width: StackOperandWidth
 ): Value {
   const esp = s.read(s.reg("esp"), { width: 32 });
-  const stack = s.memory.access({
-    reference: s.memory.reference("ss", esp),
-    byteLength: v.const(stackByteLength(width)),
-    intent: "read"
-  });
-
+  const stack = s.memory.reference("ss", esp);
   const value = s.memory.read(stack, { width });
   const nextEsp = v.binary("add", esp, v.const(stackByteLength(width)));
 
@@ -127,7 +118,7 @@ function pushAll(s: SemanticsBuilder, v: ValueBuilder, width: StackOperandWidth)
   const cellBytes = stackByteLength(width);
   const totalBytes = cellBytes * 8;
   const nextEsp = v.binary("sub", esp, v.const(totalBytes));
-  const access = s.memory.access({
+  const access = s.memory.guard({
     reference: s.memory.reference("ss", nextEsp),
     byteLength: v.const(totalBytes),
     intent: "write"
@@ -140,7 +131,7 @@ function pushAll(s: SemanticsBuilder, v: ValueBuilder, width: StackOperandWidth)
   values.forEach((value, index) => {
     const byteOffset = totalBytes - cellBytes * (index + 1);
 
-    s.memory.write(access, { width, byteOffset: v.const(byteOffset), value });
+    s.memory.store(access, { width, byteOffset: v.const(byteOffset), value });
   });
   s.write(s.reg("esp"), nextEsp, { width: 32 });
 }
@@ -150,7 +141,7 @@ function popAll(s: SemanticsBuilder, v: ValueBuilder, width: StackOperandWidth):
   const cellBytes = stackByteLength(width);
   const totalBytes = cellBytes * 8;
   const cells = width === 32 ? popadCells : popaCells;
-  const access = s.memory.access({
+  const access = s.memory.guard({
     reference: s.memory.reference("ss", esp),
     byteLength: v.const(totalBytes),
     intent: "read"
@@ -158,7 +149,7 @@ function popAll(s: SemanticsBuilder, v: ValueBuilder, width: StackOperandWidth):
 
   const loaded = cells.map(([reg, offset]) => ({
     reg,
-    value: s.memory.read(access, { width, byteOffset: v.const(offset) })
+    value: s.memory.load(access, { width, byteOffset: v.const(offset) })
   }));
   const nextEsp = v.binary("add", esp, v.const(totalBytes));
 
@@ -213,13 +204,10 @@ export function popSegmentSemantic(width: StackOperandWidth = 32): SemanticTempl
 export function leaveSemantic(): SemanticTemplate {
   return (s, v) => {
     const frame = s.read(s.reg("ebp"), { width: 32 });
-    const access = s.memory.access({
-      reference: s.memory.reference("ss", frame),
-      byteLength: v.const(4),
-      intent: "read"
-    });
-
-    const savedFrame = s.memory.read(access, { width: 32 });
+    const savedFrame = s.memory.read(
+      s.memory.reference("ss", frame),
+      { width: 32 }
+    );
     const nextEsp = v.binary("add", frame, v.const(4));
 
     s.write(s.reg("esp"), nextEsp, { width: 32 });

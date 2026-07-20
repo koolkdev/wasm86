@@ -8,6 +8,7 @@ import {
 import type { StatusFlagResolverFamily } from "#core/flags/lazy/resolvers.js";
 import type { StateAccess } from "#core/state/access.js";
 import type {
+  AccessFault,
   IfBody,
   LoopBody,
   SemanticBranchHint,
@@ -21,8 +22,7 @@ import type {
 import type { OperandWidth } from "#core/types.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type {
-  MemoryAccessConstruction,
-  MemoryAccessFailure
+  MemoryAccessConstruction
 } from "#memory/access.js";
 import type {
   OperandBinding,
@@ -317,8 +317,8 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     }
 
     const storage = this.#storage.bind(scope, {
-      terminateMemoryFailure: (failure) =>
-        this.#terminateMemoryFailure(scope, failure),
+      raiseAccessFault: (fault) =>
+        this.#raiseAccessFault(scope, fault),
       writeSegmentSelector: (binding, value, width) =>
         this.#writeSegmentSelector(scope, binding, value, width)
     });
@@ -438,15 +438,15 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     }
   }
 
-  #terminateMemoryFailure(
+  #raiseAccessFault(
     scope: SemanticRegionScope,
-    failure: MemoryAccessFailure
+    fault: AccessFault
   ): void {
     this.assertActive(scope);
     this.#control.if(
       scope,
-      failure.condition,
-      (arm) => arm.cpuException(failure.exception),
+      fault.condition,
+      (arm) => arm.cpuException(fault.exception),
       "unlikely"
     );
   }

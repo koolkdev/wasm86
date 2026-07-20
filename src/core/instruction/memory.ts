@@ -1,15 +1,19 @@
 import type { RegionBuilder } from "#ir/region-builder.js";
 import type {
+  LinearRange,
   MemoryAccess,
   MemoryAccessConstruction,
-  MemoryAccessFailure,
   MemoryAccessOperations,
   MemoryDataAccessIntent
 } from "#memory/access.js";
 import type {
+  AccessFault,
+  AccessResolution,
   SemanticMemoryAccessOptions,
+  SemanticMemoryLoadOptions,
   SemanticMemoryOps,
   SemanticMemoryReadOptions,
+  SemanticMemoryStoreOptions,
   SemanticMemoryWriteOptions
 } from "#core/semantics/builder.js";
 import type {
@@ -22,13 +26,12 @@ import type { SegmentRegister } from "#core/types.js";
 import type { ScopedOperandResolver } from "./operand-resolver.js";
 
 type InstructionMemoryOptions = Readonly<{
-  terminateFailure(failure: MemoryAccessFailure): void;
+  raiseFault(fault: AccessFault): void;
   recordWrite(): void;
 }>;
 
-// Adapts decoded x86 references to Memory's reusable linear-range capability.
-// Raw resolution stays available for ordered compound operations; access()
-// applies instruction-lifecycle termination to Memory's exception recipe.
+// Adapts segmented x86 references to Memory's linear access descriptions.
+// Guarding stays here because Core owns CPU-exception control and restart state.
 export class InstructionMemory implements SemanticMemoryOps {
   readonly #region: RegionBuilder;
   readonly #operands: ScopedOperandResolver;
@@ -74,43 +77,82 @@ export class InstructionMemory implements SemanticMemoryOps {
 
   resolve<TIntent extends MemoryDataAccessIntent>(
     options: SemanticMemoryAccessOptions<TIntent>
-  ): MemoryAccess<TIntent> {
+  ): AccessResolution<TIntent> {
     const { reference, byteLength, intent } = options;
-
-    return this.#memory.resolve(
-      { start: this.#operands.resolveAddress(reference), byteLength },
+    const resolution = this.#memory.resolve(
+      this.#range(reference, byteLength),
       intent
     );
+
+    return { access: resolution.access, fault: resolution.fault };
   }
 
-  access<TIntent extends MemoryDataAccessIntent>(
+  guard<TIntent extends MemoryDataAccessIntent>(
     options: SemanticMemoryAccessOptions<TIntent>
   ): MemoryAccess<TIntent> {
-    const access = this.resolve(options);
+    const resolution = this.resolve(options);
 
-    this.#options.terminateFailure(access.failure);
-    return access;
+    this.#options.raiseFault(resolution.fault);
+    return resolution.access;
   }
 
-  read(access: MemoryAccess, options: SemanticMemoryReadOptions): Value {
-    return this.#memory.read(
-      access,
-      options.byteOffset ?? this.#region.values.const(0),
-      options.width,
-      options.signed === true ? { signed: true } : {}
-    );
+  read(
+    reference: MemRef,
+    options: SemanticMemoryReadOptions
+  ): Value {
+    const access = this.guard({
+      reference,
+      byteLength: this.#region.values.const(options.width / 8),
+      intent: "read"
+    });
+
+    return this.load(access, options);
   }
 
   write(
-    access: MemoryAccess<"write">,
+    reference: MemRef,
     options: SemanticMemoryWriteOptions
   ): void {
+    const access = this.guard({
+      reference,
+      byteLength: this.#region.values.const(options.width / 8),
+      intent: "write"
+    });
+
+    this.store(access, { width: options.width, value: options.value });
+  }
+
+  load(
+    access: MemoryAccess,
+    options: SemanticMemoryLoadOptions
+  ): Value {
+    const { signed = false } = options;
+
+    return this.#memory.load(
+      access,
+      options.byteOffset ?? this.#region.values.const(0),
+      options.width,
+      { signed }
+    );
+  }
+
+  store(
+    access: MemoryAccess<"write">,
+    options: SemanticMemoryStoreOptions
+  ): void {
     this.#options.recordWrite();
-    this.#memory.write(
+    this.#memory.store(
       access,
       options.byteOffset ?? this.#region.values.const(0),
       options.value,
       options.width
     );
+  }
+
+  #range(reference: MemRef, byteLength: ValueInput): LinearRange {
+    return {
+      start: this.#operands.resolveAddress(reference),
+      byteLength
+    };
   }
 }

@@ -13,10 +13,10 @@ import { CellRef } from "#compiler/refs/cell.js";
 import { DynamicByteOriginRef } from "#compiler/ir/resource.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
-  MemoryAccess,
-  MemoryDataAccessIntent
+  MemoryAccess
 } from "#memory/access.js";
 import type {
+  AccessFault,
   SemanticsBuilder,
   IfBody,
   LoopBody,
@@ -238,11 +238,11 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder {
           `offset(${this.#memory(reference)}, ${this.#value(addressOffset)})`
         );
     },
-    access: (options) => {
-      const access = this.memory.resolve(options);
+    guard: (options) => {
+      const resolution = this.memory.resolve(options);
 
-      this.#faultMemoryAccess(access);
-      return access;
+      this.#raiseAccessFault(resolution.fault);
+      return resolution.access;
     },
     resolve: ({ reference, byteLength, intent }) => {
       const id = this.#nextMemoryAccessId++;
@@ -254,24 +254,45 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder {
       const access: MemoryAccess<typeof intent> = {
         range: { start: linearAddress, byteLength },
         origin: new DynamicByteOriginRef(),
-        intent,
-        failure: {
-          condition: faulted,
-          exception: pageFault(
-            linearAddress,
-            this.values.const(pageFaultErrorCode(
-              intent
-            ))
-          )
-        }
+        intent
+      };
+      const fault: AccessFault = {
+        condition: faulted,
+        exception: pageFault(
+          linearAddress,
+          this.values.const(pageFaultErrorCode(
+            intent
+          ))
+        )
       };
 
       this.#emit(
         `resolve ${this.#value(linearAddress)} = ${this.#memory(reference)}:${this.#value(byteLength)}`
       );
-      return access;
+      return { access, fault };
     },
-    read: (access, options) => {
+    read: (reference, options) => {
+      const access = this.memory.guard({
+        reference,
+        byteLength: this.values.const(options.width / 8),
+        intent: "read"
+      });
+
+      return this.memory.load(access, options);
+    },
+    write: (reference, options) => {
+      const access = this.memory.guard({
+        reference,
+        byteLength: this.values.const(options.width / 8),
+        intent: "write"
+      });
+
+      this.memory.store(access, {
+        width: options.width,
+        value: options.value
+      });
+    },
+    load: (access, options) => {
       const byteOffset = options.byteOffset ?? this.values.const(0);
       const out = this.#alloc(
         `read ${this.#access(access)}+${this.#value(byteOffset)}:${options.width}${options.signed === true ? ":signed" : ""}`
@@ -280,7 +301,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder {
       this.#emit(`${this.#value(out)} = ${this.#definition(out)}`);
       return out;
     },
-    write: (access, options) => {
+    store: (access, options) => {
       const byteOffset = options.byteOffset ?? this.values.const(0);
 
       this.#emit(
@@ -299,25 +320,16 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder {
   }
 
   read(source: StorageInput, options: SemanticReadOptions): Value {
+    const signed = options.signed ?? false;
+
     if (source.kind === "operand" && this.#operand(source).storage === "mem") {
       const width = options.memory?.width ?? options.width;
       const reference = this.memory.operand(source, options.memory?.addressOffset?.());
-      const access = this.memory.access({
-        reference,
-        byteLength: this.values.const(width / 8),
-        intent: "read"
-      });
-
-      return this.memory.read(
-        access,
-        options.signed === true
-          ? { width, signed: true }
-          : { width }
-      );
+      return this.memory.read(reference, { width, signed });
     }
 
     const out = this.#alloc(
-      `get ${this.#storage(source)}:${options.width}${options.signed === true ? ":signed" : ""}`
+      `get ${this.#storage(source)}:${options.width}${signed ? ":signed" : ""}`
     );
 
     this.#emit(`${this.#value(out)} = ${this.#definition(out)}`);
@@ -332,15 +344,15 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder {
     if (target.kind === "operand" && this.#operand(target).storage === "mem") {
       const width = options.memory?.width ?? options.width;
       const reference = this.memory.operand(target, options.memory?.addressOffset?.());
-      const access = this.memory.access({
+      const access = this.memory.guard({
         reference,
         byteLength: this.values.const(width / 8),
         intent: "write"
       });
 
       return {
-        read: (region) => region.memory.read(access, { width }),
-        write: (region, value) => region.memory.write(access, { width, value })
+        read: (region) => region.memory.load(access, { width }),
+        write: (region, value) => region.memory.store(access, { width, value })
       };
     }
 
@@ -580,10 +592,10 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder {
     return this.#operandInfo[operandRef.index] ?? { storage: "reg" };
   }
 
-  #faultMemoryAccess(access: MemoryAccess<MemoryDataAccessIntent>): void {
+  #raiseAccessFault(fault: AccessFault): void {
     this.if(
-      access.failure.condition,
-      (failure) => failure.cpuException(access.failure.exception),
+      fault.condition,
+      (failure) => failure.cpuException(fault.exception),
       "unlikely"
     );
   }

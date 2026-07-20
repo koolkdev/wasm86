@@ -47,6 +47,18 @@ export interface SemanticUpdate {
   write(region: SemanticOps, value: ValueInput): void;
 }
 
+export type AccessFault = Readonly<{
+  condition: Value;
+  exception: CpuException<Value>;
+}>;
+
+export type AccessResolution<
+  TIntent extends MemoryDataAccessIntent = MemoryDataAccessIntent
+> = Readonly<{
+  access: MemoryAccess<TIntent>;
+  fault: AccessFault;
+}>;
+
 export type SemanticMemoryAccessOptions<
   TIntent extends MemoryDataAccessIntent
 > = Readonly<{
@@ -57,30 +69,41 @@ export type SemanticMemoryAccessOptions<
 
 export type SemanticMemoryReadOptions = Readonly<{
   width: OperandWidth;
-  byteOffset?: ValueInput;
   signed?: boolean;
 }>;
 
 export type SemanticMemoryWriteOptions = Readonly<{
   width: OperandWidth;
-  byteOffset?: ValueInput;
   value: ValueInput;
+}>;
+
+export type SemanticMemoryLoadOptions = SemanticMemoryReadOptions & Readonly<{
+  byteOffset?: ValueInput;
+}>;
+
+export type SemanticMemoryStoreOptions = SemanticMemoryWriteOptions & Readonly<{
+  byteOffset?: ValueInput;
 }>;
 
 export interface SemanticMemoryOps {
   reference(segment: SegmentRegister, offset: ValueInput): MemRef;
   operand(operand: OperandInput, addressOffset?: ValueInput): MemRef;
-  // Resolves and terminates the selected CPU-fault path without transferring
-  // bytes. The returned access can be consumed zero or more times.
-  access<TIntent extends MemoryDataAccessIntent>(
+  // Guards a reusable range without transferring bytes.
+  guard<TIntent extends MemoryDataAccessIntent>(
     options: SemanticMemoryAccessOptions<TIntent>
   ): MemoryAccess<TIntent>;
-  // Raw resolution for callers that deliberately own failure control.
+  // Resolution is non-terminating; its caller owns fault selection.
   resolve<TIntent extends MemoryDataAccessIntent>(
     options: SemanticMemoryAccessOptions<TIntent>
-  ): MemoryAccess<TIntent>;
-  read(access: MemoryAccess, options: SemanticMemoryReadOptions): Value;
-  write(access: MemoryAccess<"write">, options: SemanticMemoryWriteOptions): void;
+  ): AccessResolution<TIntent>;
+  read(reference: MemRef, options: SemanticMemoryReadOptions): Value;
+  write(reference: MemRef, options: SemanticMemoryWriteOptions): void;
+  // Loads and stores consume an existing access without selecting its fault.
+  load(access: MemoryAccess, options: SemanticMemoryLoadOptions): Value;
+  store(
+    access: MemoryAccess<"write">,
+    options: SemanticMemoryStoreOptions
+  ): void;
 }
 
 export interface SemanticOps {

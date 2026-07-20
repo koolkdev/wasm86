@@ -15,11 +15,10 @@ import type { ModuleBindings } from "#compiler/program/bindings.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import { guestMemoryAccess } from "#memory/access.js";
 
-// Decode reads as action fragments: a guarded instruction fetch is Memory's
-// fault predicate + if + resource.read with a decode-fault body, and the
-// decoded values leave through exported outputs. This file builds the blocks;
-// everything is emitted by the action emitter and fragment bodies fall
-// through naturally.
+// Decode reads as action fragments: Memory resolves each instruction-fetch
+// range, the fragment selects its fault before loading, and decoded values
+// leave through exported outputs. This file builds the blocks; everything is
+// emitted by the action emitter and fragment bodies fall through naturally.
 
 export type FragmentEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
@@ -79,26 +78,27 @@ class DecodeFragment {
 
   // A guarded instruction fetch; the fault body reports the faulting address.
   readGuest(address: ValueId, width: OperandWidth, signed = false): ValueId {
-    const byteLength = width / 8;
-    const byteLengthValue = this.values.const(byteLength);
-    const access = this.#memory.resolve(
-      { start: address, byteLength: byteLengthValue },
+    const resolution = this.#memory.resolve(
+      {
+        start: address,
+        byteLength: this.values.const(width / 8)
+      },
       "instructionFetch"
     );
 
     this.#builder.if(
-      access.failure.condition,
+      resolution.fault.condition,
       (faultBody) => faultBody.finish({
         kind: "exit",
         result: buildExit(
           this.values,
-          exceptionExit(access.failure.exception)
+          exceptionExit(resolution.fault.exception)
         )
       }),
       { hint: "unlikely" }
     );
-    return this.#memory.read(
-      access,
+    return this.#memory.load(
+      resolution.access,
       this.values.const(0),
       width,
       { signed }

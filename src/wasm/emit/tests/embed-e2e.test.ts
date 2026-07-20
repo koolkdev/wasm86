@@ -25,7 +25,7 @@ import { RegionBuilder } from "#ir/region-builder.js";
 import { operandWrite } from "#ir/tests/storage-op-helpers.js";
 import { resourceRead } from "#compiler/ir/operations/resource.js";
 import {
-  flatMemoryAccess,
+  flatMemoryResolution,
   flatMemoryOperand
 } from "#memory/flat.js";
 import { guestMemoryResource } from "#memory/resource.js";
@@ -90,17 +90,17 @@ function decodeReadFragment(k: number): DecodeReadFragment {
   const eipValue = state.read(eip);
   const address = values.binary("add", eipValue, values.const(k));
   const byteLength = values.const(1);
-  const access = flatMemoryAccess(
+  const { access, fault } = flatMemoryResolution(
     values,
     { start: address, byteLength },
     "instructionFetch"
   );
   const faultResult = buildExit(
     values,
-    exceptionExit(access.failure.exception)
+    exceptionExit(fault.exception)
   );
   builder.push(ifControl.create({
-    condition: access.failure.condition,
+    condition: fault.condition,
     hint: "unlikely",
     thenBody: {
       nodes: [

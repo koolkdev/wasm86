@@ -176,10 +176,14 @@ export class LoopSemanticsBuilderImpl implements LoopSemanticsBuilder {
         this.#assertOperandSupported(operandRef);
         return context.host.memory.operand(operandRef, addressOffset);
       },
-      access: (options) => context.host.memory.access(options),
+      guard: (options) => context.host.memory.guard(options),
       resolve: (options) => context.host.memory.resolve(options),
-      read: (access, options) => context.host.memory.read(access, options),
-      write: (access, options) => context.host.memory.write(access, options)
+      read: (reference, options) =>
+        context.host.memory.read(reference, options),
+      write: (reference, options) =>
+        context.host.memory.write(reference, options),
+      load: (access, options) => context.host.memory.load(access, options),
+      store: (access, options) => context.host.memory.store(access, options)
     };
   }
 

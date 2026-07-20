@@ -77,10 +77,14 @@ export class InstructionSemantics implements SemanticsBuilder {
         this.#active().memory.reference(segment, offset),
       operand: (operandRef, addressOffset) =>
         this.#active().memory.operand(operandRef, addressOffset),
-      access: (options) => this.#active().memory.access(options),
+      guard: (options) => this.#active().memory.guard(options),
       resolve: (options) => this.#active().memory.resolve(options),
-      read: (access, options) => this.#active().memory.read(access, options),
-      write: (access, options) => this.#active().memory.write(access, options)
+      read: (reference, options) =>
+        this.#active().memory.read(reference, options),
+      write: (reference, options) =>
+        this.#active().memory.write(reference, options),
+      load: (access, options) => this.#active().memory.load(access, options),
+      store: (access, options) => this.#active().memory.store(access, options)
     };
   }
 

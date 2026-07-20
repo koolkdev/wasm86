@@ -131,13 +131,13 @@ function mem(
   }, staticMemSegment(segment));
 }
 
-function resolveDsMemory<TIntent extends MemoryDataAccessIntent>(
+function guardDsMemory<TIntent extends MemoryDataAccessIntent>(
   s: SemanticOps,
   address: ValueInput,
   byteLength: ValueInput,
   intent: TIntent
 ): MemoryAccess<TIntent> {
-  return s.memory.access({
+  return s.memory.guard({
     reference: s.memory.reference("ds", address),
     byteLength,
     intent
@@ -151,9 +151,9 @@ function writeDsMemory(
   value: ValueInput,
   width: OperandWidth
 ): void {
-  const access = resolveDsMemory(s, address, v.const(width / 8), "write");
+  const access = guardDsMemory(s, address, v.const(width / 8), "write");
 
-  s.memory.write(access, { byteOffset: v.const(0), value: value, width: width });
+  s.memory.store(access, { byteOffset: v.const(0), value, width });
 }
 
 // Every instruction advances the instruction-count field; the dedicated tests at the
@@ -1189,10 +1189,14 @@ test("ifElse arms reconcile sibling writes with dirty parent state", () => {
 
 test("a sibling exception is isolated from a continuing memory-write arm", () => {
   const storeOrFault: SemanticTemplate = (s, v) => {
-    const access = s.memory.resolve({ reference: s.memory.reference("ds", v.const(0x2000)), byteLength: v.const(4), intent: "write" });
+    const access = guardDsMemory(s, v.const(0x2000), v.const(4), "write");
 
     s.ifElse(s.read(s.reg("eax"), { width: 32 }), (then) => {
-      then.memory.write(access, { byteOffset: v.const(0), value: v.const(1), width: 32 });
+      then.memory.store(access, {
+        byteOffset: v.const(0),
+        value: v.const(1),
+        width: 32
+      });
     }, (otherwise) => otherwise.cpuException(invalidOpcode()));
   };
   const builder = createLegacyInstructionBlock();
@@ -1283,15 +1287,27 @@ test("a constant-true semantic if builds its arm in the containing scope", () =>
     const sourceAddress = v.const(0x2000);
     const armAddress = v.const(0x3000);
     const parentAddress = v.const(0x4000);
-    const source = resolveDsMemory(s, sourceAddress, v.const(4), "read");
-    const arm = resolveDsMemory(s, armAddress, v.const(4), "write");
-    const parent = resolveDsMemory(s, parentAddress, v.const(4), "write");
+    const source = guardDsMemory(s, sourceAddress, v.const(4), "read");
+    const arm = guardDsMemory(s, armAddress, v.const(4), "write");
+    const parent = guardDsMemory(s, parentAddress, v.const(4), "write");
 
     s.if(v.const(1), (then) => {
-      then.write(then.reg("eax"), then.memory.read(source, { byteOffset: v.const(0), width: 32 }), { width: 32 });
-      then.memory.write(arm, { byteOffset: v.const(0), value: v.const(1), width: 32 });
+      then.write(
+        then.reg("eax"),
+        then.memory.load(source, { byteOffset: v.const(0), width: 32 }),
+        { width: 32 }
+      );
+      then.memory.store(arm, {
+        byteOffset: v.const(0),
+        value: v.const(1),
+        width: 32
+      });
     });
-    s.memory.write(parent, { byteOffset: v.const(0), value: s.read(s.reg("eax"), { width: 32 }), width: 32 });
+    s.memory.store(parent, {
+      byteOffset: v.const(0),
+      value: s.read(s.reg("eax"), { width: 32 }),
+      width: 32
+    });
     s.write(s.reg("ebx"), s.read(s.reg("eax"), { width: 32 }), { width: 32 });
   };
   const builder = createLegacyInstructionBlock();
@@ -2574,9 +2590,17 @@ test("xchg [ebx], ebx stores through the original address, not the new ebx", () 
 test("a validated DS WRITE access lowers read and write nodes at its address", () => {
   const incMem: SemanticTemplate = (s, v) => {
     const address = v.const(0x2000);
-    const target = resolveDsMemory(s, address, v.const(4), "write");
+    const target = guardDsMemory(s, address, v.const(4), "write");
 
-    s.memory.write(target, { byteOffset: v.const(0), value: v.binary("add", s.memory.read(target, { byteOffset: v.const(0), width: 32 }), v.const(1)), width: 32 });
+    s.memory.store(target, {
+      byteOffset: v.const(0),
+      value: v.binary(
+        "add",
+        s.memory.load(target, { byteOffset: v.const(0), width: 32 }),
+        v.const(1)
+      ),
+      width: 32
+    });
   };
   const builder = createLegacyInstructionBlock();
 
@@ -2610,7 +2634,7 @@ test("a folded byte length selects the static flat guard path", () => {
     const byteLength = v.binary("shl", v.const(1), v.const(2));
 
     foldedByteLength = byteLength;
-    resolveDsMemory(s, address, byteLength, "read");
+    guardDsMemory(s, address, byteLength, "read");
   };
   const builder = createLegacyInstructionBlock();
 
@@ -2621,11 +2645,14 @@ test("a folded byte length selects the static flat guard path", () => {
   strictEqual(entryNodes(block).filter((node) => node.kind === "if").length, 0);
 });
 
-test("memory resolution is nonterminal and access metadata adds no IR nodes", () => {
+test("memory resolution is nonterminal and adds no IR nodes", () => {
   const template: SemanticTemplate = (s, v) => {
-    const access = s.memory.resolve({ reference: s.memory.reference("ds", v.const(0x2000)), byteLength: v.const(4), intent: "read" });
+    s.memory.resolve({
+      reference: s.memory.reference("ds", v.const(0x2000)),
+      byteLength: v.const(4),
+      intent: "read"
+    });
 
-    access.failure;
     s.write(s.reg("eax"), v.const(7), { width: 32 });
   };
   const builder = createLegacyInstructionBlock();
@@ -2642,11 +2669,11 @@ test("memory resolution is nonterminal and access metadata adds no IR nodes", ()
   );
 });
 
-test("memory access preflight emits the canonical fault selection without a transfer", () => {
+test("memory guard emits the canonical fault selection without a transfer", () => {
   let address!: ValueId;
   const checkedAccess: SemanticTemplate = (s, v) => {
     address = s.read(s.reg("eax"), { width: 32 });
-    s.memory.access({
+    s.memory.guard({
       reference: s.memory.reference("ds", address),
       byteLength: v.const(4),
       intent: "write"
@@ -2676,18 +2703,18 @@ test("memory access preflight emits the canonical fault selection without a tran
   );
 });
 
-test("memory access metadata remains reusable in a child semantic region", () => {
+test("guarded memory access remains reusable in a child semantic region", () => {
   let address!: ValueId;
   const checkedStoreArm: SemanticTemplate = (s, v) => {
     address = s.read(s.reg("eax"), { width: 32 });
-    const access = s.memory.access({
+    const access = s.memory.guard({
       reference: s.memory.reference("ds", address),
       byteLength: v.const(4),
       intent: "write"
     });
 
     s.if(s.read(s.reg("ecx"), { width: 32 }), (then) => {
-      then.memory.write(access, { value: v.const(1), width: 32 });
+      then.memory.store(access, { value: v.const(1), width: 32 });
     });
   };
   const builder = createLegacyInstructionBlock();
@@ -2717,27 +2744,41 @@ test("memory access metadata remains reusable in a child semantic region", () =>
   );
 });
 
-test("the instruction builder does not impose semantic memory-validation policy", () => {
-  const uncheckedRead: SemanticTemplate = (s, v) => {
-    const access = s.memory.resolve({ reference: s.memory.reference("ds", v.const(0x2000)), byteLength: v.const(4), intent: "read" });
+test("a resolve caller selects its access fault before loading", () => {
+  let address!: ValueId;
+  const manualLoad: SemanticTemplate = (s, v) => {
+    address = s.read(s.reg("eax"), { width: 32 });
+    const resolution = s.memory.resolve({
+      reference: s.memory.reference("ds", address),
+      byteLength: v.const(4),
+      intent: "read"
+    });
 
-    s.memory.read(access, { byteOffset: v.const(0), width: 32 });
+    s.if(resolution.fault.condition, (fault) => {
+      fault.cpuException(resolution.fault.exception);
+    }, "unlikely");
+    s.memory.load(resolution.access, { byteOffset: v.const(0), width: 32 });
   };
   const builder = createLegacyInstructionBlock();
 
-  builder.add(uncheckedRead, [], loc(0x1000, 0x1001));
+  builder.add(manualLoad, [], loc(0x1000, 0x1001));
 
-  const nodes = entryNodes(builder.finish());
+  const block = builder.finish();
+  const nodes = entryNodes(block);
 
   strictEqual(nodes.filter((node) => isMemoryRead(node)).length, 1);
-  strictEqual(nodes.some((node) => node.kind === "if"), false);
+  strictEqual(nodes.filter((node) => node.kind === "if").length, 1);
+  deepStrictEqual(
+    nestedBodyView(block, 1).terminator,
+    pageFaultStop(block.values, "read", address)
+  );
 });
 
 test("constant memory access offsets must fit their resolved range", () => {
   const outOfRange: SemanticTemplate = (s, v) => {
-    const access = resolveDsMemory(s, v.const(0x2000), v.const(4), "read");
+    const access = guardDsMemory(s, v.const(0x2000), v.const(4), "read");
 
-    s.memory.read(access, { byteOffset: v.const(1), width: 32 });
+    s.memory.load(access, { byteOffset: v.const(1), width: 32 });
   };
 
   throws(
@@ -2748,10 +2789,10 @@ test("constant memory access offsets must fit their resolved range", () => {
 
 test("constant relative offsets become memory immediates at the upper boundary", () => {
   const boundaryAccess: SemanticTemplate = (s, v) => {
-    const access = resolveDsMemory(s, v.const(0x2000), v.const(8), "write");
-    const value = s.memory.read(access, { byteOffset: v.const(4), width: 32 });
+    const access = guardDsMemory(s, v.const(0x2000), v.const(8), "write");
+    const value = s.memory.load(access, { byteOffset: v.const(4), width: 32 });
 
-    s.memory.write(access, { byteOffset: v.const(4), value: value, width: 32 });
+    s.memory.store(access, { byteOffset: v.const(4), value: value, width: 32 });
   };
   const builder = createLegacyInstructionBlock();
 
@@ -2767,23 +2808,38 @@ test("constant relative offsets become memory immediates at the upper boundary",
   strictEqual(read.inputs[0]!.value, write.inputs[0]!.value);
 });
 
-test("READ and WRITE resolutions retain their exact exceptions", () => {
+test("READ and WRITE resolutions retain their exact fault intents", () => {
   let address!: ValueId;
   const bothIntents: SemanticTemplate = (s, v) => {
     address = s.read(s.reg("eax"), { width: 32 });
     const memory = s.memory.reference("ds", address);
-    const read = s.memory.resolve({ reference: memory, byteLength: v.const(4), intent: "read" });
-    const write = s.memory.resolve({ reference: memory, byteLength: v.const(4), intent: "write" });
+    const read = s.memory.resolve({
+      reference: memory,
+      byteLength: v.const(4),
+      intent: "read"
+    });
+    const write = s.memory.resolve({
+      reference: memory,
+      byteLength: v.const(4),
+      intent: "write"
+    });
 
-    s.if(read.failure.condition, (failure) => {
-      failure.cpuException(read.failure.exception);
+    s.if(read.fault.condition, (failure) => {
+      failure.cpuException(read.fault.exception);
     }, "unlikely");
-    s.if(write.failure.condition, (failure) => {
-      failure.cpuException(write.failure.exception);
+    s.if(write.fault.condition, (failure) => {
+      failure.cpuException(write.fault.exception);
     }, "unlikely");
-    const value = s.memory.read(read, { byteOffset: v.const(0), width: 32 });
+    const value = s.memory.load(read.access, {
+      byteOffset: v.const(0),
+      width: 32
+    });
 
-    s.memory.write(write, { byteOffset: v.const(0), value: value, width: 32 });
+    s.memory.store(write.access, {
+      byteOffset: v.const(0),
+      value,
+      width: 32
+    });
   };
   const builder = createLegacyInstructionBlock();
 
@@ -3015,10 +3071,14 @@ test("pop [esp+k] adds the displacement to the incremented esp", () => {
 test("a fault branch after a memory write in the same instruction fails loudly", () => {
   const storeThenFault: SemanticTemplate = (s, v) => {
     const firstAddress = v.const(0x2000);
-    const access = resolveDsMemory(s, firstAddress, v.const(4), "write");
+    const access = guardDsMemory(s, firstAddress, v.const(4), "write");
 
-    s.memory.write(access, { byteOffset: v.const(0), value: v.const(1), width: 32 });
-    resolveDsMemory(s, s.read(s.reg("eax"), { width: 32 }), v.const(4), "write");
+    s.memory.store(access, {
+      byteOffset: v.const(0),
+      value: v.const(1),
+      width: 32
+    });
+    guardDsMemory(s, s.read(s.reg("eax"), { width: 32 }), v.const(4), "write");
   };
 
   throws(
@@ -3030,10 +3090,18 @@ test("a fault branch after a memory write in the same instruction fails loudly",
 
 test("memory resolution itself may follow a memory write", () => {
   const storeThenResolve: SemanticTemplate = (s, v) => {
-    const access = resolveDsMemory(s, v.const(0x2000), v.const(4), "write");
+    const access = guardDsMemory(s, v.const(0x2000), v.const(4), "write");
 
-    s.memory.write(access, { byteOffset: v.const(0), value: v.const(1), width: 32 });
-    s.memory.resolve({ reference: s.memory.reference("ds", v.const(0x3000)), byteLength: v.const(4), intent: "read" });
+    s.memory.store(access, {
+      byteOffset: v.const(0),
+      value: v.const(1),
+      width: 32
+    });
+    s.memory.resolve({
+      reference: s.memory.reference("ds", v.const(0x3000)),
+      byteLength: v.const(4),
+      intent: "read"
+    });
   };
   const builder = createLegacyInstructionBlock();
 
@@ -3101,7 +3169,7 @@ test("a guard after flushing a channel first written this instruction fails loud
   const flushThenGuard: SemanticTemplate = (s, v) => {
     s.write(s.operand(0), v.const(1), { width: 8 });
     s.read(s.operand(1), { width: 16 });
-    resolveDsMemory(s, s.read(s.reg("ebx"), { width: 32 }), v.const(4), "read");
+    guardDsMemory(s, s.read(s.reg("ebx"), { width: 32 }), v.const(4), "read");
   };
 
   throws(
@@ -3338,7 +3406,7 @@ test("a guard after a dynamic flush of an instruction-written register fails lou
   const setThenDynamicRead: SemanticTemplate = (s, v) => {
     s.write(s.reg("ebx"), v.const(0x111), { width: 32 });
     s.read(s.operand(0), { width: 32 });
-    resolveDsMemory(s, s.read(s.reg("ecx"), { width: 32 }), v.const(4), "read");
+    guardDsMemory(s, s.read(s.reg("ecx"), { width: 32 }), v.const(4), "read");
   };
 
   throws(
@@ -3351,7 +3419,7 @@ test("a guard after a dynamic flush of an instruction-written register fails lou
 test("a guard after a dynamic write fails loudly", () => {
   const dynamicWriteThenGuard: SemanticTemplate = (s, v) => {
     s.write(s.operand(0), v.const(0x222), { width: 32 });
-    resolveDsMemory(s, s.read(s.reg("ebx"), { width: 32 }), v.const(4), "write");
+    guardDsMemory(s, s.read(s.reg("ebx"), { width: 32 }), v.const(4), "write");
   };
 
   throws(
@@ -3696,7 +3764,7 @@ test("pop [memDynamic] flushes esp before the base read and restores it on the w
 test("a guard after a memDynamic flush of a never-read register fails loudly", () => {
   const blindWriteThenDynamicAddress: SemanticTemplate = (s, v) => {
     s.write(s.reg("ebx"), v.const(0x111), { width: 32 });
-    resolveDsMemory(s, s.address(s.operand(0)), v.const(4), "write");
+    guardDsMemory(s, s.address(s.operand(0)), v.const(4), "write");
   };
 
   throws(

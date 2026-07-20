@@ -60,7 +60,7 @@ export function enterSemantic(): SemanticTemplate {
     const writeBytes = v.binary("shl", writeSlots, v.const(2));
     const writeStart = v.binary("sub", esp, writeBytes);
     const oldFrameOffset = v.binary("sub", frameTemp, writeStart);
-    const writeAccess = s.memory.access({
+    const writeAccess = s.memory.guard({
       reference: s.memory.reference("ss", writeStart),
       byteLength: writeBytes,
       intent: "write"
@@ -75,13 +75,17 @@ export function enterSemantic(): SemanticTemplate {
           thenValues.const(2)
         );
         const readStart = thenValues.binary("sub", ebp, readBytes);
-        const readAccess = then.memory.access({
+        const readAccess = then.memory.guard({
           reference: then.memory.reference("ss", readStart),
           byteLength: readBytes,
           intent: "read"
         });
 
-        then.memory.write(writeAccess, { width: 32, byteOffset: oldFrameOffset, value: ebp });
+        then.memory.store(writeAccess, {
+          width: 32,
+          byteOffset: oldFrameOffset,
+          value: ebp
+        });
         const remaining = then.var(thenValues.binary("sub", level, thenValues.const(1)));
         const srcOffset = then.var(thenValues.binary("sub", readBytes, thenValues.const(4)));
         const dstOffset = then.var(thenValues.binary("sub", oldFrameOffset, thenValues.const(4)));
@@ -90,21 +94,32 @@ export function enterSemantic(): SemanticTemplate {
           const currentRemaining = loop.read(remaining, { width: 32 });
           const currentSrcOffset = loop.read(srcOffset, { width: 32 });
           const currentDstOffset = loop.read(dstOffset, { width: 32 });
-          const copied = loop.memory.read(readAccess, { width: 32, byteOffset: currentSrcOffset });
+          const copied = loop.memory.load(readAccess, {
+            width: 32,
+            byteOffset: currentSrcOffset
+          });
           const nextRemaining = loopValues.binary("sub", currentRemaining, loopValues.const(1));
 
-          loop.memory.write(writeAccess, { width: 32, byteOffset: currentDstOffset, value: copied });
+          loop.memory.store(writeAccess, {
+            width: 32,
+            byteOffset: currentDstOffset,
+            value: copied
+          });
           loop.write(remaining, nextRemaining, { width: 32 });
           loop.write(srcOffset, loopValues.binary("sub", currentSrcOffset, loopValues.const(4)), { width: 32 });
           loop.write(dstOffset, loopValues.binary("sub", currentDstOffset, loopValues.const(4)), { width: 32 });
           return loopValues.compare(32, "ne", nextRemaining, loopValues.const(0));
         });
-        then.memory.write(writeAccess, { width: 32, value: frameTemp });
+        then.memory.store(writeAccess, { width: 32, value: frameTemp });
       },
       (otherwise) => {
-        otherwise.memory.write(writeAccess, { width: 32, byteOffset: oldFrameOffset, value: ebp });
+        otherwise.memory.store(writeAccess, {
+          width: 32,
+          byteOffset: oldFrameOffset,
+          value: ebp
+        });
         otherwise.if(levelGtZero, (nonzero) => {
-          nonzero.memory.write(writeAccess, { width: 32, value: frameTemp });
+          nonzero.memory.store(writeAccess, { width: 32, value: frameTemp });
         });
       }
     );

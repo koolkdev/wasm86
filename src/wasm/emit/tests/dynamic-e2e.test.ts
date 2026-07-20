@@ -26,7 +26,7 @@ import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { operandRead, operandWrite } from "#ir/tests/storage-op-helpers.js";
-import { flatMemoryAccess } from "#memory/flat.js";
+import { flatMemoryResolution } from "#memory/flat.js";
 import { cpuStateAccess } from "#cpu/state.js";
 
 // One emitted handler body per op+width, with the register indices arriving
@@ -327,11 +327,11 @@ test("a dynamic memory check evaluates each semantic operand once", async () => 
   const byteLength = values.external(1);
   const body = new RegionBuilder(values);
   const state = cpuStateAccess.bind(body);
-  const fault = flatMemoryAccess(
+  const fault = flatMemoryResolution(
     values,
     { start: address, byteLength },
     "read"
-  ).failure.condition;
+  ).fault.condition;
   state.write(state.gprChannel(gprChannel("eax")), fault);
   const block: IrBlock = {
     values,
@@ -359,16 +359,16 @@ test("nested dynamic memory checks compose through the value graph", async () =>
   const outerByteLength = values.external(2);
   const body = new RegionBuilder(values);
   const state = cpuStateAccess.bind(body);
-  const innerFault = flatMemoryAccess(
+  const innerFault = flatMemoryResolution(
     values,
     { start: innerAddress, byteLength: innerByteLength },
     "read"
-  ).failure.condition;
-  const outerFault = flatMemoryAccess(
+  ).fault.condition;
+  const outerFault = flatMemoryResolution(
     values,
     { start: innerFault, byteLength: outerByteLength },
     "read"
-  ).failure.condition;
+  ).fault.condition;
   state.write(state.gprChannel(gprChannel("eax")), outerFault);
   const block: IrBlock = {
     values,

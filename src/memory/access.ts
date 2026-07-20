@@ -15,8 +15,8 @@ import {
 } from "#core/exceptions.js";
 import type { RegionBuilder } from "#ir/region-builder.js";
 import {
-  flatMemoryAccess,
-  flatMemoryOperand
+  flatMemoryOperand,
+  flatMemoryResolution
 } from "./flat.js";
 import { readBackingByte } from "./bytes.js";
 import { guestMemoryMinimumByteLength } from "./constants.js";
@@ -28,8 +28,9 @@ export type LinearRange = Readonly<{
 
 export type MemoryDataAccessIntent = "read" | "write";
 export type MemoryAccessIntent = MemoryDataAccessIntent | "instructionFetch";
+export type MemoryReadIntent = Exclude<MemoryAccessIntent, "write">;
 
-export type MemoryAccessFailure = Readonly<{
+export type MemoryFault = Readonly<{
   condition: ValueId;
   exception: PageFault<ValueId>;
 }>;
@@ -40,25 +41,34 @@ export type MemoryAccess<
   range: LinearRange;
   origin: DynamicByteOriginRef;
   intent: TIntent;
-  failure: MemoryAccessFailure;
 }>;
 
-export type MemoryReadOptions = Readonly<{
+export type MemoryResolution<
+  TIntent extends MemoryAccessIntent = MemoryAccessIntent
+> = Readonly<{
+  access: MemoryAccess<TIntent>;
+  fault: MemoryFault;
+}>;
+
+export type MemoryLoadOptions = Readonly<{
   signed?: boolean;
 }>;
 
 export type MemoryAccessOperations = Readonly<{
+  // Resolution is control-free. Its caller owns selecting the returned fault
+  // before transferring through the access.
   resolve<TIntent extends MemoryAccessIntent>(
     range: LinearRange,
     intent: TIntent
-  ): MemoryAccess<TIntent>;
-  read(
+  ): MemoryResolution<TIntent>;
+  // Loads and stores consume the access route without selecting its fault.
+  load(
     access: MemoryAccess,
     byteOffset: ValueId,
     width: IntegerWidth,
-    options?: MemoryReadOptions
+    options?: MemoryLoadOptions
   ): ValueId;
-  write(
+  store(
     access: MemoryAccess<"write">,
     byteOffset: ValueId,
     value: ValueId,
@@ -66,29 +76,15 @@ export type MemoryAccessOperations = Readonly<{
   ): void;
 }>;
 
-export type HostMemoryByteAccess<
-  TIntent extends MemoryAccessIntent = MemoryAccessIntent
-> = Readonly<{
-  address: number;
-  intent: TIntent;
-}>;
-
-export type HostMemoryByteResolution<TIntent extends MemoryAccessIntent> =
-  | Readonly<{
-      kind: "access";
-      access: HostMemoryByteAccess<TIntent>;
-    }>
+export type HostMemoryByteRead =
+  | Readonly<{ kind: "value"; value: number }>
   | Readonly<{
       kind: "exception";
       exception: PageFault<number>;
     }>;
 
-export type HostMemoryAccessOperations = Readonly<{
-  resolveByte<TIntent extends MemoryAccessIntent>(
-    address: number,
-    intent: TIntent
-  ): HostMemoryByteResolution<TIntent>;
-  readByte(access: HostMemoryByteAccess): number;
+export type HostMemoryReader = Readonly<{
+  readByte(address: number, intent: MemoryReadIntent): HostMemoryByteRead;
 }>;
 
 export type MemoryAccessConstruction = Readonly<{
@@ -96,15 +92,15 @@ export type MemoryAccessConstruction = Readonly<{
 }>;
 
 export type MemoryModel = MemoryAccessConstruction & Readonly<{
-  bindHost(memory: WebAssembly.Memory): HostMemoryAccessOperations;
+  bindHost(memory: WebAssembly.Memory): HostMemoryReader;
 }>;
 
 export const guestMemoryAccess: MemoryModel = {
   bind: (region) => new FlatMemoryAccessBuilder(region),
-  bindHost: (memory) => new FlatHostMemoryAccess(memory)
+  bindHost: (memory) => new FlatHostMemoryReader(memory)
 };
 
-class FlatHostMemoryAccess implements HostMemoryAccessOperations {
+class FlatHostMemoryReader implements HostMemoryReader {
   readonly #memory: WebAssembly.Memory;
 
   constructor(memory: WebAssembly.Memory) {
@@ -115,34 +111,25 @@ class FlatHostMemoryAccess implements HostMemoryAccessOperations {
     this.#memory = memory;
   }
 
-  resolveByte<TIntent extends MemoryAccessIntent>(
-    address: number,
-    intent: TIntent
-  ): HostMemoryByteResolution<TIntent> {
+  readByte(address: number, intent: MemoryReadIntent): HostMemoryByteRead {
     assert(
       Number.isInteger(address) && address >= 0 && address <= 0xffff_ffff,
       `memory address must be u32, got ${address}`
     );
 
-    return address < guestMemoryMinimumByteLength
-      ? { kind: "access", access: { address, intent } }
-      : {
-          kind: "exception",
-          exception: pageFault(
-            address,
-            pageFaultErrorCode(intent)
-          )
-        };
-  }
-
-  readByte(access: HostMemoryByteAccess): number {
-    const value = readBackingByte(this.#memory, access.address);
+    if (address >= guestMemoryMinimumByteLength) {
+      return {
+        kind: "exception",
+        exception: pageFault(address, pageFaultErrorCode(intent))
+      };
+    }
+    const value = readBackingByte(this.#memory, address);
 
     assert(
       value !== undefined,
-      `resolved memory byte is absent at 0x${access.address.toString(16)}`
+      `checked memory byte is absent at address ${address}`
     );
-    return value;
+    return { kind: "value", value };
   }
 }
 
@@ -156,15 +143,15 @@ class FlatMemoryAccessBuilder implements MemoryAccessOperations {
   resolve<TIntent extends MemoryAccessIntent>(
     range: LinearRange,
     intent: TIntent
-  ): MemoryAccess<TIntent> {
-    return flatMemoryAccess(this.#region.values, range, intent);
+  ): MemoryResolution<TIntent> {
+    return flatMemoryResolution(this.#region.values, range, intent);
   }
 
-  read(
+  load(
     access: MemoryAccess,
     byteOffset: ValueId,
     width: IntegerWidth,
-    options: MemoryReadOptions = {}
+    options: MemoryLoadOptions = {}
   ): ValueId {
     const region = this.#region;
     const source = flatMemoryOperand(
@@ -183,7 +170,7 @@ class FlatMemoryAccessBuilder implements MemoryAccessOperations {
     );
   }
 
-  write(
+  store(
     access: MemoryAccess<"write">,
     byteOffset: ValueId,
     value: ValueId,

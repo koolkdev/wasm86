@@ -45,14 +45,14 @@ export function xaddSemantic(width: OperandWidth): SemanticTemplate {
 
 export function cmpxchg8bSemantic(): SemanticTemplate {
   return (s, v) => {
-    const access = s.memory.access({
+    const access = s.memory.guard({
       reference: s.memory.operand(s.operand(0)),
       byteLength: v.const(8),
       intent: "write"
     });
 
-    const oldLo = s.memory.read(access, { width: 32 });
-    const oldHi = s.memory.read(access, { width: 32, byteOffset: v.const(4) });
+    const oldLo = s.memory.load(access, { width: 32 });
+    const oldHi = s.memory.load(access, { width: 32, byteOffset: v.const(4) });
     const oldEax = s.read(s.reg("eax"), { width: 32 });
     const oldEdx = s.read(s.reg("edx"), { width: 32 });
     const equal = and(
@@ -63,11 +63,11 @@ export function cmpxchg8bSemantic(): SemanticTemplate {
 
     s.writeFlag("ZF", equal);
     s.if(equal, (then, thenValues) => {
-      then.memory.write(access, {
+      then.memory.store(access, {
         width: 32,
         value: then.read(then.reg("ebx"), { width: 32 })
       });
-      then.memory.write(access, {
+      then.memory.store(access, {
         width: 32,
         byteOffset: thenValues.const(4),
         value: then.read(then.reg("ecx"), { width: 32 })

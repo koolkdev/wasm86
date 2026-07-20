@@ -15,7 +15,7 @@ import {
   guestMemoryMinimumPages
 } from "#memory/constants.js";
 import {
-  flatMemoryAccess
+  flatMemoryResolution
 } from "#memory/flat.js";
 import { guestMemoryResource } from "#memory/resource.js";
 import { wasmImport } from "#wasm/abi.js";
@@ -45,13 +45,13 @@ test("one flat fragment keeps its fixed capacity when backing memory grows", asy
 
     assert(start !== undefined, "flat classifier start parameter is missing");
     assert(byteLength !== undefined, "flat classifier length parameter is missing");
-    const access = flatMemoryAccess(
+    const resolution = flatMemoryResolution(
       fn.values,
       { start, byteLength },
       "read"
     );
 
-    fn.return([access.failure.condition]);
+    fn.return([resolution.fault.condition]);
   });
   builder.exportFunction({
     ref: exportRef("memory.flat-e2e.classify-export"),

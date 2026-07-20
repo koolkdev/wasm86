@@ -18,7 +18,8 @@ import { guestMemoryResource } from "./resource.js";
 import type {
   LinearRange,
   MemoryAccess,
-  MemoryAccessIntent
+  MemoryAccessIntent,
+  MemoryResolution
 } from "./access.js";
 
 type FlatMemoryValues = Pick<ValueBuilder, "const" | "binary" | "compare"> & ConstantValues;
@@ -29,11 +30,11 @@ type ConstantValues = Readonly<{
 
 const addressSpaceByteLength = 0x1_0000_0000;
 
-export function flatMemoryAccess<TIntent extends MemoryAccessIntent>(
+export function flatMemoryResolution<TIntent extends MemoryAccessIntent>(
   values: FlatMemoryValues,
   range: LinearRange,
   intent: TIntent
-): MemoryAccess<TIntent> {
+): MemoryResolution<TIntent> {
   const staticByteLength = values.constValue(range.byteLength);
 
   if (staticByteLength !== undefined) {
@@ -44,7 +45,7 @@ export function flatMemoryAccess<TIntent extends MemoryAccessIntent>(
       `flat access byte length must be an integer between 1 and ${guestMemoryMinimumByteLength}, got ${staticByteLength}`
     );
 
-    return createMemoryAccess(
+    return createMemoryResolution(
       values,
       range,
       values.compare(
@@ -70,20 +71,22 @@ export function flatMemoryAccess<TIntent extends MemoryAccessIntent>(
       values.binary("sub", last, range.start)
     )
   );
-  return createMemoryAccess(values, range, faulted, intent);
+  return createMemoryResolution(values, range, faulted, intent);
 }
 
-function createMemoryAccess<TIntent extends MemoryAccessIntent>(
+function createMemoryResolution<TIntent extends MemoryAccessIntent>(
   values: FlatMemoryValues,
   range: LinearRange,
   faulted: ValueId,
   intent: TIntent
-): MemoryAccess<TIntent> {
+): MemoryResolution<TIntent> {
   return {
-    range,
-    origin: new DynamicByteOriginRef(),
-    intent,
-    failure: {
+    access: {
+      range,
+      origin: new DynamicByteOriginRef(),
+      intent
+    },
+    fault: {
       condition: faulted,
       exception: pageFault(
         range.start,
