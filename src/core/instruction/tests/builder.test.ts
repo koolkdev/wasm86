@@ -2625,7 +2625,7 @@ test("memory resolution is nonterminal and access metadata adds no IR nodes", ()
   const template: SemanticTemplate = (s, v) => {
     const access = s.memory.resolve({ reference: s.memory.reference("ds", v.const(0x2000)), byteLength: v.const(4), intent: "read" });
 
-    access.faulted;
+    access.failure;
     s.write(s.reg("eax"), v.const(7), { width: 32 });
   };
   const builder = createLegacyInstructionBlock();
@@ -2767,7 +2767,7 @@ test("constant relative offsets become memory immediates at the upper boundary",
   strictEqual(read.inputs[0]!.value, write.inputs[0]!.value);
 });
 
-test("READ and WRITE resolutions retain their exact fault metadata", () => {
+test("READ and WRITE resolutions retain their exact exceptions", () => {
   let address!: ValueId;
   const bothIntents: SemanticTemplate = (s, v) => {
     address = s.read(s.reg("eax"), { width: 32 });
@@ -2775,14 +2775,11 @@ test("READ and WRITE resolutions retain their exact fault metadata", () => {
     const read = s.memory.resolve({ reference: memory, byteLength: v.const(4), intent: "read" });
     const write = s.memory.resolve({ reference: memory, byteLength: v.const(4), intent: "write" });
 
-    s.if(read.faulted, (failure) => {
-      failure.cpuException(pageFault(read.fault.address, v.const(0)));
+    s.if(read.failure.condition, (failure) => {
+      failure.cpuException(read.failure.exception);
     }, "unlikely");
-    s.if(write.faulted, (failure) => {
-      failure.cpuException(pageFault(
-        write.fault.address,
-        v.const(PageFaultErrorCode.WRITE)
-      ));
+    s.if(write.failure.condition, (failure) => {
+      failure.cpuException(write.failure.exception);
     }, "unlikely");
     const value = s.memory.read(read, { byteOffset: v.const(0), width: 32 });
 

@@ -3,7 +3,6 @@ import { buildExit } from "#cpu/exit.js";
 import { cpuState } from "#cpu/state.js";
 import { StateAccess } from "#core/state/access.js";
 import { coreStateFields } from "#core/state/layout.js";
-import { pageFault, pageFaultErrorCode } from "#core/exceptions.js";
 import { exceptionExit } from "#core/exits.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
@@ -88,17 +87,12 @@ class DecodeFragment {
     );
 
     this.#builder.if(
-      access.faulted,
+      access.failure.condition,
       (faultBody) => faultBody.finish({
         kind: "exit",
         result: buildExit(
           this.values,
-          exceptionExit(
-            pageFault(
-              access.fault.address,
-              this.values.const(pageFaultErrorCode("instructionFetch"))
-            )
-          )
+          exceptionExit(access.failure.exception)
         )
       }),
       { hint: "unlikely" }

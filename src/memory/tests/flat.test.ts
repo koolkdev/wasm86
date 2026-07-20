@@ -12,6 +12,10 @@ import {
   flatMemoryAccess,
   flatMemoryOperand
 } from "#memory/flat.js";
+import {
+  PageFaultErrorCode,
+  pageFault
+} from "#core/exceptions.js";
 import { guestMemoryResource } from "#memory/resource.js";
 
 test("a static-length flat access is one unsigned limit compare", () => {
@@ -22,7 +26,7 @@ test("a static-length flat access is one unsigned limit compare", () => {
   const access = flatMemoryAccess(values, range, "write");
   const limit = values.const(guestMemoryMinimumByteLength - 4);
 
-  deepStrictEqual(values.node(access.faulted), {
+  deepStrictEqual(values.node(access.failure.condition), {
     kind: "compare",
     type: "i32",
     operator: "gt_u",
@@ -30,7 +34,11 @@ test("a static-length flat access is one unsigned limit compare", () => {
     b: limit
   });
   deepStrictEqual(access.range, range);
-  deepStrictEqual(access.fault, { address: start, intent: "write" });
+  strictEqual(access.intent, "write");
+  deepStrictEqual(
+    access.failure.exception,
+    pageFault(start, values.const(PageFaultErrorCode.WRITE))
+  );
 });
 
 test("a dynamic-length flat access rejects zero with the complete nonwrapping predicate", () => {
@@ -51,8 +59,12 @@ test("a dynamic-length flat access rejects zero with the complete nonwrapping pr
     )
   );
 
-  strictEqual(access.faulted, expectedFaulted);
-  deepStrictEqual(access.fault, { address: start, intent: "read" });
+  strictEqual(access.failure.condition, expectedFaulted);
+  strictEqual(access.intent, "read");
+  deepStrictEqual(
+    access.failure.exception,
+    pageFault(start, values.const(0))
+  );
 });
 
 test("static flat bounds accept the last range and reject invalid lengths", () => {
@@ -79,9 +91,9 @@ test("static flat bounds accept the last range and reject invalid lengths", () =
     "read"
   );
 
-  strictEqual(values.constValue(finalWord.faulted), 0);
-  strictEqual(values.constValue(crossingWord.faulted), 1);
-  strictEqual(values.constValue(wrappedByte.faulted), 1);
+  strictEqual(values.constValue(finalWord.failure.condition), 0);
+  strictEqual(values.constValue(crossingWord.failure.condition), 1);
+  strictEqual(values.constValue(wrappedByte.failure.condition), 1);
   throws(
     () => flatMemoryAccess(
       values,

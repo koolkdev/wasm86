@@ -8,6 +8,11 @@ import type {
   IntegerWidth,
   ValueId
 } from "#compiler/ir/values/types.js";
+import {
+  pageFault,
+  pageFaultErrorCode,
+  type PageFault
+} from "#core/exceptions.js";
 import type { RegionBuilder } from "#ir/region-builder.js";
 import {
   flatMemoryAccess,
@@ -24,16 +29,18 @@ export type LinearRange = Readonly<{
 export type MemoryDataAccessIntent = "read" | "write";
 export type MemoryAccessIntent = MemoryDataAccessIntent | "instructionFetch";
 
+export type MemoryAccessFailure = Readonly<{
+  condition: ValueId;
+  exception: PageFault<ValueId>;
+}>;
+
 export type MemoryAccess<
   TIntent extends MemoryAccessIntent = MemoryAccessIntent
 > = Readonly<{
   range: LinearRange;
   origin: DynamicByteOriginRef;
-  faulted: ValueId;
-  fault: Readonly<{
-    address: ValueId;
-    intent: TIntent;
-  }>;
+  intent: TIntent;
+  failure: MemoryAccessFailure;
 }>;
 
 export type MemoryReadOptions = Readonly<{
@@ -72,11 +79,8 @@ export type HostMemoryByteResolution<TIntent extends MemoryAccessIntent> =
       access: HostMemoryByteAccess<TIntent>;
     }>
   | Readonly<{
-      kind: "fault";
-      fault: Readonly<{
-        address: number;
-        intent: TIntent;
-      }>;
+      kind: "exception";
+      exception: PageFault<number>;
     }>;
 
 export type HostMemoryAccessOperations = Readonly<{
@@ -122,7 +126,13 @@ class FlatHostMemoryAccess implements HostMemoryAccessOperations {
 
     return address < guestMemoryMinimumByteLength
       ? { kind: "access", access: { address, intent } }
-      : { kind: "fault", fault: { address, intent } };
+      : {
+          kind: "exception",
+          exception: pageFault(
+            address,
+            pageFaultErrorCode(intent)
+          )
+        };
   }
 
   readByte(access: HostMemoryByteAccess): number {

@@ -9,6 +9,10 @@ import type { Operation } from "#compiler/ir/operations/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { guestMemoryAccess } from "#memory/access.js";
+import {
+  PageFaultErrorCode,
+  pageFault
+} from "#core/exceptions.js";
 import { guestMemoryResource } from "#memory/resource.js";
 
 type OperationOf<Kind extends Operation["kind"]> = Extract<
@@ -30,7 +34,11 @@ test("Memory access construction expands one WRITE access into generic RMW opera
   memory.write(access, values.const(4), loaded, 32);
 
   deepStrictEqual(access.range, { start, byteLength });
-  deepStrictEqual(access.fault, { address: start, intent: "write" });
+  strictEqual(access.intent, "write");
+  deepStrictEqual(
+    access.failure.exception,
+    pageFault(start, values.const(PageFaultErrorCode.WRITE))
+  );
 
   const read = resourceOperations(body, "resource.read")[0];
   const write = resourceOperations(body, "resource.write")[0];
@@ -85,10 +93,14 @@ test("Memory access construction gives constant instruction fetches absolute ran
   });
   strictEqual(read.displacement, 2);
   strictEqual(read.signed, true);
-  deepStrictEqual(access.fault, {
-    address: access.range.start,
-    intent: "instructionFetch"
-  });
+  strictEqual(access.intent, "instructionFetch");
+  deepStrictEqual(
+    access.failure.exception,
+    pageFault(
+      access.range.start,
+      values.const(PageFaultErrorCode.INSTRUCTION_FETCH)
+    )
+  );
 });
 
 test("a parent-created access emits through the child region that consumes it", () => {

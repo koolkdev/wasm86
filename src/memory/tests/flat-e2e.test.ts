@@ -51,7 +51,7 @@ test("one flat fragment keeps its fixed capacity when backing memory grows", asy
       "read"
     );
 
-    fn.return([access.faulted]);
+    fn.return([access.failure.condition]);
   });
   builder.exportFunction({
     ref: exportRef("memory.flat-e2e.classify-export"),

@@ -3,8 +3,6 @@ import type { FieldRef } from "#compiler/layout/handles.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ExternalValueId, ValueId } from "#compiler/ir/values/types.js";
 import {
-  pageFault,
-  pageFaultErrorCode,
   type CpuException
 } from "#core/exceptions.js";
 import type { StatusFlagResolverFamily } from "#core/flags/lazy/resolvers.js";
@@ -23,9 +21,8 @@ import type {
 import type { OperandWidth } from "#core/types.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type {
-  MemoryAccess,
   MemoryAccessConstruction,
-  MemoryDataAccessIntent
+  MemoryAccessFailure
 } from "#memory/access.js";
 import type {
   OperandBinding,
@@ -320,7 +317,8 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     }
 
     const storage = this.#storage.bind(scope, {
-      faultMemoryAccess: (access) => this.#faultMemoryAccess(scope, access),
+      terminateMemoryFailure: (failure) =>
+        this.#terminateMemoryFailure(scope, failure),
       writeSegmentSelector: (binding, value, width) =>
         this.#writeSegmentSelector(scope, binding, value, width)
     });
@@ -440,22 +438,15 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     }
   }
 
-  #faultMemoryAccess(
+  #terminateMemoryFailure(
     scope: SemanticRegionScope,
-    access: MemoryAccess<MemoryDataAccessIntent>
+    failure: MemoryAccessFailure
   ): void {
     this.assertActive(scope);
     this.#control.if(
       scope,
-      access.faulted,
-      (failure) => failure.cpuException(
-        pageFault(
-          access.fault.address,
-          this.#values.const(pageFaultErrorCode(
-            access.fault.intent === "write" ? "dataWrite" : "dataRead"
-          ))
-        )
-      ),
+      failure.condition,
+      (arm) => arm.cpuException(failure.exception),
       "unlikely"
     );
   }

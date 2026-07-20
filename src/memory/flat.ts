@@ -9,6 +9,10 @@ import {
   type ByteRange,
   type ResourceByteOperand
 } from "#compiler/ir/resource.js";
+import {
+  pageFault,
+  pageFaultErrorCode
+} from "#core/exceptions.js";
 import { guestMemoryMinimumByteLength } from "./constants.js";
 import { guestMemoryResource } from "./resource.js";
 import type {
@@ -41,6 +45,7 @@ export function flatMemoryAccess<TIntent extends MemoryAccessIntent>(
     );
 
     return createMemoryAccess(
+      values,
       range,
       values.compare(
         32,
@@ -65,10 +70,11 @@ export function flatMemoryAccess<TIntent extends MemoryAccessIntent>(
       values.binary("sub", last, range.start)
     )
   );
-  return createMemoryAccess(range, faulted, intent);
+  return createMemoryAccess(values, range, faulted, intent);
 }
 
 function createMemoryAccess<TIntent extends MemoryAccessIntent>(
+  values: FlatMemoryValues,
   range: LinearRange,
   faulted: ValueId,
   intent: TIntent
@@ -76,8 +82,14 @@ function createMemoryAccess<TIntent extends MemoryAccessIntent>(
   return {
     range,
     origin: new DynamicByteOriginRef(),
-    faulted,
-    fault: { address: range.start, intent }
+    intent,
+    failure: {
+      condition: faulted,
+      exception: pageFault(
+        range.start,
+        values.const(pageFaultErrorCode(intent))
+      )
+    }
   };
 }
 

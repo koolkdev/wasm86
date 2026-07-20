@@ -7,6 +7,7 @@ import {
   guestMemoryMinimumByteLength,
   guestMemoryMinimumPages
 } from "#memory/constants.js";
+import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 
 test("flat instruction fetch resolves before reading its backing byte", () => {
   const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
@@ -35,11 +36,11 @@ test("flat instruction fetch resolves before reading its backing byte", () => {
       "instructionFetch"
     ),
     {
-      kind: "fault",
-      fault: {
-        address: guestMemoryMinimumByteLength,
-        intent: "instructionFetch"
-      }
+      kind: "exception",
+      exception: pageFault(
+        guestMemoryMinimumByteLength,
+        PageFaultErrorCode.INSTRUCTION_FETCH
+      )
     }
   );
 });
@@ -57,11 +58,11 @@ test("flat instruction fetch keeps its address-space boundary after growth", () 
       "instructionFetch"
     ),
     {
-      kind: "fault",
-      fault: {
-        address: guestMemoryMinimumByteLength,
-        intent: "instructionFetch"
-      }
+      kind: "exception",
+      exception: pageFault(
+        guestMemoryMinimumByteLength,
+        PageFaultErrorCode.INSTRUCTION_FETCH
+      )
     }
   );
 });

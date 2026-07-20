@@ -2,6 +2,7 @@ import type { RegionBuilder } from "#ir/region-builder.js";
 import type {
   MemoryAccess,
   MemoryAccessConstruction,
+  MemoryAccessFailure,
   MemoryAccessOperations,
   MemoryDataAccessIntent
 } from "#memory/access.js";
@@ -21,13 +22,13 @@ import type { SegmentRegister } from "#core/types.js";
 import type { ScopedOperandResolver } from "./operand-resolver.js";
 
 type InstructionMemoryOptions = Readonly<{
-  faultAccess(access: MemoryAccess<MemoryDataAccessIntent>): void;
+  terminateFailure(failure: MemoryAccessFailure): void;
   recordWrite(): void;
 }>;
 
 // Adapts decoded x86 references to Memory's reusable linear-range capability.
-// Raw resolution stays available; access() composes the instruction lifecycle's
-// exact-scope failure policy without performing a transfer.
+// Raw resolution stays available for ordered compound operations; access()
+// applies instruction-lifecycle termination to Memory's exception recipe.
 export class InstructionMemory implements SemanticMemoryOps {
   readonly #region: RegionBuilder;
   readonly #operands: ScopedOperandResolver;
@@ -87,7 +88,7 @@ export class InstructionMemory implements SemanticMemoryOps {
   ): MemoryAccess<TIntent> {
     const access = this.resolve(options);
 
-    this.#options.faultAccess(access);
+    this.#options.terminateFailure(access.failure);
     return access;
   }
 

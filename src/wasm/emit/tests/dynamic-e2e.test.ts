@@ -331,7 +331,7 @@ test("a dynamic memory check evaluates each semantic operand once", async () => 
     values,
     { start: address, byteLength },
     "read"
-  ).faulted;
+  ).failure.condition;
   state.write(state.gprChannel(gprChannel("eax")), fault);
   const block: IrBlock = {
     values,
@@ -363,12 +363,12 @@ test("nested dynamic memory checks compose through the value graph", async () =>
     values,
     { start: innerAddress, byteLength: innerByteLength },
     "read"
-  ).faulted;
+  ).failure.condition;
   const outerFault = flatMemoryAccess(
     values,
     { start: innerFault, byteLength: outerByteLength },
     "read"
-  ).faulted;
+  ).failure.condition;
   state.write(state.gprChannel(gprChannel("eax")), outerFault);
   const block: IrBlock = {
     values,

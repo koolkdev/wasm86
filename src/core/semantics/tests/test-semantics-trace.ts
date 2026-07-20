@@ -254,8 +254,16 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder {
       const access: MemoryAccess<typeof intent> = {
         range: { start: linearAddress, byteLength },
         origin: new DynamicByteOriginRef(),
-        faulted,
-        fault: { address: linearAddress, intent }
+        intent,
+        failure: {
+          condition: faulted,
+          exception: pageFault(
+            linearAddress,
+            this.values.const(pageFaultErrorCode(
+              intent
+            ))
+          )
+        }
       };
 
       this.#emit(
@@ -480,7 +488,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder {
       if (resolvedAddress !== undefined && resolvedErrorCode !== undefined) {
         this.#emitTerminator(
           `cpuException ${exception.kind} ${resolvedAddress}.${
-            resolvedErrorCode === `${pageFaultErrorCode("dataWrite")}`
+            resolvedErrorCode === `${pageFaultErrorCode("write")}`
               ? "write"
               : "read"
           }`
@@ -574,15 +582,8 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder {
 
   #faultMemoryAccess(access: MemoryAccess<MemoryDataAccessIntent>): void {
     this.if(
-      access.faulted,
-      (failure) => failure.cpuException(
-        pageFault(
-          access.fault.address,
-          this.values.const(pageFaultErrorCode(
-            access.fault.intent === "write" ? "dataWrite" : "dataRead"
-          ))
-        )
-      ),
+      access.failure.condition,
+      (failure) => failure.cpuException(access.failure.exception),
       "unlikely"
     );
   }
@@ -602,7 +603,7 @@ class TraceBuilder implements SemanticsBuilder, LoopSemanticsBuilder {
   }
 
   #access(access: MemoryAccess): string {
-    return `${this.#value(access.fault.address)}.${access.fault.intent}`;
+    return `${this.#value(access.range.start)}.${access.intent}`;
   }
 
   #value(input: ValueInput): string {

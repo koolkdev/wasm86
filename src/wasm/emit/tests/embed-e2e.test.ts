@@ -16,7 +16,7 @@ import type { RunStop } from "#cpu/cpu.js";
 import { buildExit, decodeExit } from "#cpu/exit.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { FallthroughTarget } from "#wasm/emit/embed.js";
-import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
+import { PageFaultErrorCode } from "#core/exceptions.js";
 import { exceptionExit } from "#core/exits.js";
 import { assertPageFaultException } from "#cpu/tests/stop-fixtures.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
@@ -97,15 +97,10 @@ function decodeReadFragment(k: number): DecodeReadFragment {
   );
   const faultResult = buildExit(
     values,
-    exceptionExit(
-      pageFault(
-        address,
-        values.const(PageFaultErrorCode.INSTRUCTION_FETCH)
-      )
-    )
+    exceptionExit(access.failure.exception)
   );
   builder.push(ifControl.create({
-    condition: access.faulted,
+    condition: access.failure.condition,
     hint: "unlikely",
     thenBody: {
       nodes: [

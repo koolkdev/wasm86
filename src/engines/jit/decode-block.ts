@@ -4,7 +4,6 @@ import type {
   IsaDecodeExceptionResult,
   IsaDecodeReader
 } from "#core/decoder/types.js";
-import { pageFault, pageFaultErrorCode } from "#core/exceptions.js";
 import { u32 } from "#core/numeric.js";
 import { guestMemoryAccess } from "#memory/access.js";
 
@@ -46,10 +45,7 @@ export function decodeJitBlock(
 
       return {
         kind: "cpuException",
-        exception: pageFault(
-          resolved.fault.address,
-          pageFaultErrorCode(resolved.fault.intent)
-        )
+        exception: resolved.exception
       };
     }
   };

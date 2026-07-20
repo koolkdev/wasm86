@@ -34,9 +34,8 @@ import type {
 } from "#core/types.js";
 import type { RegionBuilder } from "#ir/region-builder.js";
 import type {
-  MemoryAccess,
   MemoryAccessConstruction,
-  MemoryDataAccessIntent
+  MemoryAccessFailure
 } from "#memory/access.js";
 import type {
   OperandBinding,
@@ -67,7 +66,7 @@ type InstructionStorageOptions = Readonly<{
 }>;
 
 type ScopedInstructionStorageOptions = Readonly<{
-  faultMemoryAccess(access: MemoryAccess<MemoryDataAccessIntent>): void;
+  terminateMemoryFailure(failure: MemoryAccessFailure): void;
   writeSegmentSelector: WriteSegmentSelector;
 }>;
 
@@ -112,7 +111,7 @@ export class InstructionStorage {
         this.#memoryConstruction,
         operands,
         {
-          faultAccess: options.faultMemoryAccess,
+          terminateFailure: options.terminateMemoryFailure,
           recordWrite: () => scope.recordMemoryWrite()
         }
       ),

@@ -1,8 +1,14 @@
+export type PageFault<T> = Readonly<{
+  kind: "PF";
+  linearAddress: T;
+  errorCode: T;
+}>;
+
 export type CpuException<T> =
   | Readonly<{ kind: "DE" }>
   | Readonly<{ kind: "UD" }>
   | Readonly<{ kind: "GP"; errorCode: T }>
-  | Readonly<{ kind: "PF"; linearAddress: T; errorCode: T }>;
+  | PageFault<T>;
 
 export const CpuExceptionVector = {
   DE: 0,
@@ -19,8 +25,8 @@ export const PageFaultErrorCode = {
 } as const;
 
 export type PageFaultAccess =
-  | "dataRead"
-  | "dataWrite"
+  | "read"
+  | "write"
   | "instructionFetch";
 
 export function divideError<T = never>(): CpuException<T> {
@@ -35,15 +41,15 @@ export function generalProtection<T>(errorCode: T): CpuException<T> {
   return { kind: "GP", errorCode };
 }
 
-export function pageFault<T>(linearAddress: T, errorCode: T): CpuException<T> {
+export function pageFault<T>(linearAddress: T, errorCode: T): PageFault<T> {
   return { kind: "PF", linearAddress, errorCode };
 }
 
 export function pageFaultErrorCode(access: PageFaultAccess): number {
   switch (access) {
-    case "dataRead":
+    case "read":
       return 0;
-    case "dataWrite":
+    case "write":
       return PageFaultErrorCode.WRITE;
     case "instructionFetch":
       return PageFaultErrorCode.INSTRUCTION_FETCH;
