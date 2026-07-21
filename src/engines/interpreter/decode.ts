@@ -5,6 +5,8 @@ import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
 import type {
   DecodeCandidate,
   InstructionForm,
+  ModRmFieldSelection,
+  ModRmModeForms,
   OpcodeLeaf,
   OpcodeNode
 } from "#core/decoder/model/types.js";
@@ -19,7 +21,8 @@ import type { MemoryAccessConstruction } from "#memory/access.js";
 import { ModRmAddressDecoder } from "./decode/address.js";
 import {
   memoryFormDispatch,
-  modRmCandidateCases
+  exactModRmCases,
+  modRmRegCases
 } from "./decode/forms.js";
 import {
   OperandDecoder,
@@ -68,8 +71,7 @@ class InterpreterDecoder {
   readonly #options: InterpreterDecodeOptions;
   readonly #stream: InstructionByteStream;
   readonly #prefixes: PrefixDecoder;
-  readonly #memoryFormPage: CellRef;
-  readonly #memoryFormIndex: CellRef;
+  readonly #memoryFormOrdinal: CellRef;
   readonly #modRmByte: CellRef;
   readonly #address: ModRmAddressDecoder;
   readonly #operands: OperandDecoder;
@@ -79,7 +81,7 @@ class InterpreterDecoder {
     instructionStart: ValueId,
     options: InterpreterDecodeOptions
   ) {
-    const invalidSelection = region.values.const(-1);
+    const invalidFormOrdinal = region.values.const(-1);
 
     this.#root = region;
     this.#instructionStart = instructionStart;
@@ -91,8 +93,7 @@ class InterpreterDecoder {
       options.buildExit
     );
     this.#prefixes = new PrefixDecoder(region, this.#stream);
-    this.#memoryFormPage = region.cell(invalidSelection);
-    this.#memoryFormIndex = region.cell(invalidSelection);
+    this.#memoryFormOrdinal = region.cell(invalidFormOrdinal);
     this.#modRmByte = region.cell(region.values.const(0x100));
     this.#operands = new OperandDecoder({
       instructionStart,
@@ -185,72 +186,229 @@ class InterpreterDecoder {
         this.#buildInstruction(region, candidate.form, { kind: "none" });
         return;
       case "modRm": {
-        const byte = this.#stream.readByte(region);
-        const arms: SwitchControlArm[] = [];
-
-        for (const candidateCase of modRmCandidateCases(candidate)) {
-          if (candidateCase.registerMatches.length > 0) {
-            arms.push({
-              matches: candidateCase.registerMatches,
-              build: (register) => {
-                register.write(this.#modRmByte, byte);
-                this.#buildInstruction(register, candidateCase.form, {
-                  kind: "register",
-                  registerIndex: register.values.binary(
-                    "and",
-                    byte,
-                    register.values.const(0b111)
-                  )
-                });
-              }
-            });
-          }
-          if (candidateCase.memoryMatches.length > 0) {
-            arms.push({
-              matches: candidateCase.memoryMatches,
-              build: (memory) => {
-                memory.write(this.#modRmByte, byte);
-                this.#selectMemoryForm(memory, candidateCase.form);
-              }
-            });
-          }
-        }
-        region.switchControl(
-          byte,
-          arms,
-          (invalid) => this.#invalidOpcode(invalid)
-        );
+        this.#dispatchModRm(region, candidate);
         return;
       }
     }
   }
 
-  #selectMemoryForm(region: RegionBuilder, form: InstructionForm): void {
-    const location = memoryFormDispatch.locations.get(form.id);
+  #dispatchModRm(
+    region: RegionBuilder,
+    candidate: Extract<DecodeCandidate, { kind: "modRm" }>
+  ): void {
+    const byte = this.#stream.readByte(region);
+    const selection = candidate.formSelection;
+
+    switch (selection.kind) {
+      case "exact":
+        this.#dispatchExactModRm(region, byte, selection.byByte);
+        return;
+      case "fields":
+        this.#dispatchModRmFields(region, byte, selection.fields);
+        return;
+    }
+  }
+
+  #dispatchExactModRm(
+    region: RegionBuilder,
+    byte: ValueId,
+    byByte: readonly (InstructionForm | undefined)[]
+  ): void {
+    // The exact byte selects both the form and its register or memory path.
+    region.switchControl(
+      byte,
+      exactModRmCases(byByte).map(({ matches, form, mode }) => ({
+        matches,
+        build: (selected) => {
+          selected.write(this.#modRmByte, byte);
+          this.#buildModRmForm(selected, byte, form, mode);
+        }
+      })),
+      (invalid) => this.#invalidOpcode(invalid)
+    );
+  }
+
+  #dispatchModRmFields(
+    region: RegionBuilder,
+    byte: ValueId,
+    fields: ModRmFieldSelection
+  ): void {
+    switch (fields.kind) {
+      case "mode":
+        this.#dispatchModRmMode(region, byte, fields.forms);
+        return;
+      case "reg":
+        this.#dispatchModRmReg(region, byte, fields.byReg);
+        return;
+    }
+  }
+
+  #dispatchModRmMode(
+    region: RegionBuilder,
+    byte: ValueId,
+    forms: ModRmModeForms
+  ): void {
+    // The forms are already selected; only register versus memory remains.
+    this.#dispatchModRmForms(
+      region,
+      byte,
+      this.#registerMode(region, byte),
+      forms
+    );
+  }
+
+  #dispatchModRmReg(
+    region: RegionBuilder,
+    byte: ValueId,
+    byReg: readonly ModRmModeForms[]
+  ): void {
+    // Select the opcode-group forms by ModRM.reg, then branch between their
+    // register and memory forms inside the selected arm.
+    const formSelector = region.values.binary(
+      "and",
+      region.values.binary(
+        "shr_u",
+        byte,
+        region.values.const(3)
+      ),
+      region.values.const(0b111)
+    );
+    const registerMode = this.#registerMode(region, byte);
+
+    region.switchControl(
+      formSelector,
+      modRmRegCases(byReg).map(({ matches, forms }) => ({
+        matches,
+        build: (selected) => this.#dispatchModRmForms(
+          selected,
+          byte,
+          registerMode,
+          forms
+        )
+      })),
+      (invalid) => this.#invalidOpcode(invalid)
+    );
+  }
+
+  #registerMode(region: RegionBuilder, byte: ValueId): ValueId {
+    return region.values.compare(
+      32,
+      "ge_u",
+      byte,
+      region.values.const(0xc0)
+    );
+  }
+
+  #dispatchModRmForms(
+    region: RegionBuilder,
+    byte: ValueId,
+    registerMode: ValueId,
+    forms: ModRmModeForms
+  ): void {
+    region.write(this.#modRmByte, byte);
+    region.if(
+      registerMode,
+      (register) => this.#buildModRmForm(
+        register,
+        byte,
+        forms.register,
+        "register"
+      ),
+      {
+        elseBuild: (memory) => this.#buildModRmForm(
+          memory,
+          byte,
+          forms.memory,
+          "memory"
+        )
+      }
+    );
+  }
+
+  #buildModRmForm(
+    region: RegionBuilder,
+    byte: ValueId,
+    form: InstructionForm | undefined,
+    mode: "register" | "memory"
+  ): void {
+    if (form === undefined) {
+      this.#invalidOpcode(region);
+      return;
+    }
+    switch (mode) {
+      case "register":
+        // Register arms have all required decode information and finish here.
+        this.#buildInstruction(region, form, {
+          kind: "register",
+          registerIndex: region.values.binary(
+            "and",
+            byte,
+            region.values.const(0b111)
+          )
+        });
+        return;
+      case "memory":
+        // Memory arms record the selected form and join after opcode dispatch;
+        // build() then decodes the address once and builds that instruction.
+        this.#recordMemoryForm(region, form);
+        return;
+    }
+  }
+
+  #recordMemoryForm(region: RegionBuilder, form: InstructionForm): void {
+    const ordinal = memoryFormDispatch.ordinalByForm.get(form);
 
     assert(
-      location !== undefined,
+      ordinal !== undefined,
       `decode model omitted memory form ${form.id}`
     );
-    region.write(this.#memoryFormPage, region.values.const(location.page));
-    region.write(this.#memoryFormIndex, region.values.const(location.index));
+    region.write(this.#memoryFormOrdinal, region.values.const(ordinal));
   }
 
   #dispatchSelectedMemoryForm(region: RegionBuilder): void {
+    const ordinal = region.read(this.#memoryFormOrdinal);
+
+    // Compiler switch matches are bounded, so dispatch one switch-sized group
+    // at a time. The default arm carries larger ordinals into the next group,
+    // leaving forms in the first group on this switch alone.
+    this.#dispatchMemoryFormGroups(
+      region,
+      ordinal,
+      memoryFormDispatch.groups
+    );
+  }
+
+  #dispatchMemoryFormGroups(
+    region: RegionBuilder,
+    ordinal: ValueId,
+    groups: readonly (readonly InstructionForm[])[]
+  ): void {
+    assert(groups.length !== 0, "memory form dispatch has no groups");
+    const forms = groups[0];
+    const remainingGroups = groups.slice(1);
+
+    assert(forms !== undefined, "memory form dispatch group is missing");
     region.switchControl(
-      region.read(this.#memoryFormPage),
-      memoryFormDispatch.pages.map((forms, page) => ({
-        matches: [page],
-        build: (pageArm) => pageArm.switchControl(
-          pageArm.read(this.#memoryFormIndex),
-          forms.map((form, index) => ({
-            matches: [index],
-            build: (formArm) => this.#buildMemoryInstruction(formArm, form)
-          })),
-          (unreachable) => this.#unreachable(unreachable)
-        )
+      ordinal,
+      forms.map((form, slot) => ({
+        matches: [slot],
+        build: (formArm) => this.#buildMemoryInstruction(formArm, form)
       })),
-      (unreachable) => this.#unreachable(unreachable)
+      remainingGroups.length === 0
+        ? (unreachable) => this.#unreachable(unreachable)
+        : (nextGroup) => {
+          const nextOrdinal = nextGroup.values.binary(
+            "sub",
+            ordinal,
+            nextGroup.values.const(memoryFormDispatch.groupSize)
+          );
+
+          this.#dispatchMemoryFormGroups(
+            nextGroup,
+            nextOrdinal,
+            remainingGroups
+          );
+        }
     );
   }
 

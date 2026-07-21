@@ -2,28 +2,21 @@ import { assert } from "#common/assert.js";
 import { maxSwitchMatch } from "#compiler/ir/controls/index.js";
 import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
 import type {
-  DecodeCandidate,
   DecodeOperand,
-  InstructionForm
+  InstructionForm,
+  ModRmModeForms
 } from "#core/decoder/model/types.js";
 
-export type ModRmCandidateCase = Readonly<{
+type ModRmRegCase = Readonly<{
+  matches: readonly number[];
+  forms: ModRmModeForms;
+}>;
+
+type ExactModRmCase = Readonly<{
+  matches: readonly number[];
   form: InstructionForm;
-  registerMatches: readonly number[];
-  memoryMatches: readonly number[];
+  mode: "register" | "memory";
 }>;
-
-type MemoryFormLocation = Readonly<{
-  page: number;
-  index: number;
-}>;
-
-const formIds = new Set<string>();
-
-for (const form of X86_32_DECODE_MODEL.forms) {
-  assert(!formIds.has(form.id), `duplicate decode form id ${form.id}`);
-  formIds.add(form.id);
-}
 
 const memoryForms = X86_32_DECODE_MODEL.forms.filter((form) => {
   if (form.modrm === undefined) {
@@ -37,53 +30,77 @@ const memoryForms = X86_32_DECODE_MODEL.forms.filter((form) => {
     (accepted, byte) => accepted && (byte >>> 6) !== 0b11
   );
 });
-const memoryFormPageSize = maxSwitchMatch + 1;
-const memoryFormLocations = new Map<string, MemoryFormLocation>();
+const memoryFormGroupSize = maxSwitchMatch + 1;
+const memoryFormOrdinals = new Map<InstructionForm, number>();
 
 memoryForms.forEach((form, ordinal) => {
-  memoryFormLocations.set(form.id, {
-    page: Math.floor(ordinal / memoryFormPageSize),
-    index: ordinal % memoryFormPageSize
-  });
+  memoryFormOrdinals.set(form, ordinal);
 });
 
 export const memoryFormDispatch = {
-  pages: Array.from(
-    { length: Math.ceil(memoryForms.length / memoryFormPageSize) },
-    (_, page) => memoryForms.slice(
-      page * memoryFormPageSize,
-      (page + 1) * memoryFormPageSize
+  groups: Array.from(
+    { length: Math.ceil(memoryForms.length / memoryFormGroupSize) },
+    (_, group) => memoryForms.slice(
+      group * memoryFormGroupSize,
+      (group + 1) * memoryFormGroupSize
     )
   ),
-  locations: memoryFormLocations as ReadonlyMap<string, MemoryFormLocation>
+  ordinalByForm: memoryFormOrdinals as ReadonlyMap<InstructionForm, number>,
+  groupSize: memoryFormGroupSize
 } as const;
 
-export function modRmCandidateCases(
-  candidate: Extract<DecodeCandidate, { kind: "modRm" }>
-): readonly ModRmCandidateCase[] {
-  const byForm = new Map<string, {
-    form: InstructionForm;
-    registerMatches: number[];
-    memoryMatches: number[];
+export function modRmRegCases(
+  byReg: readonly ModRmModeForms[]
+): readonly ModRmRegCase[] {
+  const cases: { matches: number[]; forms: ModRmModeForms }[] = [];
+
+  byReg.forEach((forms, match) => {
+    if (forms.register === undefined && forms.memory === undefined) {
+      return;
+    }
+    const existing = cases.find((candidate) =>
+      candidate.forms.register === forms.register &&
+      candidate.forms.memory === forms.memory
+    );
+
+    if (existing === undefined) {
+      cases.push({ matches: [match], forms });
+    } else {
+      existing.matches.push(match);
+    }
+  });
+  return cases;
+}
+
+export function exactModRmCases(
+  byByte: readonly (InstructionForm | undefined)[]
+): readonly ExactModRmCase[] {
+  const byForm = new Map<InstructionForm, {
+    register: number[];
+    memory: number[];
   }>();
 
-  candidate.byByte.forEach((form, byte) => {
+  byByte.forEach((form, byte) => {
     if (form === undefined) {
       return;
     }
-    const existing = byForm.get(form.id) ?? {
-      form,
-      registerMatches: [],
-      memoryMatches: []
-    };
-    const matches = modRmPath(form, byte) === "register"
-      ? existing.registerMatches
-      : existing.memoryMatches;
+    const existing = byForm.get(form) ?? { register: [], memory: [] };
+    const mode = byte >= 0xc0 ? "register" : "memory";
 
-    matches.push(byte);
-    byForm.set(form.id, existing);
+    existing[mode].push(byte);
+    byForm.set(form, existing);
   });
-  return [...byForm.values()];
+  const cases: ExactModRmCase[] = [];
+
+  for (const [form, matches] of byForm) {
+    if (matches.register.length !== 0) {
+      cases.push({ matches: matches.register, form, mode: "register" });
+    }
+    if (matches.memory.length !== 0) {
+      cases.push({ matches: matches.memory, form, mode: "memory" });
+    }
+  }
+  return cases;
 }
 
 function modRmOperand(
@@ -93,21 +110,4 @@ function modRmOperand(
     (operand): operand is Extract<DecodeOperand, { kind: "modrm.rm" }> =>
       operand.kind === "modrm.rm"
   );
-}
-
-function modRmPath(
-  form: InstructionForm,
-  byte: number
-): "register" | "memory" {
-  const rmOperand = modRmOperand(form);
-
-  assert(rmOperand !== undefined, `${form.id} uses ModRM without an R/M operand`);
-  if ((byte >>> 6) !== 0b11) {
-    return "memory";
-  }
-  assert(
-    rmOperand.form === "registerOrMemory",
-    `${form.id} accepts a register ModRM byte for a memory-only operand`
-  );
-  return "register";
 }

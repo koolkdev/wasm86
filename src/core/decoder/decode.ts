@@ -11,6 +11,7 @@ import type {
   MemOperand,
   SegmentRegister
 } from "#core/types.js";
+import { selectModRmForm } from "./model/candidates.js";
 import { X86_32_DECODE_MODEL } from "./model/index.js";
 import type {
   AddressBase,
@@ -213,7 +214,7 @@ class NumericDecodeEvaluator {
       case "modRm": {
         const modRmOffset = opcodeOffset + leaf.opcodeLength;
         const modRmByte = this.cursor.readByte(modRmOffset);
-        const form = candidates.byByte[modRmByte];
+        const form = selectModRmForm(candidates.formSelection, modRmByte);
 
         return form === undefined ? undefined : { form, modRmByte };
       }

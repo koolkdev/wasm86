@@ -7,9 +7,11 @@ import {
   repPrefixByte,
   segmentOverridePrefixSegments
 } from "#core/prefixes.js";
+import { deriveModRmFormSelection } from "./candidates.js";
 import type {
   DecodeCandidate,
   InstructionForm,
+  OpcodeLeaf,
   OpcodeNode,
   PrefixEffect,
   PrefixModel,
@@ -19,13 +21,13 @@ import { buildInstructionForms } from "./forms.js";
 import { buildModRm32 } from "./modrm32.js";
 
 type MutableDecodeOpcodeNode = {
-  leaf: MutableDecodeOpcodeLeaf | undefined;
+  leaf: OpcodeLeaf | undefined;
   next: (MutableDecodeOpcodeNode | undefined)[];
 };
 
 type MutableDecodeOpcodeLeaf = {
   opcodeLength: number;
-  byPrefix: DecodeCandidate[];
+  formsByPrefix: InstructionForm[][];
 };
 
 const prefixFlagBits = {
@@ -56,12 +58,13 @@ export const X86_32_DECODE_MODEL: X86DecodeModel = {
 
 function buildOpcodeTree(forms: readonly InstructionForm[]): OpcodeNode {
   const root = mutableOpcodeNode();
+  const leaves = new Map<MutableDecodeOpcodeNode, MutableDecodeOpcodeLeaf>();
 
   for (const form of forms) {
     let node = root;
 
     for (const byte of form.opcode) {
-      assert(node.leaf === undefined, `${form.id} extends an existing opcode form`);
+      assert(!leaves.has(node), `${form.id} extends an existing opcode form`);
       node.next[byte] ??= mutableOpcodeNode();
       node = node.next[byte];
     }
@@ -70,16 +73,21 @@ function buildOpcodeTree(forms: readonly InstructionForm[]): OpcodeNode {
       !node.next.some((next) => next !== undefined),
       `${form.id} prefixes an existing opcode form`
     );
-    node.leaf ??= {
+    const leaf = leaves.get(node) ?? {
       opcodeLength: form.opcode.length,
-      byPrefix: Array.from(
-        { length: prefixBucketCount },
-        () => ({ kind: "empty" as const })
-      )
+      formsByPrefix: Array.from({ length: prefixBucketCount }, () => [])
     };
-    addFormToLeaf(node.leaf, form);
+
+    leaves.set(node, leaf);
+    addFormToLeaf(leaf, form);
   }
 
+  for (const [node, leaf] of leaves) {
+    node.leaf = {
+      opcodeLength: leaf.opcodeLength,
+      byPrefix: leaf.formsByPrefix.map(buildCandidate)
+    };
+  }
   return root;
 }
 
@@ -88,39 +96,53 @@ function addFormToLeaf(
   form: InstructionForm
 ): void {
   const prefixIndex = prefixFlagsFor(form.instruction);
-  const candidates = leaf.byPrefix[prefixIndex];
+  const forms = leaf.formsByPrefix[prefixIndex];
 
-  assert(candidates !== undefined, `missing prefix bucket for ${form.id}`);
+  assert(forms !== undefined, `missing prefix bucket for ${form.id}`);
 
   if (form.modrm === undefined) {
-    assert(candidates.kind === "empty", `ambiguous opcode/prefix form: ${form.id}`);
-    leaf.byPrefix[prefixIndex] = { kind: "plain", form };
-    return;
-  }
-
-  const byByte = candidates.kind === "empty"
-    ? new Array<InstructionForm | undefined>(256)
-    : candidates.kind === "modRm"
-      ? candidates.byByte as (InstructionForm | undefined)[]
-      : undefined;
-
-  assert(byByte !== undefined, `opcode mixes ModRM and plain forms: ${form.id}`);
-
-  for (let byte = 0; byte <= 0xff; byte += 1) {
-    if (form.modrm.acceptedBytes[byte] !== true) {
-      continue;
-    }
-
+    assert(forms.length === 0, `ambiguous opcode/prefix form: ${form.id}`);
+  } else {
     assert(
-      byByte[byte] === undefined,
-      `ambiguous ModRM byte 0x${byte.toString(16).padStart(2, "0")} for ${form.id}`
+      forms.every((candidate) => candidate.modrm !== undefined),
+      `opcode mixes ModRM and plain forms: ${form.id}`
     );
-    byByte[byte] = form;
   }
+  forms.push(form);
+}
 
-  if (candidates.kind === "empty") {
-    leaf.byPrefix[prefixIndex] = { kind: "modRm", byByte };
+function buildCandidate(forms: readonly InstructionForm[]): DecodeCandidate {
+  const first = forms[0];
+
+  if (first === undefined) {
+    return { kind: "empty" };
   }
+  if (first.modrm === undefined) {
+    assert(forms.length === 1, `ambiguous opcode/prefix form: ${first.id}`);
+    return { kind: "plain", form: first };
+  }
+  const byByte = new Array<InstructionForm | undefined>(256);
+
+  for (const form of forms) {
+    assert(
+      form.modrm !== undefined,
+      `opcode mixes ModRM and plain forms: ${form.id}`
+    );
+    for (let byte = 0; byte <= 0xff; byte += 1) {
+      if (form.modrm.acceptedBytes[byte] !== true) {
+        continue;
+      }
+      assert(
+        byByte[byte] === undefined,
+        `ambiguous ModRM byte 0x${byte.toString(16).padStart(2, "0")} for ${form.id}`
+      );
+      byByte[byte] = form;
+    }
+  }
+  return {
+    kind: "modRm",
+    formSelection: deriveModRmFormSelection(byByte)
+  };
 }
 
 function mutableOpcodeNode(): MutableDecodeOpcodeNode {

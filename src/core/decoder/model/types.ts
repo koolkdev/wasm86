@@ -143,6 +143,31 @@ export type ModRm32Model = Readonly<{
   sibScales: readonly EffectiveAddress["scale"][];
 }>;
 
+export type ModRmModeForms = Readonly<{
+  register: InstructionForm | undefined;
+  memory: InstructionForm | undefined;
+}>;
+
+export type ModRmFieldSelection =
+  | Readonly<{
+      kind: "mode";
+      forms: ModRmModeForms;
+    }>
+  | Readonly<{
+      kind: "reg";
+      byReg: readonly ModRmModeForms[];
+    }>;
+
+export type ModRmFormSelection =
+  | Readonly<{
+      kind: "fields";
+      fields: ModRmFieldSelection;
+    }>
+  | Readonly<{
+      kind: "exact";
+      byByte: readonly (InstructionForm | undefined)[];
+    }>;
+
 export type DecodeCandidate =
   | Readonly<{ kind: "empty" }>
   | Readonly<{
@@ -151,7 +176,7 @@ export type DecodeCandidate =
     }>
   | Readonly<{
       kind: "modRm";
-      byByte: readonly (InstructionForm | undefined)[];
+      formSelection: ModRmFormSelection;
     }>;
 
 export type OpcodeLeaf = Readonly<{
