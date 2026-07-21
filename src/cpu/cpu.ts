@@ -1,12 +1,15 @@
 import { assert } from "#common/assert.js";
-import { wasmPagesForByteLength } from "#compiler/program/pages.js";
+import { createLayoutHostView } from "#compiler/layout/host-view.js";
+import type { ResourceRef } from "#compiler/ir/resource.js";
+import { instantiateCompiledProgram } from "#compiler/program/instance.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { SegmentRegister } from "#core/types.js";
 import { u32 } from "#core/numeric.js";
-import { bindInterpreter } from "#interpreter/binding.js";
+import type { CompiledInterpreter } from "#interpreter/program.js";
 import { decodeExit } from "./exit.js";
 import { createCpuStateHostView } from "./host-view.js";
-import { cpuState } from "./state.js";
+import type { CpuStateDefinition } from "./state.js";
+import { instructionLimitField } from "./instruction-count.js";
 import type { CpuStateView } from "./view.js";
 
 export type RunStop =
@@ -26,15 +29,45 @@ export type Cpu = Readonly<{
 
 export const maximumInstructionBudget = 0x7fff_ffff;
 
-export function createCpu(guestMemory: WebAssembly.Memory): Cpu {
+type CpuInputs = Readonly<{
+  state: CpuStateDefinition;
+  sharedMemories: ReadonlyMap<ResourceRef, WebAssembly.Memory>;
+  interpreter: CompiledInterpreter;
+}>;
+
+export function createCpu({
+  state: stateDefinition,
+  sharedMemories,
+  interpreter
+}: CpuInputs): Cpu {
+  const { minPages, maxPages } = stateDefinition.memoryImport.limits;
   const cpuStateMemory = new WebAssembly.Memory({
-    initial: wasmPagesForByteLength(cpuState.layout.byteLength)
+    initial: minPages,
+    ...(maxPages === undefined ? {} : { maximum: maxPages })
   });
-  const state = createCpuStateHostView(cpuStateMemory);
-  const interpreter = bindInterpreter({
-    guestMemory,
-    cpuStateMemory
-  });
+  const memories = new Map(sharedMemories);
+
+  assert(
+    !memories.has(stateDefinition.resource),
+    `execution state memory already bound: ${stateDefinition.resource.id}`
+  );
+  memories.set(stateDefinition.resource, cpuStateMemory);
+
+  const instance = instantiateCompiledProgram(interpreter.program, memories);
+  const entry = instance.functionExports.get(interpreter.entry);
+
+  assert(
+    entry !== undefined,
+    `missing Interpreter entry export ${interpreter.entry.id}`
+  );
+  assert(
+    typeof entry === "function",
+    `Interpreter entry export ${interpreter.entry.id} is not callable`
+  );
+
+  const storage = createLayoutHostView(cpuStateMemory, stateDefinition.layout);
+  const state = createCpuStateHostView(storage);
+  const runInterpreter = entry as () => bigint;
 
   return {
     state,
@@ -47,10 +80,11 @@ export function createCpu(guestMemory: WebAssembly.Memory): Cpu {
           instructionBudget
       );
 
-      interpreter.setInstructionLimit(
+      storage.writeField(
+        instructionLimitField,
         u32(state.instructionCount + instructionBudget)
       );
-      const encodedExit = interpreter.run();
+      const encodedExit = runInterpreter();
 
       return decodeExit(encodedExit);
     }

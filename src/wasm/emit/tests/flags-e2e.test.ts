@@ -11,7 +11,6 @@ import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
 import { flagStateFields } from "#core/flags/layout.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
-import { cpuState } from "#cpu/state.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { reg32, type Reg32 } from "#core/types.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
@@ -21,6 +20,7 @@ import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
 import { wasmBodyMemoryAccesses } from "#compiler/encoder/tests/body-opcodes.js";
 import {
   irBlockBody,
@@ -31,7 +31,9 @@ import {
 import { aluReference, type AluFlags, type AluOp } from "./reference.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
-const lazyFlagsKindStateOffset = cpuState.layout.field(flagStateFields.lazyKind).offset;
+const lazyFlagsKindStateOffset = testExecutionModel.cpuState.layout.field(
+  flagStateFields.lazyKind
+).offset;
 
 // ALU r32 forms through the action pipeline, checked against reference.ts.
 

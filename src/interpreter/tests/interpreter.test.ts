@@ -18,8 +18,8 @@ import {
   writeGuestBytes
 } from "./harness.js";
 
-// End-to-end coverage of the interpreter module: guest programs over the
-// dispatch loop and typed instruction-fetch faults.
+// End-to-end coverage of the Interpreter run loop: guest programs over the
+// dispatch structure and typed instruction-fetch faults.
 
 const startAddress = 0x1000;
 // Any byte outside the configured ISA raises #UD and stops the run.

@@ -1,19 +1,14 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
+import { instantiateCompiledProgram } from "#compiler/program/instance.js";
 import type { RunStop } from "#cpu/cpu.js";
 import { decodeExit } from "#cpu/exit.js";
 import {
   instructionCountField,
   instructionLimitField
 } from "#cpu/instruction-count.js";
-import {
-  cpuState,
-  cpuStateResourceDefinition
-} from "#cpu/state.js";
-import { encodeInterpreterModule } from "#interpreter/module.js";
-import { interpreterRunExportName } from "#interpreter/program.js";
-import { guestMemoryResourceDefinition } from "#memory/resource.js";
+import { compileInterpreterProgram } from "#interpreter/program.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import {
   readWasmCpuStateField,
@@ -21,12 +16,9 @@ import {
   wasmCpuStateFields,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import { programImportModuleName } from "#compiler/program/imports.js";
-import { createGuestMemory } from "#wasm/tests/helpers.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
 
 export type InterpreterHarness = Readonly<{
-  module: WebAssembly.Module;
-  instance: WebAssembly.Instance;
   guestMemory: WebAssembly.Memory;
   stateView: DataView;
   guestView: DataView;
@@ -44,26 +36,40 @@ export type GuestMemoryBytes = Readonly<{
   bytes: readonly number[];
 }>;
 
-let interpreterModule: WebAssembly.Module | undefined;
+let compiledInterpreter:
+  | ReturnType<typeof compileInterpreterProgram>
+  | undefined;
 
 export async function instantiateInterpreter(): Promise<InterpreterHarness> {
-  interpreterModule ??= new WebAssembly.Module(encodeInterpreterModule());
-  const guestMemory = createGuestMemory();
-  const cpuStateMemory = new WebAssembly.Memory({ initial: 1 });
+  compiledInterpreter ??= compileInterpreterProgram(testExecutionModel);
+  const guestMemory = new WebAssembly.Memory({
+    initial: testExecutionModel.guestMemory.memoryImport.limits.minPages
+  });
+  const cpuStateMemory = new WebAssembly.Memory({
+    initial: testExecutionModel.cpuState.memoryImport.limits.minPages
+  });
   const stateView = new DataView(cpuStateMemory.buffer);
   const guestView = new DataView(guestMemory.buffer);
-  const instance = await WebAssembly.instantiate(interpreterModule, {
-    [programImportModuleName]: {
-      [cpuStateResourceDefinition.name]: cpuStateMemory,
-      [guestMemoryResourceDefinition.name]: guestMemory
-    }
-  });
-  const run = readExportedRun(instance);
-  const stateStorage = createLayoutHostView(cpuStateMemory, cpuState.layout);
+  const instance = instantiateCompiledProgram(
+    compiledInterpreter.program,
+    new Map([
+      [testExecutionModel.cpuState.resource, cpuStateMemory],
+      [testExecutionModel.guestMemory.resource, guestMemory]
+    ])
+  );
+  const run = instance.functionExports.get(compiledInterpreter.entry);
+
+  if (typeof run !== "function") {
+    throw new Error(
+      `expected callable Interpreter entry ${compiledInterpreter.entry.id}`
+    );
+  }
+  const stateStorage = createLayoutHostView(
+    cpuStateMemory,
+    testExecutionModel.cpuState.layout
+  );
 
   return {
-    module: interpreterModule,
-    instance,
     guestMemory,
     stateView,
     guestView,
@@ -152,13 +158,4 @@ export function assertCompletedInstruction(
 ): void {
   strictEqual(state.eip, expectedEip);
   strictEqual(state.instructionCount, expectedInstructionCount);
-}
-
-function readExportedRun(instance: WebAssembly.Instance): () => bigint {
-  const value = instance.exports[interpreterRunExportName];
-
-  if (typeof value !== "function") {
-    throw new Error(`expected exported function '${interpreterRunExportName}'`);
-  }
-  return value as () => bigint;
 }

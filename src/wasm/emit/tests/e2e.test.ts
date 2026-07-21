@@ -12,7 +12,6 @@ import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js
 import type { SemanticTemplate } from "#core/semantics/builder.js";
 import type { RegName } from "#core/types.js";
 import { coreStateFields } from "#core/state/layout.js";
-import { cpuState } from "#cpu/state.js";
 import { aluSemantic } from "#core/semantics/alu.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#core/semantics/mov.js";
 import { xchgSemantic } from "#core/semantics/xchg.js";
@@ -23,6 +22,7 @@ import {
   readWasmCpuStateField,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
 import { wasmBodyMemoryAccesses, wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import {
   irBlockBody,
@@ -31,7 +31,9 @@ import {
   testModuleMemoryIndex
 } from "./harness.js";
 
-const eaxStateOffset = cpuState.layout.array(coreStateFields.gprs).offset;
+const eaxStateOffset = testExecutionModel.cpuState.layout.array(
+  coreStateFields.gprs
+).offset;
 
 // The stage's end-to-end slice: semantics -> LegacyInstructionBlock -> emit ->
 // instantiate -> run -> assert cpu state memory through the host view.

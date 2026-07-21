@@ -12,7 +12,6 @@ import { coreStateFields } from "#core/state/layout.js";
 import { registerAlias } from "#core/registers.js";
 import { u32 } from "#core/numeric.js";
 import { reg32, segmentRegisters, type SegmentRegister } from "#core/types.js";
-import { cpuState } from "#cpu/state.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import {
   type ArrayRef,
@@ -28,6 +27,9 @@ import {
   segmentLimitChannel,
   segmentSelectorChannel
 } from "#core/state/channels.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
+
+const cpuState = testExecutionModel.cpuState;
 
 export const wasmCpuStateFields = [
   "eax",

@@ -3,6 +3,7 @@ import { ok } from "node:assert";
 import type { StorageAccess, StorageEffects } from "#compiler/ir/effects.js";
 import { buildVariant } from "#compiler/ir/values/variant.js";
 import { compileProgram } from "#compiler/program/compile.js";
+import { instantiateCompiledProgram } from "#compiler/program/instance.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/program/function-type.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
@@ -46,8 +47,10 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
-import { programImportModuleName } from "#compiler/program/imports.js";
 
+const compiledInstructionExport = functionExportRef(
+  "test.compiled-instruction.entry-export"
+);
 const compiledInstructionExportName = "run";
 
 export type CompiledInstructionMemoryPatch = Readonly<{
@@ -105,18 +108,15 @@ export async function runCompiledInstructions(
   });
 
   ok(instructions.length > 0, "compiled instruction input decoded no instructions");
-  const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(
-      compileProgram(buildInstructionProgram(instructions)).bytes
-    ),
-    {
-      [programImportModuleName]: {
-        [testExecutionModel.cpuState.memoryImport.name]: memories.cpuStateMemory,
-        [testExecutionModel.guestMemory.memoryImport.name]: memories.guestMemory
-      }
-    }
+  const program = compileProgram(buildInstructionProgram(instructions));
+  const instance = instantiateCompiledProgram(
+    program,
+    new Map([
+      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
+      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+    ])
   );
-  const entry = instance.exports[compiledInstructionExportName];
+  const entry = instance.functionExports.get(compiledInstructionExport);
 
   ok(typeof entry === "function", "compiled instruction entry export is missing");
   const encodedExit: unknown = entry();
@@ -186,7 +186,7 @@ function buildInstructionProgram(
   });
 
   program.exportFunction({
-    ref: functionExportRef("test.compiled-instruction.entry-export"),
+    ref: compiledInstructionExport,
     name: compiledInstructionExportName,
     target: entry.ref
   });

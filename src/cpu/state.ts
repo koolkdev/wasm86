@@ -46,9 +46,3 @@ export function createCpuStateDefinition(): CpuStateDefinition {
     }
   };
 }
-
-// State resource used by live Cpu storage and host views.
-export const cpuState: StateResource = {
-  resource: resourceRef(cpuStateResourceDefinition.id),
-  layout: createLayout("execution-state", cpuStateStructures)
-};

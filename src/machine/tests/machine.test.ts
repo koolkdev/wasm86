@@ -47,6 +47,17 @@ test("machine creates one Cpu with writable default state", () => {
   strictEqual(flags.readFlag("CF"), true);
 });
 
+test("machines do not share guest memory or Cpu state", () => {
+  const first = createMachine({ memoryByteLength: 0x1000 });
+  const second = createMachine({ memoryByteLength: 0x1000 });
+
+  new Uint8Array(first.memory.buffer)[0] = 0x90;
+  first.cpu.state.core.writeReg32("eax", 0x1234_5678);
+
+  strictEqual(new Uint8Array(second.memory.buffer)[0], 0);
+  strictEqual(second.cpu.state.core.readReg32("eax"), 0);
+});
+
 test("machine requires a positive x86-page-aligned size", () => {
   for (const memoryByteLength of [
     0,

@@ -4,12 +4,7 @@ import { test } from "node:test";
 import { testExecutionModel } from "#test/support/execution-model.js";
 import { createStatusFlagResolvers } from "#core/flags/lazy/resolvers.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
-import {
-  buildInterpreterProgram,
-  interpreterRunExportName
-} from "#interpreter/program.js";
-import { cpuStateResourceDefinition } from "#cpu/state.js";
-import { guestMemoryResourceDefinition } from "#memory/resource.js";
+import { buildInterpreterProgram } from "#interpreter/program.js";
 import type { Body } from "#ir/block.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -18,13 +13,13 @@ import { placeFunction } from "#compiler/placement/place.js";
 
 let cachedProgram: ReturnType<typeof buildInterpreterProgram> | undefined;
 
-test("interpreter closes as a compiler program with a parameterless run root", () => {
-  const program = interpreterProgram();
+test("interpreter closes as a compiler program with an exact parameterless entry", () => {
+  const { program, entry } = interpreterProgram();
   const runExport = program.exports.find(
-    (entry) => entry.name === interpreterRunExportName
+    (exported) => exported.ref === entry
   );
 
-  ok(runExport !== undefined, "missing interpreter run export declaration");
+  ok(runExport !== undefined, "missing exact Interpreter entry export declaration");
   const run = program.functions.find((fn) => fn.ref === runExport.target);
 
   ok(run !== undefined, "missing interpreter run function declaration");
@@ -38,15 +33,11 @@ test("interpreter closes as a compiler program with a parameterless run root", (
     program.functions.every((fn) => fn.kind === "function"),
     "interpreter program must not retain a legacy body"
   );
-  deepStrictEqual(
-    program.memoryImports.map((memory) => memory.name),
-    [cpuStateResourceDefinition.name, guestMemoryResourceDefinition.name]
-  );
   deepStrictEqual(program.globals, []);
 });
 
 test("interpreter links the zero-argument status-flag resolver family", () => {
-  const program = interpreterProgram();
+  const { program } = interpreterProgram();
   const expectedResolvers = createStatusFlagResolvers(
     testExecutionModel.cpuState.access
   ).members(x86StatusFlags);
@@ -145,12 +136,12 @@ function interpreterProgram(): ReturnType<typeof buildInterpreterProgram> {
 }
 
 function interpreterRun() {
-  const program = interpreterProgram();
+  const { program, entry } = interpreterProgram();
   const runExport = program.exports.find(
-    (entry) => entry.name === interpreterRunExportName
+    (exported) => exported.ref === entry
   );
 
-  ok(runExport !== undefined, "missing interpreter run export declaration");
+  ok(runExport !== undefined, "missing exact Interpreter entry export declaration");
   const run = program.functions.find((fn) => fn.ref === runExport.target);
 
   ok(run !== undefined && run.kind === "function", "missing compiler IR Interpreter run");

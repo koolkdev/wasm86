@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
+import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import { createCpuStateHostView } from "#cpu/host-view.js";
 import { readRegisterAlias, writeRegisterAlias } from "#core/state/view.js";
 import { x86Flags } from "#core/flags/definitions.js";
@@ -11,6 +12,7 @@ import {
   writeWasmCpuStateSnapshot,
   type WasmCpuStateInit
 } from "#test/support/cpu-state.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 const allFlagBytesSet = {
@@ -30,7 +32,7 @@ const noFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 
 test("Cpu state host view rejects short memory", () => {
   throws(
-    () => createCpuStateHostView(new WebAssembly.Memory({ initial: 0 })),
+    () => createStateHostView(new WebAssembly.Memory({ initial: 0 })),
     /execution-state memory is too small/
   );
 });
@@ -154,7 +156,13 @@ function createState(initial: WasmCpuStateInit): Readonly<{
   const memory = new WebAssembly.Memory({ initial: 1 });
   seed(memory, initial);
 
-  return { memory, state: createCpuStateHostView(memory) };
+  return { memory, state: createStateHostView(memory) };
+}
+
+function createStateHostView(memory: WebAssembly.Memory) {
+  return createCpuStateHostView(
+    createLayoutHostView(memory, testExecutionModel.cpuState.layout)
+  );
 }
 
 function seed(memory: WebAssembly.Memory, initial: WasmCpuStateInit): void {

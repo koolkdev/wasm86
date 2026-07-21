@@ -10,32 +10,8 @@ import {
   writeGuestBytes
 } from "./harness.js";
 import { startAddress } from "#test/support/addresses.js";
-import { assertMemoryImports } from "#wasm/tests/helpers.js";
-import { programImportModuleName } from "#compiler/program/imports.js";
-import { cpuStateResourceDefinition } from "#cpu/state.js";
 import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { invalidOpcode } from "#core/exceptions.js";
-import { encodeInterpreterModule } from "#interpreter/module.js";
-
-test("imports cpu state and guest memory in program resource order", () => {
-  const module = new WebAssembly.Module(encodeInterpreterModule());
-
-  assertMemoryImports(module);
-});
-
-test("exports parameterless run() -> i64", async () => {
-  const interpreter = await instantiateInterpreter();
-  const exportedRun = interpreter.instance.exports.run;
-
-  if (typeof exportedRun !== "function") {
-    throw new Error("missing exported interpreter run function");
-  }
-  strictEqual(exportedRun.length, 0);
-  strictEqual(
-    WebAssembly.Module.exports(interpreter.module).some((entry) => entry.kind === "function" && entry.name === "run"),
-    true
-  );
-});
 
 test("a zero instruction budget returns the limit exit without changing architectural state", async () => {
   const interpreter = await instantiateInterpreter();
@@ -183,22 +159,4 @@ test("undefined two-byte opcode path raises #UD after consuming the escape", asy
 
   deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
-});
-
-test("requires both declared memories when instantiating", async () => {
-  const module = new WebAssembly.Module(encodeInterpreterModule());
-  const cpuStateMemory = new WebAssembly.Memory({ initial: 1 });
-
-  await WebAssembly.instantiate(module, {
-    [programImportModuleName]: {
-      [cpuStateResourceDefinition.name]: cpuStateMemory
-    }
-  }).then(
-    () => {
-      throw new Error("expected instantiation failure");
-    },
-    (error: unknown) => {
-      strictEqual(error instanceof WebAssembly.LinkError, true);
-    }
-  );
 });

@@ -8,7 +8,6 @@ import {
 } from "#compiler/layout/host-view.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import { createCpuStateHostView } from "#cpu/host-view.js";
-import { cpuState } from "#cpu/state.js";
 import { x86Flags } from "#core/flags/definitions.js";
 import {
   createFlagStateHostView,
@@ -37,7 +36,10 @@ import {
   type WasmCpuStateField,
   type WasmCpuStateInit
 } from "#test/support/cpu-state.js";
-import { cpuStateAccess } from "#test/support/execution-model.js";
+import {
+  cpuStateAccess,
+  testExecutionModel
+} from "#test/support/execution-model.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
 type OwnerViews = Readonly<{
@@ -236,7 +238,9 @@ for (const agreement of [...fullMemberCases, ...narrowGprCases]) {
     const destination = destinationFor(agreement.location);
     const block = agreementBlock(agreement.location, destination, agreement.generatedWrite);
     const { stateMemory, run } = await instantiateIrBlock(block);
-    const combined = createCpuStateHostView(stateMemory);
+    const combined = createCpuStateHostView(
+      createLayoutHostView(stateMemory, testExecutionModel.cpuState.layout)
+    );
     const initial: WasmCpuStateInit = {};
 
     initial[agreement.field] = agreement.hostSeed;
@@ -298,7 +302,10 @@ function stateOperand(
 }
 
 function ownerViews(memory: WebAssembly.Memory): OwnerViews {
-  const storage = createLayoutHostView(memory, cpuState.layout);
+  const storage = createLayoutHostView(
+    memory,
+    testExecutionModel.cpuState.layout
+  );
 
   return {
     core: createCoreStateHostView(storage),

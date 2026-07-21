@@ -1,20 +1,54 @@
 import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
-import { functionExportRef } from "#compiler/program/refs.js";
+import {
+  compileProgram,
+  type CompiledProgram
+} from "#compiler/program/compile.js";
+import {
+  functionExportRef,
+  type FunctionExportRef
+} from "#compiler/program/refs.js";
 import type { ExecutionModel } from "#execution/model.js";
 import { defineInterpreterRun } from "./run.js";
 
-export const interpreterRunExportName = "run";
+const interpreterRunExportName = "run";
+const interpreterRunExport = functionExportRef(
+  "interpreter.run-export"
+);
+
+export type InterpreterProgram = Readonly<{
+  program: Program;
+  entry: FunctionExportRef;
+}>;
+
+export type CompiledInterpreter = Readonly<{
+  program: CompiledProgram;
+  entry: FunctionExportRef;
+}>;
 
 export function buildInterpreterProgram(
   model: ExecutionModel
-): Program {
+): InterpreterProgram {
   const builder = new ProgramBuilder(model.resources);
   const run = defineInterpreterRun(builder, model);
 
   builder.exportFunction({
-    ref: functionExportRef("interpreter.run-export"),
+    ref: interpreterRunExport,
     name: interpreterRunExportName,
     target: run.ref
   });
-  return builder.finish();
+  return {
+    program: builder.finish(),
+    entry: interpreterRunExport
+  };
+}
+
+export function compileInterpreterProgram(
+  model: ExecutionModel
+): CompiledInterpreter {
+  const interpreter = buildInterpreterProgram(model);
+
+  return {
+    program: compileProgram(interpreter.program),
+    entry: interpreter.entry
+  };
 }

@@ -6,14 +6,16 @@ import { resourceRef } from "#compiler/ir/resource.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
-import { cpuState } from "#cpu/state.js";
 import { flagStateFields } from "#core/flags/layout.js";
 import { coreStateFields } from "#core/state/layout.js";
 import { RegionBuilder } from "#ir/region-builder.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
 import {
   BoundStateAccess,
   StateAccess
 } from "../access.js";
+
+const cpuState = testExecutionModel.cpuState;
 
 function createAccess(): Readonly<{
   values: ValueTable;
