@@ -8,7 +8,6 @@ import type {
   OperandBinding
 } from "./bindings.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 import type { InstructionState } from "./state/state.js";
 
@@ -34,12 +33,10 @@ export class OperandScope {
 }
 
 export class OperandResolver {
-  readonly #values: ValueTable;
   readonly #state: InstructionState;
   #bindings: readonly OperandBinding[] = [];
 
-  constructor(values: ValueTable, state: InstructionState) {
-    this.#values = values;
+  constructor(state: InstructionState) {
     this.#state = state;
   }
 
@@ -49,7 +46,6 @@ export class OperandResolver {
   ): ScopedOperandResolver {
     return new ScopedOperandResolver(
       this,
-      this.#values,
       this.#state,
       scope,
       access
@@ -111,20 +107,17 @@ export class OperandResolver {
 // architectural read uses the state access bound to the same region.
 export class ScopedOperandResolver {
   readonly #owner: OperandResolver;
-  readonly #values: ValueTable;
   readonly #state: InstructionState;
   readonly #scope: OperandScope;
   readonly #access: BoundStateAccess;
 
   constructor(
     owner: OperandResolver,
-    values: ValueTable,
     state: InstructionState,
     scope: OperandScope,
     access: BoundStateAccess
   ) {
     this.#owner = owner;
-    this.#values = values;
     this.#state = state;
     this.#scope = scope;
     this.#access = access;
@@ -211,7 +204,7 @@ export class ScopedOperandResolver {
       32
     );
 
-    return this.#values.binary(
+    return this.#access.values.binary(
       "add",
       base,
       binding.offset
@@ -229,18 +222,28 @@ export class ScopedOperandResolver {
       const index = this.#state.gpr.read(this.#access, ea.index);
       const scaled = ea.scale === 1
         ? index
-        : this.#values.binary("shl", index, this.#values.const(scaleShift[ea.scale]));
+        : this.#access.values.binary(
+            "shl",
+            index,
+            this.#access.values.const(scaleShift[ea.scale])
+          );
 
-      address = address === undefined ? scaled : this.#values.binary("add", address, scaled);
+      address = address === undefined
+        ? scaled
+        : this.#access.values.binary("add", address, scaled);
     }
 
     if (address === undefined) {
-      return this.#values.const(ea.disp);
+      return this.#access.values.const(ea.disp);
     }
 
     return ea.disp === 0
       ? address
-      : this.#values.binary("add", address, this.#values.const(ea.disp));
+      : this.#access.values.binary(
+          "add",
+          address,
+          this.#access.values.const(ea.disp)
+        );
   }
 
   #linearAddress(segment: SegmentRegister, offset: ValueId): ValueId {
@@ -249,7 +252,7 @@ export class ScopedOperandResolver {
       return offset;
     }
 
-    return this.#values.binary(
+    return this.#access.values.binary(
       "add",
       this.#state.segments.readBase(this.#access, segment),
       offset
@@ -279,7 +282,7 @@ export class ScopedOperandResolver {
       case "static":
         return this.#linearAddress(segment.reg, offset);
       case "dynamic":
-        return this.#values.binary(
+        return this.#access.values.binary(
           "add",
           this.#state.segments.readDynamicBase(this.#access, segment.index),
           offset

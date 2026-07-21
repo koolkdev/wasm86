@@ -10,7 +10,6 @@ import type {
 } from "#core/state/access.js";
 import { covers, mayAlias } from "#ir/aliasing.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { ValueTable } from "#compiler/ir/values/table.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
 import type { StateWriteObserver } from "./write-log.js";
 
@@ -25,7 +24,6 @@ type GprStateSnapshot = Readonly<{
 
 // GPR channels can alias. This tracker owns their overlap and restart rules.
 export class GprState {
-  readonly #values: ValueTable;
   readonly #stateAccess: StateAccess;
   readonly #buffer = new PendingBuffer<GprChannel>();
   readonly #reads = new Map<GprChannel, ValueId>();
@@ -34,11 +32,9 @@ export class GprState {
   #unrestorableStore = false;
 
   constructor(
-    values: ValueTable,
     stateAccess: StateAccess,
     writeObserver?: StateWriteObserver
   ) {
-    this.#values = values;
     this.#stateAccess = stateAccess;
     this.#writeObserver = writeObserver;
   }
@@ -126,7 +122,7 @@ export class GprState {
     const exact = this.#buffer.get(channel);
 
     if (exact !== undefined) {
-      return this.#narrowTrackedValue(channel, exact.value, signed);
+      return this.#narrowTrackedValue(access, channel, exact.value, signed);
     }
 
     for (const [other] of this.#buffer.entries()) {
@@ -366,14 +362,21 @@ export class GprState {
   // flush store masks the rest. An exact hit normalizes through the smart
   // constructors, which is free whenever the value's width bounds already
   // cover the channel.
-  #narrowTrackedValue(channel: GprChannel, value: ValueId, signed: boolean): ValueId {
+  #narrowTrackedValue(
+    access: BoundStateAccess,
+    channel: GprChannel,
+    value: ValueId,
+    signed: boolean
+  ): ValueId {
     const bits = narrowBits(channel);
 
     if (bits === undefined) {
       return value;
     }
 
-    return signed ? this.#values.extend(bits, value, true) : this.#values.truncate(bits, value);
+    return signed
+      ? access.values.extend(bits, value, true)
+      : access.values.truncate(bits, value);
   }
 }
 

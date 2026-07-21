@@ -16,7 +16,10 @@ type TruncateNode = Readonly<TruncateArgs & { kind: "truncate" }>;
 
 export const truncateValue: ValueDefinition<TruncateArgs, TruncateNode> = {
   create: ({ inputType, width, value }) => ({ kind: "truncate", inputType, width, value }),
-  internKey: (node) => [node.inputType, node.width, node.value],
+  identity: {
+    kind: "scoped",
+    key: (node) => [node.inputType, node.width, node.value]
+  },
   inputs: (node) => [{ value: node.value, type: node.inputType }],
   resultType: () => "i32",
   widthBounds: (node, context) => {

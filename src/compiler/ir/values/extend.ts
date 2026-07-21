@@ -30,7 +30,10 @@ export const extendValue: ValueDefinition<ExtendArgs, ExtendNode> = {
     value,
     signed
   }),
-  internKey: (node) => [node.resultType, node.width, node.signed, node.value],
+  identity: {
+    kind: "scoped",
+    key: (node) => [node.resultType, node.width, node.signed, node.value]
+  },
   inputs: (node) => [{ value: node.value, type: "i32" }],
   resultType: (node) => node.resultType,
   widthBounds: (node, context) => {

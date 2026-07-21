@@ -68,7 +68,10 @@ const binaryOperations: Readonly<Record<BinaryOperator, BinaryDefinition>> = {
 
 export const binaryValue: ValueDefinition<BinaryArgs, BinaryNode> = {
   create: ({ type, operator, a, b }) => ({ kind: "binary", type, operator, a, b }),
-  internKey: (node) => [node.type, node.operator, node.a, node.b],
+  identity: {
+    kind: "scoped",
+    key: (node) => [node.type, node.operator, node.a, node.b]
+  },
   inputs: (node) => [
     { value: node.a, type: node.type },
     { value: node.b, type: node.type }

@@ -11,6 +11,7 @@ import {
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { placeBody } from "#compiler/placement/place.js";
 import type { Body, IrBlock } from "#ir/block.js";
+import { RegionBuilder } from "#ir/region-builder.js";
 import {
   compilerTestValues,
   memoryWriteOperation,
@@ -78,6 +79,57 @@ test("a recipe used only in a selected body stays at its use", () => {
     anchor: useSite,
     local: undefined
   });
+  deepStrictEqual(plan.localTypes, []);
+});
+
+test("identical recipes authored by sibling if arms stay at their selected uses", () => {
+  const values = compilerTestValues();
+  const builder = new RegionBuilder(values);
+  const condition = values.external(0);
+  const input = values.external(1);
+  const increment = values.const(1);
+  let thenResult: ValueId | undefined;
+  let elseResult: ValueId | undefined;
+
+  builder.if(
+    condition,
+    (then) => {
+      thenResult = then.values.binary("add", input, increment);
+      then.push(resourceWriteNode(then.values, 0, thenResult));
+    },
+    {
+      elseBuild: (otherwise) => {
+        elseResult = otherwise.values.binary("add", input, increment);
+        otherwise.push(resourceWriteNode(otherwise.values, 1, elseResult));
+      }
+    }
+  );
+  const block: IrBlock = { values, body: builder.build() };
+  const control = block.body.nodes[0];
+
+  if (thenResult === undefined || elseResult === undefined) {
+    throw new Error("if arm recipes were not built");
+  }
+  if (control?.kind !== "if" || control.elseBody === undefined) {
+    throw new Error("expected an if with two arms");
+  }
+
+  strictEqual(thenResult === elseResult, false);
+
+  const { analysis, plan, index } = place(block);
+  const controlSite = analysis.siteOf(block.body, 0);
+
+  deepStrictEqual(plan.values[thenResult], {
+    kind: "atUse",
+    anchor: analysis.siteOf(control.thenBody, 0),
+    local: undefined
+  });
+  deepStrictEqual(plan.values[elseResult], {
+    kind: "atUse",
+    anchor: analysis.siteOf(control.elseBody, 0),
+    local: undefined
+  });
+  strictEqual(index.captures[controlSite], undefined);
   deepStrictEqual(plan.localTypes, []);
 });
 

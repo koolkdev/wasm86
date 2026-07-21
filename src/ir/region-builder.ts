@@ -78,7 +78,7 @@ export class RegionBuilder {
   }
 
   child(sink: BodyNodeSink = new BufferedBodyNodeSink()): RegionBuilder {
-    return new RegionBuilder(this.values, sink, this.#functionResults);
+    return new RegionBuilder(this.values.childScope(), sink, this.#functionResults);
   }
 
   cell(seed: ValueId): CellRef {

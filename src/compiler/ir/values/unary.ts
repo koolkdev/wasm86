@@ -53,7 +53,10 @@ type UnaryNode = Readonly<UnaryArgs & { kind: "unary" }>;
 
 export const unaryValue: ValueDefinition<UnaryArgs, UnaryNode> = {
   create: ({ operator, value }) => ({ kind: "unary", operator, value }),
-  internKey: (node) => [node.operator, node.value],
+  identity: {
+    kind: "scoped",
+    key: (node) => [node.operator, node.value]
+  },
   inputs: (node) => [{ value: node.value, type: "i32" }],
   resultType: () => "i32",
   widthBounds: (node) => unaryOperators[node.operator].bounds,

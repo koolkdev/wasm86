@@ -1,4 +1,10 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
+import {
+  deepStrictEqual,
+  notStrictEqual,
+  ok,
+  strictEqual,
+  throws
+} from "node:assert";
 import { test } from "node:test";
 
 import {
@@ -366,6 +372,163 @@ function pageFaultStop(
   );
 
   return exceptionExit(values, pageFault(payload, errorCode));
+}
+
+function assertSameFinishGraph(
+  values: ValueTable,
+  actual: Finish,
+  buildExpected: (expectedValues: ValueTable) => Finish
+): void {
+  const expectedValues = values.fork();
+  const expected = buildExpected(expectedValues);
+
+  strictEqual(actual.kind, expected.kind);
+  const compared = valueGraphComparison();
+
+  switch (actual.kind) {
+    case "dispatch":
+      if (expected.kind !== "dispatch") {
+        throw new Error(`expected ${expected.kind} finish, got dispatch`);
+      }
+      assertSameValueGraphBetween(
+        values,
+        actual.targetEip,
+        expectedValues,
+        expected.targetEip,
+        compared
+      );
+      return;
+    case "exit":
+      if (expected.kind !== "exit") {
+        throw new Error(`expected ${expected.kind} finish, got exit`);
+      }
+      assertSameValueGraphBetween(
+        values,
+        actual.result,
+        expectedValues,
+        expected.result,
+        compared
+      );
+  }
+}
+
+function assertSameValueGraph(
+  values: ValueTable,
+  actual: ValueId,
+  buildExpected: (expectedValues: ValueTable) => ValueId
+): void {
+  const expectedValues = values.fork();
+
+  assertSameValueGraphBetween(
+    values,
+    actual,
+    expectedValues,
+    buildExpected(expectedValues),
+    valueGraphComparison()
+  );
+}
+
+type ValueGraphComparison = Readonly<{
+  actualToExpected: Map<ValueId, ValueId>;
+  expectedToActual: Map<ValueId, ValueId>;
+}>;
+
+function valueGraphComparison(): ValueGraphComparison {
+  return {
+    actualToExpected: new Map(),
+    expectedToActual: new Map()
+  };
+}
+
+function assertSameValueGraphBetween(
+  actualValues: ValueTable,
+  actual: ValueId,
+  expectedValues: ValueTable,
+  expected: ValueId,
+  compared: ValueGraphComparison
+): void {
+  if (compared.actualToExpected.has(actual)) {
+    strictEqual(compared.actualToExpected.get(actual), expected);
+    return;
+  }
+  if (compared.expectedToActual.has(expected)) {
+    strictEqual(compared.expectedToActual.get(expected), actual);
+    return;
+  }
+
+  compared.actualToExpected.set(actual, expected);
+  compared.expectedToActual.set(expected, actual);
+
+  const actualNode = actualValues.node(actual);
+  const expectedNode = expectedValues.node(expected);
+
+  deepStrictEqual(valueNodeProperties(actualNode), valueNodeProperties(expectedNode));
+
+  switch (actualNode.kind) {
+    case "nodeOutput":
+    case "loopInput":
+    case "const":
+    case "const64":
+    case "external":
+    case "parameter":
+    case "unreachable":
+      strictEqual(actual, expected);
+      return;
+  }
+
+  const actualChildren = actualValues.children(actual);
+  const expectedChildren = expectedValues.children(expected);
+
+  strictEqual(actualChildren.length, expectedChildren.length);
+  for (const [index, actualChild] of actualChildren.entries()) {
+    const expectedChild = expectedChildren[index];
+
+    ok(expectedChild !== undefined);
+    assertSameValueGraphBetween(
+      actualValues,
+      actualChild,
+      expectedValues,
+      expectedChild,
+      compared
+    );
+  }
+}
+
+function valueNodeProperties(node: ValueNode): unknown {
+  switch (node.kind) {
+    case "binary":
+    case "compare":
+      return {
+        kind: node.kind,
+        type: node.type,
+        operator: node.operator
+      };
+    case "extend":
+      return {
+        kind: node.kind,
+        resultType: node.resultType,
+        width: node.width,
+        signed: node.signed
+      };
+    case "select":
+      return { kind: node.kind };
+    case "truncate":
+      return {
+        kind: node.kind,
+        inputType: node.inputType,
+        width: node.width
+      };
+    case "unary":
+      return { kind: node.kind, operator: node.operator };
+    case "nodeOutput":
+    case "loopInput":
+    case "const":
+    case "const64":
+    case "external":
+    case "parameter":
+    case "unreachable":
+      return node;
+  }
 }
 
 function stateWrites(block: IrBlock): StateWriteOperation[] {
@@ -1271,6 +1434,49 @@ test("a sibling exception is isolated from a continuing memory-write arm", () =>
   deepStrictEqual(entryNodes(block).at(-1), finishDispatch(block.values.const(0x1005)));
 });
 
+test("sibling exception exits are encoded independently", () => {
+  const values = new ValueTable();
+  const faultAddress = values.external(0);
+  const condition = values.external(1);
+  const faultInArm: SemanticTemplate = (s, v) => {
+    const exception = pageFault(
+      faultAddress,
+      v.const(PageFaultErrorCode.WRITE)
+    );
+
+    s.ifElse(
+      condition,
+      (first) => first.cpuException(exception),
+      (second) => second.cpuException(exception)
+    );
+  };
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(faultInArm, [], loc(0x1000, 0x1005));
+  });
+  const branch = ifNode(block);
+  const firstFinish = branch.thenBody.nodes.at(-1);
+  const secondFinish = branch.elseBody?.nodes.at(-1);
+
+  ok(
+    firstFinish !== undefined && firstFinish.kind === "finish" &&
+      firstFinish.finish.kind === "exit",
+    "first fault arm must return an encoded exit"
+  );
+  ok(
+    secondFinish !== undefined && secondFinish.kind === "finish" &&
+      secondFinish.finish.kind === "exit",
+    "second fault arm must return an encoded exit"
+  );
+  notStrictEqual(firstFinish.finish.result, secondFinish.finish.result);
+  assertSameValueGraphBetween(
+    values,
+    firstFinish.finish.result,
+    values,
+    secondFinish.finish.result,
+    valueGraphComparison()
+  );
+});
+
 test("an ifElse with two completing arms completes the root semantic path", () => {
   const trapEitherWay: SemanticTemplate = (s, v) => {
     s.ifElse(
@@ -1581,6 +1787,62 @@ test("a dynamic if arm cannot leak an operand address into its parent scope", ()
   );
 });
 
+test("sibling operand addresses are constructed independently", () => {
+  const values = new ValueTable();
+  const base = values.external(0);
+  const condition = values.external(1);
+  let firstAddress: ValueId | undefined;
+  let secondAddress: ValueId | undefined;
+  const useAddressInArm: SemanticTemplate = (s) => {
+    const operand = s.operand(0);
+
+    s.write(s.reg("ebx"), base, { width: 32 });
+    s.ifElse(
+      condition,
+      (first) => {
+        firstAddress = first.address(operand);
+        first.write(first.reg("eax"), firstAddress, { width: 32 });
+      },
+      (second) => {
+        secondAddress = second.address(operand);
+        second.write(second.reg("ecx"), secondAddress, { width: 32 });
+      }
+    );
+  };
+  const block = buildValueInstructionBlock(values, (builder) => {
+    builder.add(
+      useAddressInArm,
+      [mem({ base: "ebx", scale: 1, disp: 8 })],
+      loc(0x1000, 0x1005)
+    );
+  });
+  const branch = ifNode(block);
+  const firstWrite = stateWriteFor(
+    block,
+    branch.thenBody.nodes.filter(isStateWrite),
+    gprChannel("eax")
+  );
+  const secondWrite = stateWriteFor(
+    block,
+    branch.elseBody?.nodes.filter(isStateWrite) ?? [],
+    gprChannel("ecx")
+  );
+
+  ok(firstAddress !== undefined && secondAddress !== undefined);
+  ok(firstWrite !== undefined && secondWrite !== undefined);
+  strictEqual(stateWriteValue(firstWrite), firstAddress);
+  strictEqual(stateWriteValue(secondWrite), secondAddress);
+  notStrictEqual(firstAddress, secondAddress);
+  deepStrictEqual(values.node(firstAddress), {
+    kind: "binary",
+    type: "i32",
+    operator: "add",
+    a: base,
+    b: values.const(8)
+  });
+  deepStrictEqual(values.node(secondAddress), values.node(firstAddress));
+});
+
 test("a loop-local operand address cannot escape into the parent scope", () => {
   const resolveAddressInLoop: SemanticTemplate = (s) => {
     const operand = s.operand(0);
@@ -1692,7 +1954,7 @@ test("jcc side exit consumes eip in a terminating state scope and preserves fall
   const block = builder.finish();
   const v = block.values;
   const takenFlushes = nestedBodyView(block, 1).flushes;
-  const advancedCount = v.binary("add", outputOf(instructionCountRead(block)), v.const(2));
+  const countBase = outputOf(instructionCountRead(block));
 
   strictEqual(
     stateWriteValue(stateWriteFor(block, takenFlushes, coreStateFields.eip)!),
@@ -1702,11 +1964,16 @@ test("jcc side exit consumes eip in a terminating state scope and preserves fall
     stateWriteValue(stateWriteFor(block, takenFlushes, gprChannel("eax"))!),
     v.const(0x77)
   );
-  strictEqual(
+  assertSameValueGraph(
+    v,
     stateWriteValue(
       stateWriteFor(block, takenFlushes, instructionCountField)!
     ),
-    advancedCount
+    (expectedValues) => expectedValues.binary(
+      "add",
+      countBase,
+      expectedValues.const(2)
+    )
   );
   strictEqual(
     stateWriteValue(stateWriteFor(block, stateWrites(block), gprChannel("eax"))!),
@@ -2338,7 +2605,11 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
   deepStrictEqual(edge.flushes, [
     stateWrite(v, coreStateFields.eip, v.const(0x1000))
   ]);
-  deepStrictEqual(edge.terminator, pageFaultStop(v, "write", address));
+  assertSameFinishGraph(
+    v,
+    edge.terminator,
+    (expectedValues) => pageFaultStop(expectedValues, "write", address)
+  );
 });
 
 test("add [ebx], r32 resolves once with a WRITE fault before its read and write", () => {
@@ -2380,7 +2651,11 @@ test("add [ebx], r32 resolves once with a WRITE fault before its read and write"
   const eipFlushes = [stateWrite(v, coreStateFields.eip, v.const(0x1000))];
 
   deepStrictEqual(nestedBodyView(block, 1).flushes, eipFlushes);
-  deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultStop(v, "write", address));
+  assertSameFinishGraph(
+    v,
+    nestedBodyView(block, 1).terminator,
+    (expectedValues) => pageFaultStop(expectedValues, "write", address)
+  );
 });
 
 test("a later guard's edge flushes earlier pendings with the faulting eip", () => {
@@ -2421,7 +2696,11 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
     ),
     v.const(0x1003)
   );
-  deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultStop(v, "write", address));
+  assertSameFinishGraph(
+    v,
+    nestedBodyView(block, 1).terminator,
+    (expectedValues) => pageFaultStop(expectedValues, "write", address)
+  );
 
   // The edge flush leaves the main-path map untouched: the entry still
   // stores the sum and the store's value is the pending sum, not a reload.
@@ -2749,9 +3028,10 @@ test("memory guard emits the canonical fault selection without a transfer", () =
   strictEqual(nodes.filter((node) => node.kind === "if").length, 1);
   strictEqual(ifNode(block).hint, "unlikely");
   strictEqual(nestedBodies(block).length, 1);
-  deepStrictEqual(
+  assertSameFinishGraph(
+    block.values,
     nestedBodyView(block, 1).terminator,
-    pageFaultStop(block.values, "write", address)
+    (expectedValues) => pageFaultStop(expectedValues, "write", address)
   );
   strictEqual(
     stateWriteValue(stateWriteFor(block, stateWrites(block), gprChannel("ebx"))!),
@@ -2794,9 +3074,10 @@ test("guarded memory access remains reusable in a child semantic region", () => 
     storeSelection.thenBody.nodes.filter((node) => isMemoryWrite(node)).length,
     1
   );
-  deepStrictEqual(
+  assertSameFinishGraph(
+    block.values,
     nestedBodyView(block, 1).terminator,
-    pageFaultStop(block.values, "write", address)
+    (expectedValues) => pageFaultStop(expectedValues, "write", address)
   );
 });
 
@@ -2824,9 +3105,10 @@ test("a resolve caller selects its access fault before loading", () => {
 
   strictEqual(nodes.filter((node) => isMemoryRead(node)).length, 1);
   strictEqual(nodes.filter((node) => node.kind === "if").length, 1);
-  deepStrictEqual(
+  assertSameFinishGraph(
+    block.values,
     nestedBodyView(block, 1).terminator,
-    pageFaultStop(block.values, "read", address)
+    (expectedValues) => pageFaultStop(expectedValues, "read", address)
   );
 });
 
@@ -2903,13 +3185,15 @@ test("READ and WRITE resolutions retain their exact fault intents", () => {
   const block = builder.finish();
 
   strictEqual(nestedBodies(block).length, 2);
-  deepStrictEqual(
+  assertSameFinishGraph(
+    block.values,
     nestedBodyView(block, 1).terminator,
-    pageFaultStop(block.values, "read", address)
+    (expectedValues) => pageFaultStop(expectedValues, "read", address)
   );
-  deepStrictEqual(
+  assertSameFinishGraph(
+    block.values,
     nestedBodyView(block, 2).terminator,
-    pageFaultStop(block.values, "write", address)
+    (expectedValues) => pageFaultStop(expectedValues, "write", address)
   );
 });
 
@@ -2950,9 +3234,10 @@ test("a guard after a register write restores the pre-instruction value in its e
     stateWrite(v, gprChannel("eax"), v.const(0x111)),
     stateWrite(v, coreStateFields.eip, v.const(0x1005))
   ]);
-  deepStrictEqual(
+  assertSameFinishGraph(
+    v,
     nestedBodyView(block, 1).terminator,
-    pageFaultStop(v, "write", address)
+    (expectedValues) => pageFaultStop(expectedValues, "write", address)
   );
 
   // The main path keeps the new value: the store and the flush carry 0x222.
@@ -2981,9 +3266,10 @@ test("a guard after writing a previously-clean register omits the channel from i
   deepStrictEqual(nestedBodyView(block, 1).flushes, [
     stateWrite(v, coreStateFields.eip, v.const(0x1000))
   ]);
-  deepStrictEqual(
+  assertSameFinishGraph(
+    v,
     nestedBodyView(block, 1).terminator,
-    pageFaultStop(v, "write", address)
+    (expectedValues) => pageFaultStop(expectedValues, "write", address)
   );
   strictEqual(
     stateWriteValue(stateWriteFor(block, stateWrites(block), gprChannel("eax"))!),
@@ -3022,9 +3308,17 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
   const eipFlushes = [stateWrite(v, coreStateFields.eip, v.const(0x1000))];
 
   deepStrictEqual(nestedBodyView(block, 1).flushes, eipFlushes);
-  deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultStop(v, "read", esp));
+  assertSameFinishGraph(
+    v,
+    nestedBodyView(block, 1).terminator,
+    (expectedValues) => pageFaultStop(expectedValues, "read", esp)
+  );
   deepStrictEqual(nestedBodyView(block, 2).flushes, eipFlushes);
-  deepStrictEqual(nestedBodyView(block, 2).terminator, pageFaultStop(v, "write", ebx));
+  assertSameFinishGraph(
+    v,
+    nestedBodyView(block, 2).terminator,
+    (expectedValues) => pageFaultStop(expectedValues, "write", ebx)
+  );
 });
 
 test("pop fs:[ebx] writes to the linear destination address", () => {
@@ -3054,7 +3348,11 @@ test("pop fs:[ebx] writes to the linear destination address", () => {
     stateWrite(v, gprChannel("esp"), nextEsp),
     finishDispatch(v.const(0x1002))
   ]);
-  deepStrictEqual(nestedBodyView(block, 2).terminator, pageFaultStop(v, "write", address));
+  assertSameFinishGraph(
+    v,
+    nestedBodyView(block, 2).terminator,
+    (expectedValues) => pageFaultStop(expectedValues, "write", address)
+  );
 });
 
 test("pop [ebx] write edge restores a previous instruction's pending esp", () => {
@@ -3073,9 +3371,10 @@ test("pop [ebx] write edge restores a previous instruction's pending esp", () =>
     stateWrite(v, gprChannel("esp"), v.const(0x30)),
     stateWrite(v, coreStateFields.eip, v.const(0x1005))
   ]);
-  deepStrictEqual(
+  assertSameFinishGraph(
+    v,
     nestedBodyView(block, 1).terminator,
-    pageFaultStop(v, "write", outputOf(ebxRead))
+    (expectedValues) => pageFaultStop(expectedValues, "write", outputOf(ebxRead))
   );
   strictEqual(
     stateWriteValue(stateWriteFor(block, stateWrites(block), gprChannel("esp"))!),
@@ -3768,9 +4067,10 @@ test("a fault edge restores a runtime eip", () => {
   deepStrictEqual(nestedBodyView(block, 1).flushes, [
     stateWrite(v, coreStateFields.eip, instructionStart)
   ]);
-  deepStrictEqual(
+  assertSameFinishGraph(
+    v,
     nestedBodyView(block, 1).terminator,
-    pageFaultStop(v, "read", address)
+    (expectedValues) => pageFaultStop(expectedValues, "read", address)
   );
   deepStrictEqual(
     rawEntryNodes(block).filter(
@@ -3843,7 +4143,11 @@ test("a memOffset operand guards and accesses the external address", () => {
     stateWrite(v, gprChannel("eax"), outputOf(load)),
     finishDispatch(v.const(0x1006))
   ]);
-  deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultStop(v, "read", address));
+  assertSameFinishGraph(
+    v,
+    nestedBodyView(block, 1).terminator,
+    (expectedValues) => pageFaultStop(expectedValues, "read", address)
+  );
 });
 
 test("a segmented memOffset operand adds the selected segment base", () => {
@@ -3874,7 +4178,11 @@ test("a segmented memOffset operand adds the selected segment base", () => {
     stateWrite(v, gprChannel("eax"), outputOf(load)),
     finishDispatch(v.const(0x1006))
   ]);
-  deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultStop(v, "read", address));
+  assertSameFinishGraph(
+    v,
+    nestedBodyView(block, 1).terminator,
+    (expectedValues) => pageFaultStop(expectedValues, "read", address)
+  );
 });
 
 test("a memDynamicBase operand reads the base register inside the block", () => {
@@ -3905,7 +4213,11 @@ test("a memDynamicBase operand reads the base register inside the block", () => 
     stateWrite(v, gprChannel("eax"), outputOf(load)),
     finishDispatch(v.const(0x1006))
   ]);
-  deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultStop(v, "read", address));
+  assertSameFinishGraph(
+    v,
+    nestedBodyView(block, 1).terminator,
+    (expectedValues) => pageFaultStop(expectedValues, "read", address)
+  );
 });
 
 test("fs memDynamicBase operands add the segment base to the dynamic effective address", () => {
@@ -4076,12 +4388,20 @@ test("pop [memDynamicBase] flushes esp before the base read and restores it on t
   deepStrictEqual(nestedBodyView(block, 1).flushes, [
     stateWrite(v, coreStateFields.eip, v.const(0x1000))
   ]);
-  deepStrictEqual(nestedBodyView(block, 1).terminator, pageFaultStop(v, "read", esp));
+  assertSameFinishGraph(
+    v,
+    nestedBodyView(block, 1).terminator,
+    (expectedValues) => pageFaultStop(expectedValues, "read", esp)
+  );
   deepStrictEqual(nestedBodyFlushes(block, 2), [
     stateWrite(v, gprChannel("esp"), esp),
     stateWrite(v, coreStateFields.eip, v.const(0x1000))
   ]);
-  deepStrictEqual(nestedBodyView(block, 2).terminator, pageFaultStop(v, "write", address));
+  assertSameFinishGraph(
+    v,
+    nestedBodyView(block, 2).terminator,
+    (expectedValues) => pageFaultStop(expectedValues, "write", address)
+  );
 });
 
 test("a guard after a memDynamicBase flush of a never-read register fails loudly", () => {
@@ -4192,20 +4512,44 @@ test("conditional jump side exit and fallthrough flush the advanced count", () =
   const fallthroughRead = instructionCountRead(block);
 
   ok(takenRead !== undefined, "expected taken count read");
-  strictEqual(
-    stateWriteValue(
-      stateWriteFor(block, taken.flushes, instructionCountField)!
-    ),
-    v.binary("add", outputOf(takenRead), v.const(1))
+  const takenCount = stateWriteValue(
+    stateWriteFor(block, taken.flushes, instructionCountField)!
   );
+  const fallthroughCount = stateWriteValue(
+    rawEntryNodes(block).find(
+      (node): node is StateWriteOperation =>
+        writesStateChannel(v, node, instructionCountField)
+    )!
+  );
+
+  assertSameValueGraph(
+    v,
+    takenCount,
+    (expectedValues) => expectedValues.binary(
+      "add",
+      outputOf(takenRead),
+      expectedValues.const(1)
+    )
+  );
+  const rootView = v.fork();
+  const rootTakenCount = rootView.binary(
+    "add",
+    outputOf(takenRead),
+    rootView.const(1)
+  );
+  const rootFallthroughCount = rootView.binary(
+    "add",
+    outputOf(fallthroughRead),
+    rootView.const(1)
+  );
+
+  notStrictEqual(takenCount, rootTakenCount);
+  notStrictEqual(takenCount, fallthroughCount);
+  strictEqual(fallthroughCount, rootFallthroughCount);
   strictEqual(
-    stateWriteValue(
-      rawEntryNodes(block).find(
-        (node): node is StateWriteOperation =>
-          writesStateChannel(v, node, instructionCountField)
-      )!
-    ),
-    v.binary("add", outputOf(fallthroughRead), v.const(1))
+    rootView.binary("add", outputOf(takenRead), rootView.const(1)),
+    rootTakenCount,
+    "repeating the reconstructed recipe in the root view preserves its identity"
   );
 });
 

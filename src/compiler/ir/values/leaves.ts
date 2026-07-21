@@ -25,7 +25,7 @@ type ParameterNode = Readonly<ParameterArgs & { kind: "parameter" }>;
 
 export const constantValue: ValueDefinition<ConstArgs, ConstNode> = {
   create: ({ value }) => ({ kind: "const", value: i32(value) }),
-  internKey: (node) => [node.value],
+  identity: { kind: "canonical", key: (node) => [node.value] },
   resultType: () => "i32",
   widthBounds: (node) => constWidthBounds(node.value),
   captureMode: "reemit",
@@ -36,7 +36,7 @@ export const constantValue: ValueDefinition<ConstArgs, ConstNode> = {
 
 export const constant64Value: ValueDefinition<Const64Args, Const64Node> = {
   create: ({ value }) => ({ kind: "const64", value: BigInt.asIntN(64, value) }),
-  internKey: (node) => [node.value],
+  identity: { kind: "canonical", key: (node) => [node.value] },
   resultType: () => "i64",
   widthBounds: () => {
     assert(false, "width bounds requested for i64 constant value");
@@ -48,7 +48,7 @@ export const constant64Value: ValueDefinition<Const64Args, Const64Node> = {
 
 export const unreachableValue: ValueDefinition<UnreachableArgs, UnreachableNode> = {
   create: ({ type }) => ({ kind: "unreachable", type }),
-  internKey: (node) => [node.type],
+  identity: { kind: "canonical", key: (node) => [node.type] },
   resultType: (node) => node.type,
   widthBounds: () => unboundedWidthBounds,
   mayTrap: () => true,
@@ -58,7 +58,7 @@ export const unreachableValue: ValueDefinition<UnreachableArgs, UnreachableNode>
 
 export const nodeOutputValue: ValueDefinition<NodeOutputArgs, NodeOutputNode> = {
   create: ({ type }) => ({ kind: "nodeOutput", type }),
-  internKey: () => undefined,
+  identity: { kind: "occurrence" },
   resultType: (node) => node.type,
   widthBounds: (node) => {
     assert(node.type === "i32", "width bounds requested for i64 node output");
@@ -70,7 +70,7 @@ export const nodeOutputValue: ValueDefinition<NodeOutputArgs, NodeOutputNode> = 
 
 export const loopInputValue: ValueDefinition<undefined, LoopInputNode> = {
   create: () => ({ kind: "loopInput" }),
-  internKey: () => undefined,
+  identity: { kind: "occurrence" },
   resultType: () => "i32",
   widthBounds: () => unboundedWidthBounds,
   captureMode: "reemit",
@@ -79,7 +79,7 @@ export const loopInputValue: ValueDefinition<undefined, LoopInputNode> = {
 
 export const externalValue: ValueDefinition<ExternalArgs, ExternalNode> = {
   create: ({ external }) => ({ kind: "external", external }),
-  internKey: (node) => [node.external],
+  identity: { kind: "canonical", key: (node) => [node.external] },
   resultType: () => "i32",
   widthBounds: () => unboundedWidthBounds,
   captureMode: "reemit",
@@ -91,7 +91,7 @@ export const parameterValue: ValueDefinition<ParameterArgs, ParameterNode> = {
     assert(Number.isInteger(index) && index >= 0, `invalid function parameter index: ${index}`);
     return { kind: "parameter", index, type };
   },
-  internKey: (node) => [node.index, node.type],
+  identity: { kind: "canonical", key: (node) => [node.index, node.type] },
   resultType: (node) => node.type,
   widthBounds: (node) => {
     assert(node.type === "i32", "width bounds requested for i64 parameter");

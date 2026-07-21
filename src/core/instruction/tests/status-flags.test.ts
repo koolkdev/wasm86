@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { BodyNode } from "#ir/block.js";
@@ -68,12 +68,58 @@ function materializeStateWrites(
   return writes.map((args) => resourceWrite.create(args));
 }
 
+function assertDirectCompare(
+  values: ValueTable,
+  result: ValueId,
+  width: 8 | 16 | 32,
+  operator: "le_u" | "lt_s" | "eq",
+  a: ValueId,
+  b: ValueId
+): void {
+  const compare = values.node(result);
+
+  if (operator === "eq" && values.constValue(b) === 0) {
+    ok(compare.kind === "unary", "expected direct arm zero comparison");
+    strictEqual(compare.operator, "eqz");
+    assertAdjustedOperand(values, compare.value, width, a, false);
+    return;
+  }
+
+  ok(compare.kind === "compare", "expected direct arm compare");
+  strictEqual(compare.operator, operator);
+  assertAdjustedOperand(values, compare.a, width, a, operator === "lt_s");
+  assertAdjustedOperand(values, compare.b, width, b, operator === "lt_s");
+}
+
+function assertAdjustedOperand(
+  values: ValueTable,
+  actual: ValueId,
+  width: 8 | 16 | 32,
+  input: ValueId,
+  signed: boolean
+): void {
+  if (width === 32 || values.widthBounds(input)[signed ? "signedBits" : "unsignedBits"] <= width) {
+    strictEqual(actual, input);
+    return;
+  }
+
+  const adjusted = values.node(actual);
+
+  if (signed) {
+    ok(adjusted.kind === "extend", "expected sign-extended compare operand");
+    strictEqual(adjusted.signed, true);
+  } else {
+    ok(adjusted.kind === "truncate", "expected truncated compare operand");
+  }
+  strictEqual(adjusted.width, width);
+  strictEqual(adjusted.value, input);
+}
+
 function createHarness(): Harness {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
   const nodes = body.build().nodes as BodyNode[];
   const state = new InstructionState(
-    values,
     cpuStateAccess,
     cpuStatusFlagResolvers,
     instructionCountField
@@ -94,7 +140,7 @@ function createHarness(): Harness {
       read: (flag) => state.statusFlags.read(context, flag),
       condition: (cc) => state.statusFlags.condition(context, cc),
       write: (flag, value) => state.statusFlags.write(context, flag, value),
-      writeSource: (source) => state.statusFlags.writeSource(source),
+      writeSource: (source) => state.statusFlags.writeSource(context, source),
       resetToInputs: () => state.statusFlags.resetToInputs()
     }
   };
@@ -268,7 +314,6 @@ test("an arm-local resolver preserves rollback for carried lazy state", () => {
   const values = new ValueTable();
   const root = new RegionBuilder(values);
   const state = new InstructionState(
-    values,
     cpuStateAccess,
     cpuStatusFlagResolvers,
     instructionCountField
@@ -285,13 +330,14 @@ test("an arm-local resolver preserves rollback for carried lazy state", () => {
     left: values.const(7),
     right: values.const(5)
   };
+  const rootContext = { region: root, access: state.bind(root) };
 
-  state.statusFlags.writeSource({
+  state.statusFlags.writeSource(rootContext, {
     ...before,
     result: values.binary("sub", before.left, before.right)
   });
   state.beginInstructionBoundary();
-  state.statusFlags.writeSource({
+  state.statusFlags.writeSource(rootContext, {
     ...after,
     result: values.binary("sub", after.left, after.right)
   });
@@ -337,6 +383,72 @@ test("an arm-local resolver preserves rollback for carried lazy state", () => {
       right: before.right
     }
   );
+});
+
+test("sibling status sources and direct conditions construct independently", () => {
+  const values = new ValueTable();
+  const root = new RegionBuilder(values);
+  const state = new InstructionState(
+    cpuStateAccess,
+    cpuStatusFlagResolvers,
+    instructionCountField
+  );
+  const left = values.external(0);
+  const right = values.external(1);
+  const build = (selected: RegionBuilder) => state.enterScope(() => {
+    const access = state.bind(selected);
+    const context = { region: selected, access };
+    const result = selected.values.binary("sub", left, right);
+
+    state.statusFlags.writeSource(context, {
+      kind: "sub",
+      width: 8,
+      left,
+      right,
+      result
+    });
+    const below = state.statusFlags.condition(context, "B");
+    const writes = stateWriteOperations(materializeStateWrites(
+      state.flushesForPath(access, "completed")
+    ));
+    const lazyA = writes.find((write) => effectsEqual(
+      write.effect,
+      stateEffect(values, flagStateFields.lazyA)
+    ));
+    const lazyB = writes.find((write) => effectsEqual(
+      write.effect,
+      stateEffect(values, flagStateFields.lazyB)
+    ));
+
+    ok(lazyA !== undefined && lazyB !== undefined, "expected a complete lazy SUB record");
+    return {
+      narrowedLeft: stateWriteValue(lazyA),
+      narrowedRight: stateWriteValue(lazyB),
+      below
+    };
+  });
+  const first = build(root.child());
+  const second = build(root.child());
+
+  notStrictEqual(first.narrowedLeft, second.narrowedLeft);
+  notStrictEqual(first.narrowedRight, second.narrowedRight);
+  notStrictEqual(first.below, second.below);
+  deepStrictEqual(values.node(first.below), {
+    kind: "compare",
+    type: "i32",
+    operator: "lt_u",
+    a: first.narrowedLeft,
+    b: first.narrowedRight
+  });
+  deepStrictEqual(values.node(first.narrowedLeft), values.node(second.narrowedLeft));
+  deepStrictEqual(values.node(first.narrowedRight), values.node(second.narrowedRight));
+  deepStrictEqual(values.node(second.below), {
+    kind: "compare",
+    type: "i32",
+    operator: "lt_u",
+    a: second.narrowedLeft,
+    b: second.narrowedRight
+  });
 });
 
 test("writing the current input status flag value is a no-op", () => {
@@ -471,15 +583,7 @@ test("input-backed compare-family condition builds a lazy SUB switch", () => {
     const width = [8, 16, 32][index] as 8 | 16 | 32;
 
     deepStrictEqual(switchCase.body.nodes, []);
-    strictEqual(
-      switchCase.body.result,
-      values.compare(width, "le_u", a, b)
-    );
-
-    const result = values.node(switchCase.body.result!);
-
-    ok(result.kind === "compare", "expected direct arm compare");
-    strictEqual(result.operator, "le_u");
+    assertDirectCompare(values, switchCase.body.result!, width, "le_u", a, b);
   }
 
   const [carry, zero] = switchControl.defaultBody.nodes;
@@ -518,15 +622,7 @@ test("signed compare-family conditions sign-extend captured narrow lazy operands
     const width = [8, 16, 32][index] as 8 | 16 | 32;
 
     deepStrictEqual(switchCase.body.nodes, []);
-    strictEqual(
-      switchCase.body.result,
-      values.compare(width, "lt_s", a, b)
-    );
-
-    const result = values.node(switchCase.body.result!);
-
-    ok(result.kind === "compare", "expected direct arm compare");
-    strictEqual(result.operator, "lt_s");
+    assertDirectCompare(values, switchCase.body.result!, width, "lt_s", a, b);
   }
 });
 
@@ -558,9 +654,13 @@ test("input-backed equality condition builds lazy cases from one captured record
       : b;
 
     deepStrictEqual(switchCase.body.nodes, []);
-    strictEqual(
-      switchCase.body.result,
-      values.compare(width, "eq", a, rightOperand)
+    assertDirectCompare(
+      values,
+      switchCase.body.result!,
+      width,
+      "eq",
+      a,
+      rightOperand
     );
   }
 });

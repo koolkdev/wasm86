@@ -60,12 +60,12 @@ function createHarness(): Harness {
   const accessConstruction = new StateAccess(cpuState);
   const access = accessConstruction.bind(body);
   const fields = new StateFieldTracker(accessConstruction);
-  const gpr = new GprState(values, accessConstruction);
+  const gpr = new GprState(accessConstruction);
   const flushesForPath = (path: StatePathKind): readonly StateWriteOperation[] => [
     ...gpr.flushesForPath(access, path),
     ...fields.flushesForPath(access, path)
   ].map((args) => resourceWrite.create(args));
-  const segments = new SegmentState(values, fields);
+  const segments = new SegmentState(fields);
 
   return {
     values,
@@ -136,6 +136,87 @@ test("a GPR pending hit returns the value with no nodes", () => {
   pending.write(gprChannel("eax"), value);
   strictEqual(pending.read(gprChannel("eax")), value);
   deepStrictEqual(nodes, []);
+});
+
+test("sibling narrow GPR reads normalize independently", () => {
+  const values = new ValueTable();
+  const root = new RegionBuilder(values);
+  const stateAccess = new StateAccess(cpuState);
+  const gpr = new GprState(stateAccess);
+  const input = values.external(0);
+
+  gpr.writeChannel(stateAccess.bind(root), gprChannel("al"), input);
+
+  const first = root.child();
+  const firstByte = gpr.readChannel(
+    stateAccess.bind(first),
+    gprChannel("al"),
+    { signed: true }
+  );
+  const second = root.child();
+  const secondByte = gpr.readChannel(
+    stateAccess.bind(second),
+    gprChannel("al"),
+    { signed: true }
+  );
+
+  notStrictEqual(
+    firstByte,
+    secondByte,
+    "a retained ancestor value view would collapse the sibling reads"
+  );
+  deepStrictEqual(values.node(firstByte), {
+    kind: "extend",
+    resultType: "i32",
+    width: 8,
+    value: input,
+    signed: true
+  });
+  deepStrictEqual(values.node(secondByte), values.node(firstByte));
+  strictEqual(first.values.extend(8, input, true), firstByte);
+  strictEqual(second.values.extend(8, input, true), secondByte);
+});
+
+test("sibling segment-selector reads normalize independently", () => {
+  const values = new ValueTable();
+  const root = new RegionBuilder(values);
+  const stateAccess = new StateAccess(cpuState);
+  const fields = new StateFieldTracker(stateAccess);
+  const segments = new SegmentState(fields);
+  const selector = values.external(0);
+
+  fields.write(segmentSelectorChannel("fs"), selector);
+
+  const first = root.child();
+  const firstSelector = segments.readSelector(
+    stateAccess.bind(first),
+    "fs",
+    16,
+    { signed: true }
+  );
+  const second = root.child();
+  const secondSelector = segments.readSelector(
+    stateAccess.bind(second),
+    "fs",
+    16,
+    { signed: true }
+  );
+
+  notStrictEqual(
+    firstSelector,
+    secondSelector,
+    "a retained ancestor value view would collapse the sibling reads"
+  );
+  deepStrictEqual(values.node(firstSelector), {
+    kind: "extend",
+    resultType: "i32",
+    width: 16,
+    value: selector,
+    signed: true
+  });
+  deepStrictEqual(values.node(secondSelector), values.node(firstSelector));
+  strictEqual(first.values.extend(16, selector, true), firstSelector);
+  strictEqual(second.values.extend(16, selector, true), secondSelector);
 });
 
 test("a read disjoint from all pendings loads through one cached resource read", () => {

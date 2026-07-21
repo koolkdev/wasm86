@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
 import {
@@ -80,17 +79,16 @@ export class InstructionStorage {
   readonly state: InstructionState;
   readonly operands: OperandResolver;
 
-  constructor(values: ValueTable, options: InstructionStorageOptions) {
+  constructor(options: InstructionStorageOptions) {
     this.#stateAccess = options.stateAccess;
     this.#memoryConstruction = options.memory;
     this.state = new InstructionState(
-      values,
       options.stateAccess,
       options.statusFlagResolvers,
       options.instructionCountField,
       options.writeObserver
     );
-    this.operands = new OperandResolver(values, this.state);
+    this.operands = new OperandResolver(this.state);
   }
 
   bind(
@@ -294,7 +292,10 @@ export class ScopedInstructionStorage {
   }
 
   writeStatusFlagsSource(source: SimpleFlagSource): void {
-    this.#state.statusFlags.writeSource(source);
+    this.#state.statusFlags.writeSource(
+      { region: this.#region, access: this.#access },
+      source
+    );
   }
 
   condition(cc: ConditionCode): Value {
@@ -319,7 +320,12 @@ export class ScopedInstructionStorage {
       case "cell":
         return this.#region.read(storage);
       case "reg":
-        return this.#state.gpr.read(this.#access, storage.reg, width, options);
+        return this.#state.gpr.read(
+          this.#access,
+          storage.reg,
+          width,
+          options
+        );
       case "operand": {
         const binding = this.#operands.binding(storage.index);
 

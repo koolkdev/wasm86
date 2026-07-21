@@ -12,6 +12,11 @@ export type ValueNodeBase = Readonly<{ kind: string }>;
 export type ValueCaptureMode = "reemit" | "producer" | "compute";
 export type ValueKey = string | number | bigint | boolean;
 
+export type ValueIdentity<Node> =
+  | Readonly<{ kind: "occurrence" }>
+  | Readonly<{ kind: "canonical"; key(node: Node): readonly ValueKey[] }>
+  | Readonly<{ kind: "scoped"; key(node: Node): readonly ValueKey[] }>;
+
 export type ValueBoundsContext = Readonly<{
   constValue(id: ValueId): number | undefined;
   widthBounds(id: ValueId): WidthBounds;
@@ -53,8 +58,7 @@ export type ValueEmitContext = ValueEmitTarget & Readonly<{
 // no special behavior; StoredValueEntry supplies their common defaults.
 export type ValueDefinition<Args, Node extends ValueNodeBase> = Readonly<{
   create(args: Args): Node;
-  // Undefined deliberately disables interning for occurrence-identity leaves.
-  internKey(node: Node): readonly ValueKey[] | undefined;
+  identity: ValueIdentity<Node>;
   inputs?(node: Node): readonly ValueInput[];
   resultType(node: Node): ValueType;
   widthBounds(node: Node, context: ValueBoundsContext): WidthBounds;

@@ -1,5 +1,4 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
 import type { StateFieldTracker } from "./field-tracker.js";
 import type { BoundStateAccess } from "#core/state/access.js";
@@ -13,18 +12,15 @@ type InstructionCountStateSnapshot = Readonly<{
 // completed`. Anything that changes the cell outside increment() re-anchors the
 // fold via #rebase, so a stale base is never reused.
 export class InstructionCountState {
-  readonly #values: ValueTable;
   readonly #state: StateFieldTracker;
   readonly #field: FieldRef<"u32">;
   #base: ValueId | undefined;
   #completed = 0;
 
   constructor(
-    values: ValueTable,
     state: StateFieldTracker,
     field: FieldRef<"u32">
   ) {
-    this.#values = values;
     this.#state = state;
     this.#field = field;
   }
@@ -41,7 +37,7 @@ export class InstructionCountState {
   add(access: BoundStateAccess, value: ValueId): void {
     this.#state.write(
       this.#field,
-      this.#values.binary("add", this.read(access), value)
+      access.values.binary("add", this.read(access), value)
     );
     this.#rebase();
   }
@@ -71,10 +67,10 @@ export class InstructionCountState {
   #advancedValue(access: BoundStateAccess): ValueId {
     this.#base ??= this.#state.read(access, this.#field);
 
-    return this.#values.binary(
+    return access.values.binary(
       "add",
       this.#base,
-      this.#values.const(this.#completed)
+      access.values.const(this.#completed)
     );
   }
 }

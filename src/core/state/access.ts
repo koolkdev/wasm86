@@ -30,6 +30,7 @@ import type {
   SegmentRegister
 } from "#core/types.js";
 import type { RegionBuilder } from "#ir/region-builder.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 
 export type StateResource = Readonly<{
   resource: ResourceRef;
@@ -108,6 +109,10 @@ export class BoundStateAccess {
   // the binding never follows mutable builder state.
   forRegion(region: RegionBuilder): BoundStateAccess {
     return new BoundStateAccess(this.#state, region);
+  }
+
+  get values(): ValueBuilder {
+    return this.#region.values;
   }
 
   gpr(reg: RegName): ResourceByteOperand {

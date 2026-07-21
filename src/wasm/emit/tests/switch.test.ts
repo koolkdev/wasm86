@@ -7,6 +7,7 @@ import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
 import { cpuStateAccess } from "#cpu/state.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   operandRead,
   operandWrite
@@ -297,28 +298,31 @@ test("an arm-local compound over an arm-local read computes inside the arm", asy
 test("a parent compound consumed by two arms captures once before the switch", async () => {
   const values = new ValueTable();
   values.const(0);
-  const state = cpuStateAccess.bind(new RegionBuilder(values));
+  const builder = new RegionBuilder(values);
+  const state = cpuStateAccess.bind(builder);
   const selector = values.external(0);
-  const shared = values.binary("add", values.external(1), values.const(5));
-  const fallback = values.const(99);
-  const output = values.addNodeOutput();
-  const block: IrBlock = {
-    values,
-    body: {
-      nodes: [
-        switchControl.create({
-          selector,
-          output,
-          cases: [
-            { matches: [0], body: { nodes: [], result: shared } },
-            { matches: [1], body: { nodes: [], result: shared } }
-          ],
-          defaultBody: { nodes: [], result: fallback }
-        }),
-        operandWrite(state.gpr("eax"), output)
-      ]
-    }
-  };
+  const input = values.external(1);
+  const increment = values.const(5);
+  const shared = values.binary("add", input, increment);
+  const output = builder.switch(
+    selector,
+    [
+      {
+        match: 0,
+        build: (arm) => arm.values.binary("add", input, increment)
+      },
+      {
+        match: 1,
+        build: (arm) => arm.values.binary("add", input, increment)
+      }
+    ],
+    (fallback) => fallback.values.const(99)
+  );
+
+  strictEqual(values.binary("add", input, increment), shared);
+
+  state.write(state.gpr("eax"), output);
+  const block: IrBlock = { values, body: builder.build() };
   const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
 
   // One computation, captured before dispatch and replayed by each arm.
@@ -329,6 +333,109 @@ test("a parent compound consumed by two arms captures once before the switch", a
 
   strictEqual(run(1, 37), irBlockCompleted);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 42);
+});
+
+test("three sibling switch arms keep equal recipes after dispatch", async () => {
+  const values = new ValueTable();
+  const builder = new RegionBuilder(values);
+  const state = cpuStateAccess.bind(builder);
+  const selector = values.external(0);
+  const input = values.external(1);
+  const increment = values.const(1);
+  const armValues: ValueId[] = [];
+  const output = builder.switch(
+    selector,
+    [0, 1, 2].map((match) => ({
+      match,
+      build: (arm: RegionBuilder) => {
+        const value = arm.values.binary("add", input, increment);
+
+        armValues.push(value);
+        return value;
+      }
+    })),
+    (fallback) => fallback.values.const(7)
+  );
+
+  strictEqual(new Set(armValues).size, 3);
+  state.write(state.gpr("eax"), output);
+  const block: IrBlock = { values, body: builder.build() };
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 2).bytes);
+  const dispatchIndex = opcodes.indexOf(wasmOpcode.brTable);
+  const addIndexes = opcodes.flatMap((opcode, index) =>
+    opcode === wasmOpcode.i32Add ? [index] : []
+  );
+
+  strictEqual(dispatchIndex >= 0, true);
+  strictEqual(addIndexes.length, 3);
+  strictEqual(addIndexes.every((index) => index > dispatchIndex), true);
+
+  const { stateView, run } = await instantiateIrBlock(block, 2);
+
+  for (const selected of [0, 1, 2]) {
+    strictEqual(run(selected, 41), irBlockCompleted);
+    strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 42);
+  }
+  strictEqual(run(9, 41), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 7);
+});
+
+test("identical trapping recipes authored by switch arms remain after dispatch", async () => {
+  const values = new ValueTable();
+  const builder = new RegionBuilder(values);
+  const state = cpuStateAccess.bind(builder);
+  const selector = values.external(0);
+  const dividend = values.external(1);
+  const divisor = values.external(2);
+  let firstQuotient: ValueId | undefined;
+  let secondQuotient: ValueId | undefined;
+  const output = builder.switch(
+    selector,
+    [
+      {
+        match: 0,
+        build: (arm) => {
+          firstQuotient = arm.values.binary("div_u", dividend, divisor);
+          return firstQuotient;
+        }
+      },
+      {
+        match: 1,
+        build: (arm) => {
+          secondQuotient = arm.values.binary("div_u", dividend, divisor);
+          return secondQuotient;
+        }
+      }
+    ],
+    (fallback) => fallback.values.const(7)
+  );
+
+  if (firstQuotient === undefined || secondQuotient === undefined) {
+    throw new Error("switch arm recipes were not built");
+  }
+  strictEqual(firstQuotient === secondQuotient, false);
+
+  state.write(state.gpr("eax"), output);
+  const block: IrBlock = { values, body: builder.build() };
+  const opcodes = wasmBodyOpcodes(irBlockBody(block, 3).bytes);
+  const dispatchIndex = opcodes.indexOf(wasmOpcode.brTable);
+  const divideIndexes = opcodes.flatMap((opcode, index) =>
+    opcode === wasmOpcode.i32DivU ? [index] : []
+  );
+
+  strictEqual(dispatchIndex >= 0, true);
+  strictEqual(divideIndexes.length, 2);
+  strictEqual(divideIndexes.every((index) => index > dispatchIndex), true);
+
+  const { stateView, run } = await instantiateIrBlock(block, 3);
+
+  strictEqual(run(9, 1, 0), irBlockCompleted);
+  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 7);
+  for (const selected of [0, 1]) {
+    strictEqual(run(selected, 84, 2), irBlockCompleted);
+    strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 42);
+    throws(() => run(selected, 1, 0), WebAssembly.RuntimeError);
+  }
 });
 
 test("a switch captures a state snapshot before the selected arm writes it", async () => {

@@ -3,7 +3,6 @@ import type { OperandWidth, SegmentRegister } from "#core/types.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 import { segmentBaseChannel, segmentSelectorChannel } from "#core/state/channels.js";
 import { type ValueId } from "#compiler/ir/values/types.js";
-import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { StateFieldTracker } from "./field-tracker.js";
 
 export type SegmentReadOptions = Readonly<{
@@ -16,15 +15,10 @@ type SegmentStateSnapshot = Readonly<{
 
 // Selector and base state only. The terminal owns selector-write policy.
 export class SegmentState {
-  readonly #values: ValueTable;
   readonly #state: StateFieldTracker;
   readonly #dynamicBases = new Map<number, ValueId>();
 
-  constructor(
-    values: ValueTable,
-    state: StateFieldTracker
-  ) {
-    this.#values = values;
+  constructor(state: StateFieldTracker) {
     this.#state = state;
   }
 
@@ -51,6 +45,7 @@ export class SegmentState {
     options: SegmentReadOptions
   ): ValueId {
     return this.#widthAdjusted(
+      access,
       this.#state.read(access, segmentSelectorChannel(reg)),
       accessWidth,
       options
@@ -64,6 +59,7 @@ export class SegmentState {
     options: SegmentReadOptions
   ): ValueId {
     return this.#widthAdjusted(
+      access,
       access.read(access.dynamicSegment(index, "selector")),
       accessWidth,
       options
@@ -85,11 +81,16 @@ export class SegmentState {
     return base;
   }
 
-  #widthAdjusted(value: ValueId, accessWidth: OperandWidth, options: SegmentReadOptions): ValueId {
+  #widthAdjusted(
+    access: BoundStateAccess,
+    value: ValueId,
+    accessWidth: OperandWidth,
+    options: SegmentReadOptions
+  ): ValueId {
     assert(accessWidth === 16 || accessWidth === 32, `${accessWidth}-bit segment selector read`);
 
     return options.signed === true
-      ? this.#values.extend(accessWidth, value, true)
-      : this.#values.truncate(accessWidth, value);
+      ? access.values.extend(accessWidth, value, true)
+      : access.values.truncate(accessWidth, value);
   }
 }

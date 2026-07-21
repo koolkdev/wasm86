@@ -15,7 +15,6 @@ import {
   type FlagStateField
 } from "#core/flags/layout.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 
 export type FlagStateStorage = Readonly<{
@@ -71,7 +70,6 @@ type LazyConditionCaseSpec = Readonly<{
 }>;
 
 export class StatusFlagTracker {
-  readonly #values: ValueTable;
   readonly #state: FlagStateStorage;
   readonly #resolveFlagFromState: ResolveStatusFlagFromState;
   readonly #recordSourceWrite: (() => void) | undefined;
@@ -80,12 +78,10 @@ export class StatusFlagTracker {
   readonly #inputFlags = new Map<X86StatusFlag, ValueId>();
 
   constructor(
-    values: ValueTable,
     state: FlagStateStorage,
     resolveFlagFromState: ResolveStatusFlagFromState,
     recordSourceWrite?: () => void
   ) {
-    this.#values = values;
     this.#state = state;
     this.#resolveFlagFromState = resolveFlagFromState;
     this.#recordSourceWrite = recordSourceWrite;
@@ -96,7 +92,7 @@ export class StatusFlagTracker {
   }
 
   condition(context: StatusFlagContext, cc: ConditionCode): ValueId {
-    const direct = this.#directCondition(cc);
+    const direct = this.#directCondition(context, cc);
 
     if (direct !== undefined) {
       return direct;
@@ -111,12 +107,13 @@ export class StatusFlagTracker {
     const cache: SourceExpansionCache = new Map();
 
     return this.#flagBoolExpr(
+      context,
       CONDITIONS[cc].expr,
       (flag) => this.#resolveFlagFrom(context, this.#current, flag, cache)
     );
   }
 
-  writeSource(source: SimpleFlagSource): void {
+  writeSource(context: StatusFlagContext, source: SimpleFlagSource): void {
     const sourceId = this.#sources.length;
 
     this.#sources.push(source);
@@ -129,10 +126,10 @@ export class StatusFlagTracker {
         for (const flag of x86StatusFlags) {
           this.#setBacking(flag, { kind: "source", source: sourceId });
         }
-        this.#writeLazyBinarySource(source);
+        this.#writeLazyBinarySource(context, source);
         return;
       case "logic": {
-        const zero = this.#values.const(0);
+        const zero = context.region.values.const(0);
 
         this.#setBacking("CF", { kind: "value", value: zero });
         this.#setBacking("PF", { kind: "source", source: sourceId });
@@ -140,7 +137,7 @@ export class StatusFlagTracker {
         this.#setBacking("ZF", { kind: "source", source: sourceId });
         this.#setBacking("SF", { kind: "source", source: sourceId });
         this.#setBacking("OF", { kind: "value", value: zero });
-        this.#writeLazyLogicSource(source);
+        this.#writeLazyLogicSource(context, source);
         return;
       }
     }
@@ -151,7 +148,7 @@ export class StatusFlagTracker {
     targetFlag: X86StatusFlag,
     value: ValueId
   ): void {
-    if (this.#isCurrentFlagValue(targetFlag, value)) {
+    if (this.#isCurrentFlagValue(context, targetFlag, value)) {
       return;
     }
 
@@ -239,7 +236,7 @@ export class StatusFlagTracker {
     for (const flag of x86StatusFlags) {
       this.#writeExplicitFlag(flag, values[flag]);
     }
-    this.#state.write(flagStateFields.lazyKind, this.#values.const(0));
+    this.#state.write(flagStateFields.lazyKind, context.region.values.const(0));
   }
 
   #writeExplicitFlag(flag: X86StatusFlag, value: ValueId): void {
@@ -247,18 +244,22 @@ export class StatusFlagTracker {
     this.#state.write(flagStateFields.concrete[flag], value);
   }
 
-  #isCurrentFlagValue(flag: X86StatusFlag, value: ValueId): boolean {
+  #isCurrentFlagValue(
+    context: StatusFlagContext,
+    flag: X86StatusFlag,
+    value: ValueId
+  ): boolean {
     const backing = getBacking(this.#current.backings, flag);
 
     switch (backing.kind) {
       case "source":
-        return this.#sourceValues(backing.source, new Map())[flag] === value;
+        return this.#sourceValues(context, backing.source, new Map())[flag] === value;
       case "value":
         return backing.value === value;
       case "input":
         return this.#inputFlags.get(backing.flag) === value;
       case "undef":
-        return backing.policy === "zero" && value === this.#values.const(0);
+        return backing.policy === "zero" && value === context.region.values.const(0);
     }
   }
 
@@ -266,27 +267,36 @@ export class StatusFlagTracker {
     return x86StatusFlags.some((flag) => getBacking(this.#current.backings, flag).kind === "input");
   }
 
-  #writeLazyBinarySource(source: SimpleFlagSource & Readonly<{ kind: "add" | "sub" }>): void {
+  #writeLazyBinarySource(
+    context: StatusFlagContext,
+    source: SimpleFlagSource & Readonly<{ kind: "add" | "sub" }>
+  ): void {
     const kind = source.kind === "add" ? LAZY_FLAGS_KIND.ADD : LAZY_FLAGS_KIND.SUB;
+    const values = context.region.values;
 
     this.#invalidateExplicitFlagFields();
     this.#state.invalidate(flagStateFields.lazyKind);
-    this.#state.write(flagStateFields.lazyA, this.#values.truncate(source.width, source.left));
-    this.#state.write(flagStateFields.lazyB, this.#values.truncate(source.width, source.right));
+    this.#state.write(flagStateFields.lazyA, values.truncate(source.width, source.left));
+    this.#state.write(flagStateFields.lazyB, values.truncate(source.width, source.right));
     this.#state.write(
       flagStateFields.lazyKind,
-      this.#values.const(lazyFlagsKindByte(kind, source.width))
+      values.const(lazyFlagsKindByte(kind, source.width))
     );
   }
 
-  #writeLazyLogicSource(source: SimpleFlagSource & Readonly<{ kind: "logic" }>): void {
+  #writeLazyLogicSource(
+    context: StatusFlagContext,
+    source: SimpleFlagSource & Readonly<{ kind: "logic" }>
+  ): void {
+    const values = context.region.values;
+
     this.#invalidateExplicitFlagFields();
     this.#state.invalidate(flagStateFields.lazyKind);
-    this.#state.write(flagStateFields.lazyA, this.#values.truncate(source.width, source.result));
+    this.#state.write(flagStateFields.lazyA, values.truncate(source.width, source.result));
     this.#state.invalidate(flagStateFields.lazyB);
     this.#state.write(
       flagStateFields.lazyKind,
-      this.#values.const(lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, source.width))
+      values.const(lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, source.width))
     );
   }
 
@@ -324,23 +334,27 @@ export class StatusFlagTracker {
   ): ValueId {
     switch (backing.kind) {
       case "source":
-        return this.#sourceValues(backing.source, cache)[flag];
+        return this.#sourceValues(context, backing.source, cache)[flag];
       case "value":
         return backing.value;
       case "input":
         return this.#readInputFlag(context, backing.flag);
       case "undef":
-        return this.#materializeUndef(backing.policy);
+        return this.#materializeUndef(context, backing.policy);
     }
   }
 
-  #directCondition(cc: ConditionCode): ValueId | undefined {
+  #directCondition(
+    context: StatusFlagContext,
+    cc: ConditionCode
+  ): ValueId | undefined {
     if (this.#current.directSource === undefined) {
       return undefined;
     }
 
     const source = this.#source(this.#current.directSource);
     const operator = simpleFlagSourceConditionOperators[source.kind][cc];
+    const values = context.region.values;
 
     if (operator === undefined) {
       return undefined;
@@ -349,9 +363,9 @@ export class StatusFlagTracker {
     switch (source.kind) {
       case "add":
       case "sub":
-        return this.#values.compare(source.width, operator, source.left, source.right);
+        return values.compare(source.width, operator, source.left, source.right);
       case "logic":
-        return this.#values.compare(source.width, operator, source.result, this.#values.const(0));
+        return values.compare(source.width, operator, source.result, values.const(0));
     }
   }
 
@@ -402,7 +416,7 @@ export class StatusFlagTracker {
   ): ValueId {
     const flags = new Map<X86StatusFlag, ValueId>();
 
-    return this.#flagBoolExpr(expr, (flag) => {
+    return this.#flagBoolExpr(context, expr, (flag) => {
       const cached = flags.get(flag);
 
       if (cached !== undefined) {
@@ -416,34 +430,40 @@ export class StatusFlagTracker {
     });
   }
 
-  #flagBoolExpr(expr: FlagBoolExpr, resolveFlag: FlagBoolExprFlagResolver): ValueId {
+  #flagBoolExpr(
+    context: StatusFlagContext,
+    expr: FlagBoolExpr,
+    resolveFlag: FlagBoolExprFlagResolver
+  ): ValueId {
+    const values = context.region.values;
+
     switch (expr.kind) {
       case "flag":
         return resolveFlag(expr.flag);
       case "not":
-        return this.#values.compare(
+        return values.compare(
           32,
           "eq",
-          this.#flagBoolExpr(expr.value, resolveFlag),
-          this.#values.const(0)
+          this.#flagBoolExpr(context, expr.value, resolveFlag),
+          values.const(0)
         );
       case "and":
-        return this.#values.binary(
+        return values.binary(
           "and",
-          this.#flagBoolExpr(expr.a, resolveFlag),
-          this.#flagBoolExpr(expr.b, resolveFlag)
+          this.#flagBoolExpr(context, expr.a, resolveFlag),
+          this.#flagBoolExpr(context, expr.b, resolveFlag)
         );
       case "or":
-        return this.#values.binary(
+        return values.binary(
           "or",
-          this.#flagBoolExpr(expr.a, resolveFlag),
-          this.#flagBoolExpr(expr.b, resolveFlag)
+          this.#flagBoolExpr(context, expr.a, resolveFlag),
+          this.#flagBoolExpr(context, expr.b, resolveFlag)
         );
       case "xor":
-        return this.#values.binary(
+        return values.binary(
           "xor",
-          this.#flagBoolExpr(expr.a, resolveFlag),
-          this.#flagBoolExpr(expr.b, resolveFlag)
+          this.#flagBoolExpr(context, expr.a, resolveFlag),
+          this.#flagBoolExpr(context, expr.b, resolveFlag)
         );
     }
   }
@@ -481,29 +501,36 @@ export class StatusFlagTracker {
     return source;
   }
 
-  #sourceValues(sourceId: FlagSourceId, cache: SourceExpansionCache): StatusFlagValueIds {
+  #sourceValues(
+    context: StatusFlagContext,
+    sourceId: FlagSourceId,
+    cache: SourceExpansionCache
+  ): StatusFlagValueIds {
     const cached = cache.get(sourceId);
 
     if (cached !== undefined) {
       return cached;
     }
 
-    const materialized = this.#materializeSource(this.#source(sourceId));
+    const materialized = this.#materializeSource(context, this.#source(sourceId));
 
     cache.set(sourceId, materialized);
     return materialized;
   }
 
-  #materializeUndef(policy: UndefFlagPolicy): ValueId {
+  #materializeUndef(context: StatusFlagContext, policy: UndefFlagPolicy): ValueId {
     switch (policy) {
       case "zero":
-        return this.#values.const(0);
+        return context.region.values.const(0);
     }
   }
 
-  #materializeSource(source: SimpleFlagSource): StatusFlagValueIds {
-    return statusFlagValuesForSource(this.#values, source, {
-      undefinedAF: this.#materializeUndef(logicUndefFlagPolicy)
+  #materializeSource(
+    context: StatusFlagContext,
+    source: SimpleFlagSource
+  ): StatusFlagValueIds {
+    return statusFlagValuesForSource(context.region.values, source, {
+      undefinedAF: this.#materializeUndef(context, logicUndefFlagPolicy)
     });
   }
 }

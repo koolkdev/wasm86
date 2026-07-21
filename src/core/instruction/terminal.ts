@@ -32,18 +32,15 @@ export type InstructionTerminals = Readonly<{
 // it cannot change completion or restart policy.
 export class InstructionTerminator {
   readonly #state: InstructionState;
-  readonly #values: ValueTable;
   readonly #buildExit: BuildExit;
   readonly #terminals: InstructionTerminals;
 
   constructor(
     state: InstructionState,
-    values: ValueTable,
     buildExit: BuildExit,
     terminals: InstructionTerminals
   ) {
     this.#state = state;
-    this.#values = values;
     this.#buildExit = buildExit;
     this.#terminals = terminals;
   }
@@ -57,7 +54,7 @@ export class InstructionTerminator {
       region,
       access,
       this.#buildExit(
-        this.#values,
+        region.values,
         exceptionExit(exception)
       ),
       "fault"
@@ -89,7 +86,7 @@ export class InstructionTerminator {
     this.#exit(
       region,
       access,
-      this.#buildExit(this.#values, trapExit(vector)),
+      this.#buildExit(region.values, trapExit(vector)),
       "completed"
     );
   }
@@ -103,7 +100,7 @@ export class InstructionTerminator {
     this.#exit(
       region,
       access,
-      this.#buildExit(this.#values, segmentExit(segment, selector)),
+      this.#buildExit(region.values, segmentExit(segment, selector)),
       "fault"
     );
   }

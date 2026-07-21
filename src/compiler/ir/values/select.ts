@@ -17,7 +17,10 @@ export const selectValue: ValueDefinition<SelectArgs, SelectNode> = {
     whenTrue,
     whenFalse
   }),
-  internKey: (node) => [node.condition, node.whenTrue, node.whenFalse],
+  identity: {
+    kind: "scoped",
+    key: (node) => [node.condition, node.whenTrue, node.whenFalse]
+  },
   // Wasm select consumes its two alternatives before its condition.
   inputs: (node) => [
     { value: node.whenTrue, type: "i32" },

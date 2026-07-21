@@ -8,7 +8,6 @@ import {
   type StateAccess
 } from "#core/state/access.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
 import { StatusFlagTracker } from "#core/flags/lazy/tracker.js";
 import type { StatusFlagResolverFamily } from "#core/flags/lazy/resolvers.js";
 import { StateFieldTracker } from "./field-tracker.js";
@@ -44,7 +43,6 @@ export class InstructionState {
   readonly eip: EipState;
   readonly instructionCount: InstructionCountState;
   constructor(
-    values: ValueTable,
     stateAccess: StateAccess,
     statusFlagResolvers: StatusFlagResolverFamily,
     instructionCountField: FieldRef<"u32">,
@@ -55,10 +53,9 @@ export class InstructionState {
     this.#stateAccess = stateAccess;
     this.#fields = new StateFieldTracker(stateAccess, writeObserver);
 
-    this.gpr = new GprState(values, stateAccess, writeObserver);
+    this.gpr = new GprState(stateAccess, writeObserver);
     this.flags = new InstructionFlagState(this.#fields);
     this.statusFlags = new StatusFlagTracker(
-      values,
       this.#fields,
       (context, flag) => {
         const target = statusFlagResolvers.get(flag);
@@ -71,10 +68,9 @@ export class InstructionState {
       },
       () => writeObserver?.recordStatusFlagSourceWrite()
     );
-    this.segments = new SegmentState(values, this.#fields);
+    this.segments = new SegmentState(this.#fields);
     this.eip = new EipState(this.#fields);
     this.instructionCount = new InstructionCountState(
-      values,
       this.#fields,
       instructionCountField
     );

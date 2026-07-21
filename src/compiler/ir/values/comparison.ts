@@ -107,7 +107,10 @@ type ComparisonNode = Readonly<ComparisonArgs & { kind: "compare" }>;
 
 export const comparisonValue: ValueDefinition<ComparisonArgs, ComparisonNode> = {
   create: ({ type, operator, a, b }) => ({ kind: "compare", type, operator, a, b }),
-  internKey: (node) => [node.type, node.operator, node.a, node.b],
+  identity: {
+    kind: "scoped",
+    key: (node) => [node.type, node.operator, node.a, node.b]
+  },
   inputs: (node) => [
     { value: node.a, type: node.type },
     { value: node.b, type: node.type }

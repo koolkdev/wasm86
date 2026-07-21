@@ -1,7 +1,6 @@
 import { segmentRegisterIndex } from "#core/segments.js";
 import type { SegmentDynamicOperandBinding, SegmentOperandBinding } from "#core/instruction/bindings.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
 import type { InstructionTerminator } from "./terminal.js";
 import type { RegionBuilder } from "#ir/region-builder.js";
 import type { BoundStateAccess } from "#core/state/access.js";
@@ -16,7 +15,6 @@ export type SegmentWriteOutcome = "terminated" | "continues";
 // through a host exit naming the register index and the selector.
 export function emitSegmentLoad(
   mode: SegmentMode,
-  values: ValueTable,
   terminator: InstructionTerminator,
   region: RegionBuilder,
   access: BoundStateAccess,
@@ -28,7 +26,7 @@ export function emitSegmentLoad(
       terminator.segmentLoad(
         region,
         access,
-        segmentIndex(values, binding),
+        segmentIndex(region, binding),
         selector
       );
       return "terminated";
@@ -36,12 +34,12 @@ export function emitSegmentLoad(
 }
 
 function segmentIndex(
-  values: ValueTable,
+  region: RegionBuilder,
   binding: SegmentOperandBinding | SegmentDynamicOperandBinding
 ): ValueId {
   switch (binding.kind) {
     case "segment":
-      return values.const(segmentRegisterIndex(binding.reg));
+      return region.values.const(segmentRegisterIndex(binding.reg));
     case "segmentDynamic":
       return binding.index;
   }

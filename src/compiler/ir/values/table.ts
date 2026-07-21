@@ -134,13 +134,33 @@ type InternNode = {
   value: ValueId | undefined;
 };
 
+type InternTable = Map<object, InternNode>;
+
+type ScopedInterning = Readonly<{
+  table: InternTable;
+  parent?: ScopedInterning;
+}>;
+
+type ValueArena = Readonly<{
+  values: StoredValue[];
+  widthBounds: (WidthBounds | undefined)[];
+  canonicalInterned: InternTable;
+}>;
+
+const scopedTable = Symbol("scopedValueTable");
+
+type ScopedTable = Readonly<{
+  [scopedTable]: true;
+  arena: ValueArena;
+  scopedInterning: ScopedInterning;
+}>;
+
 const noInputs: readonly ValueInput[] = [];
 const noChildren: readonly ValueId[] = [];
 
 export class ValueTable implements ValueBuilder {
-  readonly #values: StoredValue[] = [];
-  readonly #widthBounds: (WidthBounds | undefined)[] = [];
-  readonly #interned = new Map<object, InternNode>();
+  readonly #arena: ValueArena;
+  readonly #scopedInterning: ScopedInterning;
   readonly #foldContext: ValueFoldContext = {
     constValue: (id) => this.constValue(id),
     integerValue: (id) => this.#integerValue(id),
@@ -156,26 +176,47 @@ export class ValueTable implements ValueBuilder {
     eqz: (value) => this.unary("eqz", value)
   };
 
+  constructor(scope?: ScopedTable) {
+    this.#arena = scope?.arena ?? {
+      values: [],
+      widthBounds: [],
+      canonicalInterned: new Map()
+    };
+    this.#scopedInterning = scope?.scopedInterning ?? { table: new Map() };
+  }
+
+  childScope(): ValueTable {
+    return new ValueTable({
+      [scopedTable]: true,
+      arena: this.#arena,
+      scopedInterning: {
+        table: new Map(),
+        parent: this.#scopedInterning
+      }
+    });
+  }
+
   node(id: ValueId): ValueNode {
     return this.#entry(id).node;
   }
 
   size(): number {
-    return this.#values.length;
+    return this.#arena.values.length;
   }
 
   // Analysis forks preserve every existing ValueId while isolating all later
   // allocation and interning. Stored entries are immutable, so the prefix can
   // be shared safely; mutable caches and trie nodes are copied.
   fork(): ValueTable {
-    const fork = new ValueTable();
-
-    fork.#values.push(...this.#values);
-    fork.#widthBounds.push(...this.#widthBounds);
-    for (const [definition, root] of this.#interned) {
-      fork.#interned.set(definition, cloneInternNode(root));
-    }
-    return fork;
+    return new ValueTable({
+      [scopedTable]: true,
+      arena: {
+        values: [...this.#arena.values],
+        widthBounds: [...this.#arena.widthBounds],
+        canonicalInterned: cloneInternTable(this.#arena.canonicalInterned)
+      },
+      scopedInterning: cloneScopedInterning(this.#scopedInterning)
+    });
   }
 
   children(id: ValueId): readonly ValueId[] {
@@ -187,7 +228,7 @@ export class ValueTable implements ValueBuilder {
   }
 
   widthBounds(id: ValueId): WidthBounds {
-    const existing = this.#widthBounds[id];
+    const existing = this.#arena.widthBounds[id];
 
     if (existing !== undefined) {
       return existing;
@@ -195,7 +236,7 @@ export class ValueTable implements ValueBuilder {
 
     const derived = this.#entry(id).bounds(this.#foldContext);
 
-    this.#widthBounds[id] = derived;
+    this.#arena.widthBounds[id] = derived;
     return derived;
   }
 
@@ -332,17 +373,72 @@ export class ValueTable implements ValueBuilder {
       return folded;
     }
 
-    const key = definition.internKey(node);
-    if (key === undefined) {
-      return this.#append(definition, node, inputs, initialBounds);
+    switch (definition.identity.kind) {
+      case "occurrence":
+        return this.#append(definition, node, inputs, initialBounds);
+      case "canonical":
+        return this.#intern(
+          this.#arena.canonicalInterned,
+          definition,
+          node,
+          inputs,
+          definition.identity.key(node),
+          initialBounds
+        );
+      case "scoped":
+        return this.#internScoped(
+          definition,
+          node,
+          inputs,
+          definition.identity.key(node),
+          initialBounds
+        );
+    }
+  }
+
+  #internScoped<Args, Node extends ValueNode>(
+    definition: ValueDefinition<Args, Node>,
+    node: Node,
+    inputs: readonly ValueInput[],
+    key: readonly ValueKey[],
+    initialBounds: WidthBounds | undefined
+  ): ValueId {
+    for (
+      let scope: ScopedInterning | undefined = this.#scopedInterning;
+      scope !== undefined;
+      scope = scope.parent
+    ) {
+      const existing = internedValue(scope.table, definition, key);
+
+      if (existing !== undefined) {
+        return existing;
+      }
     }
 
-    const existingRoot = this.#interned.get(definition);
+    return this.#intern(
+      this.#scopedInterning.table,
+      definition,
+      node,
+      inputs,
+      key,
+      initialBounds
+    );
+  }
+
+  #intern<Args, Node extends ValueNode>(
+    table: InternTable,
+    definition: ValueDefinition<Args, Node>,
+    node: Node,
+    inputs: readonly ValueInput[],
+    key: readonly ValueKey[],
+    initialBounds: WidthBounds | undefined
+  ): ValueId {
+    const existingRoot = table.get(definition);
     let position: InternNode;
 
     if (existingRoot === undefined) {
       position = internNode();
-      this.#interned.set(definition, position);
+      table.set(definition, position);
     } else {
       position = existingRoot;
     }
@@ -376,23 +472,23 @@ export class ValueTable implements ValueBuilder {
     inputs: readonly ValueInput[],
     initialBounds: WidthBounds | undefined
   ): ValueId {
-    const id = valueId(this.#values.length);
+    const id = valueId(this.#arena.values.length);
     const mayTrap = definition.mayTrap?.(node, this.#foldContext) ?? false;
     const nonTrapping = !mayTrap && inputs.every((input) => this.isNonTrapping(input.value));
 
-    this.#values.push(new StoredValueEntry(
+    this.#arena.values.push(new StoredValueEntry(
       definition,
       node,
       inputs,
       mayTrap,
       nonTrapping
     ));
-    this.#widthBounds.push(initialBounds);
+    this.#arena.widthBounds.push(initialBounds);
     return id;
   }
 
   #entry(id: ValueId): StoredValue {
-    const entry = this.#values[id];
+    const entry = this.#arena.values[id];
 
     assert(entry !== undefined, `unknown value id ${id}`);
     return entry;
@@ -421,4 +517,38 @@ function cloneInternNode(source: InternNode): InternNode {
     ),
     value: source.value
   };
+}
+
+function cloneInternTable(source: InternTable): InternTable {
+  return new Map(
+    [...source].map(([definition, root]) => [definition, cloneInternNode(root)])
+  );
+}
+
+function cloneScopedInterning(source: ScopedInterning): ScopedInterning {
+  return {
+    table: cloneInternTable(source.table),
+    ...(source.parent === undefined
+      ? {}
+      : { parent: cloneScopedInterning(source.parent) })
+  };
+}
+
+function internedValue(
+  table: InternTable,
+  definition: object,
+  key: readonly ValueKey[]
+): ValueId | undefined {
+  let position = table.get(definition);
+
+  if (position === undefined) {
+    return undefined;
+  }
+  for (const part of key) {
+    position = position.children.get(part);
+    if (position === undefined) {
+      return undefined;
+    }
+  }
+  return position.value;
 }

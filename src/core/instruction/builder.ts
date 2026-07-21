@@ -125,7 +125,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     this.#region = region;
     this.#options = options;
     this.#scopes = new SemanticScopeStack(this.#region);
-    this.#storage = new InstructionStorage(this.#values, {
+    this.#storage = new InstructionStorage({
       stateAccess: options.stateAccess,
       statusFlagResolvers: options.statusFlagResolvers,
       memory: options.memory,
@@ -141,7 +141,6 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     );
     this.#terminator = new InstructionTerminator(
       this.#storage.state,
-      this.#values,
       options.buildExit,
       options.terminals
     );
@@ -356,7 +355,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     // body, then run it normally to build the real loop. The callback must not
     // depend on build-time side effects because construction invokes it twice.
     const writeLog = new StateWriteLog();
-    const scratchValues = this.#values.fork();
+    const scratchValues = this.#scopes.current.region.values.fork();
     const scratch = new InstructionBuilderImpl(
       new RegionBuilder(scratchValues),
       {
@@ -455,7 +454,6 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
 
     const outcome = emitSegmentLoad(
       this.#segmentMode,
-      this.#values,
       this.#terminator,
       scope.region,
       this.#storageFor(scope).access,

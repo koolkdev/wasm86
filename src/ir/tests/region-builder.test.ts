@@ -1,6 +1,7 @@
 import {
   deepStrictEqual,
   doesNotThrow,
+  notStrictEqual,
   ok,
   strictEqual,
   throws
@@ -8,6 +9,7 @@ import {
 import { test } from "node:test";
 
 import type { BodyNode } from "#ir/block.js";
+import { FunctionBuilder } from "#ir/function.js";
 import {
   resourceRead,
   resourceWrite
@@ -17,7 +19,7 @@ import {
   type ResourceByteOperand
 } from "#compiler/ir/resource.js";
 import { RegionBuilder, buildIrBlock, type BodyNodeSink } from "#ir/region-builder.js";
-import { validateIrBlock } from "#ir/validate.js";
+import { validateIrBlock, validateIrFunction } from "#ir/validate.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -361,6 +363,80 @@ test("if builds hinted then and else bodies against child builders", () => {
 
   ok(finish?.kind === "finish");
   deepStrictEqual(finish.finish, { kind: "exit", result: exitResult });
+});
+
+test("control bodies isolate siblings while retaining ancestor recipes", () => {
+  const values = new ValueTable();
+  const builder = new RegionBuilder(values);
+  const input = values.addNodeOutput();
+  const operand = values.external(0);
+  let thenValue!: ValueId;
+  let nestedValue!: ValueId;
+  let elseValue!: ValueId;
+
+  builder.if(
+    values.external(1),
+    (then) => {
+      thenValue = then.values.binary("add", input, operand);
+      strictEqual(then.values.binary("add", input, operand), thenValue);
+      then.if(values.external(2), (nested) => {
+        nestedValue = nested.values.binary("add", input, operand);
+      });
+    },
+    {
+      elseBuild: (other) => {
+        elseValue = other.values.binary("add", input, operand);
+      }
+    }
+  );
+
+  const rootValue = values.binary("add", input, operand);
+
+  notStrictEqual(thenValue, rootValue);
+  notStrictEqual(elseValue, rootValue);
+  notStrictEqual(thenValue, elseValue);
+  strictEqual(nestedValue, thenValue);
+  deepStrictEqual(values.node(thenValue), {
+    kind: "binary",
+    type: "i32",
+    operator: "add",
+    a: input,
+    b: operand
+  });
+  deepStrictEqual(values.node(nestedValue), values.node(thenValue));
+});
+
+test("function snapshots retain values created in control children", () => {
+  const fn = new FunctionBuilder(functionType(["i32", "i32"], ["i32"]));
+  const [condition, input] = fn.parameters;
+
+  ok(condition !== undefined && input !== undefined);
+  let childValue!: ValueId;
+
+  const result = fn.region.ifValue(
+    condition,
+    (child) => {
+      childValue = child.values.binary("add", input, child.values.const(1));
+      return childValue;
+    },
+    () => input
+  );
+
+  fn.return([result]);
+
+  const built = fn.finish();
+
+  doesNotThrow(() => validateIrFunction(built));
+  deepStrictEqual(built.values.node(childValue), {
+    kind: "binary",
+    type: "i32",
+    operator: "add",
+    a: input,
+    b: built.values.const(1)
+  });
+  strictEqual(built.values.valueType(childValue), "i32");
+  deepStrictEqual(built.values.widthBounds(childValue), fitsUnsigned(32));
+  strictEqual(built.values.mayTrap(childValue), false);
 });
 
 test("switch builds every arm before allocating the shared output", () => {

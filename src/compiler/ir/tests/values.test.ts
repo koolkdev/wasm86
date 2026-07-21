@@ -5,6 +5,7 @@ import type { BinaryOperator } from "#compiler/ir/values/binary.js";
 import type { CompareOperator } from "#compiler/ir/values/comparison.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { ValueEmitContext } from "#compiler/ir/values/definition.js";
+import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import { valueId } from "#compiler/ir/values/id.js";
@@ -66,6 +67,214 @@ test("value table forks preserve the prefix and isolate later allocation", () =>
   strictEqual(table.constValue(laterParentOnly), 13);
   strictEqual(fork.constValue(fork.const(13)), 13);
   strictEqual(table.const(7), constant, "fork interning does not mutate the parent trie");
+});
+
+test("every computed constructor follows lexical visibility", () => {
+  const root = new ValueTable();
+  const condition = root.addNodeOutput();
+  const a = root.addNodeOutput();
+  const b = root.addNodeOutput();
+  const constructors: readonly Readonly<{
+    name: string;
+    build(values: ValueBuilder): ValueId;
+  }>[] = [
+    { name: "binary", build: (values) => values.binary("add", a, b) },
+    { name: "unary", build: (values) => values.unary("clz", a) },
+    { name: "compare", build: (values) => values.compare(32, "lt_u", a, b) },
+    { name: "select", build: (values) => values.select(condition, a, b) },
+    { name: "truncate", build: (values) => values.truncate(8, a) },
+    { name: "extend", build: (values) => values.extend(8, a, true) }
+  ];
+
+  for (const constructor of constructors) {
+    const child = root.childScope();
+    const childValue = constructor.build(child);
+    const nestedValue = constructor.build(child.childScope());
+    const sibling = root.childScope();
+    const siblingValue = constructor.build(sibling);
+    const rootValue = constructor.build(root);
+    const lateChildValue = constructor.build(root.childScope());
+
+    strictEqual(
+      constructor.build(child),
+      childValue,
+      `${constructor.name} must intern within one view`
+    );
+    notStrictEqual(
+      childValue,
+      rootValue,
+      `${constructor.name} authored earlier in a child must not enter its parent`
+    );
+    notStrictEqual(
+      siblingValue,
+      childValue,
+      `${constructor.name} must not search a sibling view`
+    );
+    strictEqual(
+      nestedValue,
+      childValue,
+      `${constructor.name} must reuse a visible ancestor recipe`
+    );
+    strictEqual(
+      lateChildValue,
+      rootValue,
+      `${constructor.name} must see a recipe already authored by its parent`
+    );
+  }
+});
+
+test("canonical leaves span scoped views while occurrence leaves stay unique", () => {
+  const root = new ValueTable();
+  const child = root.childScope();
+  const nested = child.childScope();
+  const constant = root.const(-7);
+  const constant64 = root.const64(-7n);
+  const external = root.external(3);
+  const parameter = root.parameter(2, "i64");
+  const unreachable = root.unreachable("i64");
+
+  for (const view of [root, child, nested]) {
+    strictEqual(view.const(-7), constant);
+    strictEqual(view.const64(-7n), constant64);
+    strictEqual(view.external(3), external);
+    strictEqual(view.parameter(2, "i64"), parameter);
+    strictEqual(view.unreachable("i64"), unreachable);
+  }
+
+  const nodeOutputs = [
+    root.addNodeOutput(),
+    root.addNodeOutput(),
+    child.addNodeOutput(),
+    nested.addNodeOutput()
+  ];
+  const loopInputs = [
+    root.addLoopInput(),
+    root.addLoopInput(),
+    child.addLoopInput(),
+    nested.addLoopInput()
+  ];
+
+  strictEqual(new Set(nodeOutputs).size, nodeOutputs.length);
+  strictEqual(new Set(loopInputs).size, loopInputs.length);
+});
+
+test("fold-created computed values follow lexical scope visibility", () => {
+  const root = new ValueTable();
+  const input = root.addNodeOutput();
+  const zero = root.const(0);
+  const child = root.childScope();
+  const childEqz = child.compare(32, "eq", input, zero);
+  const childLowByte = child.truncate64(8, child.extend64(8, input, true));
+  const sibling = root.childScope();
+  const siblingEqz = sibling.compare(32, "eq", input, zero);
+  const rootEqz = root.compare(32, "eq", input, zero);
+  const rootLowByte = root.truncate(8, input);
+
+  strictEqual(root.node(rootEqz).kind, "unary");
+  strictEqual(child.node(childEqz).kind, "unary");
+  strictEqual(child.compare(32, "eq", input, zero), childEqz);
+  notStrictEqual(childEqz, rootEqz);
+  notStrictEqual(siblingEqz, rootEqz);
+  notStrictEqual(siblingEqz, childEqz);
+  strictEqual(child.childScope().compare(32, "eq", input, zero), childEqz);
+
+  strictEqual(childLowByte, child.truncate(8, input));
+  notStrictEqual(childLowByte, rootLowByte);
+
+  strictEqual(
+    child.binary("add", child.const(1), child.const(2)),
+    root.const(3),
+    "constant folds remain root-canonical"
+  );
+  strictEqual(
+    sibling.compare(32, "eq", input, input),
+    root.const(1),
+    "predicate folds remain root-canonical"
+  );
+});
+
+test("the root view can inspect values allocated by descendants", () => {
+  const root = new ValueTable();
+  const input = root.addNodeOutput(fitsUnsigned(8));
+  const child = root.childScope();
+  const derived = child.binary("add", input, child.const(1));
+  const nested = child.childScope();
+  const narrowed = nested.truncate(8, derived);
+
+  deepStrictEqual(root.node(derived), child.node(derived));
+  strictEqual(root.valueType(derived), "i32");
+  deepStrictEqual(root.widthBounds(derived), child.widthBounds(derived));
+  deepStrictEqual(root.node(narrowed), nested.node(narrowed));
+  strictEqual(root.valueType(narrowed), "i32");
+  strictEqual(root.mayTrap(narrowed), false);
+  strictEqual(root.isNonTrapping(narrowed), true);
+  const emitted: ValueId[] = [];
+
+  root.emit(narrowed, {
+    body: new WasmFunctionBodyEncoder(),
+    emitUse: (value) => emitted.push(value),
+    emitNodeOutput: () => {},
+    emitExternal: () => {},
+    emitParameter: () => {},
+    emitLoopInput: () => {}
+  });
+  deepStrictEqual(emitted, [derived]);
+  strictEqual(root.size(), nested.size());
+});
+
+test("forking a child preserves its arena and selected scoped cache", () => {
+  const root = new ValueTable();
+  const input = root.addNodeOutput();
+  const operand = root.external(0);
+  const rootOnly = root.binary("xor", input, operand);
+  const selected = root.childScope();
+  const selectedSum = selected.binary("add", input, operand);
+  const sibling = root.childScope();
+  const siblingOnly = sibling.binary("sub", input, operand);
+  const siblingCanonical = sibling.external(9);
+  const parentSize = root.size();
+  const fork = selected.fork();
+
+  strictEqual(fork.size(), parentSize);
+  deepStrictEqual(fork.node(rootOnly), root.node(rootOnly));
+  deepStrictEqual(fork.node(siblingOnly), sibling.node(siblingOnly));
+  strictEqual(fork.binary("add", input, operand), selectedSum);
+  strictEqual(
+    fork.binary("xor", input, operand),
+    rootOnly,
+    "a child fork retains its visible ancestor cache"
+  );
+  notStrictEqual(
+    fork.binary("sub", input, operand),
+    siblingOnly,
+    "a child fork does not inherit a sibling's scoped cache"
+  );
+  strictEqual(fork.external(0), operand, "the canonical cache is retained");
+  strictEqual(
+    fork.external(9),
+    siblingCanonical,
+    "the fork retains canonical identities first created by a sibling"
+  );
+  const forkSizeAfterCacheChecks = fork.size();
+
+  const sourceAfterFork = sibling.binary("or", input, operand);
+
+  strictEqual(root.size(), parentSize + 1);
+  strictEqual(
+    fork.size(),
+    forkSizeAfterCacheChecks,
+    "later allocations in the shared source arena do not enter the fork"
+  );
+  deepStrictEqual(root.node(sourceAfterFork), sibling.node(sourceAfterFork));
+
+  const nested = fork.childScope();
+
+  strictEqual(nested.binary("add", input, operand), selectedSum);
+  strictEqual(
+    root.size(),
+    parentSize + 1,
+    "fork allocations do not mutate any source view"
+  );
 });
 
 test("node outputs retain their declared scalar type", () => {
