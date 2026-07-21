@@ -26,8 +26,7 @@ import {
 } from "#compiler/program/functions.js";
 import {
   exportRef,
-  functionRef,
-  signatureRef
+  functionRef
 } from "#compiler/program/refs.js";
 import { FunctionBuilder } from "#ir/function.js";
 import { nodeCompletes } from "#ir/block.js";
@@ -60,12 +59,10 @@ function writeEffect(fn: FunctionBuilder, value: ValueId): void {
 test("returned direct invocations keep deep recursion on a bounded stack", async () => {
   const program = new ProgramBuilder();
   const type = functionType(["i32"], []);
-  const signature = signatureRef("test.deep-return-invocation-signature");
 
-  program.signature({ ref: signature, type });
   const countdown = program.defineFunction({
     ref: functionRef("test.deep-return-invocation-countdown"),
-    signature,
+    type,
     effects: noEffects
   }, (fn, self) => {
     const remaining = fn.parameters[0];
@@ -107,7 +104,6 @@ test("returned direct invocations keep deep recursion on a bounded stack", async
 test("returnCall closes and emits a typed terminal tail call", async () => {
   const program = new ProgramBuilder();
   const type = functionType(["i32"], ["i32"]);
-  const signature = signatureRef("test.return-call-control-signature");
   const family = new FunctionFamily<number>({
     type,
     effects: () => noEffects,
@@ -123,10 +119,9 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
   });
   const target = family.get(7);
 
-  program.signature({ ref: signature, type });
   const caller = program.defineFunction({
     ref: functionRef("test.return-call-control-caller"),
-    signature,
+    type,
     effects: noEffects
   }, (fn) => {
     const argument = fn.parameters[0];
@@ -178,7 +173,6 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
 test("returnCall participates in declared-effect validation", () => {
   const program = new ProgramBuilder();
   const type = functionType(["i32"], []);
-  const signature = signatureRef("test.return-call-effect-signature");
   const effects = {
     reads: [],
     writes: [effect]
@@ -190,10 +184,9 @@ test("returnCall participates in declared-effect validation", () => {
     name: "returnCallEffectResource",
     limits: { minPages: 1 }
   });
-  program.signature({ ref: signature, type });
   const callee = program.defineFunction({
     ref: functionRef("test.return-call-effect-callee"),
-    signature,
+    type,
     effects
   }, (fn) => {
     const value = fn.parameters[0];
@@ -206,7 +199,7 @@ test("returnCall participates in declared-effect validation", () => {
   });
   program.defineFunction({
     ref: functionRef("test.return-call-effect-caller"),
-    signature,
+    type,
     effects: noEffects
   }, (fn) => {
     const value = fn.parameters[0];

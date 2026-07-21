@@ -3,7 +3,6 @@ import { test } from "node:test";
 
 import { cpuStatusFlagResolvers } from "#cpu/state.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
-import { statusFlagResolverType } from "#core/flags/lazy/resolvers.js";
 import { buildInterpreterProgram } from "#interpreter/program.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import type { Body } from "#ir/block.js";
@@ -25,6 +24,8 @@ test("interpreter closes as a compiler program with a parameterless run root", (
   ok(run.kind === "function", "interpreter run must use compiler IR");
   deepStrictEqual(run.type.parameters, []);
   deepStrictEqual(run.type.results, ["i64"]);
+  deepStrictEqual(program.signatures, []);
+  ok(program.functionTypes.includes(run.type), "interpreter program must include the run type");
 
   ok(
     program.functions.every((fn) => fn.kind === "function"),
@@ -46,7 +47,11 @@ test("interpreter links the zero-argument status-flag resolver family", () => {
 
     ok(resolver !== undefined, `missing status-flag resolver ${expected.ref.id}`);
     ok(resolver.kind === "function", `status-flag resolver ${expected.ref.id} must use compiler IR`);
-    deepStrictEqual(resolver.type, statusFlagResolverType);
+    strictEqual(resolver.type, expected.type);
+    ok(
+      program.functionTypes.includes(resolver.type),
+      `interpreter program is missing the type for ${expected.ref.id}`
+    );
     deepStrictEqual(resolver.type.parameters, []);
     deepStrictEqual(resolver.effects, expected.effects);
   }

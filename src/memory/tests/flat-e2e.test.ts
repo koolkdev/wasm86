@@ -7,8 +7,7 @@ import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import {
   exportRef,
-  functionRef,
-  signatureRef
+  functionRef
 } from "#compiler/program/refs.js";
 import {
   guestMemoryMinimumByteLength,
@@ -22,13 +21,9 @@ import { wasmImport } from "#wasm/abi.js";
 
 test("one flat fragment keeps its fixed capacity when backing memory grows", async () => {
   const builder = new ProgramBuilder();
-  const signature = signatureRef("memory.flat-e2e.classify-signature");
+  const type = functionType(["i32", "i32"], ["i32"]);
   const entry = functionRef("memory.flat-e2e.classify");
 
-  builder.signature({
-    ref: signature,
-    type: functionType(["i32", "i32"], ["i32"])
-  });
   builder.importMemory({
     ref: guestMemoryResource,
     moduleName: wasmImport.namespace,
@@ -37,7 +32,7 @@ test("one flat fragment keeps its fixed capacity when backing memory grows", asy
   });
   builder.defineFunction({
     ref: entry,
-    signature,
+    type,
     effects: { reads: [], writes: [] }
   }, (fn) => {
     const start = fn.parameters[0];

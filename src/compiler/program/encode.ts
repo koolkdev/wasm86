@@ -100,11 +100,27 @@ function addFunctions(
   bodies: readonly EncodedWasmFunctionBody[]
 ): void {
   for (const [declarationIndex, fn] of program.functions.entries()) {
-    const typeIndex = layout.signatureIndices.get(fn.signature);
+    let typeIndex: number | undefined;
+
+    switch (fn.kind) {
+      case "legacy":
+        typeIndex = layout.signatureIndices.get(fn.signature);
+        assert(
+          typeIndex !== undefined,
+          `missing layout for program signature ${fn.signature.id}`
+        );
+        break;
+      case "function":
+        typeIndex = layout.typeIndices.get(fn.type);
+        assert(
+          typeIndex !== undefined,
+          `missing layout for function ${fn.ref.id} type`
+        );
+        break;
+    }
     const expectedIndex = layout.functionIndices.get(fn.ref);
     const body = bodies[declarationIndex];
 
-    assert(typeIndex !== undefined, `missing layout for program signature ${fn.signature.id}`);
     assert(expectedIndex !== undefined, `missing layout for program function ${fn.ref.id}`);
     assert(body !== undefined, `missing encoded body for program function ${fn.ref.id}`);
     const index = module.addFunction(typeIndex, body);
@@ -126,16 +142,24 @@ function layoutProgram(program: Program): ProgramLayout {
   const signatureIndices = new Map<SignatureRef, number>();
   const typeIndices = new Map<FunctionType, number>();
 
-  for (const signature of program.signatures) {
-    const physicalType = encodeFunctionType(signature.type);
+  for (const type of program.functionTypes) {
+    const physicalType = encodeFunctionType(type);
     let index = types.findIndex((candidate) => functionTypesEqual(candidate, physicalType));
 
     if (index === -1) {
       index = types.length;
       types.push(physicalType);
     }
+    typeIndices.set(type, index);
+  }
+  for (const signature of program.signatures) {
+    const index = typeIndices.get(signature.type);
+
+    assert(
+      index !== undefined,
+      `program signature ${signature.ref.id} has no function type index`
+    );
     signatureIndices.set(signature.ref, index);
-    typeIndices.set(signature.type, index);
   }
 
   return {

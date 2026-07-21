@@ -18,7 +18,6 @@ import {
   signatureRef
 } from "#compiler/program/refs.js";
 import { cpuState } from "#cpu/state.js";
-import { statusFlagResolverType } from "#core/flags/lazy/resolvers.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
 import { guestMemoryResource } from "#memory/resource.js";
@@ -167,10 +166,6 @@ function createIrBlockProgram(
   const cpuStateRef = cpuState.resource;
 
   builder.signature({ ref: entrySignature, type: entryType });
-  builder.signature({
-    ref: signatureRef("test.status-flag-resolver-signature"),
-    type: statusFlagResolverType
-  });
   builder.importMemory({
     ref: cpuStateRef,
     moduleName: wasmImport.namespace,

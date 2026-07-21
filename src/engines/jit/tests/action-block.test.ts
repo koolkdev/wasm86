@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { buildIrBlock } from "#engines/jit/action-compiler.js";
 import { encodeJitModule } from "#engines/jit/module.js";
 import { compileActionWasmBlockHandle } from "#engines/jit/block-handle.js";
+import { buildJitProgram } from "#engines/jit/program.js";
 import type { BodyNode, IrBlock } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -41,6 +42,19 @@ import { x86Flags } from "#core/flags/definitions.js";
 import { jitMemoryWithBytes } from "./decode-helpers.js";
 
 const startEip = 0x1000;
+
+test("JIT retains only its raw block-entry signature", () => {
+  const program = buildJitProgram(
+    [{ entryEip: startEip, ir: syntheticBlock(true) }],
+    undefined
+  );
+
+  deepStrictEqual(
+    program.signatures.map((signature) => signature.ref.id),
+    ["jit.block-entry"]
+  );
+  strictEqual(program.functionTypes.length, 2);
+});
 
 test("JIT module emits no resolver functions for ordinary blocks", () => {
   const bytes = encodeJitModule([{ entryEip: startEip, ir: syntheticBlock(false) }]);

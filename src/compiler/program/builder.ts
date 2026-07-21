@@ -10,6 +10,7 @@ import {
 } from "./functions.js";
 import type { LegacyFunctionDeclaration } from "./legacy-body.js";
 import { linkProgram } from "./link.js";
+import type { FunctionType } from "./function-type.js";
 import type {
   FunctionDeclaration,
   FunctionExport,
@@ -39,6 +40,7 @@ export class ProgramBuilder {
   #closing = false;
   #finished = false;
 
+  // Explicit signatures exist only for raw legacyFunction bodies.
   signature(declaration: Signature): SignatureRef {
     this.#assertOpen();
 
@@ -97,22 +99,15 @@ export class ProgramBuilder {
   defineFunction(
     declaration: Readonly<{
       ref: FunctionRef;
-      signature: SignatureRef;
+      type: FunctionType;
       effects: StorageEffects;
     }>,
     build: BuildFunction
   ): FunctionDefinition {
     this.#assertOpen();
-    const signature = this.#signatures.get(declaration.signature);
-
-    assert(
-      signature !== undefined,
-      `unknown program signature ${declaration.signature.id} declared by ` +
-        `function ${declaration.ref.id}`
-    );
     const definition = new FunctionDefinition({
       ref: declaration.ref,
-      type: signature.type,
+      type: declaration.type,
       effects: declaration.effects,
       owner: this.#owner,
       build

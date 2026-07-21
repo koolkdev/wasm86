@@ -1,6 +1,5 @@
 import { assert } from "#common/assert.js";
 import { u32 } from "#core/numeric.js";
-import { statusFlagResolverType } from "#core/flags/lazy/resolvers.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/program/function-type.js";
@@ -118,13 +117,10 @@ function createJitProgram(tableTargetEips: readonly number[]): JitProgram {
   const guestMemory = guestMemoryResource;
   const linkTable = tableTargetEips.length === 0 ? undefined : tableRef("jit.links");
 
+  // Raw legacy JIT bodies still need their numeric type index for table links.
   builder.signature({
     ref: blockSignature,
     type: jitBlockFunctionType
-  });
-  builder.signature({
-    ref: signatureRef("jit.status-flag-resolver"),
-    type: statusFlagResolverType
   });
   builder.importMemory({
     ref: cpuStateRef,

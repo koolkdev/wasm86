@@ -6,7 +6,7 @@ import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
-import { ProgramBuilder } from "#compiler/program/builder.js";
+import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
 import { createModuleBindings } from "#compiler/program/bindings.js";
 import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
@@ -168,24 +168,22 @@ test("forward function declarations close before their factories build and execu
   strictEqual(entry(), 42);
 });
 
-test("functions call typed peers and execute through program encoding", async () => {
+test("symbolic roots close and encode from their function type without signatures", async () => {
   const program = new ProgramBuilder();
   const type = functionType([], ["i32"]);
-  const signature = signatureRef("test.typed-signature");
   const calleeRef = functionRef("test.typed-callee");
   const callerRef = functionRef("test.typed-caller");
 
-  program.signature({ ref: signature, type });
   const callee = program.defineFunction({
     ref: calleeRef,
-    signature,
+    type,
     effects: noEffects
   }, (fn) => {
     fn.return([fn.values.const(42)]);
   });
   const caller = program.defineFunction({
     ref: callerRef,
-    signature,
+    type,
     effects: noEffects
   }, (fn) => {
     const result = fn.region.call(callee, [])[0];
@@ -203,8 +201,12 @@ test("functions call typed peers and execute through program encoding", async ()
 
   const closed = program.finish();
 
+  deepStrictEqual(closed.signatures, []);
+  deepStrictEqual(closed.functionTypes, [type]);
+  strictEqual(closed.functionTypes[0], type);
   strictEqual(closed.functions.length, 2);
   ok(closed.functions.every((fn) => fn.kind === "function"));
+  ok(closed.functions.every((fn) => !("signature" in fn)));
   const bytes = encodeProgram(closed);
   const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
   const entry = instance.exports.entry;
@@ -215,9 +217,56 @@ test("functions call typed peers and execute through program encoding", async ()
   strictEqual(entry(), 42);
 });
 
+test("program validation enforces the finished program's exact function type list", () => {
+  const builder = new ProgramBuilder();
+  const firstType = functionType([], []);
+  const secondType = functionType([], ["i32"]);
+
+  builder.defineFunction({
+    ref: functionRef("test.closed-function-type-validation-first"),
+    type: firstType,
+    effects: noEffects
+  }, (fn) => fn.return([]));
+  builder.defineFunction({
+    ref: functionRef("test.closed-function-type-validation-second"),
+    type: secondType,
+    effects: noEffects
+  }, (fn) => fn.return([fn.values.const(1)]));
+  const closed = builder.finish();
+  const extraType = functionType(["i32"], []);
+
+  throws(
+    () => validateProgram({
+      ...closed,
+      functionTypes: [secondType]
+    } as Program),
+    /type is missing from the program function types/
+  );
+  throws(
+    () => validateProgram({
+      ...closed,
+      functionTypes: [...closed.functionTypes, extraType]
+    } as Program),
+    /unrequired function type/
+  );
+  throws(
+    () => validateProgram({
+      ...closed,
+      functionTypes: [...closed.functionTypes, firstType]
+    } as Program),
+    /duplicate function type/
+  );
+  throws(
+    () => validateProgram({
+      ...closed,
+      functionTypes: [secondType, firstType]
+    } as Program),
+    /not in required order/
+  );
+});
+
 test("defined resource operations resolve memory index two", async () => {
   const program = new ProgramBuilder();
-  const signature = signatureRef("test.resource-operation-signature");
   const firstDummy = resourceRef("test.resource-operation-first-dummy");
   const secondDummy = resourceRef("test.resource-operation-second-dummy");
   const resource = resourceRef("test.resource-operation-target");
@@ -231,7 +280,6 @@ test("defined resource operations resolve memory index two", async () => {
     range
   };
 
-  program.signature({ ref: signature, type: i32Type });
   program.importMemory({
     ref: firstDummy,
     moduleName: "test",
@@ -252,7 +300,7 @@ test("defined resource operations resolve memory index two", async () => {
   });
   const definition = program.defineFunction({
     ref: functionRef("test.resource-operation-function"),
-    signature,
+    type: i32Type,
     effects: { reads: [byteAccess], writes: [byteAccess] }
   }, (fn) => {
     const address = fn.values.const(6);
@@ -347,12 +395,10 @@ test("program validation rejects malformed declared resource effects", () => {
 
   for (const [index, [effect, expected]] of cases.entries()) {
     const program = new ProgramBuilder();
-    const signature = signatureRef(`test.malformed-effect-signature-${index}`);
 
-    program.signature({ ref: signature, type: voidType });
     program.defineFunction({
       ref: functionRef(`test.malformed-effect-function-${index}`),
-      signature,
+      type: voidType,
       effects: index % 2 === 0
         ? { reads: [effect], writes: [] }
         : { reads: [], writes: [effect] }
@@ -365,11 +411,13 @@ test("program validation rejects malformed declared resource effects", () => {
 test("program validation checks retained function and legacy effect shapes", () => {
   {
     const program = new ProgramBuilder();
+    const type = functionType(["f32" as "i32"], []);
 
-    program.signature({
-      ref: signatureRef("test.invalid-function-type"),
-      type: functionType(["f32" as "i32"], [])
-    });
+    program.defineFunction({
+      ref: functionRef("test.invalid-function-type"),
+      type,
+      effects: noEffects
+    }, (fn) => fn.return([]));
     throws(
       () => validateProgram(program.finish()),
       /unknown function value type: f32/
@@ -400,7 +448,6 @@ test("program validation checks retained function and legacy effect shapes", () 
 
 test("program closure omits dead resource reads", () => {
   const program = new ProgramBuilder();
-  const signature = signatureRef("test.dead-resource-signature");
   const readResource = resourceRef("test.dead-read-resource");
   const range: ByteRange = {
     basis: { kind: "resource" },
@@ -412,7 +459,6 @@ test("program closure omits dead resource reads", () => {
     range
   };
 
-  program.signature({ ref: signature, type: i32Type });
   program.importMemory({
     ref: readResource,
     moduleName: "test",
@@ -421,7 +467,7 @@ test("program closure omits dead resource reads", () => {
   });
   const definition = program.defineFunction({
     ref: functionRef("test.dead-resource-function"),
-    signature,
+    type: i32Type,
     effects: { reads: [byteAccess], writes: [] }
   }, (fn) => {
     fn.region.operation(resourceRead, {
@@ -441,7 +487,6 @@ test("program closure omits dead resource reads", () => {
 test("program validation rejects unknown effects and undeclared live resource uses", () => {
   {
     const program = new ProgramBuilder();
-    const signature = signatureRef("test.unknown-symbolic-resource-signature");
     const resource = resourceRef("test.unknown-symbolic-resource");
     const byteAccess: ResourceEffect = {
       space: "resource",
@@ -449,10 +494,9 @@ test("program validation rejects unknown effects and undeclared live resource us
       range: { basis: { kind: "resource" } }
     };
 
-    program.signature({ ref: signature, type: i32Type });
     program.defineFunction({
       ref: functionRef("test.unknown-symbolic-resource-function"),
-      signature,
+      type: i32Type,
       effects: noEffects
     }, (fn) => {
       fn.return([fn.region.operation(resourceRead, {
@@ -464,7 +508,6 @@ test("program validation rejects unknown effects and undeclared live resource us
   }
   {
     const program = new ProgramBuilder();
-    const signature = signatureRef("test.unknown-resource-effect-signature");
     const resource = resourceRef("test.unknown-resource-effect");
     const byteAccess: ResourceEffect = {
       space: "resource",
@@ -472,10 +515,9 @@ test("program validation rejects unknown effects and undeclared live resource us
       range: { basis: { kind: "resource" } }
     };
 
-    program.signature({ ref: signature, type: i32Type });
     program.defineFunction({
       ref: functionRef("test.unknown-resource-effect-function"),
-      signature,
+      type: i32Type,
       effects: { reads: [byteAccess], writes: [] }
     }, (fn) => fn.return([fn.values.const(1)]));
 
@@ -525,8 +567,6 @@ test("an effectful function call stays single and conditional inside its selecte
   const program = new ProgramBuilder();
   const calleeType = functionType(["i32"], []);
   const callerType = functionType(["i32"], ["i32"]);
-  const calleeSignature = signatureRef("test.conditional-callee-signature");
-  const callerSignature = signatureRef("test.conditional-caller-signature");
   const calleeRef = functionRef("test.conditional-callee");
   const callerRef = functionRef("test.conditional-caller");
   const effects = {
@@ -535,11 +575,9 @@ test("an effectful function call stays single and conditional inside its selecte
   } as const;
 
   importFunctionEffectResource(program);
-  program.signature({ ref: calleeSignature, type: calleeType });
-  program.signature({ ref: callerSignature, type: callerType });
   const callee = program.defineFunction({
     ref: calleeRef,
-    signature: calleeSignature,
+    type: calleeType,
     effects
   }, (fn) => {
     const value = fn.parameters[0];
@@ -552,7 +590,7 @@ test("an effectful function call stays single and conditional inside its selecte
   });
   const caller = program.defineFunction({
     ref: callerRef,
-    signature: callerSignature,
+    type: callerType,
     effects
   }, (fn) => {
     const condition = fn.parameters[0];
@@ -640,7 +678,6 @@ test("an effectful function call stays single and conditional inside its selecte
 test("function declarations keep resource bindings direct while effects are transitive", () => {
   const program = new ProgramBuilder();
   const type = functionType(["i32"], []);
-  const signature = signatureRef("test.transitive-effects-signature");
   const rootRef = functionRef("test.transitive-effects-root");
   const middleRef = functionRef("test.transitive-effects-middle");
   const leafRef = functionRef("test.transitive-effects-leaf");
@@ -649,8 +686,7 @@ test("function declarations keep resource bindings direct while effects are tran
   let leaf!: FunctionDefinition;
 
   importFunctionEffectResource(program);
-  program.signature({ ref: signature, type });
-  const root = program.defineFunction({ ref: rootRef, signature, effects }, (fn) => {
+  const root = program.defineFunction({ ref: rootRef, type, effects }, (fn) => {
     const value = fn.parameters[0];
 
     if (value === undefined) {
@@ -659,7 +695,7 @@ test("function declarations keep resource bindings direct while effects are tran
     fn.region.call(middle, [value]);
     fn.return([]);
   });
-  middle = program.defineFunction({ ref: middleRef, signature, effects }, (fn) => {
+  middle = program.defineFunction({ ref: middleRef, type, effects }, (fn) => {
     const value = fn.parameters[0];
 
     if (value === undefined) {
@@ -668,7 +704,7 @@ test("function declarations keep resource bindings direct while effects are tran
     fn.region.call(leaf, [value]);
     fn.return([]);
   });
-  leaf = program.defineFunction({ ref: leafRef, signature, effects }, (fn) => {
+  leaf = program.defineFunction({ ref: leafRef, type, effects }, (fn) => {
     const value = fn.parameters[0];
 
     if (value === undefined) {
@@ -696,13 +732,11 @@ test("function declarations keep resource bindings direct while effects are tran
 test("function effect declarations must cover their bodies", () => {
   const program = new ProgramBuilder();
   const type = functionType(["i32"], []);
-  const signature = signatureRef("test.undeclared-effect-signature");
 
   importFunctionEffectResource(program);
-  program.signature({ ref: signature, type });
   program.defineFunction({
     ref: functionRef("test.undeclared-effect"),
-    signature,
+    type,
     effects: noEffects
   }, (fn) => {
     const value = fn.parameters[0];
@@ -720,17 +754,15 @@ test("function effect declarations must cover their bodies", () => {
 test("callers must cover the effects declared by their call targets", () => {
   const program = new ProgramBuilder();
   const type = functionType(["i32"], []);
-  const signature = signatureRef("test.call-effect-signature");
   const effects = {
     reads: [],
     writes: [functionEffect()]
   } as const;
 
   importFunctionEffectResource(program);
-  program.signature({ ref: signature, type });
   const callee = program.defineFunction({
     ref: functionRef("test.call-effect-callee"),
-    signature,
+    type,
     effects
   }, (fn) => {
     const value = fn.parameters[0];
@@ -743,7 +775,7 @@ test("callers must cover the effects declared by their call targets", () => {
   });
   program.defineFunction({
     ref: functionRef("test.call-effect-caller"),
-    signature,
+    type,
     effects: noEffects
   }, (fn) => {
     const value = fn.parameters[0];
@@ -765,13 +797,11 @@ test("resource effect declarations preserve their range basis and extent", () =>
   {
     const program = new ProgramBuilder();
     const type = functionType(["i32"], []);
-    const signature = signatureRef("test.dynamic-gpr-effect-signature");
 
     importFunctionEffectResource(program);
-    program.signature({ ref: signature, type });
     program.defineFunction({
       ref: functionRef("test.dynamic-gpr-effect"),
-      signature,
+      type,
       effects: {
         reads: [],
         writes: [functionEffect(0, 1)]
@@ -791,15 +821,13 @@ test("resource effect declarations preserve their range basis and extent", () =>
   {
     const program = new ProgramBuilder();
     const type = functionType([], ["i32"]);
-    const signature = signatureRef("test.dynamic-segment-effect-signature");
 
     const origin = new DynamicByteOriginRef();
 
     importFunctionEffectResource(program);
-    program.signature({ ref: signature, type });
     program.defineFunction({
       ref: functionRef("test.dynamic-segment-effect"),
-      signature,
+      type,
       effects: {
         reads: [{
           space: "resource",
@@ -826,23 +854,19 @@ test("calls enforce their declared function contracts", () => {
     const program = new ProgramBuilder();
     const calleeType = functionType(["i32"], []);
     const callerType = functionType([], []);
-    const calleeSignature = signatureRef("test.argument-callee-signature");
-    const callerSignature = signatureRef("test.argument-caller-signature");
     const calleeRef = functionRef("test.argument-callee");
     const callerRef = functionRef("test.argument-caller");
 
-    program.signature({ ref: calleeSignature, type: calleeType });
-    program.signature({ ref: callerSignature, type: callerType });
     const callee = program.defineFunction({
       ref: calleeRef,
-      signature: calleeSignature,
+      type: calleeType,
       effects: noEffects
     }, (fn) => {
       fn.return([]);
     });
     program.defineFunction({
       ref: callerRef,
-      signature: callerSignature,
+      type: callerType,
       effects: noEffects
     }, (fn) => {
       fn.region.call(callee, []);
@@ -856,11 +880,9 @@ test("calls enforce their declared function contracts", () => {
 test("functions must terminate with a return matching their result contract", () => {
   const program = new ProgramBuilder();
   const type = functionType([], ["i32"]);
-  const signature = signatureRef("test.missing-return-signature");
   const fn = functionRef("test.missing-return");
 
-  program.signature({ ref: signature, type });
-  program.defineFunction({ ref: fn, signature, effects: noEffects }, () => {});
+  program.defineFunction({ ref: fn, type, effects: noEffects }, () => {});
 
   throws(() => program.finish(), /root body does not complete/);
 });
@@ -984,20 +1006,18 @@ test("successful closure rejects every later topology mutation including one fro
 
 test("function factories cannot mutate program topology while it is closing", () => {
   const program = new ProgramBuilder();
-  const signature = signatureRef("test.closing-signature");
   let triesMutation = true;
 
-  program.signature({ ref: signature, type: voidType });
   program.defineFunction({
     ref: functionRef("test.closing-function"),
-    signature,
+    type: voidType,
     effects: noEffects
   }, (fn) => {
     if (triesMutation) {
       triesMutation = false;
       program.defineFunction({
         ref: functionRef("test.closing-late-function"),
-        signature,
+        type: voidType,
         effects: noEffects
       }, (late) => late.return([]));
     }
@@ -1010,13 +1030,11 @@ test("function factories cannot mutate program topology while it is closing", ()
 
 test("closed functions do not retain their mutable factory builders", () => {
   const program = new ProgramBuilder();
-  const signature = signatureRef("test.function-snapshot-signature");
   let rawBuilder!: FunctionBuilder;
 
-  program.signature({ ref: signature, type: voidType });
   const definition = program.defineFunction({
     ref: functionRef("test.function-snapshot"),
-    signature,
+    type: voidType,
     effects: noEffects
   }, (fn) => {
     rawBuilder = fn;
@@ -1037,7 +1055,7 @@ test("closed functions do not retain their mutable factory builders", () => {
   encodeProgram(closed);
 });
 
-test("declaration construction rejects conflicts needed to build a program", () => {
+test("declaration construction and closure reject invalid program declarations", () => {
   {
     const program = new ProgramBuilder();
 
@@ -1049,15 +1067,28 @@ test("declaration construction rejects conflicts needed to build a program", () 
   }
   {
     const program = new ProgramBuilder();
+    const signature = signatureRef("unused-signature");
 
-    program.signature({ ref: signatureRef("same-signature"), type: voidType });
+    program.signature({ ref: signature, type: voidType });
     throws(
-      () => program.defineFunction({
-        ref: functionRef("same-id-signature-lookalike-user"),
-        signature: signatureRef("same-signature"),
-        effects: noEffects
-      }, (fn) => fn.return([])),
-      /unknown program signature/
+      () => program.finish(),
+      /program signature unused-signature is not used by a legacy function/
+    );
+  }
+  {
+    const program = new ProgramBuilder();
+    const type = functionType([], []);
+    const signature = signatureRef("symbolic-only-signature");
+
+    program.signature({ ref: signature, type });
+    program.defineFunction({
+      ref: functionRef("symbolic-signature-lookalike-user"),
+      type,
+      effects: noEffects
+    }, (fn) => fn.return([]));
+    throws(
+      () => program.finish(),
+      /program signature symbolic-only-signature is not used by a legacy function/
     );
   }
   {
@@ -1176,7 +1207,7 @@ test("program validation rejects duplicate stable declaration identities", () =>
     });
     program.defineFunction({
       ref: functionRef("mixed-function"),
-      signature,
+      type: voidType,
       effects: noEffects
     }, (fn) => fn.return([]));
     throws(() => validateProgram(program.finish()), /duplicate program function identity/);
@@ -1284,7 +1315,7 @@ test("program validation resolves references by identity", () => {
   program.signature({ ref: signature, type: voidType });
   program.defineFunction({
     ref: functionRef("test.unrelated-typed-function"),
-    signature,
+    type: voidType,
     effects: noEffects
   }, (fn) => {
     typedBuilt = true;
@@ -1490,6 +1521,16 @@ test("recorded type indexes must come from the function's declared signature", (
   program.signature({ ref: unrelatedSignature, type: i32Type });
   program.importTable({ ref: table, moduleName: "test", name: "table", limits: { minElements: 1 } });
   program.legacyFunction({
+    ref: functionRef("test.unrelated-function"),
+    signature: unrelatedSignature,
+    calls: [],
+    resources: [],
+    globals: [],
+    tables: [],
+    irBlocks: [],
+    build: () => new WasmFunctionBodyEncoder().i32Const(0).finish()
+  });
+  program.legacyFunction({
     ref: fn,
     signature,
     calls: [],
@@ -1590,15 +1631,13 @@ test("program closure rejects functions owned by another program", () => {
     const owner = new ProgramBuilder();
     const consumer = new ProgramBuilder();
     const ownedType = functionType([], []);
-    const ownerSignature = signatureRef("test.owner-signature");
     const consumerSignature = signatureRef("test.consumer-signature");
     const ownedRef = functionRef("test.owned-function");
     const root = functionRef("test.cross-program-root");
 
-    owner.signature({ ref: ownerSignature, type: ownedType });
     const owned = owner.defineFunction({
       ref: ownedRef,
-      signature: ownerSignature,
+      type: ownedType,
       effects: noEffects
     }, (fn) => fn.return([]));
     const ir = buildIrBlock((body) => {
@@ -1621,73 +1660,82 @@ test("program closure rejects functions owned by another program", () => {
   }
 });
 
-test("program closure includes only function calls that must execute", () => {
+test("program closure retains live and transitive family types but omits a dead type", () => {
   const program = new ProgramBuilder();
-  const generatedType = functionType([], ["i64"]);
-  const generatedSignature = signatureRef("test.generated-signature");
-  const rootSignature = signatureRef("test.generated-root-signature");
-  const root = functionRef("test.generated-root");
-  const builds: number[] = [];
-  let family!: FunctionFamily<number>;
-
-  family = new FunctionFamily<number>({
-    type: generatedType,
+  const rootType = functionType([], ["i64"]);
+  const liveType = functionType([], ["i64"]);
+  const transitiveType = functionType([], ["i64"]);
+  const deadType = functionType([], []);
+  const builds: string[] = [];
+  const transitiveFamily = new FunctionFamily<number>({
+    type: transitiveType,
     effects: () => noEffects,
-    id: (key) => `test.generated.${key}`,
+    id: (key) => `test.generated.transitive.${key}`,
     build: (key, fn) => {
-      builds.push(key);
-      if (key === 2) {
-        const result = fn.region.call(family.get(3), [])[0];
-
-        if (result === undefined) {
-          throw new Error("missing transitive generated result");
-        }
-        fn.return([result]);
-        return;
-      }
+      builds.push(`transitive-${key}`);
       fn.return([fn.values.const64(BigInt(key))]);
     }
   });
-  const dead = family.get(1);
-  const live = family.get(2);
-  const transitive = family.get(3);
-  const deadCall = buildIrBlock((body) => {
-    body.call(dead, []);
+  const transitive = transitiveFamily.get(3);
+  const liveFamily = new FunctionFamily<number>({
+    type: liveType,
+    effects: () => noEffects,
+    id: (key) => `test.generated.live.${key}`,
+    build: (key, fn) => {
+      builds.push(`live-${key}`);
+      const result = fn.region.call(transitive, [])[0];
+
+      if (result === undefined) {
+        throw new Error("missing transitive generated result");
+      }
+      fn.return([result]);
+    }
   });
-  const liveCall = buildIrBlock((body) => {
-    const result = body.call(live, [])[0];
+  const deadFamily = new FunctionFamily<number>({
+    type: deadType,
+    effects: () => noEffects,
+    id: (key) => `test.generated.dead.${key}`,
+    build: (key, fn) => {
+      builds.push(`dead-${key}`);
+      fn.return([]);
+    }
+  });
+  const live = liveFamily.get(2);
+  const dead = deadFamily.get(1);
+  const root = program.defineFunction({
+    ref: functionRef("test.generated.root"),
+    type: rootType,
+    effects: noEffects
+  }, (fn) => {
+    fn.region.call(dead, []);
+    const result = fn.region.call(live, [])[0];
 
     if (result === undefined) {
       throw new Error("missing live generated result");
     }
-    body.finish({ kind: "exit", result });
-  });
-
-  program.signature({ ref: rootSignature, type: voidType });
-  program.signature({ ref: generatedSignature, type: generatedType });
-  program.legacyFunction({
-    ref: root,
-    signature: rootSignature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [
-      { block: deadCall, allowImplicitEntryFallthrough: true },
-      { block: liveCall, allowImplicitEntryFallthrough: false }
-    ],
-    build: () => new WasmFunctionBodyEncoder().finish()
+    fn.return([result]);
   });
 
   const closed = program.finish();
 
+  deepStrictEqual(closed.signatures, []);
+  deepStrictEqual(
+    closed.functions.map((fn) => fn.ref),
+    [root.ref, live.ref, transitive.ref]
+  );
   strictEqual(closed.functions.some((fn) => fn.ref === dead.ref), false);
-  deepStrictEqual(builds, [2, 3]);
+  deepStrictEqual(builds, ["live-2", "transitive-3"]);
+  deepStrictEqual(closed.functionTypes, [rootType, liveType, transitiveType]);
+  strictEqual(closed.functionTypes[0], rootType);
+  strictEqual(closed.functionTypes[1], liveType);
+  strictEqual(closed.functionTypes[2], transitiveType);
+  strictEqual(closed.functionTypes.includes(deadType), false);
   const liveFunction = closed.functions.find((fn) => fn.ref === live.ref);
 
   ok(liveFunction?.kind === "function", "missing live family member");
   ok(closed.functions.some((fn) => fn.ref === transitive.ref), "missing transitive family member");
   deepStrictEqual(liveFunction.effects, noEffects);
+  encodeProgram(closed);
 });
 
 test("generated and declared functions share one identity namespace", () => {
@@ -1784,7 +1832,12 @@ test("distinct semantic function contracts coalesce to one physical Wasm type", 
     }
   });
 
-  encodeProgram(program.finish());
+  const closed = program.finish();
+
+  deepStrictEqual(closed.functionTypes, [firstType, secondType]);
+  strictEqual(closed.functionTypes[0], firstType);
+  strictEqual(closed.functionTypes[1], secondType);
+  encodeProgram(closed);
   strictEqual(firstTypeIndex, 0);
   strictEqual(secondTypeIndex, 0);
 });

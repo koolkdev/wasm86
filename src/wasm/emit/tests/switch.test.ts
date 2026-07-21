@@ -19,8 +19,7 @@ import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import {
   exportRef,
-  functionRef,
-  signatureRef
+  functionRef
 } from "#compiler/program/refs.js";
 import {
   readWasmCpuStateChannel,
@@ -129,12 +128,10 @@ test("a control-only switch routes several matches through one emitted body", as
 test("nested completing switches seal a defined function result", async () => {
   const program = new ProgramBuilder();
   const entryType = functionType(["i32"], ["i64"]);
-  const entrySignature = signatureRef("test.completing-switch-signature");
 
-  program.signature({ ref: entrySignature, type: entryType });
   const entry = program.defineFunction({
     ref: functionRef("test.completing-switch"),
-    signature: entrySignature,
+    type: entryType,
     effects: { reads: [], writes: [] }
   }, (fn) => {
     const selector = fn.parameters[0];

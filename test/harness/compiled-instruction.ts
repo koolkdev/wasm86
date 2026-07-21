@@ -8,8 +8,7 @@ import { functionType } from "#compiler/program/function-type.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import {
   exportRef,
-  functionRef,
-  signatureRef
+  functionRef
 } from "#compiler/program/refs.js";
 import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
 import type {
@@ -144,11 +143,7 @@ function buildInstructionProgram(
   const program = new ProgramBuilder();
   const entryType = functionType([], ["i64"]);
   const dispatchType = functionType(["i32"], ["i64"]);
-  const entrySignature = signatureRef("test.compiled-instruction.entry-signature");
-  const dispatchSignature = signatureRef("test.compiled-instruction.dispatch-signature");
 
-  program.signature({ ref: entrySignature, type: entryType });
-  program.signature({ ref: dispatchSignature, type: dispatchType });
   program.importMemory({
     ref: cpuState.resource,
     moduleName: wasmImport.namespace,
@@ -164,14 +159,14 @@ function buildInstructionProgram(
 
   const dispatch = program.defineFunction({
     ref: functionRef("test.compiled-instruction.dispatch"),
-    signature: dispatchSignature,
+    type: dispatchType,
     effects: noEffects
   }, (fn) => {
     fn.return([buildVariant(fn.values, exitLayout, instructionLimitExit())]);
   });
   const entry = program.defineFunction({
     ref: functionRef("test.compiled-instruction.entry"),
-    signature: entrySignature,
+    type: entryType,
     effects: compiledInstructionEffects
   }, (fn) => {
     const builder = createInstructionBuilder(fn.region, {

@@ -2,8 +2,6 @@ import type { ValueType } from "#compiler/ir/values/types.js";
 
 declare const functionTypeBrand: unique symbol;
 
-// An owner-defined semantic contract. Program signatures pair a local
-// identity with this contract; physical Wasm types may still be coalesced.
 export type FunctionType = Readonly<{
   [functionTypeBrand]: true;
   parameters: readonly ValueType[];

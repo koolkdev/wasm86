@@ -19,7 +19,8 @@ import type {
   FunctionExport,
   LegacyFunction,
   Program,
-  ProgramFunction
+  ProgramFunction,
+  Signature
 } from "./model.js";
 import type {
   FunctionRef,
@@ -97,6 +98,15 @@ export function validateProgramDeclarations(
     }
   }
 
+  for (const signature of declarations.signatures) {
+    assert(
+      functions.some(
+        (fn) => !(fn instanceof FunctionDefinition) && fn.signature === signature.ref
+      ),
+      `program signature ${signature.ref.id} is not used by a legacy function`
+    );
+  }
+
   for (const exported of declarations.exports) {
     assert(
       functionsByRef.has(exported.target),
@@ -151,10 +161,7 @@ function validateFunctionDefinitionDeclaration(
     definition.canBeUsedBy(declarations.owner),
     `function ${definition.ref.id} belongs to another program`
   );
-  assert(
-    declarations.signatures.some((signature) => signature.type === definition.type),
-    `function ${definition.ref.id} has no program signature`
-  );
+  validateFunctionType(definition.type);
   validateDeclaredStorageEffects(
     definition.effects,
     `function ${definition.ref.id} declared`
@@ -172,6 +179,9 @@ function validateFunctionDefinitionDeclaration(
 }
 
 export function validateProgram(program: Program): void {
+  for (const type of program.functionTypes) {
+    validateFunctionType(type);
+  }
   validateDeclarations(program.signatures);
   validateDeclarations(program.memories);
   validateDeclarations(program.tables);
@@ -184,13 +194,6 @@ export function validateProgram(program: Program): void {
     validateFunctionType(signature.type);
   }
   for (const fn of program.functions) {
-    for (const type of fn.indirectTypes) {
-      assert(
-        program.signatures.some((signature) => signature.type === type),
-        `function ${fn.ref.id} uses an indirect call type with no program signature`
-      );
-    }
-
     if (fn.kind === "legacy") {
       assert(
         fn.effects === "none" || fn.effects === "world",
@@ -212,18 +215,10 @@ export function validateProgram(program: Program): void {
   const globals = new Set(program.globals.map((global) => global.ref));
   const functions = new Map(program.functions.map((fn) => [fn.ref, fn]));
 
-  for (const fn of program.functions) {
-    const signature = signatures.get(fn.signature);
+  validateProgramFunctionTypes(program, signatures);
 
-    assert(
-      signature !== undefined,
-      `unknown program signature ${fn.signature.id} declared by function ${fn.ref.id}`
-    );
-    if (fn.kind === "function") {
-      assert(
-        fn.type === signature.type,
-        `function ${fn.ref.id} does not match its program signature`
-      );
+  for (const fn of program.functions) {
+    if (fn.kind !== "legacy") {
       assert(
         fn.body.type === fn.type,
         `function ${fn.ref.id} body does not match its declared type`
@@ -308,6 +303,84 @@ export function validateProgram(program: Program): void {
   }
 }
 
+function validateProgramFunctionTypes(
+  program: Program,
+  signatures: ReadonlyMap<SignatureRef, Signature>
+): void {
+  const functionTypes = new Set(program.functionTypes);
+
+  assert(
+    functionTypes.size === program.functionTypes.length,
+    "program contains a duplicate function type"
+  );
+
+  const requiredTypes: FunctionType[] = [];
+
+  for (const fn of program.functions) {
+    if (fn.kind === "function") {
+      assert(
+        functionTypes.has(fn.type),
+        `function ${fn.ref.id} type is missing from the program function types`
+      );
+      if (!requiredTypes.includes(fn.type)) {
+        requiredTypes.push(fn.type);
+      }
+    }
+  }
+  for (const fn of program.functions) {
+    for (const type of fn.indirectTypes) {
+      assert(
+        functionTypes.has(type),
+        `function ${fn.ref.id} live indirect type is missing from the program function types`
+      );
+      if (!requiredTypes.includes(type)) {
+        requiredTypes.push(type);
+      }
+    }
+  }
+
+  const usedSignatures = new Set<SignatureRef>();
+
+  for (const fn of program.functions) {
+    if (fn.kind !== "legacy") {
+      continue;
+    }
+    const signature = signatures.get(fn.signature);
+
+    assert(
+      signature !== undefined,
+      `unknown program signature ${fn.signature.id} declared by function ${fn.ref.id}`
+    );
+    usedSignatures.add(fn.signature);
+  }
+  for (const signature of program.signatures) {
+    assert(
+      usedSignatures.has(signature.ref),
+      `program signature ${signature.ref.id} is not used by a legacy function`
+    );
+    assert(
+      functionTypes.has(signature.type),
+      `program signature ${signature.ref.id} type is missing from the program function types`
+    );
+    if (!requiredTypes.includes(signature.type)) {
+      requiredTypes.push(signature.type);
+    }
+  }
+
+  const requiredTypeSet = new Set(requiredTypes);
+
+  for (const type of program.functionTypes) {
+    assert(
+      requiredTypeSet.has(type),
+      "program contains an unrequired function type"
+    );
+  }
+  assert(
+    sameIdentitySequence(program.functionTypes, requiredTypes),
+    "program function types are not in required order"
+  );
+}
+
 function collectDeclaredFunctions(
   declarations: readonly FunctionDeclaration[]
 ): readonly FunctionDeclaration[] {
@@ -381,15 +454,23 @@ function indexProgramEncoding(program: Program): ProgramEncodingIndices {
   const signatures = new Map<SignatureRef, number>();
   const typeIndices = new Map<FunctionType, number>();
 
-  for (const signature of program.signatures) {
-    let index = types.findIndex((type) => functionTypesEqual(type, signature.type));
+  for (const type of program.functionTypes) {
+    let index = types.findIndex((candidate) => functionTypesEqual(candidate, type));
 
     if (index === -1) {
       index = types.length;
-      types.push(signature.type);
+      types.push(type);
     }
+    typeIndices.set(type, index);
+  }
+  for (const signature of program.signatures) {
+    const index = typeIndices.get(signature.type);
+
+    assert(
+      index !== undefined,
+      `program signature ${signature.ref.id} has no function type index`
+    );
     signatures.set(signature.ref, index);
-    typeIndices.set(signature.type, index);
   }
 
   return {

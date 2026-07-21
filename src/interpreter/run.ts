@@ -2,8 +2,9 @@ import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ResourceEffect, ResourceRef } from "#compiler/ir/resource.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ProgramBuilder } from "#compiler/program/builder.js";
+import { functionType } from "#compiler/program/function-type.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef, type SignatureRef } from "#compiler/program/refs.js";
+import { functionRef } from "#compiler/program/refs.js";
 import { StateAccess } from "#core/state/access.js";
 import { coreStateFields } from "#core/state/layout.js";
 import type { FunctionBuilder } from "#ir/function.js";
@@ -16,9 +17,10 @@ import type {
 import { instructionLimitExit } from "./exits.js";
 import { buildInterpreterInstruction } from "./instruction.js";
 
+const interpreterRunType = functionType([], ["i64"]);
+
 export function defineInterpreterRun(
   program: ProgramBuilder,
-  signature: SignatureRef,
   environment: InterpreterEnvironment
 ): FunctionDefinition {
   const stateAccess = new StateAccess(environment.state);
@@ -32,7 +34,7 @@ export function defineInterpreterRun(
   };
   return program.defineFunction({
     ref: functionRef("interpreter.run"),
-    signature,
+    type: interpreterRunType,
     effects: interpreterRunEffects(
       environment.state.resource,
       environment.memory.resource

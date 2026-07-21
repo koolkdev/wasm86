@@ -56,15 +56,20 @@ export function linkProgram(options: LinkProgramOptions): Program {
   });
   const defined = linkDefinedFunctions(
     closure,
-    options.signatures,
     placements
   );
   const functions: readonly ProgramFunction[] = [...legacy.functions, ...defined];
+  const functionTypes = collectProgramFunctionTypes(
+    defined,
+    legacy.functions,
+    options.signatures
+  );
 
   if (buildDefinition.validation) {
     validateLinkedProgramFunctions(declarations.all(), functions);
   }
   const program: ProgramData = {
+    functionTypes,
     signatures: options.signatures,
     memories: options.memories,
     tables: options.tables,
@@ -125,14 +130,10 @@ function placeLegacyFunctions(
 
 function linkDefinedFunctions(
   closure: FunctionClosure,
-  signatures: readonly Signature[],
   placements: Map<IrBlock, BodyPlacement>
 ): readonly DefinedFunction[] {
   return [...closure.functions].map(([definition, closed]): DefinedFunction => {
     const { body, placement } = closed;
-    const signature = signatures.find((candidate) => candidate.type === definition.type);
-
-    assert(signature !== undefined, `function ${definition.ref.id} has no program signature`);
     const invocations = liveInvocations(placement.analysis);
     const directTargets: FunctionDefinition[] = [];
     const indirectTypes: FunctionType[] = [];
@@ -153,7 +154,6 @@ function linkDefinedFunctions(
       ref: definition.ref,
       type: definition.type,
       effects: definition.effects,
-      signature: signature.ref,
       directTargets: unique(directTargets),
       indirectTypes: unique(indirectTypes),
       resources,
@@ -162,6 +162,30 @@ function linkDefinedFunctions(
       placement
     };
   });
+}
+
+function collectProgramFunctionTypes(
+  definedFunctions: readonly DefinedFunction[],
+  legacyFunctions: readonly LegacyFunction[],
+  signatures: readonly Signature[]
+): readonly FunctionType[] {
+  const usedSignatures = new Set(legacyFunctions.map((fn) => fn.signature));
+
+  for (const fn of legacyFunctions) {
+    assert(
+      signatures.some((signature) => signature.ref === fn.signature),
+      `unknown program signature ${fn.signature.id} declared by function ${fn.ref.id}`
+    );
+  }
+
+  return unique([
+    ...definedFunctions.map((fn) => fn.type),
+    ...legacyFunctions.flatMap((fn) => fn.indirectTypes),
+    ...definedFunctions.flatMap((fn) => fn.indirectTypes),
+    ...signatures
+      .filter((signature) => usedSignatures.has(signature.ref))
+      .map((signature) => signature.type)
+  ]);
 }
 
 function collectFunctionDeclarations(

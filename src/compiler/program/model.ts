@@ -73,7 +73,6 @@ export type DefinedFunction = Readonly<{
   ref: FunctionRef;
   type: FunctionType;
   effects: StorageEffects;
-  signature: SignatureRef;
   directTargets: readonly FunctionDefinition[];
   indirectTypes: readonly FunctionType[];
   resources: readonly ResourceRef[];
@@ -88,6 +87,7 @@ export type ProgramFunction = LegacyFunction | DefinedFunction;
 declare const programBrand: unique symbol;
 
 export type ProgramData = Readonly<{
+  functionTypes: readonly FunctionType[];
   signatures: readonly Signature[];
   memories: readonly MemoryImport[];
   tables: readonly TableImport[];

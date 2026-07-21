@@ -1,6 +1,5 @@
 import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/program/function-type.js";
-import { exportRef, signatureRef } from "#compiler/program/refs.js";
+import { exportRef } from "#compiler/program/refs.js";
 import { buildExit } from "#cpu/exit.js";
 import {
   instructionCountField,
@@ -10,7 +9,6 @@ import {
   cpuState,
   cpuStatusFlagResolvers
 } from "#cpu/state.js";
-import { statusFlagResolverType } from "#core/flags/lazy/resolvers.js";
 import { guestMemoryAccess } from "#memory/access.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
 import { guestMemoryResource } from "#memory/resource.js";
@@ -19,17 +17,6 @@ import { defineInterpreterRun } from "./run.js";
 
 export function buildInterpreterProgram(): Program {
   const builder = new ProgramBuilder();
-  const runSignature = builder.signature({
-    ref: signatureRef("interpreter.run-signature"),
-    type: functionType([], ["i64"])
-  });
-
-  // Resolver members are discovered from instruction calls when the program
-  // closes; their shared function type must be declared beforehand.
-  builder.signature({
-    ref: signatureRef("interpreter.status-flag-resolver-signature"),
-    type: statusFlagResolverType
-  });
 
   builder.importMemory({
     ref: cpuState.resource,
@@ -43,7 +30,7 @@ export function buildInterpreterProgram(): Program {
     name: wasmImport.guestMemoryName,
     limits: { minPages: guestMemoryMinimumPages }
   });
-  const run = defineInterpreterRun(builder, runSignature, {
+  const run = defineInterpreterRun(builder, {
     state: cpuState,
     statusFlagResolvers: cpuStatusFlagResolvers,
     memory: {
