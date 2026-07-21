@@ -14,7 +14,7 @@ import {
   pageFault
 } from "#core/exceptions.js";
 import { exitLayout } from "#cpu/exit.js";
-import { instructionLimitExit } from "#engines/interpreter/exits.js";
+import { instructionLimitExit } from "#interpreter/exits.js";
 import {
   decodeTransfer,
   encodeTransfer,

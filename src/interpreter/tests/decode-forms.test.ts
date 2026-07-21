@@ -16,7 +16,7 @@ import {
   exactModRmCases,
   memoryFormDispatch,
   modRmRegCases
-} from "#engines/interpreter/decode/forms.js";
+} from "#interpreter/decode/forms.js";
 
 type ModRmCandidate = Extract<DecodeCandidate, { kind: "modRm" }>;
 

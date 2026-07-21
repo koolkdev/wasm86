@@ -16,7 +16,7 @@ import {
   invalidOpcode,
   pageFault
 } from "#core/exceptions.js";
-import { instructionLimitExit } from "#engines/interpreter/exits.js";
+import { instructionLimitExit } from "#interpreter/exits.js";
 import { encodeTransfer } from "#engines/jit/legacy-transfer.js";
 
 const validExits: readonly Readonly<{

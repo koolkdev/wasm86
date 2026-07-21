@@ -14,7 +14,7 @@ import { assertMemoryImports } from "#wasm/tests/helpers.js";
 import { wasmImport } from "#wasm/abi.js";
 import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { invalidOpcode } from "#core/exceptions.js";
-import { encodeInterpreterModule } from "#engines/interpreter/module.js";
+import { encodeInterpreterModule } from "#interpreter/module.js";
 
 test("imports cpu state and guest memories in ABI order", () => {
   const module = new WebAssembly.Module(encodeInterpreterModule());

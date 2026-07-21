@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { SegmentRegister } from "#core/types.js";
 import { u32 } from "#core/numeric.js";
-import { bindInterpreter } from "#engines/interpreter/binding.js";
+import { bindInterpreter } from "#interpreter/binding.js";
 import { wasmPageByteLength } from "#wasm/abi.js";
 import { decodeExit } from "./exit.js";
 import { createCpuStateHostView } from "./host-view.js";

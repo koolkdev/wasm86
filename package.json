@@ -27,6 +27,10 @@
       "types": "./src/machine/*",
       "default": "./dist/src/machine/*"
     },
+    "#interpreter/*": {
+      "types": "./src/interpreter/*",
+      "default": "./dist/src/interpreter/*"
+    },
     "#engines/*": {
       "types": "./src/engines/*",
       "default": "./dist/src/engines/*"

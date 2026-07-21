@@ -8,7 +8,7 @@ import {
   instructionLimitField
 } from "#cpu/instruction-count.js";
 import { cpuState } from "#cpu/state.js";
-import { encodeInterpreterModule } from "#engines/interpreter/module.js";
+import { encodeInterpreterModule } from "#interpreter/module.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import {
   readWasmCpuStateField,

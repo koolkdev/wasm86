@@ -22,7 +22,7 @@ import { segmentRegisters } from "#core/types.js";
 import {
   interpreterExits,
   interpreterExitSet
-} from "#engines/interpreter/exits.js";
+} from "#interpreter/exits.js";
 import type { RunStop } from "./cpu.js";
 
 // Cpu resolves every configured owner's true exits once. Guest transfers use

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { cpuStatusFlagResolvers } from "#cpu/state.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
 import { statusFlagResolverType } from "#core/flags/lazy/resolvers.js";
-import { buildInterpreterProgram } from "#engines/interpreter/program.js";
+import { buildInterpreterProgram } from "#interpreter/program.js";
 import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
 import type { Body } from "#ir/block.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";

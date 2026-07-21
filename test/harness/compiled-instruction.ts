@@ -35,7 +35,7 @@ import {
   cpuStateAccess,
   cpuStatusFlagResolvers
 } from "#cpu/state.js";
-import { instructionLimitExit } from "#engines/interpreter/exits.js";
+import { instructionLimitExit } from "#interpreter/exits.js";
 import { guestMemoryAccess } from "#memory/access.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
 import { readBackingByte, writeBackingBytes } from "#memory/bytes.js";
