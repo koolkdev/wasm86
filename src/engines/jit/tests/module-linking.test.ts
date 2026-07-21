@@ -11,6 +11,7 @@ import {
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 import { compileActionWasmBlockHandle, type WasmBlockHandle } from "#engines/jit/block-handle.js";
 import { writeBackingBytes } from "#memory/bytes.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
 
 const aEip = 0x1000;
 const bEip = 0x2000;
@@ -185,12 +186,14 @@ function compileBlock(fixture: ReturnType<typeof createLinkingFixture>, eip: num
     `source bytes exceed guest memory at 0x${firstFailingAddress?.toString(16)}`
   );
   const decoded = decodeJitBlock(
-    fixture.memories.guestMemory,
+    testExecutionModel.guestMemory.createReader(
+      fixture.memories.guestMemory
+    ),
     eip,
     { maxInstructions: 1024 }
   );
 
-  return compileActionWasmBlockHandle([decoded], {
+  return compileActionWasmBlockHandle(testExecutionModel, [decoded], {
     cpuStateMemory: fixture.memories.cpuStateMemory,
     guestMemory: fixture.memories.guestMemory
   });

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { BodyNode, IrBlock } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { gprChannel } from "#core/state/channels.js";
-import { cpuStateAccess } from "#cpu/state.js";
+import { cpuStateAccess } from "#test/support/execution-model.js";
 import {
   memoryReadOperation,
   operandRead,

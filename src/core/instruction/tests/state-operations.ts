@@ -16,7 +16,7 @@ import {
 import type { SegmentStateField } from "#core/state/channels.js";
 import type { InstructionStateChannel } from "../state/channels.js";
 import type { OperandWidth } from "#core/types.js";
-import { cpuState } from "#cpu/state.js";
+import { cpuState } from "#test/support/execution-model.js";
 import type { BodyNode } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { covers } from "#ir/aliasing.js";

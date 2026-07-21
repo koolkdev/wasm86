@@ -2,7 +2,7 @@ import { deepStrictEqual, doesNotThrow, ok, strictEqual, throws } from "node:ass
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
 import { subFlagSource } from "#core/flags/lazy/sources.js";
 import { immBinding, memBinding, regBinding, staticMemSegment } from "#core/instruction/bindings.js";
 import { flagStateFields } from "#core/flags/layout.js";

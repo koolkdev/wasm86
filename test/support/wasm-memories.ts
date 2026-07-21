@@ -1,6 +1,6 @@
+import { wasmPagesForByteLength } from "#compiler/program/pages.js";
 import { cpuState } from "#cpu/state.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
-import { wasmPageByteLength } from "#wasm/abi.js";
 
 export type TestWasmMemories = Readonly<{
   cpuStateMemory: WebAssembly.Memory;
@@ -10,7 +10,7 @@ export type TestWasmMemories = Readonly<{
 export function createTestWasmMemories(): TestWasmMemories {
   return {
     cpuStateMemory: new WebAssembly.Memory({
-      initial: Math.ceil(cpuState.layout.byteLength / wasmPageByteLength)
+      initial: wasmPagesForByteLength(cpuState.layout.byteLength)
     }),
     guestMemory: new WebAssembly.Memory({
       initial: guestMemoryMinimumPages

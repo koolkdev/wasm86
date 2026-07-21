@@ -1,10 +1,17 @@
-import { encodeProgram } from "#compiler/program/encode.js";
+import {
+  compileProgram,
+  type CompiledProgram
+} from "#compiler/program/compile.js";
+import type { ExecutionModel } from "#execution/model.js";
 import { u32 } from "#core/numeric.js";
 import type { IrBlock } from "#ir/block.js";
 import type { JitLinkLayout } from "./compiled-blocks/module-link-table.js";
 import { buildJitProgram, jitBlockLinkTargets } from "./program.js";
 
-export { jitBlockExportName } from "./program.js";
+export {
+  jitBlockExportName,
+  jitLinkTableImportName
+} from "./program.js";
 
 export type JitBlock = Readonly<{
   entryEip: number;
@@ -33,8 +40,19 @@ export function jitModuleLinkTargets(blocks: readonly JitBlock[]): readonly numb
 }
 
 export function encodeJitModule(
+  model: ExecutionModel,
   blocks: readonly JitBlock[],
   options: JitModuleOptions = {}
 ): Uint8Array<ArrayBuffer> {
-  return encodeProgram(buildJitProgram(blocks, options.linkLayout));
+  return compileJitProgram(model, blocks, options).bytes;
+}
+
+export function compileJitProgram(
+  model: ExecutionModel,
+  blocks: readonly JitBlock[],
+  options: JitModuleOptions = {}
+): CompiledProgram {
+  return compileProgram(
+    buildJitProgram(model, blocks, options.linkLayout)
+  );
 }

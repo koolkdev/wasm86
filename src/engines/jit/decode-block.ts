@@ -5,7 +5,7 @@ import type {
   IsaDecodeReader
 } from "#core/decoder/types.js";
 import { u32 } from "#core/numeric.js";
-import { guestMemoryAccess } from "#memory/access.js";
+import type { GuestMemoryReader } from "#memory/access.js";
 
 export type JitDecodedBlock = Readonly<{
   startEip: number;
@@ -25,13 +25,12 @@ export type DecodeJitBlockOptions = Readonly<{
 const defaultMaxInstructions = 64;
 
 export function decodeJitBlock(
-  memory: WebAssembly.Memory,
+  memoryReader: GuestMemoryReader,
   startEip: number,
   options: DecodeJitBlockOptions = {}
 ): JitDecodedBlock {
   const instructions: IsaDecodedInstruction[] = [];
   const maxInstructions = options.maxInstructions ?? defaultMaxInstructions;
-  const memoryReader = guestMemoryAccess.bindHost(memory);
   const reader: IsaDecodeReader = {
     readU8: (address) => memoryReader.readByte(address, "instructionFetch")
   };

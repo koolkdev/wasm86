@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
 import { immBinding, memBinding, regBinding, staticMemSegment, type OperandBinding } from "#core/instruction/bindings.js";
 import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";

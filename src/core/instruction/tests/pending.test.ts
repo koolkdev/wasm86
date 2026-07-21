@@ -7,7 +7,7 @@ import type { StatePathKind } from "../state/pending-buffer.js";
 import { GprState, type GprReadOptions } from "../state/gpr.js";
 import { SegmentState } from "../state/segments.js";
 import { StateAccess } from "#core/state/access.js";
-import { cpuState } from "#cpu/state.js";
+import { cpuState } from "#test/support/execution-model.js";
 import { flagStateFields } from "#core/flags/layout.js";
 import type { InstructionStateChannel } from "../state/channels.js";
 import {

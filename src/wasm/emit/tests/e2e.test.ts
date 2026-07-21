@@ -2,7 +2,10 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock, type LegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import {
+  createLegacyInstructionBlock,
+  type LegacyInstructionBlock
+} from "#test/support/legacy-instruction-block.js";
 import { immBinding, regBinding } from "#core/instruction/bindings.js";
 import { gprChannel } from "#core/state/channels.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
@@ -13,7 +16,6 @@ import { cpuState } from "#cpu/state.js";
 import { aluSemantic } from "#core/semantics/alu.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#core/semantics/mov.js";
 import { xchgSemantic } from "#core/semantics/xchg.js";
-import { wasmMemoryIndex } from "#wasm/abi.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   assertLazyFlagState,
@@ -22,7 +24,12 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { wasmBodyMemoryAccesses, wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
-import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import {
+  irBlockBody,
+  irBlockCompleted,
+  instantiateIrBlock,
+  testModuleMemoryIndex
+} from "./harness.js";
 
 const eaxStateOffset = cpuState.layout.array(coreStateFields.gprs).offset;
 
@@ -127,7 +134,7 @@ test("xchg eax, eax emits no register-state Wasm access", async () => {
   deepStrictEqual(
     wasmBodyMemoryAccesses(body).filter(
       (access) =>
-        access.memoryIndex === wasmMemoryIndex.cpuState &&
+        access.memoryIndex === testModuleMemoryIndex.cpuState &&
         access.offset === eaxStateOffset
     ),
     []

@@ -8,12 +8,14 @@ import { test } from "node:test";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { RegionBuilder } from "#ir/region-builder.js";
-import { guestMemoryAccess } from "#memory/access.js";
 import {
   PageFaultErrorCode,
   pageFault
 } from "#core/exceptions.js";
-import { guestMemoryResource } from "#memory/resource.js";
+import {
+  guestMemoryAccess,
+  guestMemoryResource
+} from "#test/support/execution-model.js";
 
 type OperationOf<Kind extends Operation["kind"]> = Extract<
   Operation,

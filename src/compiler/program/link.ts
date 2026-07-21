@@ -14,7 +14,6 @@ import type {
   FunctionExport,
   InternalGlobal,
   LegacyFunction,
-  MemoryImport,
   Program,
   ProgramData,
   ProgramFunction,
@@ -23,6 +22,7 @@ import type {
 } from "./model.js";
 import type { TableRef } from "./refs.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { MemoryImport, ProgramResources } from "./resources.js";
 import {
   validateLinkedProgramFunctions,
   validateProgramFunctionDeclaration
@@ -30,8 +30,8 @@ import {
 
 export type LinkProgramOptions = Readonly<{
   owner: object;
+  resources: ProgramResources;
   signatures: readonly Signature[];
-  memories: readonly MemoryImport[];
   tables: readonly TableImport[];
   globals: readonly InternalGlobal[];
   functions: readonly FunctionDeclaration[];
@@ -64,6 +64,7 @@ export function linkProgram(options: LinkProgramOptions): Program {
     legacy.functions,
     options.signatures
   );
+  const memoryImports = collectMemoryImports(options.resources, functions);
 
   if (buildDefinition.validation) {
     validateLinkedProgramFunctions(declarations.all(), functions);
@@ -71,7 +72,7 @@ export function linkProgram(options: LinkProgramOptions): Program {
   const program: ProgramData = {
     functionTypes,
     signatures: options.signatures,
-    memories: options.memories,
+    memoryImports,
     tables: options.tables,
     globals: options.globals,
     functions,
@@ -80,6 +81,26 @@ export function linkProgram(options: LinkProgramOptions): Program {
   };
 
   return program as Program;
+}
+
+function collectMemoryImports(
+  resources: ProgramResources,
+  functions: readonly ProgramFunction[]
+): readonly MemoryImport[] {
+  const known = new Set(resources.memoryImports.map((memory) => memory.ref));
+  const used = new Set<ResourceRef>();
+
+  for (const fn of functions) {
+    for (const resource of fn.resources) {
+      assert(
+        known.has(resource),
+        `unknown program resource ${resource.id} used by function ${fn.ref.id}`
+      );
+      used.add(resource);
+    }
+  }
+  return resources.memoryImports
+    .filter((memory) => used.has(memory.ref));
 }
 
 type PlacedLegacyFunctions = Readonly<{

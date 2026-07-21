@@ -8,23 +8,49 @@ import {
   resourceRef,
   type ResourceEffect
 } from "#compiler/ir/resource.js";
-import { ProgramBuilder } from "#compiler/program/builder.js";
+import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
+import { compileProgram } from "#compiler/program/compile.js";
 import { createModuleBindings } from "#compiler/program/bindings.js";
-import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import {
-  exportRef,
+  functionExportRef,
   functionRef,
   signatureRef,
   tableRef
 } from "#compiler/program/refs.js";
+import { createProgramResources } from "#compiler/program/resources.js";
 import { buildIrBlock } from "#ir/region-builder.js";
 import { emitFunction } from "#wasm/emit/action.js";
 
 const noEffects = { reads: [], writes: [] } as const;
 
+const effectfulResource = resourceRef("test.effectful-indirect-resource");
+const legacyResource = resourceRef("test.legacy-indirect-resource");
+const indirectInvocationResources = createProgramResources([
+  {
+    ref: effectfulResource,
+    moduleName: "test",
+    name: "effectfulIndirectResource",
+    limits: { minPages: 1 }
+  },
+  {
+    ref: legacyResource,
+    moduleName: "test",
+    name: "legacyIndirectResource",
+    limits: { minPages: 1 }
+  }
+]);
+
+function createTestProgram(): ProgramBuilder {
+  return new ProgramBuilder(indirectInvocationResources);
+}
+
+function compileBytes(program: Program): Uint8Array<ArrayBuffer> {
+  return compileProgram(program).bytes;
+}
+
 test("dead pure indirect invocations retain neither types nor tables", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const callerType = functionType([], []);
   const indirectType = functionType([], ["i32"]);
   const table = tableRef("test.dead-indirect-table");
@@ -67,15 +93,15 @@ test("dead pure indirect invocations retain neither types nor tables", () => {
 
   deepStrictEqual(body.references.typeIndices, []);
   deepStrictEqual(body.references.tableIndices, []);
-  encodeProgram(closed);
+  compileBytes(closed);
 });
 
 test("resultless indirect invocations retain their declared writes", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const callerType = functionType([], []);
   const indirectType = functionType([], []);
   const table = tableRef("test.effectful-indirect-table");
-  const resource = resourceRef("test.effectful-indirect-resource");
+  const resource = effectfulResource;
   const write: ResourceEffect = {
     space: "resource",
     resource,
@@ -86,12 +112,6 @@ test("resultless indirect invocations retain their declared writes", () => {
   };
   const effects = { reads: [], writes: [write] } as const;
 
-  program.importMemory({
-    ref: resource,
-    moduleName: "test",
-    name: "effectfulIndirectResource",
-    limits: { minPages: 1 }
-  });
   program.importTable({
     ref: table,
     moduleName: "test",
@@ -125,14 +145,8 @@ test("resultless indirect invocations retain their declared writes", () => {
   deepStrictEqual(linked.tables, [table]);
   deepStrictEqual(linked.resources, []);
 
-  const undeclared = new ProgramBuilder();
+  const undeclared = createTestProgram();
 
-  undeclared.importMemory({
-    ref: resource,
-    moduleName: "test",
-    name: "effectfulIndirectResource",
-    limits: { minPages: 1 }
-  });
   undeclared.importTable({
     ref: table,
     moduleName: "test",
@@ -160,12 +174,12 @@ test("resultless indirect invocations retain their declared writes", () => {
 });
 
 test("legacy symbolic blocks inherit live indirect dependencies", async () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const indirectType = functionType([], []);
   const entryType = functionType([], []);
   const signature = signatureRef("test.legacy-indirect-signature");
   const table = tableRef("test.legacy-indirect-table");
-  const resource = resourceRef("test.legacy-indirect-resource");
+  const resource = legacyResource;
   const write: ResourceEffect = {
     space: "resource",
     resource,
@@ -180,12 +194,6 @@ test("legacy symbolic blocks inherit live indirect dependencies", async () => {
   let entryTypeIndex: number | undefined;
 
   program.signature({ ref: signature, type: entryType });
-  program.importMemory({
-    ref: resource,
-    moduleName: "test",
-    name: "legacyIndirectResource",
-    limits: { minPages: 1 }
-  });
   program.importTable({
     ref: table,
     moduleName: "test",
@@ -229,12 +237,12 @@ test("legacy symbolic blocks inherit live indirect dependencies", async () => {
     }
   });
   program.exportFunction({
-    ref: exportRef("test.legacy-indirect-target-export"),
+    ref: functionExportRef("test.legacy-indirect-target-export"),
     name: "target",
     target: target.ref
   });
   program.exportFunction({
-    ref: exportRef("test.legacy-indirect-entry-export"),
+    ref: functionExportRef("test.legacy-indirect-entry-export"),
     name: "entry",
     target: entry
   });
@@ -253,7 +261,7 @@ test("legacy symbolic blocks inherit live indirect dependencies", async () => {
 
   const importedTable = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
   const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeProgram(closed)),
+    await WebAssembly.compile(compileBytes(closed)),
     {
       test: {
         legacyIndirectResource: new WebAssembly.Memory({ initial: 1 }),
@@ -273,7 +281,7 @@ test("legacy symbolic blocks inherit live indirect dependencies", async () => {
 });
 
 test("defined functions bind ordinary and returning indirect invocations", async () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const type = functionType(["i32"], ["i32"]);
   const table = tableRef("test.indirect-invocation-table");
   const dummyTable = tableRef("test.indirect-invocation-dummy-table");
@@ -340,17 +348,17 @@ test("defined functions bind ordinary and returning indirect invocations", async
   });
 
   program.exportFunction({
-    ref: exportRef("test.indirect-invocation-target-export"),
+    ref: functionExportRef("test.indirect-invocation-target-export"),
     name: "target",
     target: target.ref
   });
   program.exportFunction({
-    ref: exportRef("test.indirect-invocation-ordinary-export"),
+    ref: functionExportRef("test.indirect-invocation-ordinary-export"),
     name: "ordinary",
     target: ordinary.ref
   });
   program.exportFunction({
-    ref: exportRef("test.indirect-invocation-returning-export"),
+    ref: functionExportRef("test.indirect-invocation-returning-export"),
     name: "returning",
     target: returning.ref
   });
@@ -401,7 +409,7 @@ test("defined functions bind ordinary and returning indirect invocations", async
   const importedTable = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
   const dummyImportedTable = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
   const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeProgram(closed)),
+    await WebAssembly.compile(compileBytes(closed)),
     {
       test: {
         dummyIndirectInvocationTable: dummyImportedTable,
@@ -428,7 +436,7 @@ test("defined functions bind ordinary and returning indirect invocations", async
 
 test("defined indirect invocations retain live types and require declared tables", () => {
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const callerType = functionType([], []);
     const indirectType = functionType([], []);
     const table = tableRef("test.closed-indirect-type-table");
@@ -457,10 +465,10 @@ test("defined indirect invocations retain live types and require declared tables
     deepStrictEqual(closed.functionTypes, [callerType, indirectType]);
     strictEqual(closed.functionTypes[0], callerType);
     strictEqual(closed.functionTypes[1], indirectType);
-    encodeProgram(closed);
+    compileBytes(closed);
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const type = functionType([], []);
     const table = tableRef("test.unknown-indirect-table");
 

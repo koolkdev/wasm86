@@ -37,7 +37,6 @@ export function validateProgramDeclarations(
   declarations: LinkProgramOptions
 ): void {
   validateDeclarations(declarations.signatures);
-  validateDeclarations(declarations.memories);
   validateDeclarations(declarations.tables);
   validateDeclarations(declarations.globals);
   validateDeclarations(declarations.exports);
@@ -50,7 +49,6 @@ export function validateProgramDeclarations(
   const signatures = new Map(
     declarations.signatures.map((signature) => [signature.ref, signature])
   );
-  const memories = new Set(declarations.memories.map((memory) => memory.ref));
   const tables = new Set(declarations.tables.map((table) => table.ref));
   const globals = new Set(declarations.globals.map((global) => global.ref));
   const functions = collectDeclaredFunctions(declarations.functions);
@@ -80,7 +78,9 @@ export function validateProgramDeclarations(
     }
     for (const resource of fn.resources) {
       assert(
-        memories.has(resource),
+        declarations.resources.memoryImports.some(
+          (memory) => memory.ref === resource
+        ),
         `unknown program resource ${resource.id} used by function ${fn.ref.id}`
       );
     }
@@ -108,8 +108,10 @@ export function validateProgramDeclarations(
   }
 
   for (const exported of declarations.exports) {
+    const target = functionsByRef.get(exported.target);
+
     assert(
-      functionsByRef.has(exported.target),
+      target !== undefined,
       `unknown program function ${exported.target.id} exported by ${exported.ref.id}`
     );
   }
@@ -166,12 +168,12 @@ function validateFunctionDefinitionDeclaration(
     definition.effects,
     `function ${definition.ref.id} declared`
   );
-  const memories = new Set(declarations.memories.map((memory) => memory.ref));
-
   for (const access of [...definition.effects.reads, ...definition.effects.writes]) {
     if (access.space === "resource") {
       assert(
-        memories.has(access.resource),
+        declarations.resources.memoryImports.some(
+          (memory) => memory.ref === access.resource
+        ),
         `unknown program resource ${access.resource.id} declared by function ${definition.ref.id}`
       );
     }
@@ -183,7 +185,7 @@ export function validateProgram(program: Program): void {
     validateFunctionType(type);
   }
   validateDeclarations(program.signatures);
-  validateDeclarations(program.memories);
+  validateResourceDeclarations(program.memoryImports);
   validateDeclarations(program.tables);
   validateDeclarations(program.globals);
   validateDeclarations(program.functions);
@@ -210,7 +212,9 @@ export function validateProgram(program: Program): void {
   const signatures = new Map(
     program.signatures.map((signature) => [signature.ref, signature])
   );
-  const memories = new Set(program.memories.map((memory) => memory.ref));
+  const memories = new Set<ResourceRef>(
+    program.memoryImports.map((memory) => memory.ref)
+  );
   const tables = new Set(program.tables.map((table) => table.ref));
   const globals = new Set(program.globals.map((global) => global.ref));
   const functions = new Map(program.functions.map((fn) => [fn.ref, fn]));
@@ -255,21 +259,13 @@ export function validateProgram(program: Program): void {
         `unknown program table ${table.id} used by function ${fn.ref.id}`
       );
     }
-
-    for (const access of [...fn.effects.reads, ...fn.effects.writes]) {
-      if (access.space !== "resource") {
-        continue;
-      }
-      assert(
-        memories.has(access.resource),
-        `unknown program resource ${access.resource.id} declared by function ${fn.ref.id}`
-      );
-    }
   }
 
   for (const exported of program.exports) {
+    const target = functions.get(exported.target);
+
     assert(
-      functions.has(exported.target),
+      target !== undefined,
       `unknown program function ${exported.target.id} exported by ${exported.ref.id}`
     );
   }
@@ -416,15 +412,14 @@ function collectDeclaredFunctions(
 
 export function validateProgramEncoding(
   program: Program,
-  bodies: readonly EncodedWasmFunctionBody[]
+  bodies: readonly EncodedWasmFunctionBody[],
+  indices: ProgramEncodingIndices
 ): void {
   validateProgram(program);
   assert(
     bodies.length === program.functions.length,
     "program encoding body count does not match its functions"
   );
-  const indices = indexProgramEncoding(program);
-
   for (const [index, fn] of program.functions.entries()) {
     const body = bodies[index];
 
@@ -441,58 +436,24 @@ export function validateProgramEncoding(
 }
 
 type ProgramEncodingIndices = Readonly<{
-  signatures: ReadonlyMap<SignatureRef, number>;
-  types: ReadonlyMap<FunctionType, number>;
-  functions: ReadonlyMap<FunctionRef, number>;
-  resources: ReadonlyMap<ResourceRef, number>;
-  globals: ReadonlyMap<GlobalRef, number>;
-  tables: ReadonlyMap<TableRef, number>;
+  signatureIndices: ReadonlyMap<SignatureRef, number>;
+  typeIndices: ReadonlyMap<FunctionType, number>;
+  functionIndices: ReadonlyMap<FunctionRef, number>;
+  memoryIndices: ReadonlyMap<ResourceRef, number>;
+  globalIndices: ReadonlyMap<GlobalRef, number>;
+  tableIndices: ReadonlyMap<TableRef, number>;
 }>;
-
-function indexProgramEncoding(program: Program): ProgramEncodingIndices {
-  const types: FunctionType[] = [];
-  const signatures = new Map<SignatureRef, number>();
-  const typeIndices = new Map<FunctionType, number>();
-
-  for (const type of program.functionTypes) {
-    let index = types.findIndex((candidate) => functionTypesEqual(candidate, type));
-
-    if (index === -1) {
-      index = types.length;
-      types.push(type);
-    }
-    typeIndices.set(type, index);
-  }
-  for (const signature of program.signatures) {
-    const index = typeIndices.get(signature.type);
-
-    assert(
-      index !== undefined,
-      `program signature ${signature.ref.id} has no function type index`
-    );
-    signatures.set(signature.ref, index);
-  }
-
-  return {
-    signatures,
-    types: typeIndices,
-    functions: new Map(program.functions.map((fn, index) => [fn.ref, index])),
-    resources: new Map(program.memories.map((memory, index) => [memory.ref, index])),
-    globals: new Map(program.globals.map((global, index) => [global.ref, index])),
-    tables: new Map(program.tables.map((table, index) => [table.ref, index]))
-  };
-}
 
 function validateLegacyEncoding(
   fn: LegacyFunction,
   body: EncodedWasmFunctionBody,
   indices: ProgramEncodingIndices
 ): void {
-  const typeIndex = indices.signatures.get(fn.signature);
+  const typeIndex = indices.signatureIndices.get(fn.signature);
 
   assert(typeIndex !== undefined, `missing layout for program signature ${fn.signature.id}`);
   const indirectTypes = fn.indirectTypes.map((type) => {
-    const index = indices.types.get(type);
+    const index = indices.typeIndices.get(type);
 
     assert(index !== undefined, "missing layout for indirect call type");
     return index;
@@ -500,14 +461,14 @@ function validateLegacyEncoding(
   const functions = new Map<FunctionRef, number>();
 
   for (const call of fn.calls) {
-    const index = indices.functions.get(call);
+    const index = indices.functionIndices.get(call);
 
     assert(index !== undefined, `missing layout for called program function ${call.id}`);
     functions.set(call, index);
   }
   const resources = new Map(
     fn.resources.map((resource) => {
-      const index = indices.resources.get(resource);
+      const index = indices.memoryIndices.get(resource);
 
       assert(index !== undefined, `missing layout for program resource ${resource.id}`);
       return [resource, index] as const;
@@ -515,7 +476,7 @@ function validateLegacyEncoding(
   );
   const globals = new Map(
     fn.globals.map((global) => {
-      const index = indices.globals.get(global);
+      const index = indices.globalIndices.get(global);
 
       assert(index !== undefined, `missing layout for program global ${global.id}`);
       return [global, index] as const;
@@ -523,7 +484,7 @@ function validateLegacyEncoding(
   );
   const tables = new Map(
     fn.tables.map((table) => {
-      const index = indices.tables.get(table);
+      const index = indices.tableIndices.get(table);
 
       assert(index !== undefined, `missing layout for program table ${table.id}`);
       return [table, index] as const;
@@ -545,7 +506,7 @@ function validateDefinedEncoding(
 ): void {
   const functions = new Map(
     fn.directTargets.map((target) => {
-      const index = indices.functions.get(target.ref);
+      const index = indices.functionIndices.get(target.ref);
 
       assert(index !== undefined, `missing layout for called program function ${target.ref.id}`);
       return [target, index] as const;
@@ -553,7 +514,7 @@ function validateDefinedEncoding(
   );
   const resources = new Map(
     fn.resources.map((resource) => {
-      const index = indices.resources.get(resource);
+      const index = indices.memoryIndices.get(resource);
 
       assert(index !== undefined, `missing layout for program resource ${resource.id}`);
       return [resource, index] as const;
@@ -561,7 +522,7 @@ function validateDefinedEncoding(
   );
   const types = new Map(
     fn.indirectTypes.map((type) => {
-      const index = indices.types.get(type);
+      const index = indices.typeIndices.get(type);
 
       assert(index !== undefined, "missing layout for indirect call type");
       return [type, index] as const;
@@ -569,7 +530,7 @@ function validateDefinedEncoding(
   );
   const tables = new Map(
     fn.tables.map((table) => {
-      const index = indices.tables.get(table);
+      const index = indices.tableIndices.get(table);
 
       assert(index !== undefined, `missing layout for program table ${table.id}`);
       return [table, index] as const;
@@ -604,14 +565,6 @@ function validateEncodingReferences(
   validateRecordedIndices(fn, "memory", body.references.memoryIndices, declared.memories);
 }
 
-function functionTypesEqual(a: FunctionType, b: FunctionType): boolean {
-  return valueTypesEqual(a.parameters, b.parameters) && valueTypesEqual(a.results, b.results);
-}
-
-function valueTypesEqual(a: readonly ValueType[], b: readonly ValueType[]): boolean {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
-}
-
 function validateDeclarations(declarations: readonly Declaration[]): void {
   const refs = new Set<object>();
   const ids = new Set<string>();
@@ -627,6 +580,20 @@ function validateDeclarations(declarations: readonly Declaration[]): void {
       `duplicate program ${ref.kind} identity: ${ref.id}`
     );
     ids.add(ref.id);
+  }
+}
+
+function validateResourceDeclarations(
+  declarations: readonly Readonly<{ ref: ResourceRef }>[]
+): void {
+  const refs = new Set<ResourceRef>();
+
+  for (const { ref } of declarations) {
+    assert(
+      !refs.has(ref),
+      `duplicate program resource declaration: ${ref.id}`
+    );
+    refs.add(ref);
   }
 }
 

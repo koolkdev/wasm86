@@ -1,5 +1,9 @@
 import { assert } from "#common/assert.js";
-import type { DynamicByteOriginRef } from "#compiler/ir/resource.js";
+import {
+  resourceRef,
+  type DynamicByteOriginRef,
+  type ResourceRef
+} from "#compiler/ir/resource.js";
 import {
   resourceRead,
   resourceWrite
@@ -8,6 +12,8 @@ import type {
   IntegerWidth,
   ValueId
 } from "#compiler/ir/values/types.js";
+import type { MemoryImport } from "#compiler/program/resources.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
 import {
   pageFault,
   pageFaultErrorCode,
@@ -20,6 +26,7 @@ import {
 } from "./flat.js";
 import { readBackingByte } from "./bytes.js";
 import { guestMemoryMinimumByteLength } from "./constants.js";
+import { guestMemoryResourceDefinition } from "./resource.js";
 
 export type LinearRange = Readonly<{
   start: ValueId;
@@ -76,31 +83,47 @@ export type MemoryAccessOperations = Readonly<{
   ): void;
 }>;
 
-export type HostMemoryByteRead =
+export type GuestMemoryByteRead =
   | Readonly<{ kind: "value"; value: number }>
   | Readonly<{
       kind: "exception";
       exception: PageFault<number>;
     }>;
 
-export type HostMemoryReader = Readonly<{
-  readByte(address: number, intent: MemoryReadIntent): HostMemoryByteRead;
+export type GuestMemoryReader = Readonly<{
+  readByte(address: number, intent: MemoryReadIntent): GuestMemoryByteRead;
 }>;
 
 export type MemoryAccessConstruction = Readonly<{
   bind(region: RegionBuilder): MemoryAccessOperations;
 }>;
 
-export type MemoryModel = MemoryAccessConstruction & Readonly<{
-  bindHost(memory: WebAssembly.Memory): HostMemoryReader;
+export type GuestMemoryDefinition = Readonly<{
+  resource: ResourceRef;
+  access: MemoryAccessConstruction;
+  createReader(memory: WebAssembly.Memory): GuestMemoryReader;
+  memoryImport: MemoryImport;
 }>;
 
-export const guestMemoryAccess: MemoryModel = {
-  bind: (region) => new FlatMemoryAccessBuilder(region),
-  bindHost: (memory) => new FlatHostMemoryReader(memory)
-};
+export function createGuestMemoryDefinition(): GuestMemoryDefinition {
+  const resource = resourceRef(guestMemoryResourceDefinition.id);
 
-class FlatHostMemoryReader implements HostMemoryReader {
+  return {
+    resource,
+    access: {
+      bind: (region) => new FlatMemoryAccessBuilder(resource, region)
+    },
+    createReader: (memory) => new FlatGuestMemoryReader(memory),
+    memoryImport: {
+      ref: resource,
+      moduleName: programImportModuleName,
+      name: guestMemoryResourceDefinition.name,
+      limits: guestMemoryResourceDefinition.limits
+    }
+  };
+}
+
+class FlatGuestMemoryReader implements GuestMemoryReader {
   readonly #memory: WebAssembly.Memory;
 
   constructor(memory: WebAssembly.Memory) {
@@ -111,7 +134,7 @@ class FlatHostMemoryReader implements HostMemoryReader {
     this.#memory = memory;
   }
 
-  readByte(address: number, intent: MemoryReadIntent): HostMemoryByteRead {
+  readByte(address: number, intent: MemoryReadIntent): GuestMemoryByteRead {
     assert(
       Number.isInteger(address) && address >= 0 && address <= 0xffff_ffff,
       `memory address must be u32, got ${address}`
@@ -134,9 +157,11 @@ class FlatHostMemoryReader implements HostMemoryReader {
 }
 
 class FlatMemoryAccessBuilder implements MemoryAccessOperations {
+  readonly #resource: ResourceRef;
   readonly #region: RegionBuilder;
 
-  constructor(region: RegionBuilder) {
+  constructor(resource: ResourceRef, region: RegionBuilder) {
+    this.#resource = resource;
     this.#region = region;
   }
 
@@ -155,6 +180,7 @@ class FlatMemoryAccessBuilder implements MemoryAccessOperations {
   ): ValueId {
     const region = this.#region;
     const source = flatMemoryOperand(
+      this.#resource,
       region.values,
       access,
       byteOffset,
@@ -178,6 +204,7 @@ class FlatMemoryAccessBuilder implements MemoryAccessOperations {
   ): void {
     const region = this.#region;
     const destination = flatMemoryOperand(
+      this.#resource,
       region.values,
       access,
       byteOffset,

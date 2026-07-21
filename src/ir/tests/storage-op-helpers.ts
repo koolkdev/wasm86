@@ -12,10 +12,12 @@ import {
 import { valueId } from "#compiler/ir/values/id.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { cpuStatusFlagResolvers } from "#cpu/state.js";
+import {
+  cpuStatusFlagResolvers,
+  guestMemoryResource
+} from "#test/support/execution-model.js";
 import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
 import type { OperandWidth } from "#core/types.js";
-import { guestMemoryResource } from "#memory/resource.js";
 import {
   DynamicByteOriginRef,
   resourceRef,
@@ -231,20 +233,28 @@ export function resourceWriteValue(operation: MemoryWriteOperation): ValueId {
 export function isStatusFlagCall(node: BodyNode): node is StatusFlagCallOperation {
   return node.kind === "call" &&
     node.outputs.length === 1 &&
-    x86StatusFlags.some((flag) =>
-      node.invocation.target === cpuStatusFlagResolvers.get(flag)
-    );
+    statusFlagForTarget(node.invocation.target) !== undefined;
 }
 
 
 export function resolvedStatusFlag(operation: StatusFlagCallOperation): X86StatusFlag {
-  const target = operation.invocation.target;
-  const flag = x86StatusFlags.find((candidate) =>
-    target === cpuStatusFlagResolvers.get(candidate)
-  );
+  const flag = statusFlagForTarget(operation.invocation.target);
 
   if (flag === undefined) {
     throw new Error("unknown status-flag resolver");
   }
   return flag;
+}
+
+function statusFlagForTarget(
+  target: Invocation["target"]
+): X86StatusFlag | undefined {
+  if (target.references.functions.length !== 1) {
+    return undefined;
+  }
+  const [definition] = target.references.functions;
+
+  return x86StatusFlags.find((flag) =>
+    definition?.ref.id === cpuStatusFlagResolvers.get(flag).ref.id
+  );
 }

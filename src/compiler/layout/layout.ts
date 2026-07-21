@@ -48,10 +48,9 @@ export type LayoutRecordStructure = Readonly<{
   members: readonly LayoutRecordMember[];
 }>;
 
-// The complete canonical resolved record: structures in canonical id order,
-// members in their declared sequences, every placement fact enumerable. It
-// carries no handle or other object identity, so consumers can fingerprint it
-// directly.
+// The complete resolved record: structures in stable id order, members in
+// their declared sequences, and every placement fact enumerable. It carries
+// no live handles.
 export type LayoutRecord = Readonly<{
   space: string;
   byteLength: number;

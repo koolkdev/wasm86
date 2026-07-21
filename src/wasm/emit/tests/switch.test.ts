@@ -5,7 +5,6 @@ import type { IrBlock } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
-import { cpuStateAccess } from "#cpu/state.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
@@ -14,17 +13,21 @@ import {
 } from "#ir/tests/storage-op-helpers.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { wasmBodyLocalCount, wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
+import { compileProgram } from "#compiler/program/compile.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import {
-  exportRef,
+  functionExportRef,
   functionRef
 } from "#compiler/program/refs.js";
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
+import {
+  cpuStateAccess,
+  testExecutionModel
+} from "#test/support/execution-model.js";
 import { instantiateIrBlock, irBlockBody, irBlockCompleted } from "./harness.js";
 import {
   finishControl,
@@ -126,7 +129,7 @@ test("a control-only switch routes several matches through one emitted body", as
 });
 
 test("nested completing switches seal a defined function result", async () => {
-  const program = new ProgramBuilder();
+  const program = new ProgramBuilder(testExecutionModel.resources);
   const entryType = functionType(["i32"], ["i64"]);
 
   const entry = program.defineFunction({
@@ -152,12 +155,12 @@ test("nested completing switches seal a defined function result", async () => {
     });
   });
   program.exportFunction({
-    ref: exportRef("test.completing-switch-export"),
+    ref: functionExportRef("test.completing-switch-export"),
     name: "run",
     target: entry.ref
   });
 
-  const encoded = encodeProgram(program.finish());
+  const encoded = compileProgram(program.finish()).bytes;
 
   strictEqual(WebAssembly.validate(encoded), true);
   const instance = await WebAssembly.instantiate(

@@ -10,8 +10,6 @@ import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
 import { createModuleBindings } from "#compiler/program/bindings.js";
-import { wasmMemoryIndex } from "#wasm/abi.js";
-import { cpuState, cpuStateAccess } from "#cpu/state.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import {
@@ -19,10 +17,15 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import {
+  cpuState,
+  cpuStateAccess
+} from "#test/support/execution-model.js";
+import {
   instantiateFunctionBody,
   instantiateIrBlock,
   irBlockBody,
-  irBlockCompleted
+  irBlockCompleted,
+  testModuleMemoryIndex
 } from "./harness.js";
 import {
   ifControl,
@@ -285,7 +288,7 @@ test("an exported trapping value evaluates at the fragment boundary", async () =
       types: new Map(),
       tables: new Map(),
       resources: new Map([
-        [cpuState.resource, wasmMemoryIndex.cpuState]
+        [cpuState.resource, testModuleMemoryIndex.cpuState]
       ])
     }),
     externalLocals: new Map([[0, 0], [1, 1]]),

@@ -10,7 +10,7 @@ export type SignatureRef = Ref<"signature">;
 export type FunctionRef = Ref<"function">;
 export type TableRef = Ref<"table">;
 export type GlobalRef = Ref<"global">;
-export type ExportRef = Ref<"export">;
+export type FunctionExportRef = Ref<"function-export">;
 
 export function signatureRef(id: string): SignatureRef {
   return createIdentity("signature", id);
@@ -28,8 +28,8 @@ export function globalRef(id: string): GlobalRef {
   return createIdentity("global", id);
 }
 
-export function exportRef(id: string): ExportRef {
-  return createIdentity("export", id);
+export function functionExportRef(id: string): FunctionExportRef {
+  return createIdentity("function-export", id);
 }
 
 function createIdentity<TKind extends string>(kind: TKind, id: string): Ref<TKind> {

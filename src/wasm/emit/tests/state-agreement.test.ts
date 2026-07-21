@@ -8,7 +8,7 @@ import {
 } from "#compiler/layout/host-view.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import { createCpuStateHostView } from "#cpu/host-view.js";
-import { cpuState, cpuStateAccess } from "#cpu/state.js";
+import { cpuState } from "#cpu/state.js";
 import { x86Flags } from "#core/flags/definitions.js";
 import {
   createFlagStateHostView,
@@ -37,6 +37,7 @@ import {
   type WasmCpuStateField,
   type WasmCpuStateInit
 } from "#test/support/cpu-state.js";
+import { cpuStateAccess } from "#test/support/execution-model.js";
 import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 
 type OwnerViews = Readonly<{

@@ -39,6 +39,10 @@
       "types": "./src/common/*",
       "default": "./dist/src/common/*"
     },
+    "#execution/*": {
+      "types": "./src/execution/*",
+      "default": "./dist/src/execution/*"
+    },
     "#compiler/*": {
       "types": "./src/compiler/*",
       "default": "./dist/src/compiler/*"

@@ -1,6 +1,8 @@
 import { deepStrictEqual } from "node:assert";
 
-import { wasmImport } from "#wasm/abi.js";
+import { cpuStateResourceDefinition } from "#cpu/state.js";
+import { guestMemoryResourceDefinition } from "#memory/resource.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
 
 export function createGuestMemory(): WebAssembly.Memory {
   return new WebAssembly.Memory({ initial: 1 });
@@ -28,7 +30,15 @@ export function assertMemoryImports(module: WebAssembly.Module): void {
     .map((entry) => ({ module: entry.module, name: entry.name, kind: entry.kind }));
 
   deepStrictEqual(memoryImports, [
-    { module: wasmImport.namespace, name: wasmImport.cpuStateMemoryName, kind: "memory" },
-    { module: wasmImport.namespace, name: wasmImport.guestMemoryName, kind: "memory" }
+    {
+      module: programImportModuleName,
+      name: cpuStateResourceDefinition.name,
+      kind: "memory"
+    },
+    {
+      module: programImportModuleName,
+      name: guestMemoryResourceDefinition.name,
+      kind: "memory"
+    }
   ]);
 }

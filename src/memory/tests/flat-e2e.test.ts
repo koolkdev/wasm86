@@ -2,34 +2,25 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { assert } from "#common/assert.js";
+import { compileProgram } from "#compiler/program/compile.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import {
-  exportRef,
+  functionExportRef,
   functionRef
 } from "#compiler/program/refs.js";
-import {
-  guestMemoryMinimumByteLength,
-  guestMemoryMinimumPages
-} from "#memory/constants.js";
+import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   flatMemoryResolution
 } from "#memory/flat.js";
-import { guestMemoryResource } from "#memory/resource.js";
-import { wasmImport } from "#wasm/abi.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
 
 test("one flat fragment keeps its fixed capacity when backing memory grows", async () => {
-  const builder = new ProgramBuilder();
+  const builder = new ProgramBuilder(testExecutionModel.resources);
   const type = functionType(["i32", "i32"], ["i32"]);
   const entry = functionRef("memory.flat-e2e.classify");
 
-  builder.importMemory({
-    ref: guestMemoryResource,
-    moduleName: wasmImport.namespace,
-    name: wasmImport.guestMemoryName,
-    limits: { minPages: guestMemoryMinimumPages }
-  });
   builder.defineFunction({
     ref: entry,
     type,
@@ -49,17 +40,19 @@ test("one flat fragment keeps its fixed capacity when backing memory grows", asy
     fn.return([resolution.fault.condition]);
   });
   builder.exportFunction({
-    ref: exportRef("memory.flat-e2e.classify-export"),
+    ref: functionExportRef("memory.flat-e2e.classify-export"),
     name: "classify",
     target: entry
   });
 
-  const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
+  const memory = new WebAssembly.Memory({
+    initial: testExecutionModel.guestMemory.memoryImport.limits.minPages
+  });
   const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeProgram(builder.finish())),
+    await WebAssembly.compile(compileProgram(builder.finish()).bytes),
     {
-      [wasmImport.namespace]: {
-        [wasmImport.guestMemoryName]: memory
+      [programImportModuleName]: {
+        [testExecutionModel.guestMemory.memoryImport.name]: memory
       }
     }
   );

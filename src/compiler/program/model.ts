@@ -1,4 +1,3 @@
-import type { WasmMemoryLimits } from "#compiler/encoder/memory.js";
 import type { WasmTableLimits } from "#compiler/encoder/module.js";
 import type { wasmValueType } from "#compiler/encoder/types.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
@@ -12,24 +11,18 @@ import type {
   LegacyFunctionDeclaration
 } from "./legacy-body.js";
 import type {
-  ExportRef,
+  FunctionExportRef,
   FunctionRef,
   GlobalRef,
   SignatureRef,
   TableRef
 } from "./refs.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { MemoryImport } from "./resources.js";
 
 export type Signature = Readonly<{
   ref: SignatureRef;
   type: FunctionType;
-}>;
-
-export type MemoryImport = Readonly<{
-  ref: ResourceRef;
-  moduleName: string;
-  name: string;
-  limits: WasmMemoryLimits;
 }>;
 
 export type TableImport = Readonly<{
@@ -47,7 +40,7 @@ export type InternalGlobal = Readonly<{
 }>;
 
 export type FunctionExport = Readonly<{
-  ref: ExportRef;
+  ref: FunctionExportRef;
   name: string;
   target: FunctionRef;
 }>;
@@ -89,7 +82,7 @@ declare const programBrand: unique symbol;
 export type ProgramData = Readonly<{
   functionTypes: readonly FunctionType[];
   signatures: readonly Signature[];
-  memories: readonly MemoryImport[];
+  memoryImports: readonly MemoryImport[];
   tables: readonly TableImport[];
   globals: readonly InternalGlobal[];
   functions: readonly ProgramFunction[];

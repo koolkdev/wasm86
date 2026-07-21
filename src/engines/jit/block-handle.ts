@@ -1,14 +1,18 @@
 import { assert } from "#common/assert.js";
 import { u32 } from "#core/numeric.js";
-import { wasmImport } from "#wasm/abi.js";
+import { createInstructionConstruction } from "#core/instruction/builder.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
 import { UnsupportedWasmCodegenError } from "#wasm/errors.js";
-import { decodeExit, exitLayout } from "#cpu/exit.js";
+import { buildExit, decodeExit, exitLayout } from "#cpu/exit.js";
+import { instructionCountField } from "#cpu/instruction-count.js";
 import type { RunStop } from "#cpu/cpu.js";
+import type { ExecutionModel } from "#execution/model.js";
 import { buildIrBlock } from "./action-compiler.js";
 import {
   jitModuleLinkTargets,
   encodeJitModule,
   jitBlockExportName,
+  jitLinkTableImportName,
   type JitBlock
 } from "./module.js";
 import {
@@ -41,23 +45,37 @@ export type CompileWasmBlockHandleOptions = Readonly<{
 }>;
 
 export function compileActionWasmBlockHandle(
+  model: ExecutionModel,
   blocks: readonly JitDecodedBlock[],
   options: CompileWasmBlockHandleOptions
 ): WasmBlockHandle {
   assertCompilableBlocks(blocks);
+  const instructionConstruction = createInstructionConstruction({
+    stateAccess: model.cpuState.access,
+    memory: model.guestMemory.access,
+    instructionCountField,
+    buildExit
+  });
 
   const moduleBlocks: JitBlock[] = blocks.map((block) => ({
     entryEip: u32(block.startEip),
-    ir: buildIrBlock(block.instructions)
+    ir: buildIrBlock(instructionConstruction, block.instructions)
   }));
   const targetEips = jitModuleLinkTargets(moduleBlocks);
   const moduleLinkTable = targetEips.length === 0 ? undefined : new JitModuleLinkTable({ targetEips });
   const bytes = encodeJitModule(
+    model,
     moduleBlocks,
     moduleLinkTable === undefined ? {} : { linkLayout: moduleLinkTable.linkLayout() }
   );
 
-  return instantiateCompiledBlocks(blocks, bytes, moduleLinkTable, options);
+  return instantiateCompiledBlocks(
+    model,
+    blocks,
+    bytes,
+    moduleLinkTable,
+    options
+  );
 }
 
 function assertCompilableBlocks(blocks: readonly JitDecodedBlock[]): void {
@@ -81,6 +99,7 @@ function assertCompilableBlocks(blocks: readonly JitDecodedBlock[]): void {
 }
 
 function instantiateCompiledBlocks(
+  model: ExecutionModel,
   blocks: readonly JitDecodedBlock[],
   bytes: Uint8Array<ArrayBuffer>,
   moduleLinkTable: JitModuleLinkTable | undefined,
@@ -88,7 +107,15 @@ function instantiateCompiledBlocks(
 ): WasmBlockHandle {
   const entryEips = blocks.map((block) => u32(block.startEip));
   const module = new WebAssembly.Module(bytes);
-  const instance = new WebAssembly.Instance(module, wasmImports(options.cpuStateMemory, options.guestMemory, moduleLinkTable));
+  const instance = new WebAssembly.Instance(
+    module,
+    wasmImports(
+      model,
+      options.cpuStateMemory,
+      options.guestMemory,
+      moduleLinkTable
+    )
+  );
   installModuleLocalFallbacks(instance, moduleLinkTable);
   const exportedBlockFunctions = readExportedBlockFunctions(instance, entryEips);
 
@@ -126,15 +153,18 @@ function installModuleLocalFallbacks(
 }
 
 function wasmImports(
+  model: ExecutionModel,
   cpuStateMemory: WebAssembly.Memory,
   guestMemory: WebAssembly.Memory,
   moduleLinkTable: JitModuleLinkTable | undefined
 ): WebAssembly.Imports {
   return {
-    [wasmImport.namespace]: {
-      [wasmImport.cpuStateMemoryName]: cpuStateMemory,
-      [wasmImport.guestMemoryName]: guestMemory,
-      ...(moduleLinkTable === undefined ? {} : { [wasmImport.linkTableName]: moduleLinkTable.table })
+    [programImportModuleName]: {
+      [model.cpuState.memoryImport.name]: cpuStateMemory,
+      [model.guestMemory.memoryImport.name]: guestMemory,
+      ...(moduleLinkTable === undefined
+        ? {}
+        : { [jitLinkTableImportName]: moduleLinkTable.table })
     }
   };
 }

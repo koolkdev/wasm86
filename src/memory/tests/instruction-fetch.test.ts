@@ -2,7 +2,7 @@ import { deepStrictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { writeBackingBytes } from "#memory/bytes.js";
-import { guestMemoryAccess } from "#memory/access.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
 import {
   guestMemoryMinimumByteLength,
   guestMemoryMinimumPages
@@ -11,7 +11,7 @@ import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 
 test("flat instruction fetch checks and reads its backing byte", () => {
   const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
-  const reader = guestMemoryAccess.bindHost(memory);
+  const reader = testExecutionModel.guestMemory.createReader(memory);
 
   writeBackingBytes(memory, guestMemoryMinimumByteLength - 1, [0xa5]);
 
@@ -39,7 +39,7 @@ test("flat instruction fetch checks and reads its backing byte", () => {
 
 test("flat instruction fetch keeps its address-space boundary after growth", () => {
   const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
-  const reader = guestMemoryAccess.bindHost(memory);
+  const reader = testExecutionModel.guestMemory.createReader(memory);
 
   memory.grow(1);
   writeBackingBytes(memory, guestMemoryMinimumByteLength, [0x90]);
@@ -61,7 +61,7 @@ test("flat instruction fetch keeps its address-space boundary after growth", () 
 
 test("host byte reads retain data-read fault intent", () => {
   const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
-  const reader = guestMemoryAccess.bindHost(memory);
+  const reader = testExecutionModel.guestMemory.createReader(memory);
 
   deepStrictEqual(
     reader.readByte(guestMemoryMinimumByteLength, "read"),
@@ -74,7 +74,9 @@ test("host byte reads retain data-read fault intent", () => {
 
 test("flat instruction fetch rejects an invalid Memory binding", () => {
   throws(
-    () => guestMemoryAccess.bindHost(new WebAssembly.Memory({ initial: 0 })),
+    () => testExecutionModel.guestMemory.createReader(
+      new WebAssembly.Memory({ initial: 0 })
+    ),
     /guest memory is shorter than the flat address-space binding/
   );
 });

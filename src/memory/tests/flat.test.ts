@@ -16,7 +16,7 @@ import {
   PageFaultErrorCode,
   pageFault
 } from "#core/exceptions.js";
-import { guestMemoryResource } from "#memory/resource.js";
+import { guestMemoryResource } from "#test/support/execution-model.js";
 
 test("a static-length flat access is one unsigned limit compare", () => {
   const values = new ValueTable();
@@ -132,7 +132,13 @@ test("flat operands derive address normalization and range facts together", () =
     "write"
   );
   const byteOffset = values.const(4);
-  const absolute = flatMemoryOperand(values, constant, byteOffset, 32);
+  const absolute = flatMemoryOperand(
+    guestMemoryResource,
+    values,
+    constant,
+    byteOffset,
+    32
+  );
 
   deepStrictEqual(
     absolute.effect,
@@ -151,7 +157,13 @@ test("flat operands derive address normalization and range facts together", () =
   });
   strictEqual(absolute.width, 32);
 
-  const slice = flatMemoryOperand(values, dynamic, byteOffset, 32);
+  const slice = flatMemoryOperand(
+    guestMemoryResource,
+    values,
+    dynamic,
+    byteOffset,
+    32
+  );
 
   deepStrictEqual(slice.address, {
     base: dynamic.range.start,
@@ -165,7 +177,13 @@ test("flat operands derive address normalization and range facts together", () =
   strictEqual(slice.effect.range.slice?.byteLength, 4);
 
   const dynamicOffset = values.external(1);
-  const whole = flatMemoryOperand(values, dynamic, dynamicOffset, 32);
+  const whole = flatMemoryOperand(
+    guestMemoryResource,
+    values,
+    dynamic,
+    dynamicOffset,
+    32
+  );
 
   deepStrictEqual(whole.address, {
     base: values.binary("add", dynamic.range.start, dynamicOffset),
@@ -183,6 +201,7 @@ test("flat operands derive address normalization and range facts together", () =
     "write"
   );
   const conservative = flatMemoryOperand(
+    guestMemoryResource,
     values,
     wrappingConstant,
     values.const(0),
@@ -211,15 +230,33 @@ test("flat operands reject invalid widths and constant subranges", () => {
   );
 
   throws(
-    () => flatMemoryOperand(values, access, values.const(0), 64 as 32),
+    () => flatMemoryOperand(
+      guestMemoryResource,
+      values,
+      access,
+      values.const(0),
+      64 as 32
+    ),
     /flat operation width must be 8, 16, or 32/
   );
   throws(
-    () => flatMemoryOperand(values, access, values.const(-1), 8),
+    () => flatMemoryOperand(
+      guestMemoryResource,
+      values,
+      access,
+      values.const(-1),
+      8
+    ),
     /memory byte offset must be non-negative/
   );
   throws(
-    () => flatMemoryOperand(values, access, values.const(1), 32),
+    () => flatMemoryOperand(
+      guestMemoryResource,
+      values,
+      access,
+      values.const(1),
+      32
+    ),
     /32-bit memory access at byte offset 1 exceeds 4-byte resolution/
   );
 });

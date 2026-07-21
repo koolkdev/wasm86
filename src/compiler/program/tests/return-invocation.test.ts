@@ -16,18 +16,19 @@ import {
   type ResourceEffect
 } from "#compiler/ir/resource.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { ProgramBuilder } from "#compiler/program/builder.js";
+import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
+import { compileProgram } from "#compiler/program/compile.js";
 import { createModuleBindings } from "#compiler/program/bindings.js";
-import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import {
   FunctionDefinition,
   FunctionFamily
 } from "#compiler/program/functions.js";
 import {
-  exportRef,
+  functionExportRef,
   functionRef
 } from "#compiler/program/refs.js";
+import { createProgramResources } from "#compiler/program/resources.js";
 import { FunctionBuilder } from "#ir/function.js";
 import { nodeCompletes } from "#ir/block.js";
 import { effectsOf } from "#ir/aliasing.js";
@@ -36,6 +37,14 @@ import { emitFunction } from "#wasm/emit/action.js";
 
 const noEffects = { reads: [], writes: [] } as const;
 const effectResource = resourceRef("test.return-call-effect-resource");
+const returnInvocationResources = createProgramResources([
+  {
+    ref: effectResource,
+    moduleName: "test",
+    name: "returnCallEffectResource",
+    limits: { minPages: 1 }
+  }
+]);
 const effect: ResourceEffect = {
   space: "resource",
   resource: effectResource,
@@ -44,6 +53,14 @@ const effect: ResourceEffect = {
     slice: { byteOffset: 0, byteLength: 4 }
   }
 };
+
+function createTestProgram(): ProgramBuilder {
+  return new ProgramBuilder(returnInvocationResources);
+}
+
+function compileBytes(program: Program): Uint8Array<ArrayBuffer> {
+  return compileProgram(program).bytes;
+}
 
 function writeEffect(fn: FunctionBuilder, value: ValueId): void {
   fn.region.operation(resourceWrite, {
@@ -57,7 +74,7 @@ function writeEffect(fn: FunctionBuilder, value: ValueId): void {
 }
 
 test("returned direct invocations keep deep recursion on a bounded stack", async () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const type = functionType(["i32"], []);
 
   const countdown = program.defineFunction({
@@ -85,13 +102,13 @@ test("returned direct invocations keep deep recursion on a bounded stack", async
     );
   });
   program.exportFunction({
-    ref: exportRef("test.deep-return-invocation-export"),
+    ref: functionExportRef("test.deep-return-invocation-export"),
     name: "entry",
     target: countdown.ref
   });
 
   const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeProgram(program.finish()))
+    await WebAssembly.compile(compileBytes(program.finish()))
   );
   const entry = instance.exports.entry;
 
@@ -102,7 +119,7 @@ test("returned direct invocations keep deep recursion on a bounded stack", async
 });
 
 test("returnCall closes and emits a typed terminal tail call", async () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const type = functionType(["i32"], ["i32"]);
   const family = new FunctionFamily<number>({
     type,
@@ -132,7 +149,7 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
     fn.returnCall(target, [argument]);
   });
   program.exportFunction({
-    ref: exportRef("test.return-call-control-export"),
+    ref: functionExportRef("test.return-call-control-export"),
     name: "entry",
     target: caller.ref
   });
@@ -160,7 +177,7 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
   strictEqual(opcodes.includes(wasmOpcode.call), false);
 
   const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeProgram(closed))
+    await WebAssembly.compile(compileBytes(closed))
   );
   const entry = instance.exports.entry;
 
@@ -171,19 +188,13 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
 });
 
 test("returnCall participates in declared-effect validation", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const type = functionType(["i32"], []);
   const effects = {
     reads: [],
     writes: [effect]
   } as const;
 
-  program.importMemory({
-    ref: effectResource,
-    moduleName: "test",
-    name: "returnCallEffectResource",
-    limits: { minPages: 1 }
-  });
   const callee = program.defineFunction({
     ref: functionRef("test.return-call-effect-callee"),
     type,

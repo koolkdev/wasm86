@@ -1,31 +1,32 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
-  createInstructionBuilder,
+  type InstructionConstruction,
   valueInstructionLocation
 } from "#core/instruction/builder.js";
 import type { InstructionTerminals } from "#core/instruction/terminal.js";
+import type { StateAccess } from "#core/state/access.js";
+import { buildExit } from "#cpu/exit.js";
+import {
+  instructionCountField,
+  instructionLimitField
+} from "#cpu/instruction-count.js";
 import type { RegionBuilder } from "#ir/region-builder.js";
 import { instructionLimitExit } from "./exits.js";
 import type { DecodedInstruction } from "./decode.js";
-import type { InterpreterExecutionContext } from "./environment.js";
 
 export function buildInterpreterInstruction(
   region: RegionBuilder,
   decoded: DecodedInstruction,
-  context: InterpreterExecutionContext
+  stateAccess: StateAccess,
+  instructionConstruction: InstructionConstruction
 ): void {
-  const entryState = context.stateAccess.bind(region);
-  const entryCount = entryState.readField(context.instructionCount);
-  const instructionLimit = entryState.readField(context.instructionLimit);
-  const builder = createInstructionBuilder(region, {
-    stateAccess: context.stateAccess,
-    statusFlagResolvers: context.statusFlagResolvers,
-    memory: context.memory,
-    instructionCountField: context.instructionCount,
-    buildExit: context.buildExit,
-    segmentMode: "flat32",
-    terminals: interpreterTerminals()
-  });
+  const entryState = stateAccess.bind(region);
+  const entryCount = entryState.readField(instructionCountField);
+  const instructionLimit = entryState.readField(instructionLimitField);
+  const builder = instructionConstruction.createBuilder(
+    region,
+    interpreterTerminals()
+  );
 
   builder.add(
     decoded.instruction.semantics,
@@ -38,7 +39,7 @@ export function buildInterpreterInstruction(
     continueInterpreter(
       region,
       nextEip,
-      context,
+      stateAccess,
       entryCount,
       instructionLimit
     );
@@ -59,13 +60,13 @@ function interpreterTerminals(): InstructionTerminals {
 function continueInterpreter(
   region: RegionBuilder,
   nextEip: ValueId,
-  context: InterpreterExecutionContext,
+  stateAccess: StateAccess,
   entryCount: ValueId,
   instructionLimit: ValueId
 ): void {
   const values = region.values;
-  const completedCount = context.stateAccess.bind(region).readField(
-    context.instructionCount
+  const completedCount = stateAccess.bind(region).readField(
+    instructionCountField
   );
   const completedDistance = values.binary("sub", completedCount, entryCount);
   const deadlineDistance = values.binary("sub", instructionLimit, entryCount);
@@ -81,7 +82,7 @@ function continueInterpreter(
   // preserves that overshoot while still stopping at this completion.
   region.if(crossedDeadline, (expired) => {
     expired.return([
-      context.buildExit(expired.values, instructionLimitExit())
+      buildExit(expired.values, instructionLimitExit())
     ]);
   }, { hint: "unlikely" });
   region.loopContinue([nextEip]);

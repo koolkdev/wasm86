@@ -2,12 +2,12 @@ import { ok } from "node:assert";
 
 import type { StorageAccess, StorageEffects } from "#compiler/ir/effects.js";
 import { buildVariant } from "#compiler/ir/values/variant.js";
+import { compileProgram } from "#compiler/program/compile.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import {
-  exportRef,
+  functionExportRef,
   functionRef
 } from "#compiler/program/refs.js";
 import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
@@ -17,28 +17,27 @@ import type {
   IsaDecodeReader
 } from "#core/decoder/types.js";
 import {
-  createInstructionBuilder,
+  createInstructionConstruction,
   staticInstructionLocation
 } from "#core/instruction/builder.js";
 import { staticOperandBinding } from "#core/instruction/static-binding.js";
 import type { InstructionTerminals } from "#core/instruction/terminal.js";
 import type { RunStop } from "#cpu/cpu.js";
 import {
-  buildExit,
-  decodeExit,
-  exitLayout
+  decodeExit
 } from "#cpu/exit.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import {
+  buildExit,
   cpuState,
   cpuStateAccess,
-  cpuStatusFlagResolvers
-} from "#cpu/state.js";
+  exitLayout,
+  guestMemoryAccess,
+  guestMemoryResource,
+  testExecutionModel
+} from "#test/support/execution-model.js";
 import { instructionLimitExit } from "#interpreter/exits.js";
-import { guestMemoryAccess } from "#memory/access.js";
-import { guestMemoryMinimumPages } from "#memory/constants.js";
 import { readBackingByte, writeBackingBytes } from "#memory/bytes.js";
-import { guestMemoryResource } from "#memory/resource.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
   readWasmCpuStateSnapshot,
@@ -47,7 +46,9 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
-import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
+
+const compiledInstructionExportName = "run";
 
 export type CompiledInstructionMemoryPatch = Readonly<{
   address: number;
@@ -105,15 +106,17 @@ export async function runCompiledInstructions(
 
   ok(instructions.length > 0, "compiled instruction input decoded no instructions");
   const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeProgram(buildInstructionProgram(instructions))),
+    await WebAssembly.compile(
+      compileProgram(buildInstructionProgram(instructions)).bytes
+    ),
     {
-      [wasmImport.namespace]: {
-        [wasmImport.cpuStateMemoryName]: memories.cpuStateMemory,
-        [wasmImport.guestMemoryName]: memories.guestMemory
+      [programImportModuleName]: {
+        [testExecutionModel.cpuState.memoryImport.name]: memories.cpuStateMemory,
+        [testExecutionModel.guestMemory.memoryImport.name]: memories.guestMemory
       }
     }
   );
-  const entry = instance.exports[wasmBlockExportName];
+  const entry = instance.exports[compiledInstructionExportName];
 
   ok(typeof entry === "function", "compiled instruction entry export is missing");
   const encodedExit: unknown = entry();
@@ -140,22 +143,15 @@ export async function runCompiledInstructions(
 function buildInstructionProgram(
   instructions: readonly IsaDecodedInstruction[]
 ) {
-  const program = new ProgramBuilder();
+  const program = new ProgramBuilder(testExecutionModel.resources);
+  const instructionConstruction = createInstructionConstruction({
+    stateAccess: cpuStateAccess,
+    memory: guestMemoryAccess,
+    instructionCountField,
+    buildExit
+  });
   const entryType = functionType([], ["i64"]);
   const dispatchType = functionType(["i32"], ["i64"]);
-
-  program.importMemory({
-    ref: cpuState.resource,
-    moduleName: wasmImport.namespace,
-    name: wasmImport.cpuStateMemoryName,
-    limits: { minPages: 1 }
-  });
-  program.importMemory({
-    ref: guestMemoryResource,
-    moduleName: wasmImport.namespace,
-    name: wasmImport.guestMemoryName,
-    limits: { minPages: guestMemoryMinimumPages }
-  });
 
   const dispatch = program.defineFunction({
     ref: functionRef("test.compiled-instruction.dispatch"),
@@ -169,14 +165,10 @@ function buildInstructionProgram(
     type: entryType,
     effects: compiledInstructionEffects
   }, (fn) => {
-    const builder = createInstructionBuilder(fn.region, {
-      stateAccess: cpuStateAccess,
-      statusFlagResolvers: cpuStatusFlagResolvers,
-      memory: guestMemoryAccess,
-      instructionCountField,
-      buildExit,
-      terminals: instructionFunctionTerminals(dispatch)
-    });
+    const builder = instructionConstruction.createBuilder(
+      fn.region,
+      instructionFunctionTerminals(dispatch)
+    );
     for (const instruction of instructions) {
       if (!builder.add(
         instruction.spec.semantics,
@@ -194,8 +186,8 @@ function buildInstructionProgram(
   });
 
   program.exportFunction({
-    ref: exportRef("test.compiled-instruction.entry-export"),
-    name: wasmBlockExportName,
+    ref: functionExportRef("test.compiled-instruction.entry-export"),
+    name: compiledInstructionExportName,
     target: entry.ref
   });
   return program.finish();

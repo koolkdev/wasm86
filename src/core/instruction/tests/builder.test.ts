@@ -8,12 +8,11 @@ import {
 import { test } from "node:test";
 
 import {
-  createInstructionBuilder,
   staticInstructionLocation as loc,
   valueInstructionLocation,
   type InstructionBuilder
 } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
 import {
   immBinding,
   immDynamicBinding,
@@ -60,7 +59,6 @@ import type {
   MemoryAccess,
   MemoryDataAccessIntent
 } from "#memory/access.js";
-import { guestMemoryAccess } from "#memory/access.js";
 import { x86EflagsBitOffset, x86Flags, x86StatusFlags } from "#core/flags/definitions.js";
 import { aluSemantic, unaryAluSemantic } from "#core/semantics/alu.js";
 import { cmpSemantic } from "#core/semantics/cmp.js";
@@ -75,12 +73,11 @@ import { testSemantic as testInstructionSemantic } from "#core/semantics/test.js
 import { xchgSemantic } from "#core/semantics/xchg.js";
 import { defaultSegmentForBase, segmentRegisterIndex } from "#core/segments.js";
 import type { EffectiveAddress, OperandWidth } from "#core/types.js";
-import { buildExit } from "#cpu/exit.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import {
-  cpuStateAccess,
-  cpuStatusFlagResolvers
-} from "#cpu/state.js";
+  buildExit,
+  testInstructionConstruction
+} from "#test/support/execution-model.js";
 import {
   exceptionExit as coreExceptionExit,
   segmentExit,
@@ -219,14 +216,10 @@ function buildValueInstructionBlock(
     dispatch: (body, targetEip) => finishDispatch("dispatch", body, targetEip),
     returnExit: (body, result) => body.finish({ kind: "exit", result })
   };
-  const instructions = createInstructionBuilder(region, {
-    stateAccess: cpuStateAccess,
-    statusFlagResolvers: cpuStatusFlagResolvers,
-    memory: guestMemoryAccess,
-    instructionCountField,
-    buildExit,
+  const instructions = testInstructionConstruction.createBuilder(
+    region,
     terminals
-  });
+  );
 
   build(instructions);
   const finalFallthrough = instructions.finish();
@@ -1619,7 +1612,7 @@ test("a generic CS operand write requests a segment load without imposing MOV va
   const writeSegment: SemanticTemplate = (s, v) => {
     s.write(s.operand(0), v.const(0x1234), { width: 16 });
   };
-  const builder = createLegacyInstructionBlock({ segmentMode: "flat32" });
+  const builder = createLegacyInstructionBlock();
 
   builder.add(
     writeSegment,
@@ -1646,7 +1639,7 @@ test("a generic CS operand write requests a segment load without imposing MOV va
 });
 
 test("a constant-true invalid-CS arm stops before building the segment-load tail", () => {
-  const builder = createLegacyInstructionBlock({ segmentMode: "flat32" });
+  const builder = createLegacyInstructionBlock();
 
   builder.add(
     movToSregSemantic(),
@@ -2192,7 +2185,7 @@ test("jecxz and loop branches dispatch through ecx-derived conditions without fl
 });
 
 test("flat32 segment set exits through the fault path without segment writes", () => {
-  const builder = createLegacyInstructionBlock({ segmentMode: "flat32" });
+  const builder = createLegacyInstructionBlock();
 
   builder.add(movSemantic(32), [regBinding("ecx"), immBinding(0x77)], loc(0x1000, 0x1005));
   builder.add(movToSregSemantic(), [segmentBinding("ds"), regBinding("ax")], loc(0x1005, 0x1007));
@@ -3938,19 +3931,12 @@ test("finish publishes final fallthrough without choosing its continuation", () 
   const instructionStart = values.parameter(0, "i32");
   const nextEip = values.parameter(1, "i32");
   const terminalEvents: CompletionEvent[] = [];
-  const builder = createInstructionBuilder(region, {
-    stateAccess: cpuStateAccess,
-    statusFlagResolvers: cpuStatusFlagResolvers,
-    memory: guestMemoryAccess,
-    instructionCountField,
-    buildExit,
-    terminals: {
+  const builder = testInstructionConstruction.createBuilder(region, {
       dispatch: (body, targetEip) => {
         terminalEvents.push({ kind: "dispatch", targetEip });
         body.finish({ kind: "dispatch", targetEip });
       },
       returnExit: (body, result) => body.finish({ kind: "exit", result })
-    }
   });
 
   strictEqual(builder.add(

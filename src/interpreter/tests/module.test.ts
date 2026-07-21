@@ -11,12 +11,13 @@ import {
 } from "./harness.js";
 import { startAddress } from "#test/support/addresses.js";
 import { assertMemoryImports } from "#wasm/tests/helpers.js";
-import { wasmImport } from "#wasm/abi.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
+import { cpuStateResourceDefinition } from "#cpu/state.js";
 import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { invalidOpcode } from "#core/exceptions.js";
 import { encodeInterpreterModule } from "#interpreter/module.js";
 
-test("imports cpu state and guest memories in ABI order", () => {
+test("imports cpu state and guest memory in program resource order", () => {
   const module = new WebAssembly.Module(encodeInterpreterModule());
 
   assertMemoryImports(module);
@@ -184,13 +185,13 @@ test("undefined two-byte opcode path raises #UD after consuming the escape", asy
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
-test("requires both ABI memories when instantiating", async () => {
+test("requires both declared memories when instantiating", async () => {
   const module = new WebAssembly.Module(encodeInterpreterModule());
   const cpuStateMemory = new WebAssembly.Memory({ initial: 1 });
 
   await WebAssembly.instantiate(module, {
-    [wasmImport.namespace]: {
-      [wasmImport.cpuStateMemoryName]: cpuStateMemory
+    [programImportModuleName]: {
+      [cpuStateResourceDefinition.name]: cpuStateMemory
     }
   }).then(
     () => {

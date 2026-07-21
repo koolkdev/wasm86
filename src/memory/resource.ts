@@ -1,3 +1,7 @@
-import { resourceRef } from "#compiler/ir/resource.js";
+import { guestMemoryMinimumPages } from "./constants.js";
 
-export const guestMemoryResource = resourceRef("memory.guest");
+export const guestMemoryResourceDefinition = {
+  id: "memory.guest",
+  name: "guest",
+  limits: { minPages: guestMemoryMinimumPages }
+} as const;

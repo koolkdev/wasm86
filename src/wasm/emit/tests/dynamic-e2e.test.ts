@@ -2,7 +2,6 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
-  createInstructionBuilder,
   staticInstructionLocation as loc,
   type InstructionBuilder
 } from "#core/instruction/builder.js";
@@ -30,10 +29,10 @@ import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { operandRead, operandWrite } from "#ir/tests/storage-op-helpers.js";
 import { flatMemoryResolution } from "#memory/flat.js";
-import { guestMemoryAccess } from "#memory/access.js";
-import { instructionCountField } from "#cpu/instruction-count.js";
-import { buildExit } from "#cpu/exit.js";
-import { cpuStateAccess, cpuStatusFlagResolvers } from "#cpu/state.js";
+import {
+  cpuStateAccess,
+  testInstructionConstruction
+} from "#test/support/execution-model.js";
 import type { InstructionTerminals } from "#core/instruction/terminal.js";
 
 // One emitted handler body per op+width, with the register indices arriving
@@ -56,14 +55,10 @@ function buildValueInstructionBlock(
     dispatch: (body, targetEip) => body.finish({ kind: "dispatch", targetEip }),
     returnExit: (body, result) => body.finish({ kind: "exit", result })
   };
-  const instructions = createInstructionBuilder(region, {
-    stateAccess: cpuStateAccess,
-    statusFlagResolvers: cpuStatusFlagResolvers,
-    memory: guestMemoryAccess,
-    instructionCountField,
-    buildExit,
+  const instructions = testInstructionConstruction.createBuilder(
+    region,
     terminals
-  });
+  );
 
   build(instructions, values);
   const finalFallthrough = instructions.finish();

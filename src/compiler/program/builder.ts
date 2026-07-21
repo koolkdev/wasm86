@@ -1,6 +1,5 @@
 import { assert } from "#common/assert.js";
 import { buildDefinition } from "#build";
-import type { WasmMemoryLimits } from "#compiler/encoder/memory.js";
 import type { WasmTableLimits } from "#compiler/encoder/module.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import { Declarations } from "./declarations.js";
@@ -16,12 +15,12 @@ import type {
   FunctionExport,
   InternalGlobal,
   LegacyFunction,
-  MemoryImport,
   Program,
   Signature,
   TableImport
 } from "./model.js";
 import type { FunctionRef, SignatureRef } from "./refs.js";
+import type { ProgramResources } from "./resources.js";
 import {
   validateProgram,
   validateProgramDeclarations
@@ -31,14 +30,18 @@ export type { Program, ProgramFunction } from "./model.js";
 
 export class ProgramBuilder {
   readonly #signatures = new Declarations<Signature>();
-  readonly #memories = new Declarations<MemoryImport>();
   readonly #tables = new Declarations<TableImport>();
   readonly #globals = new Declarations<InternalGlobal>();
   readonly #functions = new Declarations<FunctionDeclaration>();
   readonly #exports = new Declarations<FunctionExport>();
   readonly #owner = {};
+  readonly #resources: ProgramResources;
   #closing = false;
   #finished = false;
+
+  constructor(resources: ProgramResources) {
+    this.#resources = resources;
+  }
 
   // Explicit signatures exist only for raw legacyFunction bodies.
   signature(declaration: Signature): SignatureRef {
@@ -54,23 +57,6 @@ export class ProgramBuilder {
       type: declaration.type
     });
     return declaration.ref;
-  }
-
-  importMemory(declaration: MemoryImport): void {
-    this.#assertOpen();
-    assert(
-      this.#memories.find(
-        (memory) =>
-          memory.moduleName === declaration.moduleName &&
-          memory.name === declaration.name
-      ) === undefined,
-      `duplicate program memory import: ${declaration.moduleName}.${declaration.name}`
-    );
-
-    this.#memories.add({
-      ...declaration,
-      limits: copyMemoryLimits(declaration.limits)
-    });
   }
 
   importTable(declaration: TableImport): void {
@@ -133,8 +119,8 @@ export class ProgramBuilder {
     try {
       const declarations = {
         owner: this.#owner,
+        resources: this.#resources,
         signatures: this.#signatures.all(),
-        memories: this.#memories.all(),
         tables: this.#tables.all(),
         globals: this.#globals.all(),
         functions: this.#functions.all(),
@@ -191,12 +177,6 @@ function normalizeLegacyFunction(declaration: LegacyFunctionDeclaration): Legacy
 
 function unique<T>(values: readonly T[]): readonly T[] {
   return [...new Set(values)];
-}
-
-function copyMemoryLimits(limits: WasmMemoryLimits): WasmMemoryLimits {
-  return limits.maxPages === undefined
-    ? { minPages: limits.minPages }
-    : { minPages: limits.minPages, maxPages: limits.maxPages };
 }
 
 function copyTableLimits(limits: WasmTableLimits): WasmTableLimits {

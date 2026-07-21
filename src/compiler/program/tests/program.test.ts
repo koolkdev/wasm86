@@ -7,17 +7,18 @@ import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
 import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
+import { compileProgram } from "#compiler/program/compile.js";
 import { createModuleBindings } from "#compiler/program/bindings.js";
-import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { FunctionFamily, type FunctionDefinition } from "#compiler/program/functions.js";
 import {
-  exportRef,
+  functionExportRef,
   functionRef,
   globalRef,
   signatureRef,
   tableRef
 } from "#compiler/program/refs.js";
+import { createProgramResources } from "#compiler/program/resources.js";
 import {
   validateProgram
 } from "#compiler/program/validate.js";
@@ -45,6 +46,40 @@ const voidType = functionType([], []);
 const i32Type = functionType([], ["i32"]);
 const noEffects = { reads: [], writes: [] } as const;
 
+const memoryDefinitions = [
+  ["test.function-effect-resource", "functionEffectResource", 1],
+  ["test.resource-operation-first-dummy", "firstDummy", 1],
+  ["test.resource-operation-second-dummy", "secondDummy", 1],
+  ["test.resource-operation-target", "target", 2],
+  ["test.dead-read-resource", "deadRead", 1],
+  ["test.undeclared-legacy-resource", "undeclaredLegacy", 1],
+  ["test.memory", "memory", 1]
+] as const;
+const testMemories = new Map<string, ResourceRef>();
+const programResources = createProgramResources(
+  memoryDefinitions.map(([id, name, minPages]) => {
+    const ref = resourceRef(id);
+
+    testMemories.set(id, ref);
+    return { ref, moduleName: "test", name, limits: { minPages } };
+  })
+);
+
+function createTestProgram(): ProgramBuilder {
+  return new ProgramBuilder(programResources);
+}
+
+function testMemory(id: string): ResourceRef {
+  const memory = testMemories.get(id);
+
+  assert(memory !== undefined, `missing test program memory ${id}`);
+  return memory;
+}
+
+function compileBytes(program: Program): Uint8Array<ArrayBuffer> {
+  return compileProgram(program).bytes;
+}
+
 function byteOperand(
   resource: ResourceRef,
   range: ByteRange,
@@ -59,7 +94,7 @@ function byteOperand(
   };
 }
 
-const functionEffectResource = resourceRef("test.function-effect-resource");
+const functionEffectResource = testMemory("test.function-effect-resource");
 
 function functionEffect(region = 0, byteLength = 4): ResourceEffect {
   return {
@@ -70,15 +105,6 @@ function functionEffect(region = 0, byteLength = 4): ResourceEffect {
       slice: { byteOffset: region * 4, byteLength }
     }
   };
-}
-
-function importFunctionEffectResource(program: ProgramBuilder): void {
-  program.importMemory({
-    ref: functionEffectResource,
-    moduleName: "test",
-    name: "functionEffectResource",
-    limits: { minPages: 1 }
-  });
 }
 
 function writeFunctionEffect(
@@ -115,7 +141,7 @@ function readFunctionEffect(
 }
 
 test("forward function declarations close before their factories build and execute", async () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const signature = signatureRef("test.i32");
   const caller = functionRef("test.caller");
   const callee = functionRef("test.callee");
@@ -151,13 +177,17 @@ test("forward function declarations close before their factories build and execu
       return new WasmFunctionBodyEncoder().i32Const(42).finish();
     }
   });
-  program.exportFunction({ ref: exportRef("test.entry"), name: "entry", target: caller });
+  program.exportFunction({
+    ref: functionExportRef("test.entry"),
+    name: "entry",
+    target: caller
+  });
 
   const closed = program.finish();
 
   validateProgram(closed);
   strictEqual(buildCount, 0);
-  const bytes = encodeProgram(closed);
+  const bytes = compileBytes(closed);
   strictEqual(buildCount, 2);
   const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
   const entry = instance.exports.entry;
@@ -169,7 +199,7 @@ test("forward function declarations close before their factories build and execu
 });
 
 test("symbolic roots close and encode from their function type without signatures", async () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const type = functionType([], ["i32"]);
   const calleeRef = functionRef("test.typed-callee");
   const callerRef = functionRef("test.typed-caller");
@@ -194,7 +224,7 @@ test("symbolic roots close and encode from their function type without signature
     fn.return([result]);
   });
   program.exportFunction({
-    ref: exportRef("test.typed-export"),
+    ref: functionExportRef("test.typed-export"),
     name: "entry",
     target: caller.ref
   });
@@ -207,7 +237,7 @@ test("symbolic roots close and encode from their function type without signature
   strictEqual(closed.functions.length, 2);
   ok(closed.functions.every((fn) => fn.kind === "function"));
   ok(closed.functions.every((fn) => !("signature" in fn)));
-  const bytes = encodeProgram(closed);
+  const bytes = compileBytes(closed);
   const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
   const entry = instance.exports.entry;
 
@@ -218,7 +248,7 @@ test("symbolic roots close and encode from their function type without signature
 });
 
 test("program validation enforces the finished program's exact function type list", () => {
-  const builder = new ProgramBuilder();
+  const builder = createTestProgram();
   const firstType = functionType([], []);
   const secondType = functionType([], ["i32"]);
 
@@ -265,11 +295,9 @@ test("program validation enforces the finished program's exact function type lis
   );
 });
 
-test("defined resource operations resolve memory index two", async () => {
-  const program = new ProgramBuilder();
-  const firstDummy = resourceRef("test.resource-operation-first-dummy");
-  const secondDummy = resourceRef("test.resource-operation-second-dummy");
-  const resource = resourceRef("test.resource-operation-target");
+test("defined resource operations import only their reachable resource", async () => {
+  const program = createTestProgram();
+  const resource = testMemory("test.resource-operation-target");
   const range: ByteRange = {
     basis: { kind: "resource" },
     slice: { byteOffset: 12, byteLength: 2 }
@@ -280,24 +308,6 @@ test("defined resource operations resolve memory index two", async () => {
     range
   };
 
-  program.importMemory({
-    ref: firstDummy,
-    moduleName: "test",
-    name: "firstDummy",
-    limits: { minPages: 1 }
-  });
-  program.importMemory({
-    ref: secondDummy,
-    moduleName: "test",
-    name: "secondDummy",
-    limits: { minPages: 1 }
-  });
-  program.importMemory({
-    ref: resource,
-    moduleName: "test",
-    name: "target",
-    limits: { minPages: 2 }
-  });
   const definition = program.defineFunction({
     ref: functionRef("test.resource-operation-function"),
     type: i32Type,
@@ -315,7 +325,7 @@ test("defined resource operations resolve memory index two", async () => {
     fn.return([read]);
   });
   program.exportFunction({
-    ref: exportRef("test.resource-operation-export"),
+    ref: functionExportRef("test.resource-operation-export"),
     name: "entry",
     target: definition.ref
   });
@@ -327,16 +337,13 @@ test("defined resource operations resolve memory index two", async () => {
     throw new Error("missing resource operation function");
   }
   deepStrictEqual(fn.resources, [resource]);
+  deepStrictEqual(closed.memoryImports.map((memory) => memory.ref), [resource]);
 
-  const firstDummyMemory = new WebAssembly.Memory({ initial: 1 });
-  const secondDummyMemory = new WebAssembly.Memory({ initial: 1 });
   const targetMemory = new WebAssembly.Memory({ initial: 2 });
   const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeProgram(closed)),
+    await WebAssembly.compile(compileBytes(closed)),
     {
       test: {
-        firstDummy: firstDummyMemory,
-        secondDummy: secondDummyMemory,
         target: targetMemory
       }
     }
@@ -348,8 +355,6 @@ test("defined resource operations resolve memory index two", async () => {
   }
   strictEqual(entry(), 0x1234);
   strictEqual(new DataView(targetMemory.buffer).getUint16(12, true), 0x1234);
-  strictEqual(new DataView(firstDummyMemory.buffer).getUint16(12, true), 0);
-  strictEqual(new DataView(secondDummyMemory.buffer).getUint16(12, true), 0);
 });
 
 test("program validation rejects malformed declared resource effects", () => {
@@ -394,7 +399,7 @@ test("program validation rejects malformed declared resource effects", () => {
   ];
 
   for (const [index, [effect, expected]] of cases.entries()) {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
 
     program.defineFunction({
       ref: functionRef(`test.malformed-effect-function-${index}`),
@@ -410,7 +415,7 @@ test("program validation rejects malformed declared resource effects", () => {
 
 test("program validation checks retained function and legacy effect shapes", () => {
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const type = functionType(["f32" as "i32"], []);
 
     program.defineFunction({
@@ -424,7 +429,7 @@ test("program validation checks retained function and legacy effect shapes", () 
     );
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const signature = signatureRef("test.invalid-legacy-effects-signature");
 
     program.signature({ ref: signature, type: voidType });
@@ -447,8 +452,8 @@ test("program validation checks retained function and legacy effect shapes", () 
 });
 
 test("program closure omits dead resource reads", () => {
-  const program = new ProgramBuilder();
-  const readResource = resourceRef("test.dead-read-resource");
+  const program = createTestProgram();
+  const readResource = testMemory("test.dead-read-resource");
   const range: ByteRange = {
     basis: { kind: "resource" },
     slice: { byteOffset: 0, byteLength: 1 }
@@ -459,12 +464,6 @@ test("program closure omits dead resource reads", () => {
     range
   };
 
-  program.importMemory({
-    ref: readResource,
-    moduleName: "test",
-    name: "deadRead",
-    limits: { minPages: 1 }
-  });
   const definition = program.defineFunction({
     ref: functionRef("test.dead-resource-function"),
     type: i32Type,
@@ -486,7 +485,7 @@ test("program closure omits dead resource reads", () => {
 
 test("program validation rejects unknown effects and undeclared live resource uses", () => {
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const resource = resourceRef("test.unknown-symbolic-resource");
     const byteAccess: ResourceEffect = {
       space: "resource",
@@ -504,10 +503,13 @@ test("program validation rejects unknown effects and undeclared live resource us
       })]);
     });
 
-    throws(() => validateProgram(program.finish()), /unknown program resource.*used by function/);
+    throws(
+      () => validateProgram(program.finish()),
+      /unknown program resource test\.unknown-symbolic-resource used by function test\.unknown-symbolic-resource-function/
+    );
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const resource = resourceRef("test.unknown-resource-effect");
     const byteAccess: ResourceEffect = {
       space: "resource",
@@ -521,12 +523,15 @@ test("program validation rejects unknown effects and undeclared live resource us
       effects: { reads: [byteAccess], writes: [] }
     }, (fn) => fn.return([fn.values.const(1)]));
 
-    throws(() => validateProgram(program.finish()), /unknown program resource.*declared by function/);
+    throws(
+      () => validateProgram(program.finish()),
+      /unknown program resource test\.unknown-resource-effect declared by function test\.unknown-resource-effect-function/
+    );
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const signature = signatureRef("test.undeclared-legacy-resource-signature");
-    const resource = resourceRef("test.undeclared-legacy-resource");
+    const resource = testMemory("test.undeclared-legacy-resource");
     const range: ByteRange = {
       basis: { kind: "resource" },
       slice: { byteOffset: 0, byteLength: 1 }
@@ -539,12 +544,6 @@ test("program validation rejects unknown effects and undeclared live resource us
     });
 
     program.signature({ ref: signature, type: voidType });
-    program.importMemory({
-      ref: resource,
-      moduleName: "test",
-      name: "memory",
-      limits: { minPages: 1 }
-    });
     program.legacyFunction({
       ref: functionRef("test.undeclared-legacy-resource-function"),
       signature,
@@ -564,7 +563,7 @@ test("program validation rejects unknown effects and undeclared live resource us
 });
 
 test("an effectful function call stays single and conditional inside its selected if arm", async () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const calleeType = functionType(["i32"], []);
   const callerType = functionType(["i32"], ["i32"]);
   const calleeRef = functionRef("test.conditional-callee");
@@ -573,8 +572,6 @@ test("an effectful function call stays single and conditional inside its selecte
     reads: [],
     writes: [functionEffect()]
   } as const;
-
-  importFunctionEffectResource(program);
   const callee = program.defineFunction({
     ref: calleeRef,
     type: calleeType,
@@ -604,7 +601,7 @@ test("an effectful function call stays single and conditional inside its selecte
     fn.return([fn.values.const(7)]);
   });
   program.exportFunction({
-    ref: exportRef("test.conditional-caller-export"),
+    ref: functionExportRef("test.conditional-caller-export"),
     name: "entry",
     target: caller.ref
   });
@@ -676,7 +673,7 @@ test("an effectful function call stays single and conditional inside its selecte
 });
 
 test("function declarations keep resource bindings direct while effects are transitive", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const type = functionType(["i32"], []);
   const rootRef = functionRef("test.transitive-effects-root");
   const middleRef = functionRef("test.transitive-effects-middle");
@@ -684,8 +681,6 @@ test("function declarations keep resource bindings direct while effects are tran
   const effects = { reads: [], writes: [functionEffect()] } as const;
   let middle!: FunctionDefinition;
   let leaf!: FunctionDefinition;
-
-  importFunctionEffectResource(program);
   const root = program.defineFunction({ ref: rootRef, type, effects }, (fn) => {
     const value = fn.parameters[0];
 
@@ -730,10 +725,8 @@ test("function declarations keep resource bindings direct while effects are tran
 });
 
 test("function effect declarations must cover their bodies", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const type = functionType(["i32"], []);
-
-  importFunctionEffectResource(program);
   program.defineFunction({
     ref: functionRef("test.undeclared-effect"),
     type,
@@ -752,14 +745,12 @@ test("function effect declarations must cover their bodies", () => {
 });
 
 test("callers must cover the effects declared by their call targets", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const type = functionType(["i32"], []);
   const effects = {
     reads: [],
     writes: [functionEffect()]
   } as const;
-
-  importFunctionEffectResource(program);
   const callee = program.defineFunction({
     ref: functionRef("test.call-effect-callee"),
     type,
@@ -795,10 +786,8 @@ test("callers must cover the effects declared by their call targets", () => {
 
 test("resource effect declarations preserve their range basis and extent", () => {
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const type = functionType(["i32"], []);
-
-    importFunctionEffectResource(program);
     program.defineFunction({
       ref: functionRef("test.dynamic-gpr-effect"),
       type,
@@ -819,12 +808,10 @@ test("resource effect declarations preserve their range basis and extent", () =>
     throws(() => validateProgram(program.finish()), /undeclared write effect/);
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const type = functionType([], ["i32"]);
 
     const origin = new DynamicByteOriginRef();
-
-    importFunctionEffectResource(program);
     program.defineFunction({
       ref: functionRef("test.dynamic-segment-effect"),
       type,
@@ -851,7 +838,7 @@ test("resource effect declarations preserve their range basis and extent", () =>
 
 test("calls enforce their declared function contracts", () => {
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const calleeType = functionType(["i32"], []);
     const callerType = functionType([], []);
     const calleeRef = functionRef("test.argument-callee");
@@ -878,7 +865,7 @@ test("calls enforce their declared function contracts", () => {
 });
 
 test("functions must terminate with a return matching their result contract", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const type = functionType([], ["i32"]);
   const fn = functionRef("test.missing-return");
 
@@ -888,7 +875,7 @@ test("functions must terminate with a return matching their result contract", ()
 });
 
 test("legacy factories default to conservative behavior and never become eliminable", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const signature = signatureRef("test.signature");
   program.signature({ ref: signature, type: voidType });
   program.legacyFunction({
@@ -927,7 +914,7 @@ test("legacy factories default to conservative behavior and never become elimina
 });
 
 test("successful closure rejects every later topology mutation including one from a body factory", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const signature = signatureRef("test.signature");
   const fn = functionRef("test.function");
 
@@ -941,11 +928,11 @@ test("successful closure rejects every later topology mutation including one fro
     tables: [],
     irBlocks: [],
     build: () => {
-      program.importMemory({
-        ref: resourceRef("test.body-late"),
-        moduleName: "test",
-        name: "late",
-        limits: { minPages: 1 }
+      program.global({
+        ref: globalRef("test.body-late-global"),
+        type: wasmValueType.i32,
+        mutable: true,
+        initialValue: 0
       });
       return new WasmFunctionBodyEncoder().finish();
     }
@@ -955,15 +942,6 @@ test("successful closure rejects every later topology mutation including one fro
   throws(() => program.finish(), /finished program/);
   throws(
     () => program.signature({ ref: signatureRef("test.late-signature"), type: voidType }),
-    /finished program/
-  );
-  throws(
-    () => program.importMemory({
-      ref: resourceRef("test.late-memory"),
-      moduleName: "test",
-      name: "memory",
-      limits: { minPages: 1 }
-    }),
     /finished program/
   );
   throws(
@@ -998,14 +976,18 @@ test("successful closure rejects every later topology mutation including one fro
     /finished program/
   );
   throws(
-    () => program.exportFunction({ ref: exportRef("test.late-export"), name: "late", target: fn }),
+    () => program.exportFunction({
+      ref: functionExportRef("test.late-export"),
+      name: "late",
+      target: fn
+    }),
     /finished program/
   );
-  throws(() => encodeProgram(closed), /finished program/);
+  throws(() => compileBytes(closed), /finished program/);
 });
 
 test("function factories cannot mutate program topology while it is closing", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   let triesMutation = true;
 
   program.defineFunction({
@@ -1029,7 +1011,7 @@ test("function factories cannot mutate program topology while it is closing", ()
 });
 
 test("closed functions do not retain their mutable factory builders", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   let rawBuilder!: FunctionBuilder;
 
   const definition = program.defineFunction({
@@ -1052,12 +1034,12 @@ test("closed functions do not retain their mutable factory builders", () => {
   rawBuilder.values.const(0x1234_5678);
   strictEqual(fn.body.body.nodes.length, 1);
   strictEqual(fn.body.values.size(), valueCount);
-  encodeProgram(closed);
+  compileBytes(closed);
 });
 
 test("declaration construction and closure reject invalid program declarations", () => {
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
 
     program.signature({ ref: signatureRef("same-type-signature-a"), type: voidType });
     throws(
@@ -1066,7 +1048,7 @@ test("declaration construction and closure reject invalid program declarations",
     );
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const signature = signatureRef("unused-signature");
 
     program.signature({ ref: signature, type: voidType });
@@ -1076,7 +1058,7 @@ test("declaration construction and closure reject invalid program declarations",
     );
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const type = functionType([], []);
     const signature = signatureRef("symbolic-only-signature");
 
@@ -1091,54 +1073,24 @@ test("declaration construction and closure reject invalid program declarations",
       /program signature symbolic-only-signature is not used by a legacy function/
     );
   }
-  {
-    const program = new ProgramBuilder();
-
-    program.importMemory({
-      ref: resourceRef("memory-import-a"),
-      moduleName: "test",
-      name: "memory",
-      limits: { minPages: 1 }
-    });
-    throws(
-      () => program.importMemory({
-        ref: resourceRef("memory-import-b"),
-        moduleName: "test",
-        name: "memory",
-        limits: { minPages: 1 }
-      }),
-      /duplicate program memory import: test\.memory/
-    );
-  }
 });
 
 test("program validation rejects duplicate stable declaration identities", () => {
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
 
-    program.signature({ ref: signatureRef("same-signature"), type: functionType([], []) });
-    program.signature({ ref: signatureRef("same-signature"), type: functionType([], []) });
+    program.signature({
+      ref: signatureRef("same-signature"),
+      type: functionType([], [])
+    });
+    program.signature({
+      ref: signatureRef("same-signature"),
+      type: functionType([], [])
+    });
     throws(() => validateProgram(program.finish()), /duplicate program signature identity/);
   }
   {
-    const program = new ProgramBuilder();
-
-    program.importMemory({
-      ref: resourceRef("same-memory"),
-      moduleName: "test",
-      name: "first",
-      limits: { minPages: 1 }
-    });
-    program.importMemory({
-      ref: resourceRef("same-memory"),
-      moduleName: "test",
-      name: "second",
-      limits: { minPages: 1 }
-    });
-    throws(() => validateProgram(program.finish()), /duplicate program resource identity/);
-  }
-  {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
 
     program.importTable({
       ref: tableRef("same-table"),
@@ -1155,7 +1107,7 @@ test("program validation rejects duplicate stable declaration identities", () =>
     throws(() => validateProgram(program.finish()), /duplicate program table identity/);
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
 
     program.global({
       ref: globalRef("same-global"),
@@ -1172,7 +1124,7 @@ test("program validation rejects duplicate stable declaration identities", () =>
     throws(() => validateProgram(program.finish()), /duplicate program global identity/);
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const signature = signatureRef("same-function-signature");
 
     program.signature({ ref: signature, type: voidType });
@@ -1191,7 +1143,7 @@ test("program validation rejects duplicate stable declaration identities", () =>
     throws(() => validateProgram(program.finish()), /duplicate program function identity/);
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const signature = signatureRef("mixed-function-signature");
 
     program.signature({ ref: signature, type: voidType });
@@ -1213,7 +1165,7 @@ test("program validation rejects duplicate stable declaration identities", () =>
     throws(() => validateProgram(program.finish()), /duplicate program function identity/);
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const signature = signatureRef("same-export-signature");
     const fn = functionRef("same-export-function");
 
@@ -1228,15 +1180,18 @@ test("program validation rejects duplicate stable declaration identities", () =>
       irBlocks: [],
       build: () => new WasmFunctionBodyEncoder().finish()
     });
-    program.exportFunction({ ref: exportRef("same-export"), name: "first", target: fn });
-    program.exportFunction({ ref: exportRef("same-export"), name: "second", target: fn });
-    throws(() => validateProgram(program.finish()), /duplicate program export identity/);
+    program.exportFunction({ ref: functionExportRef("same-export"), name: "first", target: fn });
+    program.exportFunction({ ref: functionExportRef("same-export"), name: "second", target: fn });
+    throws(
+      () => validateProgram(program.finish()),
+      /duplicate program function-export identity/
+    );
   }
 });
 
 test("program validation rejects duplicate and empty export names", () => {
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const signature = signatureRef("duplicate-export-name-signature");
     const fn = functionRef("duplicate-export-name-function");
 
@@ -1251,12 +1206,12 @@ test("program validation rejects duplicate and empty export names", () => {
       irBlocks: [],
       build: () => new WasmFunctionBodyEncoder().finish()
     });
-    program.exportFunction({ ref: exportRef("first-export"), name: "entry", target: fn });
-    program.exportFunction({ ref: exportRef("second-export"), name: "entry", target: fn });
+    program.exportFunction({ ref: functionExportRef("first-export"), name: "entry", target: fn });
+    program.exportFunction({ ref: functionExportRef("second-export"), name: "entry", target: fn });
     throws(() => program.finish(), /duplicate program export name/);
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const signature = signatureRef("empty-export-name-signature");
     const fn = functionRef("empty-export-name-function");
 
@@ -1271,17 +1226,17 @@ test("program validation rejects duplicate and empty export names", () => {
       irBlocks: [],
       build: () => new WasmFunctionBodyEncoder().finish()
     });
-    program.exportFunction({ ref: exportRef("empty-export"), name: "", target: fn });
+    program.exportFunction({ ref: functionExportRef("empty-export"), name: "", target: fn });
     throws(() => validateProgram(program.finish()), /empty program function export name/);
   }
 });
 
 test("finished programs snapshot export declarations", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const signature = signatureRef("test.signature");
   const fn = functionRef("test.function");
   const exported = {
-    ref: exportRef("test.export"),
+    ref: functionExportRef("test.export"),
     name: "before",
     target: fn
   };
@@ -1305,7 +1260,7 @@ test("finished programs snapshot export declarations", () => {
 });
 
 test("program validation resolves references by identity", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const signature = signatureRef("test.signature");
   const declared = functionRef("test.declared");
   const sameIdLookalike = functionRef("test.declared");
@@ -1347,7 +1302,7 @@ test("program validation rejects unknown resources, tables, globals, signatures,
   const signature = signatureRef("test.signature");
 
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const fn = functionRef("test.resource-user");
 
     program.signature({ ref: signature, type: voidType });
@@ -1361,10 +1316,13 @@ test("program validation rejects unknown resources, tables, globals, signatures,
       irBlocks: [],
       build: () => new WasmFunctionBodyEncoder().finish()
     });
-    throws(() => validateProgram(program.finish()), /unknown program resource/);
+    throws(
+      () => validateProgram(program.finish()),
+      /unknown program resource test\.unknown-resource used by function test\.resource-user/
+    );
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const fn = functionRef("test.table-user");
 
     program.signature({ ref: signature, type: voidType });
@@ -1381,7 +1339,7 @@ test("program validation rejects unknown resources, tables, globals, signatures,
     throws(() => validateProgram(program.finish()), /unknown program table/);
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const fn = functionRef("test.global-user");
     const unknownGlobal = globalRef("test.unknown-global");
 
@@ -1399,7 +1357,7 @@ test("program validation rejects unknown resources, tables, globals, signatures,
     throws(() => validateProgram(program.finish()), /unknown program global/);
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
     const unknownSignature = signatureRef("test.unknown-signature");
 
     program.legacyFunction({
@@ -1415,10 +1373,10 @@ test("program validation rejects unknown resources, tables, globals, signatures,
     throws(() => validateProgram(program.finish()), /unknown program signature/);
   }
   {
-    const program = new ProgramBuilder();
+    const program = createTestProgram();
 
     program.exportFunction({
-      ref: exportRef("test.export"),
+      ref: functionExportRef("test.export"),
       name: "entry",
       target: functionRef("test.unknown-function")
     });
@@ -1427,7 +1385,7 @@ test("program validation rejects unknown resources, tables, globals, signatures,
 });
 
 test("recorded direct calls must be declared by that legacy function", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const signature = signatureRef("test.signature");
   const other = functionRef("test.other");
   const subject = functionRef("test.subject");
@@ -1455,19 +1413,29 @@ test("recorded direct calls must be declared by that legacy function", () => {
   });
 
   throws(
-    () => encodeProgram(program.finish()),
+    () => compileBytes(program.finish()),
     /undeclared Wasm function index 0/
   );
 });
 
 test("recorded memory indexes must come from that legacy function's resources", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const signature = signatureRef("test.signature");
-  const memory = resourceRef("test.memory");
+  const memory = testMemory("test.memory");
+  const owner = functionRef("test.memory-owner");
   const fn = functionRef("test.function");
 
   program.signature({ ref: signature, type: voidType });
-  program.importMemory({ ref: memory, moduleName: "test", name: "memory", limits: { minPages: 1 } });
+  program.legacyFunction({
+    ref: owner,
+    signature,
+    calls: [],
+    resources: [memory],
+    globals: [],
+    tables: [],
+    irBlocks: [],
+    build: () => new WasmFunctionBodyEncoder().finish()
+  });
   program.legacyFunction({
     ref: fn,
     signature,
@@ -1480,13 +1448,13 @@ test("recorded memory indexes must come from that legacy function's resources", 
   });
 
   throws(
-    () => encodeProgram(program.finish()),
+    () => compileBytes(program.finish()),
     /undeclared Wasm memory index 0/
   );
 });
 
 test("recorded table indexes must come from that legacy function's tables", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const signature = signatureRef("test.signature");
   const table = tableRef("test.table");
   const fn = functionRef("test.function");
@@ -1505,13 +1473,13 @@ test("recorded table indexes must come from that legacy function's tables", () =
   });
 
   throws(
-    () => encodeProgram(program.finish()),
+    () => compileBytes(program.finish()),
     /undeclared Wasm table index 0/
   );
 });
 
 test("recorded type indexes must come from the function's declared signature", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const signature = signatureRef("test.signature");
   const unrelatedSignature = signatureRef("test.unrelated-signature");
   const table = tableRef("test.table");
@@ -1542,13 +1510,13 @@ test("recorded type indexes must come from the function's declared signature", (
   });
 
   throws(
-    () => encodeProgram(program.finish()),
+    () => compileBytes(program.finish()),
     /undeclared Wasm type index 1/
   );
 });
 
 test("typed internal globals resolve through declared legacy bindings and execute", async () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const counterSignature = signatureRef("test.counter-signature");
   const counter = globalRef("test.counter");
   const increment = functionRef("test.increment");
@@ -1581,11 +1549,15 @@ test("typed internal globals resolve through declared legacy bindings and execut
         .finish();
     }
   });
-  program.exportFunction({ ref: exportRef("test.increment-export"), name: "increment", target: increment });
+  program.exportFunction({
+    ref: functionExportRef("test.increment-export"),
+    name: "increment",
+    target: increment
+  });
 
   const closed = program.finish();
 
-  const bytes = encodeProgram(closed);
+  const bytes = compileBytes(closed);
   const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
   const incrementExport = instance.exports.increment;
 
@@ -1597,7 +1569,7 @@ test("typed internal globals resolve through declared legacy bindings and execut
 });
 
 test("recorded global indexes must come from that legacy function's globals", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const signature = signatureRef("test.signature");
   const programGlobal = globalRef("test.global");
   const fn = functionRef("test.function");
@@ -1621,15 +1593,15 @@ test("recorded global indexes must come from that legacy function's globals", ()
   });
 
   throws(
-    () => encodeProgram(program.finish()),
+    () => compileBytes(program.finish()),
     /undeclared Wasm global index 0/
   );
 });
 
 test("program closure rejects functions owned by another program", () => {
   {
-    const owner = new ProgramBuilder();
-    const consumer = new ProgramBuilder();
+    const owner = createTestProgram();
+    const consumer = createTestProgram();
     const ownedType = functionType([], []);
     const consumerSignature = signatureRef("test.consumer-signature");
     const ownedRef = functionRef("test.owned-function");
@@ -1661,7 +1633,7 @@ test("program closure rejects functions owned by another program", () => {
 });
 
 test("program closure retains live and transitive family types but omits a dead type", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const rootType = functionType([], ["i64"]);
   const liveType = functionType([], ["i64"]);
   const transitiveType = functionType([], ["i64"]);
@@ -1735,11 +1707,11 @@ test("program closure retains live and transitive family types but omits a dead 
   ok(liveFunction?.kind === "function", "missing live family member");
   ok(closed.functions.some((fn) => fn.ref === transitive.ref), "missing transitive family member");
   deepStrictEqual(liveFunction.effects, noEffects);
-  encodeProgram(closed);
+  compileBytes(closed);
 });
 
 test("generated and declared functions share one identity namespace", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const generatedType = functionType([], ["i64"]);
   const generatedSignature = signatureRef("test.generated-collision-signature");
   const rootSignature = signatureRef("test.generated-collision-root-signature");
@@ -1795,7 +1767,7 @@ test("generated and declared functions share one identity namespace", () => {
 });
 
 test("distinct semantic function contracts coalesce to one physical Wasm type", () => {
-  const program = new ProgramBuilder();
+  const program = createTestProgram();
   const firstType = functionType([], ["i32"]);
   const secondType = functionType([], ["i32"]);
   const firstSignature = signatureRef("test.first-physical-signature");
@@ -1837,7 +1809,7 @@ test("distinct semantic function contracts coalesce to one physical Wasm type", 
   deepStrictEqual(closed.functionTypes, [firstType, secondType]);
   strictEqual(closed.functionTypes[0], firstType);
   strictEqual(closed.functionTypes[1], secondType);
-  encodeProgram(closed);
+  compileBytes(closed);
   strictEqual(firstTypeIndex, 0);
   strictEqual(secondTypeIndex, 0);
 });

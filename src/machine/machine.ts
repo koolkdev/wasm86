@@ -1,5 +1,5 @@
+import { wasmPagesForByteLength } from "#compiler/program/pages.js";
 import { createCpu, type Cpu } from "#cpu/cpu.js";
-import { wasmPageByteLength } from "#wasm/abi.js";
 
 export type MachineOptions = Readonly<{
   memoryByteLength: number;
@@ -29,7 +29,7 @@ export function createMachine(options: MachineOptions): Machine {
   }
 
   const memory = new WebAssembly.Memory({
-    initial: Math.ceil(memoryByteLength / wasmPageByteLength)
+    initial: wasmPagesForByteLength(memoryByteLength)
   });
   const cpu = createCpu(memory);
 

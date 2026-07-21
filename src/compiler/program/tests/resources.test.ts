@@ -1,0 +1,120 @@
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { test } from "node:test";
+
+import { resourceRef } from "#compiler/ir/resource.js";
+import {
+  createProgramResources,
+  memoryImportFor,
+  type MemoryImport
+} from "#compiler/program/resources.js";
+
+test("program resources retain owner-provided memory imports", () => {
+  const state = memoryImport("test.state", "state");
+  const guest = memoryImport("test.guest", "guest");
+  const resources = createProgramResources([state, guest]);
+
+  deepStrictEqual(resources.memoryImports, [state, guest]);
+  strictEqual(memoryImportFor(resources, state.ref), state);
+  strictEqual(memoryImportFor(resources, guest.ref), guest);
+});
+
+test("program resource lookup uses exact resource identity", () => {
+  const state = memoryImport("test.state", "state");
+  const resources = createProgramResources([state]);
+
+  throws(
+    () => memoryImportFor(resources, resourceRef(state.ref.id)),
+    /unknown program resource test.state/
+  );
+});
+
+test("program resources reject duplicate refs and external names", () => {
+  const state = memoryImport("test.state", "state");
+
+  throws(
+    () => createProgramResources([
+      state,
+      { ...state, name: "other" }
+    ]),
+    /duplicate program resource declaration: test.state/
+  );
+  throws(
+    () => createProgramResources([
+      memoryImport("test.state", "state"),
+      memoryImport("test.other", "state")
+    ]),
+    /duplicate memory external identity: test.state/
+  );
+});
+
+test("same-id resource refs remain distinct", () => {
+  const first = memoryImport("state", "first");
+  const second = memoryImport("state", "second");
+  const resources = createProgramResources([first, second]);
+
+  strictEqual(memoryImportFor(resources, first.ref), first);
+  strictEqual(memoryImportFor(resources, second.ref), second);
+});
+
+test("external memory identity compares module and field names separately", () => {
+  const first = {
+    ...memoryImport("first", "field"),
+    moduleName: "test\u0000nested"
+  };
+  const second = {
+    ...memoryImport("second", "nested\u0000field"),
+    moduleName: "test"
+  };
+
+  deepStrictEqual(
+    createProgramResources([first, second]).memoryImports,
+    [first, second]
+  );
+});
+
+test("program resources validate memory names and limits", () => {
+  throws(
+    () => createProgramResources([{
+      ...memoryImport("test.state", "state"),
+      moduleName: ""
+    }]),
+    /empty external module name/
+  );
+  throws(
+    () => createProgramResources([{
+      ...memoryImport("test.state", "state"),
+      name: ""
+    }]),
+    /empty external field name/
+  );
+  throws(
+    () => createProgramResources([{
+      ...memoryImport("test.state", "state"),
+      limits: { minPages: -1 }
+    }]),
+    /memory minimum pages out of range/
+  );
+  throws(
+    () => createProgramResources([{
+      ...memoryImport("test.state", "state"),
+      limits: { minPages: 2, maxPages: 1 }
+    }]),
+    /maximum pages are below its minimum/
+  );
+  throws(
+    () => createProgramResources([{
+      ...memoryImport("test.state", "state"),
+      limits: { minPages: 0x1_0001 }
+    }]),
+    /memory minimum pages out of range/
+  );
+});
+
+function memoryImport(id: string, name: string): MemoryImport {
+  return {
+    ref: resourceRef(id),
+    moduleName: "test",
+    name,
+    limits: { minPages: 1 }
+  };
+}

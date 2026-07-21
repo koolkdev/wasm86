@@ -6,21 +6,22 @@ import type { IrBlock } from "#ir/block.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
-import { wasmMemoryIndex } from "#wasm/abi.js";
-import { cpuState, cpuStateAccess } from "#cpu/state.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 import { createModuleBindings } from "#compiler/program/bindings.js";
 import type { RunStop } from "#cpu/cpu.js";
-import { buildExit, decodeExit } from "#cpu/exit.js";
+import { decodeExit } from "#cpu/exit.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import type { FallthroughTarget } from "#wasm/emit/embed.js";
 import { PageFaultErrorCode } from "#core/exceptions.js";
 import { exceptionExit } from "#core/exits.js";
 import { assertPageFaultException } from "#cpu/tests/stop-fixtures.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
-import { instantiateFunctionBody } from "./harness.js";
+import {
+  instantiateFunctionBody,
+  testModuleMemoryIndex
+} from "./harness.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import { operandWrite } from "#ir/tests/storage-op-helpers.js";
 import { resourceRead } from "#compiler/ir/operations/resource.js";
@@ -28,11 +29,15 @@ import {
   flatMemoryResolution,
   flatMemoryOperand
 } from "#memory/flat.js";
-import { guestMemoryResource } from "#memory/resource.js";
 import {
   finishControl,
   ifControl
 } from "#compiler/ir/controls/index.js";
+import {
+  buildExit,
+  cpuStateAccess,
+  testExecutionModel
+} from "#test/support/execution-model.js";
 
 // Fragments emitted inline in hand-written function bodies. The fragments
 // here are decode reads — a guarded one-byte instruction fetch at eip+k with a
@@ -48,7 +53,7 @@ const stateBindings = createModuleBindings({
   types: new Map(),
   tables: new Map(),
   resources: new Map([
-    [cpuState.resource, wasmMemoryIndex.cpuState]
+    [testExecutionModel.cpuState.resource, testModuleMemoryIndex.cpuState]
   ])
 });
 const decodeBindings = createModuleBindings({
@@ -56,8 +61,8 @@ const decodeBindings = createModuleBindings({
   types: new Map(),
   tables: new Map(),
   resources: new Map([
-    [cpuState.resource, wasmMemoryIndex.cpuState],
-    [guestMemoryResource, wasmMemoryIndex.guest]
+    [testExecutionModel.cpuState.resource, testModuleMemoryIndex.cpuState],
+    [testExecutionModel.guestMemory.resource, testModuleMemoryIndex.guest]
   ])
 });
 
@@ -115,7 +120,13 @@ function decodeReadFragment(k: number): DecodeReadFragment {
     }
   }));
   const fetched = builder.operation(resourceRead, {
-    source: flatMemoryOperand(values, access, values.const(0), 8)
+    source: flatMemoryOperand(
+      testExecutionModel.guestMemory.resource,
+      values,
+      access,
+      values.const(0),
+      8
+    )
   });
   const block: IrBlock = { body: builder.build(), values };
 

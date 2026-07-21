@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { cpuStateAccess } from "#cpu/state.js";
+import { cpuStateAccess } from "#test/support/execution-model.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#core/state/channels.js";

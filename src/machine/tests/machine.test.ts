@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
+import { wasmPageByteLength } from "#compiler/program/pages.js";
 import { createMachine } from "#machine/machine.js";
-import { wasmPageByteLength } from "#wasm/abi.js";
 
 test("machine exposes memory for caller initialization", () => {
   const machine = createMachine({

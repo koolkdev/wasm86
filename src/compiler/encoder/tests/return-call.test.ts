@@ -1,7 +1,7 @@
 import { match, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { wasmImport } from "#wasm/abi.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
 import {
   WasmFunctionBodyEncoder,
   type EncodedWasmFunctionBody
@@ -10,6 +10,8 @@ import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 const entryExportName = "entry";
+const cpuStateMemoryName = "cpuState";
+const guestMemoryName = "guest";
 const cpuStatePtr = 32;
 const statePayloadOffset = 0;
 const u32Align = 2;
@@ -73,9 +75,9 @@ async function instantiateReturnCallModule(
   const guestMemory = new WebAssembly.Memory({ initial: 1 });
 
   return WebAssembly.instantiate(module, {
-    [wasmImport.namespace]: {
-      [wasmImport.cpuStateMemoryName]: cpuStateMemory,
-      [wasmImport.guestMemoryName]: guestMemory
+    [programImportModuleName]: {
+      [cpuStateMemoryName]: cpuStateMemory,
+      [guestMemoryName]: guestMemory
     }
   });
 }
@@ -109,8 +111,8 @@ function encodeMismatchedReturnCallModule(): Uint8Array<ArrayBuffer> {
 function moduleWithMemories(): WasmModuleEncoder {
   const module = new WasmModuleEncoder();
 
-  module.importMemory(wasmImport.namespace, wasmImport.cpuStateMemoryName, { minPages: 1 });
-  module.importMemory(wasmImport.namespace, wasmImport.guestMemoryName, { minPages: 1 });
+  module.importMemory(programImportModuleName, cpuStateMemoryName, { minPages: 1 });
+  module.importMemory(programImportModuleName, guestMemoryName, { minPages: 1 });
 
   return module;
 }

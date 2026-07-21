@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
@@ -8,7 +8,9 @@ import {
   pageFault
 } from "#core/exceptions.js";
 import { decodeJitBlock } from "#engines/jit/decode-block.js";
+import type { GuestMemoryReader } from "#memory/access.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
 import { jitMemoryWithBytes } from "./decode-helpers.js";
 
 const startAddress = 0x1000;
@@ -153,16 +155,27 @@ test("decodeJitBlock gives the instruction limit priority over a fetch fault", (
   });
 });
 
-test("decodeJitBlock does not reinterpret an invalid Memory binding", () => {
-  throws(
-    () => decodeJitBlock(new WebAssembly.Memory({ initial: 0 }), startAddress),
-    /guest memory is shorter than the flat address-space binding/
-  );
+test("decodeJitBlock reads through its guest-memory reader as instruction fetch", () => {
+  const reads: Array<Readonly<{ address: number; intent: string }>> = [];
+  const block = decodeJitBlock({
+    readByte: (address, intent) => {
+      reads.push({ address, intent });
+      return { kind: "value", value: 0xcc };
+    }
+  }, startAddress);
+
+  deepStrictEqual(reads, [{
+    address: startAddress,
+    intent: "instructionFetch"
+  }]);
+  strictEqual(block.terminator.kind, "control");
 });
 
 function memory(
   values: readonly number[],
   address = startAddress
-): WebAssembly.Memory {
-  return jitMemoryWithBytes(values, address);
+): GuestMemoryReader {
+  return testExecutionModel.guestMemory.createReader(
+    jitMemoryWithBytes(values, address)
+  );
 }

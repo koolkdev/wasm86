@@ -1,9 +1,9 @@
 import { assert } from "#common/assert.js";
+import { wasmPagesForByteLength } from "#compiler/program/pages.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { SegmentRegister } from "#core/types.js";
 import { u32 } from "#core/numeric.js";
 import { bindInterpreter } from "#interpreter/binding.js";
-import { wasmPageByteLength } from "#wasm/abi.js";
 import { decodeExit } from "./exit.js";
 import { createCpuStateHostView } from "./host-view.js";
 import { cpuState } from "./state.js";
@@ -28,7 +28,7 @@ export const maximumInstructionBudget = 0x7fff_ffff;
 
 export function createCpu(guestMemory: WebAssembly.Memory): Cpu {
   const cpuStateMemory = new WebAssembly.Memory({
-    initial: Math.ceil(cpuState.layout.byteLength / wasmPageByteLength)
+    initial: wasmPagesForByteLength(cpuState.layout.byteLength)
   });
   const state = createCpuStateHostView(cpuStateMemory);
   const interpreter = bindInterpreter({

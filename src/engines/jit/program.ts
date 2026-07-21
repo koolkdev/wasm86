@@ -1,11 +1,14 @@
 import { assert } from "#common/assert.js";
 import { u32 } from "#core/numeric.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
+import {
+  ProgramBuilder,
+  type Program
+} from "#compiler/program/builder.js";
 import { functionType } from "#compiler/program/function-type.js";
 import type { LegacyEffects } from "#compiler/program/legacy-body.js";
 import {
-  exportRef,
+  functionExportRef,
   functionRef,
   signatureRef,
   tableRef,
@@ -13,13 +16,9 @@ import {
   type SignatureRef,
   type TableRef
 } from "#compiler/program/refs.js";
-import {
-  type ResourceRef
-} from "#compiler/ir/resource.js";
-import { cpuState } from "#cpu/state.js";
-import { wasmImport } from "#wasm/abi.js";
-import { guestMemoryMinimumPages } from "#memory/constants.js";
-import { guestMemoryResource } from "#memory/resource.js";
+import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { ExecutionModel } from "#execution/model.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
 import { encodeTransfer } from "./legacy-transfer.js";
 import type { IrBlock } from "#ir/block.js";
 import { walkBodyNodes } from "#ir/traverse.js";
@@ -27,6 +26,8 @@ import {
   jitModuleLinkFallbackExportName,
   type JitLinkLayout
 } from "./compiled-blocks/module-link-table.js";
+
+export const jitLinkTableImportName = "links";
 import { LegacyActionEmbeddingAdapter } from "./legacy-action-embedding.js";
 import {
   LegacyNumericLinkAdapter,
@@ -36,8 +37,8 @@ import {
 type JitProgram = Readonly<{
   builder: ProgramBuilder;
   blockSignature: SignatureRef;
-  cpuState: ResourceRef;
-  guestMemory: ResourceRef;
+  cpuStateResource: ResourceRef;
+  guestMemoryResource: ResourceRef;
   linkTable: TableRef | undefined;
 }>;
 
@@ -56,6 +57,7 @@ type JitProgramBlock = Readonly<{
 const jitBlockFunctionType = functionType([], ["i64"]);
 
 export function buildJitProgram(
+  model: ExecutionModel,
   sourceBlocks: readonly JitProgramSourceBlock[],
   linkLayout: JitLinkLayout | undefined
 ): Program {
@@ -63,7 +65,7 @@ export function buildJitProgram(
   const blocks = prepareJitBlocks(sourceBlocks);
   const links = snapshotLinkLayout(linkLayout);
   const tableTargetEips = links === undefined ? [] : [...links.keys()];
-  const program = createJitProgram(tableTargetEips);
+  const program = createJitProgram(model, tableTargetEips);
 
   declareLinkStubs(program, tableTargetEips);
   const blockFunctions = createBlockFunctions(blocks);
@@ -110,11 +112,14 @@ export function jitBlockLinkTargets(ir: IrBlock): readonly number[] {
   return targets;
 }
 
-function createJitProgram(tableTargetEips: readonly number[]): JitProgram {
-  const builder = new ProgramBuilder();
+function createJitProgram(
+  model: ExecutionModel,
+  tableTargetEips: readonly number[]
+): JitProgram {
+  const builder = new ProgramBuilder(model.resources);
   const blockSignature = signatureRef("jit.block-entry");
-  const cpuStateRef = cpuState.resource;
-  const guestMemory = guestMemoryResource;
+  const cpuStateResource = model.cpuState.resource;
+  const guestMemoryResource = model.guestMemory.resource;
   const linkTable = tableTargetEips.length === 0 ? undefined : tableRef("jit.links");
 
   // Raw legacy JIT bodies still need their numeric type index for table links.
@@ -122,23 +127,11 @@ function createJitProgram(tableTargetEips: readonly number[]): JitProgram {
     ref: blockSignature,
     type: jitBlockFunctionType
   });
-  builder.importMemory({
-    ref: cpuStateRef,
-    moduleName: wasmImport.namespace,
-    name: wasmImport.cpuStateMemoryName,
-    limits: { minPages: 1 }
-  });
-  builder.importMemory({
-    ref: guestMemory,
-    moduleName: wasmImport.namespace,
-    name: wasmImport.guestMemoryName,
-    limits: { minPages: guestMemoryMinimumPages }
-  });
   if (linkTable !== undefined) {
     builder.importTable({
       ref: linkTable,
-      moduleName: wasmImport.namespace,
-      name: wasmImport.linkTableName,
+      moduleName: programImportModuleName,
+      name: jitLinkTableImportName,
       limits: { minElements: tableTargetEips.length, maxElements: tableTargetEips.length }
     });
   }
@@ -146,8 +139,8 @@ function createJitProgram(tableTargetEips: readonly number[]): JitProgram {
   return {
     builder,
     blockSignature,
-    cpuState: cpuStateRef,
-    guestMemory,
+    cpuStateResource,
+    guestMemoryResource,
     linkTable
   };
 }
@@ -170,7 +163,7 @@ function declareLinkStubs(program: JitProgram, targetEips: readonly number[]): v
         .finish()
     });
     program.builder.exportFunction({
-      ref: exportRef(`jit.stub-export.${hex(targetEip)}`),
+      ref: functionExportRef(`jit.stub-export.${hex(targetEip)}`),
       name: jitModuleLinkFallbackExportName(targetEip),
       target: stub
     });
@@ -235,15 +228,14 @@ function declareBlocks(
     );
     const adapter = new LegacyActionEmbeddingAdapter({
       ir: block.ir,
-      links: new LegacyNumericLinkAdapter(links, linkLayout),
-      cpuState: program.cpuState
+      links: new LegacyNumericLinkAdapter(links, linkLayout)
     });
 
     program.builder.legacyFunction({
       ref,
       signature: program.blockSignature,
       calls: uniqueFunctionRefs(directCalls),
-      resources: [program.cpuState, program.guestMemory],
+      resources: [program.cpuStateResource, program.guestMemoryResource],
       globals: [],
       tables: links.some((link) => link.target.kind === "table") && program.linkTable !== undefined
         ? [program.linkTable]
@@ -253,7 +245,7 @@ function declareBlocks(
       build: (context) => adapter.build(context)
     });
     program.builder.exportFunction({
-      ref: exportRef(`jit.block-export.${hex(block.entryEip)}`),
+      ref: functionExportRef(`jit.block-export.${hex(block.entryEip)}`),
       name: block.exportName,
       target: ref
     });

@@ -7,14 +7,14 @@ import type {
 import {
   DynamicByteOriginRef,
   type ByteRange,
-  type ResourceByteOperand
+  type ResourceByteOperand,
+  type ResourceRef
 } from "#compiler/ir/resource.js";
 import {
   pageFault,
   pageFaultErrorCode
 } from "#core/exceptions.js";
 import { guestMemoryMinimumByteLength } from "./constants.js";
-import { guestMemoryResource } from "./resource.js";
 import type {
   LinearRange,
   MemoryAccess,
@@ -99,6 +99,7 @@ function createMemoryResolution<TIntent extends MemoryAccessIntent>(
 // Classify only from facts issued by this access. Value identities are never
 // reverse-engineered: a dynamic offset therefore widens to the whole origin.
 export function flatMemoryOperand(
+  resource: ResourceRef,
   values: FlatMemoryValues,
   access: MemoryAccess,
   byteOffset: ValueId,
@@ -128,7 +129,7 @@ export function flatMemoryOperand(
     : access.range.start;
 
   return {
-    effect: { space: "resource", resource: guestMemoryResource, range },
+    effect: { space: "resource", resource, range },
     address: {
       base,
       displacement: staticByteOffset ?? 0

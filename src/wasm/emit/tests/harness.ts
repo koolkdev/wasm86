@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { IrBlock } from "#ir/block.js";
-import { wasmBlockExportName, wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
 import {
   WasmFunctionBodyEncoder,
   type EncodedWasmFunctionBody
@@ -8,19 +8,20 @@ import {
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
+import { compileProgram } from "#compiler/program/compile.js";
 import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
-import { encodeProgram } from "#compiler/program/encode.js";
 import { functionType } from "#compiler/program/function-type.js";
 import type { LegacyFunctionBodyContext } from "#compiler/program/legacy-body.js";
 import {
-  exportRef,
+  functionExportRef,
   functionRef,
   signatureRef
 } from "#compiler/program/refs.js";
-import { cpuState } from "#cpu/state.js";
 import { emitActionFragment } from "#wasm/emit/action.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
-import { guestMemoryResource } from "#memory/resource.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
+
+const testModuleRunExportName = "run";
 
 // Test-only module wrapper around the action emitter: imported state + guest
 // memories, one run export returning the encoded i64 exit. The harness
@@ -33,6 +34,10 @@ import { guestMemoryResource } from "#memory/resource.js";
 // Canonical Cpu exits leave unused high bits clear, while legacy JIT
 // transfers require their high detail bits to be zero.
 export const irBlockCompleted = -1n;
+export const testModuleMemoryIndex = {
+  cpuState: 0,
+  guest: 1
+} as const;
 
 export type InstantiatedIrBlock = Readonly<{
   stateMemory: WebAssembly.Memory;
@@ -42,7 +47,10 @@ export type InstantiatedIrBlock = Readonly<{
 }>;
 
 // The fragment with direct exits to the sentinel tail.
-export function irBlockBody(block: IrBlock, externalParamCount = 0): EncodedWasmFunctionBody {
+export function irBlockBody(
+  block: IrBlock,
+  externalParamCount = 0
+): EncodedWasmFunctionBody {
   let encodedBody: EncodedWasmFunctionBody | undefined;
   const program = createIrBlockProgram(
     block,
@@ -50,7 +58,7 @@ export function irBlockBody(block: IrBlock, externalParamCount = 0): EncodedWasm
     (body) => (encodedBody = body)
   );
 
-  encodeProgram(program);
+  compileProgram(program);
   assert(encodedBody !== undefined, "test IR block body was not encoded");
   return encodedBody;
 }
@@ -87,20 +95,27 @@ export async function instantiateIrBlock(
   block: IrBlock,
   externalParamCount = 0
 ): Promise<InstantiatedIrBlock> {
-  const state = new WebAssembly.Memory({ initial: 1 });
-  const guest = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
+  const state = new WebAssembly.Memory({
+    initial: testExecutionModel.cpuState.memoryImport.limits.minPages
+  });
+  const guest = new WebAssembly.Memory({
+    initial: testExecutionModel.guestMemory.memoryImport.limits.minPages
+  });
   const instance = await WebAssembly.instantiate(
     await WebAssembly.compile(encodeIrBlockModule(block, externalParamCount)),
     {
-      [wasmImport.namespace]: {
-        [wasmImport.cpuStateMemoryName]: state,
-        [wasmImport.guestMemoryName]: guest
+      [programImportModuleName]: {
+        [testExecutionModel.cpuState.memoryImport.name]: state,
+        [testExecutionModel.guestMemory.memoryImport.name]: guest
       }
     }
   );
-  const run = instance.exports[wasmBlockExportName];
+  const run = instance.exports[testModuleRunExportName];
 
-  assert(typeof run === "function", `missing Wasm ${wasmBlockExportName} export`);
+  assert(
+    typeof run === "function",
+    `missing Wasm ${testModuleRunExportName} export`
+  );
 
   return {
     stateMemory: state,
@@ -121,15 +136,18 @@ export async function instantiateFunctionBody(
   const instance = await WebAssembly.instantiate(
     await WebAssembly.compile(encodeFunctionBodyModule(body, paramCount)),
     {
-      [wasmImport.namespace]: {
-        [wasmImport.cpuStateMemoryName]: state,
-        [wasmImport.guestMemoryName]: guest
+      [programImportModuleName]: {
+        [testExecutionModel.cpuState.memoryImport.name]: state,
+        [testExecutionModel.guestMemory.memoryImport.name]: guest
       }
     }
   );
-  const run = instance.exports[wasmBlockExportName];
+  const run = instance.exports[testModuleRunExportName];
 
-  assert(typeof run === "function", `missing Wasm ${wasmBlockExportName} export`);
+  assert(
+    typeof run === "function",
+    `missing Wasm ${testModuleRunExportName} export`
+  );
 
   return {
     stateMemory: state,
@@ -143,12 +161,17 @@ function encodeFunctionBodyModule(body: EncodedWasmFunctionBody, paramCount: num
   const module = new WasmModuleEncoder();
   const typeIndex = initializeTestModule(module, paramCount);
 
-  module.exportFunction(wasmBlockExportName, module.addFunction(typeIndex, body));
+  module.exportFunction(testModuleRunExportName, module.addFunction(typeIndex, body));
   return module.encode();
 }
 
-function encodeIrBlockModule(block: IrBlock, externalParamCount: number): Uint8Array<ArrayBuffer> {
-  return encodeProgram(createIrBlockProgram(block, externalParamCount));
+function encodeIrBlockModule(
+  block: IrBlock,
+  externalParamCount: number
+): Uint8Array<ArrayBuffer> {
+  return compileProgram(
+    createIrBlockProgram(block, externalParamCount)
+  ).bytes;
 }
 
 function createIrBlockProgram(
@@ -156,39 +179,28 @@ function createIrBlockProgram(
   externalParamCount: number,
   bodyEncoded?: (body: EncodedWasmFunctionBody) => void
 ): Program {
-  const builder = new ProgramBuilder();
+  const builder = new ProgramBuilder(testExecutionModel.resources);
   const entryType = functionType(
     Array.from({ length: externalParamCount }, () => "i32" as const),
     ["i64"]
   );
   const entrySignature = signatureRef("test.ir-block-entry-signature");
   const entry = functionRef("test.ir-block-entry");
-  const cpuStateRef = cpuState.resource;
+  const cpuStateRef = testExecutionModel.cpuState.resource;
+  const guestMemoryRef = testExecutionModel.guestMemory.resource;
 
   builder.signature({ ref: entrySignature, type: entryType });
-  builder.importMemory({
-    ref: cpuStateRef,
-    moduleName: wasmImport.namespace,
-    name: wasmImport.cpuStateMemoryName,
-    limits: { minPages: 1 }
-  });
-  builder.importMemory({
-    ref: guestMemoryResource,
-    moduleName: wasmImport.namespace,
-    name: wasmImport.guestMemoryName,
-    limits: { minPages: guestMemoryMinimumPages }
-  });
   builder.legacyFunction({
     ref: entry,
     signature: entrySignature,
     calls: [],
-    resources: [cpuStateRef, guestMemoryResource],
+    resources: [cpuStateRef, guestMemoryRef],
     globals: [],
     tables: [],
     irBlocks: [{ block, allowImplicitEntryFallthrough: true }],
     build: (context) => {
       assert(
-        context.bindings.resourceIndex(cpuStateRef) === wasmMemoryIndex.cpuState,
+        context.bindings.resourceIndex(cpuStateRef) === testModuleMemoryIndex.cpuState,
         "unexpected CPU-state memory import index"
       );
       const body = emitIrBlockBody(block, externalParamCount, context);
@@ -198,21 +210,30 @@ function createIrBlockProgram(
     }
   });
   builder.exportFunction({
-    ref: exportRef("test.ir-block-entry-export"),
-    name: wasmBlockExportName,
+    ref: functionExportRef("test.ir-block-entry-export"),
+    name: testModuleRunExportName,
     target: entry
   });
   return builder.finish();
 }
 
 function initializeTestModule(module: WasmModuleEncoder, paramCount: number): number {
-  const cpuStateMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.cpuStateMemoryName, { minPages: 1 });
-  const guestMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.guestMemoryName, {
-    minPages: guestMemoryMinimumPages
-  });
+  const cpuStateMemoryIndex = module.importMemory(
+    programImportModuleName,
+    testExecutionModel.cpuState.memoryImport.name,
+    { minPages: 1 }
+  );
+  const guestMemoryIndex = module.importMemory(
+    programImportModuleName,
+    testExecutionModel.guestMemory.memoryImport.name,
+    {
+      minPages: guestMemoryMinimumPages
+    }
+  );
 
   assert(
-    cpuStateMemoryIndex === wasmMemoryIndex.cpuState && guestMemoryIndex === wasmMemoryIndex.guest,
+    cpuStateMemoryIndex === testModuleMemoryIndex.cpuState &&
+      guestMemoryIndex === testModuleMemoryIndex.guest,
     "unexpected Wasm memory import order"
   );
 

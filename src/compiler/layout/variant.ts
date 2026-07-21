@@ -68,9 +68,9 @@ export type VariantSetRecord = Readonly<{
   variants: readonly VariantRecord[];
 }>;
 
-// The complete canonical resolved record. Sets and variants are in stable-id
-// order, while each variant retains its owner's explicit field sequence. The
-// identity-free record can be fingerprinted directly.
+// The complete resolved record. Sets and variants are in stable-id order,
+// while each variant retains its owner's explicit field sequence. It carries
+// no live handles.
 export type VariantLayoutRecord = Readonly<{
   id: string;
   byteLength: number;

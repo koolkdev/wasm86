@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
 import { regBinding, type OperandBinding } from "#core/instruction/bindings.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
@@ -14,7 +14,6 @@ import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js
 import { cpuState } from "#cpu/state.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { reg32, type Reg32 } from "#core/types.js";
-import { wasmMemoryIndex } from "#wasm/abi.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   assertLazyFlagState,
@@ -23,7 +22,12 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { wasmBodyMemoryAccesses } from "#compiler/encoder/tests/body-opcodes.js";
-import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import {
+  irBlockBody,
+  irBlockCompleted,
+  instantiateIrBlock,
+  testModuleMemoryIndex
+} from "./harness.js";
 import { aluReference, type AluFlags, type AluOp } from "./reference.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
@@ -135,7 +139,7 @@ test("two adds in one block store one lazy add record, with the second add's sou
     wasmBodyMemoryAccesses(body).filter(
       (access) =>
         access.opcode === wasmOpcode.i32Store8 &&
-        access.memoryIndex === wasmMemoryIndex.cpuState &&
+        access.memoryIndex === testModuleMemoryIndex.cpuState &&
         access.offset === lazyFlagsKindStateOffset
     ).length,
     1

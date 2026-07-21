@@ -2,11 +2,11 @@ import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#engines/legacy-instruction-block.js";
+import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
 import { memBinding, staticMemSegment } from "#core/instruction/bindings.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
-import { cpuStateAccess } from "#cpu/state.js";
+import { cpuStateAccess } from "#test/support/execution-model.js";
 import type { BodyNode, IrBlock } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import {
@@ -15,7 +15,6 @@ import {
 } from "#ir/tests/storage-op-helpers.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { repMovsSemantic } from "#core/semantics/strings.js";
-import { wasmMemoryIndex } from "#wasm/abi.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   readWasmCpuStateChannel,
@@ -26,7 +25,12 @@ import {
   wasmBodyInstructions,
   wasmBodyOpcodes
 } from "#compiler/encoder/tests/body-opcodes.js";
-import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import {
+  irBlockBody,
+  irBlockCompleted,
+  instantiateIrBlock,
+  testModuleMemoryIndex
+} from "./harness.js";
 import {
   finishControl,
   ifControl,
@@ -466,7 +470,7 @@ test("rep movsd does not read cpu state inside the loop body", () => {
       (instruction) =>
         instruction.offset > loopEntry.offset &&
         instruction.offset < loopEnd.offset &&
-        instruction.memoryIndex === wasmMemoryIndex.cpuState &&
+        instruction.memoryIndex === testModuleMemoryIndex.cpuState &&
         stateLoadOpcodes.includes(instruction.opcode)
     ),
     []

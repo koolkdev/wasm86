@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrBlock } from "#ir/block.js";
 import { gprChannel } from "#core/state/channels.js";
-import { cpuStateAccess } from "#cpu/state.js";
+import { cpuStateAccess } from "#test/support/execution-model.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { wasmBranchHint } from "#compiler/encoder/function-body.js";
 import {

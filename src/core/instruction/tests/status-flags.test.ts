@@ -30,7 +30,7 @@ import { instructionCountField } from "#cpu/instruction-count.js";
 import {
   cpuStateAccess,
   cpuStatusFlagResolvers
-} from "#cpu/state.js";
+} from "#test/support/execution-model.js";
 import { covers } from "#ir/aliasing.js";
 import {
   stateEffect,

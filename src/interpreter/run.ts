@@ -5,15 +5,21 @@ import type { ProgramBuilder } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/program/function-type.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/program/refs.js";
-import { StateAccess } from "#core/state/access.js";
+import type { ExecutionModel } from "#execution/model.js";
+import {
+  createInstructionConstruction,
+  type InstructionConstruction
+} from "#core/instruction/builder.js";
 import { coreStateFields } from "#core/state/layout.js";
+import type { StateAccess } from "#core/state/access.js";
+import { buildExit } from "#cpu/exit.js";
+import {
+  instructionCountField,
+  instructionLimitField
+} from "#cpu/instruction-count.js";
 import type { FunctionBuilder } from "#ir/function.js";
 import type { RegionBuilder } from "#ir/region-builder.js";
 import { buildDecodeAndDispatch } from "./decode.js";
-import type {
-  InterpreterEnvironment,
-  InterpreterExecutionContext
-} from "./environment.js";
 import { instructionLimitExit } from "./exits.js";
 import { buildInterpreterInstruction } from "./instruction.js";
 
@@ -21,48 +27,53 @@ const interpreterRunType = functionType([], ["i64"]);
 
 export function defineInterpreterRun(
   program: ProgramBuilder,
-  environment: InterpreterEnvironment
+  model: ExecutionModel
 ): FunctionDefinition {
-  const stateAccess = new StateAccess(environment.state);
-  const execution: InterpreterExecutionContext = {
-    stateAccess,
-    statusFlagResolvers: environment.statusFlagResolvers,
-    memory: environment.memory.access,
-    instructionCount: environment.instructionCount,
-    instructionLimit: environment.instructionLimit,
-    buildExit: environment.buildExit
-  };
+  const instructionConstruction = createInstructionConstruction({
+    stateAccess: model.cpuState.access,
+    memory: model.guestMemory.access,
+    instructionCountField,
+    buildExit
+  });
+
   return program.defineFunction({
     ref: functionRef("interpreter.run"),
     type: interpreterRunType,
     effects: interpreterRunEffects(
-      environment.state.resource,
-      environment.memory.resource
+      model.cpuState.resource,
+      model.guestMemory.resource
     )
-  }, (fn) => buildRunBody(fn, execution));
+  }, (fn) => buildRunBody(fn, model, instructionConstruction));
 }
 
 function buildRunBody(
   fn: FunctionBuilder,
-  context: InterpreterExecutionContext
+  model: ExecutionModel,
+  instructionConstruction: InstructionConstruction
 ): void {
-  const entryEip = context.stateAccess.bind(fn.region).readField(
+  const stateAccess = model.cpuState.access;
+  const entryEip = stateAccess.bind(fn.region).readField(
     coreStateFields.eip
   );
   const instructionStart = fn.values.addLoopInput();
 
   fn.region.loop([{ seed: entryEip, loopInput: instructionStart }], (body) => {
-    body.if(instructionLimitReached(body, context), (expired) => {
+    body.if(instructionLimitReached(body, stateAccess), (expired) => {
       expired.return([
-        context.buildExit(expired.values, instructionLimitExit())
+        buildExit(expired.values, instructionLimitExit())
       ]);
     }, { hint: "unlikely" });
     buildDecodeAndDispatch(body, instructionStart, {
-      stateAccess: context.stateAccess,
-      memory: context.memory,
-      buildExit: context.buildExit,
+      stateAccess,
+      memory: model.guestMemory.access,
+      buildExit,
       buildInstruction: (region, decoded) =>
-        buildInterpreterInstruction(region, decoded, context)
+        buildInterpreterInstruction(
+          region,
+          decoded,
+          stateAccess,
+          instructionConstruction
+        )
     });
   });
 
@@ -72,11 +83,11 @@ function buildRunBody(
 
 function instructionLimitReached(
   region: RegionBuilder,
-  context: InterpreterExecutionContext
+  stateAccess: StateAccess
 ): ValueId {
-  const state = context.stateAccess.bind(region);
-  const count = state.readField(context.instructionCount);
-  const limit = state.readField(context.instructionLimit);
+  const state = stateAccess.bind(region);
+  const count = state.readField(instructionCountField);
+  const limit = state.readField(instructionLimitField);
   const countMinusLimit = region.values.binary("sub", count, limit);
 
   return region.values.compare(

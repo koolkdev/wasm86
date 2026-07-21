@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { wasmImport, wasmMemoryIndex } from "#wasm/abi.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
 import {
   WasmFunctionBodyEncoder,
   type EncodedWasmFunctionBody
@@ -10,6 +10,8 @@ import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 const entryExportName = "entry";
+const cpuStateMemoryName = "cpuState";
+const guestMemoryName = "guest";
 const cpuStatePtr = 32;
 const forwardedResult = 0x1234_5678_9abc_def0n;
 
@@ -53,8 +55,8 @@ test("cpu_state_memory_import_still_memory_0", () => {
   const imports = WebAssembly.Module.imports(new WebAssembly.Module(encodeTwoFunctionModule()));
 
   deepStrictEqual(imports[0], {
-    module: wasmImport.namespace,
-    name: wasmImport.cpuStateMemoryName,
+    module: programImportModuleName,
+    name: cpuStateMemoryName,
     kind: "memory"
   });
 });
@@ -63,8 +65,8 @@ test("guest_memory_import_still_memory_1", () => {
   const imports = WebAssembly.Module.imports(new WebAssembly.Module(encodeTwoFunctionModule()));
 
   deepStrictEqual(imports[1], {
-    module: wasmImport.namespace,
-    name: wasmImport.guestMemoryName,
+    module: programImportModuleName,
+    name: guestMemoryName,
     kind: "memory"
   });
 });
@@ -74,9 +76,9 @@ async function instantiateTwoFunctionModule(): Promise<WebAssembly.Instance> {
   const cpuStateMemory = new WebAssembly.Memory({ initial: 1 });
   const guestMemory = new WebAssembly.Memory({ initial: 1 });
   const instance = await WebAssembly.instantiate(module, {
-    [wasmImport.namespace]: {
-      [wasmImport.cpuStateMemoryName]: cpuStateMemory,
-      [wasmImport.guestMemoryName]: guestMemory
+    [programImportModuleName]: {
+      [cpuStateMemoryName]: cpuStateMemory,
+      [guestMemoryName]: guestMemory
     }
   });
 
@@ -85,11 +87,11 @@ async function instantiateTwoFunctionModule(): Promise<WebAssembly.Instance> {
 
 function encodeTwoFunctionModule(): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
-  const cpuStateMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.cpuStateMemoryName, { minPages: 1 });
-  const guestMemoryIndex = module.importMemory(wasmImport.namespace, wasmImport.guestMemoryName, { minPages: 1 });
+  const cpuStateMemoryIndex = module.importMemory(programImportModuleName, cpuStateMemoryName, { minPages: 1 });
+  const guestMemoryIndex = module.importMemory(programImportModuleName, guestMemoryName, { minPages: 1 });
 
-  strictEqual(cpuStateMemoryIndex, wasmMemoryIndex.cpuState);
-  strictEqual(guestMemoryIndex, wasmMemoryIndex.guest);
+  strictEqual(cpuStateMemoryIndex, 0);
+  strictEqual(guestMemoryIndex, 1);
 
   const blockType = addBlockFunctionType(module);
   const helperIndex = module.addFunction(blockType, helperBody());

@@ -5,7 +5,10 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   type CpuException
 } from "#core/exceptions.js";
-import type { StatusFlagResolverFamily } from "#core/flags/lazy/resolvers.js";
+import {
+  createStatusFlagResolvers,
+  type StatusFlagResolverFamily
+} from "#core/flags/lazy/resolvers.js";
 import type { StateAccess } from "#core/state/access.js";
 import type {
   AccessFault,
@@ -36,7 +39,7 @@ import {
   InstructionSemantics,
   type InstructionSemanticsSession
 } from "./semantics.js";
-import { emitSegmentLoad, type SegmentMode } from "./segments.js";
+import { emitSegmentLoad } from "./segments.js";
 import {
   InstructionStorage,
   type ScopedInstructionStorage
@@ -63,17 +66,43 @@ export type InstructionBuilder = Readonly<{
   finish(): ValueId | undefined;
 }>;
 
-export type InstructionBuilderOptions = Readonly<{
+export type InstructionConstruction = Readonly<{
+  createBuilder(
+    region: RegionBuilder,
+    terminals: InstructionTerminals
+  ): InstructionBuilder;
+}>;
+
+export type InstructionConstructionOptions = Readonly<{
   stateAccess: StateAccess;
-  statusFlagResolvers: StatusFlagResolverFamily;
   memory: MemoryAccessConstruction;
   instructionCountField: FieldRef<"u32">;
   buildExit: BuildExit;
-  terminals: InstructionTerminals;
-  segmentMode?: SegmentMode;
 }>;
 
-export function createInstructionBuilder(
+type InstructionBuilderOptions = InstructionConstructionOptions & Readonly<{
+  statusFlagResolvers: StatusFlagResolverFamily;
+  terminals: InstructionTerminals;
+}>;
+
+// A closed program creates one construction capability. Its generated flag
+// family is private Core topology shared by every instruction body in that
+// program, rather than a dependency exposed by Interpreter or JIT.
+export function createInstructionConstruction(
+  options: InstructionConstructionOptions
+): InstructionConstruction {
+  const statusFlagResolvers = createStatusFlagResolvers(options.stateAccess);
+
+  return {
+    createBuilder: (region, terminals) => createInstructionBuilder(region, {
+      ...options,
+      statusFlagResolvers,
+      terminals
+    })
+  };
+}
+
+function createInstructionBuilder(
   region: RegionBuilder,
   options: InstructionBuilderOptions
 ): InstructionBuilder {
@@ -107,7 +136,6 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   readonly #storage: InstructionStorage;
   readonly #control: ControlEmitter;
   readonly #terminator: InstructionTerminator;
-  readonly #segmentMode: SegmentMode;
   readonly #scopeStorage = new WeakMap<SemanticRegionScope, ScopedInstructionStorage>();
   readonly #scopeSemantics = new WeakMap<SemanticRegionScope, InstructionSemantics>();
   #instructionLocation: InstructionLocationValues | undefined;
@@ -144,7 +172,6 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
       options.buildExit,
       options.terminals
     );
-    this.#segmentMode = options.segmentMode ?? "flat32";
   }
 
   add(
@@ -358,10 +385,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     const scratchValues = this.#scopes.current.region.values.fork();
     const scratch = new InstructionBuilderImpl(
       new RegionBuilder(scratchValues),
-      {
-        ...this.#options,
-        segmentMode: this.#segmentMode
-      },
+      this.#options,
       writeLog,
       scratchValues
     );
@@ -453,7 +477,6 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     assert(scope.kind === "root", "a segment load inside a semantic if arm is unsupported");
 
     const outcome = emitSegmentLoad(
-      this.#segmentMode,
       this.#terminator,
       scope.region,
       this.#storageFor(scope).access,

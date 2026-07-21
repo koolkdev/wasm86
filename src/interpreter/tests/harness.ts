@@ -7,8 +7,13 @@ import {
   instructionCountField,
   instructionLimitField
 } from "#cpu/instruction-count.js";
-import { cpuState } from "#cpu/state.js";
+import {
+  cpuState,
+  cpuStateResourceDefinition
+} from "#cpu/state.js";
 import { encodeInterpreterModule } from "#interpreter/module.js";
+import { interpreterRunExportName } from "#interpreter/program.js";
+import { guestMemoryResourceDefinition } from "#memory/resource.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import {
   readWasmCpuStateField,
@@ -16,7 +21,7 @@ import {
   wasmCpuStateFields,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import { wasmBlockExportName, wasmImport } from "#wasm/abi.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
 import { createGuestMemory } from "#wasm/tests/helpers.js";
 
 export type InterpreterHarness = Readonly<{
@@ -48,9 +53,9 @@ export async function instantiateInterpreter(): Promise<InterpreterHarness> {
   const stateView = new DataView(cpuStateMemory.buffer);
   const guestView = new DataView(guestMemory.buffer);
   const instance = await WebAssembly.instantiate(interpreterModule, {
-    [wasmImport.namespace]: {
-      [wasmImport.cpuStateMemoryName]: cpuStateMemory,
-      [wasmImport.guestMemoryName]: guestMemory
+    [programImportModuleName]: {
+      [cpuStateResourceDefinition.name]: cpuStateMemory,
+      [guestMemoryResourceDefinition.name]: guestMemory
     }
   });
   const run = readExportedRun(instance);
@@ -150,10 +155,10 @@ export function assertCompletedInstruction(
 }
 
 function readExportedRun(instance: WebAssembly.Instance): () => bigint {
-  const value = instance.exports[wasmBlockExportName];
+  const value = instance.exports[interpreterRunExportName];
 
   if (typeof value !== "function") {
-    throw new Error(`expected exported function '${wasmBlockExportName}'`);
+    throw new Error(`expected exported function '${interpreterRunExportName}'`);
   }
   return value as () => bigint;
 }

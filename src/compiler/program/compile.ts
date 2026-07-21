@@ -9,6 +9,7 @@ import {
 } from "#compiler/encoder/types.js";
 import { emitFunction } from "#wasm/emit/action.js";
 import type {
+  FunctionExportRef,
   FunctionRef,
   GlobalRef,
   SignatureRef,
@@ -22,10 +23,22 @@ import type {
 import type { FunctionType } from "./function-type.js";
 import type { FunctionDefinition } from "./functions.js";
 import type { Program, ProgramFunction } from "./model.js";
+import type { MemoryImport } from "./resources.js";
 import { validateProgramEncoding } from "./validate.js";
 
 type LegacyFunction = Extract<ProgramFunction, { kind: "legacy" }>;
 type DefinedFunction = Extract<ProgramFunction, { kind: "function" }>;
+
+export type CompiledFunctionExport = Readonly<{
+  ref: FunctionExportRef;
+  name: string;
+}>;
+
+export type CompiledProgram = Readonly<{
+  bytes: Uint8Array<ArrayBuffer>;
+  memoryImports: readonly MemoryImport[];
+  functionExports: readonly CompiledFunctionExport[];
+}>;
 
 type ProgramLayout = Readonly<{
   types: readonly WasmFunctionType[];
@@ -37,12 +50,20 @@ type ProgramLayout = Readonly<{
   globalIndices: ReadonlyMap<GlobalRef, number>;
 }>;
 
-export function encodeProgram(program: Program): Uint8Array<ArrayBuffer> {
+export function compileProgram(program: Program): CompiledProgram {
+  return {
+    bytes: encodeProgram(program),
+    memoryImports: program.memoryImports,
+    functionExports: program.exports.map(({ ref, name }) => ({ ref, name }))
+  };
+}
+
+function encodeProgram(program: Program): Uint8Array<ArrayBuffer> {
   const layout = layoutProgram(program);
   const bodies = program.functions.map((fn) => buildFunctionBody(program, layout, fn));
 
   if (buildDefinition.validation) {
-    validateProgramEncoding(program, bodies);
+    validateProgramEncoding(program, bodies, layout);
   }
   const module = new WasmModuleEncoder();
 
@@ -64,7 +85,7 @@ function addFunctionTypes(module: WasmModuleEncoder, layout: ProgramLayout): voi
 }
 
 function addMemoryImports(module: WasmModuleEncoder, program: Program, layout: ProgramLayout): void {
-  for (const memory of program.memories) {
+  for (const memory of program.memoryImports) {
     const expectedIndex = layout.memoryIndices.get(memory.ref);
 
     assert(expectedIndex !== undefined, `missing layout for program resource ${memory.ref.id}`);
@@ -167,7 +188,9 @@ function layoutProgram(program: Program): ProgramLayout {
     signatureIndices,
     typeIndices,
     functionIndices: new Map(program.functions.map((fn, index) => [fn.ref, index])),
-    memoryIndices: new Map(program.memories.map((memory, index) => [memory.ref, index])),
+    memoryIndices: new Map(
+      program.memoryImports.map((memory, index) => [memory.ref, index])
+    ),
     tableIndices: new Map(program.tables.map((table, index) => [table.ref, index])),
     globalIndices: new Map(program.globals.map((global, index) => [global.ref, index]))
   };
