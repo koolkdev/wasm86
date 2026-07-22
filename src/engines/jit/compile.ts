@@ -1,13 +1,10 @@
 import { compileProgram, type CompiledProgram } from "#compiler/program/compile.js";
-import { instructionCountField } from "#cpu/instruction-count.js";
-import { buildExit } from "#cpu/exit.js";
-import { createInstructionConstruction } from "#core/instruction/builder.js";
+import type { FunctionExportRef } from "#compiler/program/refs.js";
 import type { ExecutionModel } from "#execution/model.js";
 import {
   snapshotInstructionBytes,
   type InstructionByteSnapshot
 } from "./instruction-snapshot.js";
-import { buildIrBlock } from "./action-compiler.js";
 import { decodeJitBlock } from "./decode-block.js";
 import {
   jitSnapshotRequestByteLength,
@@ -17,6 +14,7 @@ import { buildJitProgram } from "./program.js";
 
 export type CompiledJitArtifact = Readonly<{
   program: CompiledProgram;
+  entry: FunctionExportRef;
   entryEip: number;
 }>;
 
@@ -52,27 +50,11 @@ export function compileJitArtifact(
   const { snapshot, policy, model } = input;
   const start = snapshot.linearStart;
   const decoded = decodeJitBlock(snapshot, policy);
-  const construction = createInstructionConstruction({
-    stateAccess: model.cpuState.access,
-    memory: model.guestMemory.access,
-    instructionCountField,
-    buildExit
-  });
-  const decodeException = decoded.terminator.kind === "cpuException"
-    ? decoded.terminator
-    : undefined;
-  const ir = buildIrBlock(
-    construction,
-    decoded.instructions,
-    decodeException
-  );
-  const program = compileProgram(buildJitProgram(model, [{
-    entryEip: start,
-    ir
-  }], undefined));
+  const built = buildJitProgram(model, decoded);
 
   return {
-    program,
+    program: compileProgram(built.program),
+    entry: built.entry,
     entryEip: start
   };
 }

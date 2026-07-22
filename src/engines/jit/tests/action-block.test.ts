@@ -1,270 +1,252 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import {
-  buildIrBlock,
-  buildJitProgram,
-  encodeJitModule
-} from "#test/support/jit.js";
-import type { ResourceRef } from "#compiler/ir/resource.js";
-import {
-  compileProgram,
-  type CompiledProgram
-} from "#compiler/program/compile.js";
-import { instantiateCompiledProgram } from "#compiler/program/instance.js";
-import {
-  instantiateJitArtifact,
-  type InstantiateJitArtifactOptions,
-  type JitArtifactHandle
-} from "#test/support/jit-artifact.js";
-import { compileJitFromMemory } from "#engines/jit/compile.js";
-import { snapshotInstructionBytes } from "#engines/jit/instruction-snapshot.js";
-import {
-  defaultJitBlockPolicy,
-  jitSnapshotRequestByteLength
-} from "#engines/jit/policy.js";
-import type { BodyNode, IrBlock } from "#ir/block.js";
-import { RegionBuilder } from "#ir/region-builder.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
-import type { Operation } from "#compiler/ir/operations/index.js";
-import { finishControl } from "#compiler/ir/controls/index.js";
-import { flagStateFields } from "#core/flags/layout.js";
-import type { InstructionStateChannel } from "#core/instruction/state/channels.js";
-import { gprChannel } from "#core/state/channels.js";
-import { coreStateFields } from "#core/state/layout.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
-import { decodeJitBlock, type JitDecodedBlock } from "#engines/jit/decode-block.js";
+import { encodeVariant } from "#compiler/layout/variant-codec.js";
+import type { ResourceRef } from "#compiler/ir/resource.js";
+import { instantiateCompiledProgram } from "#compiler/program/instance.js";
+import type { FunctionRef } from "#compiler/program/refs.js";
 import { invalidOpcode, pageFault } from "#core/exceptions.js";
+import { x86Flags } from "#core/flags/definitions.js";
+import { flagStateFields } from "#core/flags/layout.js";
+import { coreStateFields } from "#core/state/layout.js";
+import type { RunStop } from "#cpu/cpu.js";
+import { decodeExit, exitLayout } from "#cpu/exit.js";
 import {
-  readWasmCpuStateSnapshot,
-  writeWasmCpuStateSnapshot
-} from "#test/support/cpu-state.js";
-import { createTestWasmMemories } from "#test/support/wasm-memories.js";
+  compileJitFromMemory,
+  type CompiledJitArtifact
+} from "#engines/jit/compile.js";
+import { instructionLimitExit } from "#interpreter/exits.js";
 import {
   extractOnlyWasmFunctionBody,
+  wasmBodyMemoryAccesses,
   wasmBodyOpcodes,
   wasmDefinedFunctionCount
 } from "#compiler/encoder/tests/body-opcodes.js";
 import {
-  stateEffect,
-  stateWrite,
-  stateWriteValue,
-  isStateRead,
-  isStateWrite
-} from "#core/instruction/tests/state-operations.js";
-import { covers } from "#ir/aliasing.js";
-import { trapExit } from "#core/exits.js";
-import { decodeExit } from "#cpu/exit.js";
-import {
-  buildExit,
-  cpuStatusFlagResolvers,
-  testExecutionModel
-} from "#test/support/execution-model.js";
-import { x86Flags } from "#core/flags/definitions.js";
+  readWasmCpuStateSnapshot,
+  type WasmCpuStateSnapshot,
+  writeWasmCpuStateSnapshot
+} from "#test/support/cpu-state.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
+import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 import { jitMemoryWithBytes } from "./decode-helpers.js";
-import { decodeTransfer } from "#engines/jit/legacy-transfer.js";
-import { jitBlockExportName } from "#engines/jit/program.js";
 
 const startEip = 0x1000;
+const encodedDispatchStop = encodeVariant(
+  exitLayout,
+  instructionLimitExit()
+);
 
-test("JIT retains only its raw block-entry signature", () => {
-  const program = buildJitProgram(
-    [{ entryEip: startEip, ir: syntheticBlock(true) }],
-    undefined
+test("JIT closure emits only resolver functions reached by symbolic instructions", () => {
+  const ordinary = compileArtifact([0x90], 1);
+  // seta al reads CF and ZF when the block has no pending flag source.
+  const withResolvers = compileArtifact(
+    [0x0f, 0x97, 0xc0, 0xcd, 0x2e],
+    2
   );
 
-  deepStrictEqual(
-    program.signatures.map((signature) => signature.ref.id),
-    ["jit.block-entry"]
-  );
-  strictEqual(program.functionTypes.length, 2);
-});
-
-test("JIT module emits no resolver functions for ordinary blocks", () => {
-  const bytes = encodeJitModule([{ entryEip: startEip, ir: syntheticBlock(false) }]);
-
-  strictEqual(wasmDefinedFunctionCount(bytes), 1);
-});
-
-test("JIT module emits a referenced status-flag resolver", () => {
-  const bytes = encodeJitModule([{ entryEip: startEip, ir: syntheticBlock(true) }]);
-
-  strictEqual(wasmDefinedFunctionCount(bytes), 2);
-});
-
-test("JIT module includes resolver members reached by input flag reads", () => {
-  // seta al reads CF and ZF when there is no same-block flag source; int
-  // terminates the block so the test does not need a fallthrough link target.
-  const block = buildIrBlock(decodeBlock([0x0f, 0x97, 0xc0, 0xcd, 0x2e]).instructions);
-  const bytes = encodeJitModule([{ entryEip: startEip, ir: block }]);
-
-  strictEqual(wasmDefinedFunctionCount(bytes), 3);
-});
-
-test("JIT program closure rejects duplicate normalized block identities", () => {
-  const nodes = syntheticBlock(false);
-
-  throws(
-    () => encodeJitModule([
-      { entryEip: startEip, ir: nodes },
-      { entryEip: startEip + 0x1_0000_0000, ir: nodes }
-    ]),
-    /duplicate JIT block module entry EIP/
-  );
-});
-
-test("JIT program closure gives an external link a detached fallback stub", () => {
-  const bytes = encodeJitModule([{
-    entryEip: startEip,
-    ir: syntheticDispatchBlock(startEip + 0x100)
-  }]);
-
-  strictEqual(wasmDefinedFunctionCount(bytes), 2);
+  strictEqual(wasmDefinedFunctionCount(ordinary.program.bytes), 1);
+  strictEqual(wasmDefinedFunctionCount(withResolvers.program.bytes), 3);
+  // The terminal INT has no guest-transfer path, so its unused dispatch
+  // declaration is removed by ordinary function-import closure.
+  strictEqual(withResolvers.program.functionImports.length, 0);
 });
 
 test("JIT compiles a decode-time CPU exception after decoded instructions", () => {
-  const block = decodeBlock([0x40, 0x62]);
+  const artifact = compileArtifact([0x40, 0x62], 2);
   const memories = createTestWasmMemories();
   const stateView = new DataView(memories.cpuStateMemory.buffer);
+  const dispatches: DispatchObservation[] = [];
 
-  deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["inc.r32"]);
-  strictEqual(block.terminator.kind, "cpuException");
-  const handle = compileDecodedBlockHandle(block, {
-    cpuStateMemory: memories.cpuStateMemory,
-    guestMemory: memories.guestMemory
+  strictEqual(artifact.program.functionImports.length, 0);
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map()
   });
+  const entry = instance.functionExports.get(artifact.entry);
 
   writeWasmCpuStateSnapshot(stateView, { eip: startEip, eax: 4 });
-  const run = handle.run();
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
   const state = readWasmCpuStateSnapshot(stateView);
 
-  deepStrictEqual(run.exit, {
+  deepStrictEqual(exit, {
     kind: "cpuException",
     exception: invalidOpcode()
   });
+  deepStrictEqual(dispatches, []);
   strictEqual(state.eax, 5);
   strictEqual(state.eip, startEip + 1);
   strictEqual(state.instructionCount, 1);
 });
 
-test("JIT program validates external link layouts before declaration", () => {
-  const targetEip = startEip + 0x100;
-  const blocks = [{ entryEip: startEip, ir: syntheticDispatchBlock(targetEip) }];
+test("an empty decode-time CPU exception commits its instruction start", () => {
+  const artifact = compileArtifact([0x62], 1);
+  const memories = createTestWasmMemories();
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
+  const dispatches: DispatchObservation[] = [];
 
-  throws(
-    () => encodeJitModule(blocks, { linkLayout: new Map([[targetEip, -1]]) }),
-    /invalid JIT link slot/
-  );
-  throws(
-    () => encodeJitModule(blocks, { linkLayout: new Map([[targetEip, 1]]) }),
-    /JIT link slot out of range/
-  );
-  throws(
-    () => encodeJitModule(blocks, {
-      linkLayout: new Map([[targetEip, 0], [targetEip + 1, 0]])
-    }),
-    /duplicate JIT link slot/
-  );
+  strictEqual(artifact.program.functionImports.length, 0);
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map()
+  });
+  const entry = instance.functionExports.get(artifact.entry);
+
+  writeWasmCpuStateSnapshot(stateView, {
+    eip: startEip + 0x123,
+    instructionCount: 0
+  });
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
+  const state = readWasmCpuStateSnapshot(stateView);
+
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: invalidOpcode()
+  });
+  deepStrictEqual(dispatches, []);
+  strictEqual(state.eip, startEip);
+  strictEqual(state.instructionCount, 0);
 });
 
-test("a repeated add compiles to one eax read and one eax write", () => {
+test("a repeated add retains one physical eax read and write before fallthrough dispatch", () => {
   // add eax, 1; add eax, 1.
-  const block = buildIrBlock(decodeBlock(
+  const artifact = compileArtifact(
     [0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01],
-    startEip,
     2
-  ).instructions);
-  const nodes = entryActions(block);
-
-  strictEqual(nodes.filter((action) =>
-    isStateRead(action) && accessesChannel(block, action, gprChannel("eax"))
-  ).length, 1);
-  strictEqual(nodes.filter((action) =>
-    isStateWrite(action) && accessesChannel(block, action, gprChannel("eax"))
-  ).length, 1);
-});
-
-test("cross-instruction dead flag writes are absent and Core commits EIP before dispatch", () => {
-  // add eax, 1; add eax, 1.
-  const block = buildIrBlock(decodeBlock(
-    [0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01],
-    startEip,
-    2
-  ).instructions);
-  const nodes = entryActions(block);
-  const flagWrites = nodes.filter((action) =>
-    isStateWrite(action) && x86Flags.some((flag) =>
-      accessesChannel(block, action, flagStateFields.concrete[flag])
-    )
   );
-  const lazyKindWrites = nodes.filter(
-    (action) => isStateWrite(action) &&
-      accessesChannel(block, action, flagStateFields.lazyKind)
+  const body = extractOnlyWasmFunctionBody(artifact.program.bytes);
+  const accesses = wasmBodyMemoryAccesses(body);
+  const cpuMemoryIndex = artifact.program.memoryImports.findIndex(
+    (memory) => memory.ref === testExecutionModel.cpuState.resource
+  );
+  const gprs = testExecutionModel.cpuState.layout.array(coreStateFields.gprs);
+  const eaxOffset = gprs.offset;
+  const eaxAccesses = accesses.filter(
+    (access) => access.memoryIndex === cpuMemoryIndex && access.offset === eaxOffset
   );
 
-  strictEqual(flagWrites.length, 0);
-  strictEqual(lazyKindWrites.length, 1);
-  strictEqual(nodes.filter((action) =>
-    isStateWrite(action) && accessesChannel(block, action, coreStateFields.eip)
-  ).length, 1);
+  ok(cpuMemoryIndex >= 0, "compiled block has no CPU-state memory import");
   strictEqual(
-    nodes.filter((action) => action.kind === "finish" && action.finish.kind === "dispatch").length,
+    eaxAccesses.filter((access) => access.opcode === wasmOpcode.i32Load).length,
     1
   );
-  const finishIndex = nodes.findIndex(
-    (action) => action.kind === "finish" && action.finish.kind === "dispatch"
-  );
-  const eipCommitIndex = nodes.findIndex(
-    (action) => isStateWrite(action) && accessesChannel(block, action, coreStateFields.eip)
+  strictEqual(
+    eaxAccesses.filter((access) => access.opcode === wasmOpcode.i32Store).length,
+    1
   );
 
-  ok(eipCommitIndex >= 0);
-  ok(eipCommitIndex < finishIndex);
+  const memories = createTestWasmMemories();
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
+  const dispatches: DispatchObservation[] = [];
+  const imported = artifact.program.functionImports[0];
+
+  strictEqual(artifact.program.functionImports.length, 1);
+  ok(imported !== undefined, "fallthrough block has no dispatch import");
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map<FunctionRef, Function>([[
+      imported.ref,
+      createDispatchRecorder(memories, dispatches)
+    ]])
+  });
+  const entry = instance.functionExports.get(artifact.entry);
+
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, eax: 7 });
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
+
+  deepStrictEqual(exit, { kind: "instructionLimit" });
+  deepStrictEqual(dispatchTargets(dispatches), [startEip + 6]);
+  strictEqual(dispatches[0]?.state.eax, 9);
+  strictEqual(dispatches[0]?.state.eip, startEip + 6);
+  strictEqual(dispatches[0]?.state.instructionCount, 2);
+});
+
+test("cross-instruction dead concrete flag writes stay absent", () => {
+  const artifact = compileArtifact(
+    [0x83, 0xc0, 0x01, 0x83, 0xc0, 0x01],
+    2
+  );
+  const accesses = wasmBodyMemoryAccesses(
+    extractOnlyWasmFunctionBody(artifact.program.bytes)
+  );
+  const cpuMemoryIndex = artifact.program.memoryImports.findIndex(
+    (memory) => memory.ref === testExecutionModel.cpuState.resource
+  );
+  const concreteFlagOffsets = new Set(
+    x86Flags.map((flag) =>
+      testExecutionModel.cpuState.layout.field(
+        flagStateFields.concrete[flag]
+      ).offset
+    )
+  );
+  const lazyKindOffset = testExecutionModel.cpuState.layout.field(
+    flagStateFields.lazyKind
+  ).offset;
+  const stores = accesses.filter(
+    (access) => access.memoryIndex === cpuMemoryIndex && isStore(access.opcode)
+  );
+
+  strictEqual(
+    stores.filter((access) => concreteFlagOffsets.has(access.offset)).length,
+    0
+  );
+  strictEqual(
+    stores.filter((access) => access.offset === lazyKindOffset).length,
+    1
+  );
 });
 
 test("a guard fault mid-block reports the faulting eip with earlier state flushed", () => {
   // inc eax; mov eax, [0xff0000] — beyond the one-page guest memory.
   const faultAddress = 0xff_0000;
-  const block = decodeBlock(
+  const artifact = compileArtifact(
     [0x40, 0x8b, 0x05, 0x00, 0x00, 0xff, 0x00],
-    startEip,
     2
   );
   const memories = createTestWasmMemories();
-  const handle = compileDecodedBlockHandle(block, {
-    cpuStateMemory: memories.cpuStateMemory,
-    guestMemory: memories.guestMemory
-  });
-
   const stateView = new DataView(memories.cpuStateMemory.buffer);
+  const dispatches: DispatchObservation[] = [];
+
+  strictEqual(artifact.program.functionImports.length, 0);
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map()
+  });
+  const entry = instance.functionExports.get(artifact.entry);
 
   writeWasmCpuStateSnapshot(stateView, { eip: startEip, eax: 5 });
-
-  const run = handle.run();
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
   const state = readWasmCpuStateSnapshot(stateView);
 
-  deepStrictEqual(run.exit, {
+  deepStrictEqual(exit, {
     kind: "cpuException",
     exception: pageFault(faultAddress, 0)
   });
+  deepStrictEqual(dispatches, []);
   strictEqual(state.eax, 6);
   strictEqual(state.eip, startEip + 1);
   strictEqual(state.instructionCount, 1);
 });
 
-test("a segment-register load exits from a compiled block before committing the instruction", () => {
-  // mov es, ax; inc eax. The decoder does not know the segment load ends
-  // the flat32 IR block, so action compilation must stop after the first
-  // instruction.
-  const block = decodeBlock([0x8e, 0xc0, 0x40], startEip, 2);
-  strictEqual(block.instructions.length, 2);
+test("a segment-register load exits before committing the instruction", () => {
+  // mov es, ax; inc eax. Static decode sees both instructions, while Core's
+  // segment-load terminal stops symbolic construction after the first.
+  const artifact = compileArtifact([0x8e, 0xc0, 0x40], 2);
   const memories = createTestWasmMemories();
-  const handle = compileDecodedBlockHandle(block, {
-    cpuStateMemory: memories.cpuStateMemory,
-    guestMemory: memories.guestMemory
-  });
-
   const stateView = new DataView(memories.cpuStateMemory.buffer);
+  const dispatches: DispatchObservation[] = [];
+
+  strictEqual(artifact.program.functionImports.length, 0);
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map()
+  });
+  const entry = instance.functionExports.get(artifact.entry);
 
   writeWasmCpuStateSnapshot(stateView, {
     eip: startEip,
@@ -272,30 +254,38 @@ test("a segment-register load exits from a compiled block before committing the 
     esSelector: 0x1111,
     instructionCount: 7
   });
-
-  const run = handle.run();
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
   const state = readWasmCpuStateSnapshot(stateView);
 
-  deepStrictEqual(run.exit, {
+  deepStrictEqual(exit, {
     kind: "segmentLoad",
     segment: "es",
     selector: 0x5678
   });
+  deepStrictEqual(dispatches, []);
   strictEqual(state.eax, 0x1234_5678);
   strictEqual(state.esSelector, 0x1111);
   strictEqual(state.eip, startEip);
   strictEqual(state.instructionCount, 7);
 });
 
-test("a compiled ENTER level 2 copies the display through semantic var loop cells", () => {
-  const block = decodeBlock([0xc8, 0x04, 0x00, 0x02, 0xcd, 0x2e]);
+test("a compiled ENTER level 2 copies the display through loop cells", () => {
+  const artifact = compileArtifact(
+    [0xc8, 0x04, 0x00, 0x02, 0xcd, 0x2e],
+    2
+  );
   const memories = createTestWasmMemories();
   const guest = new DataView(memories.guestMemory.buffer);
   const stateView = new DataView(memories.cpuStateMemory.buffer);
-  const handle = compileDecodedBlockHandle(block, {
-    cpuStateMemory: memories.cpuStateMemory,
-    guestMemory: memories.guestMemory
+  const dispatches: DispatchObservation[] = [];
+
+  strictEqual(artifact.program.functionImports.length, 0);
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map()
   });
+  const entry = instance.functionExports.get(artifact.entry);
 
   guest.setUint32(0x17c, 0xaaaa_0001, true);
   writeWasmCpuStateSnapshot(stateView, {
@@ -304,11 +294,12 @@ test("a compiled ENTER level 2 copies the display through semantic var loop cell
     ebp: 0x180,
     instructionCount: 7
   });
-
-  const run = handle.run();
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
   const state = readWasmCpuStateSnapshot(stateView);
 
-  deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
+  deepStrictEqual(exit, { kind: "hostTrap", vector: 0x2e });
+  deepStrictEqual(dispatches, []);
   strictEqual(state.ebp, 0x11c);
   strictEqual(state.esp, 0x110);
   strictEqual(guest.getUint32(0x11c, true), 0x180);
@@ -318,182 +309,173 @@ test("a compiled ENTER level 2 copies the display through semantic var loop cell
   strictEqual(state.instructionCount, 9);
 });
 
-test("a not-taken forward jcc keeps pre-branch register pendings live inside the block", () => {
+test("a not-taken forward jcc keeps pre-branch register pendings live", () => {
   // mov eax, 7; cmp ecx, 0; je +2; add ebx, eax; int 0x2e.
-  const block = decodeBlock([
+  const artifact = compileArtifact([
     0xb8, 0x07, 0x00, 0x00, 0x00,
     0x83, 0xf9, 0x00,
     0x74, 0x02,
     0x01, 0xc3,
     0xcd, 0x2e
-  ]);
-  const ir = buildIrBlock(block.instructions);
-  const nodes = entryActions(ir);
-  const branchIndex = nodes.findIndex((action) => action.kind === "if");
-  const ebxReadIndex = nodes.findIndex(
-    (action): action is BodyNode =>
-      isStateRead(action) && accessesChannel(ir, action, gprChannel("ebx"))
-  );
-  const ebxRead = nodes[ebxReadIndex];
+  ], 5);
   const memories = createTestWasmMemories();
   const stateView = new DataView(memories.cpuStateMemory.buffer);
-  const handle = compileDecodedBlockHandle(block, {
-    cpuStateMemory: memories.cpuStateMemory,
-    guestMemory: memories.guestMemory
+  const dispatches: DispatchObservation[] = [];
+  const imported = artifact.program.functionImports[0];
+  const functions = new Map<FunctionRef, Function>();
+
+  ok(
+    artifact.program.functionImports.length <= 1,
+    "JIT artifact has more than one function import"
+  );
+  if (imported !== undefined) {
+    functions.set(imported.ref, createDispatchRecorder(memories, dispatches));
+  }
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions
   });
+  const entry = instance.functionExports.get(artifact.entry);
 
-  strictEqual(block.instructions.map((instruction) => instruction.spec.id).join(","), [
-    "mov.r32_imm32",
-    "cmp.rm32_imm8",
-    "je.rel8",
-    "add.rm32_r32",
-    "int.imm8"
-  ].join(","));
-  strictEqual(branchIndex > 0, true);
-  strictEqual(ebxReadIndex > branchIndex, true);
-  strictEqual(
-    nodes.slice(branchIndex + 1, ebxReadIndex).some((action) => isStateWrite(action)),
-    false
-  );
-
-  if (ebxRead === undefined || !isStateRead(ebxRead)) {
-    throw new Error("expected ebx read after the branch");
-  }
-
-  const ebxWrite = nodes.find((action) =>
-    isStateWrite(action) && accessesChannel(ir, action, gprChannel("ebx"))
-  );
-
-  if (ebxWrite === undefined || !isStateWrite(ebxWrite)) {
-    throw new Error("expected ebx write after the branch");
-  }
-  const ebx = ebxRead.outputs[0];
-
-  ok(ebx !== undefined, "expected ebx read output");
-
-  strictEqual(
-    nodes.filter((action) =>
-      isStateWrite(action) && accessesChannel(ir, action, gprChannel("eax"))
-    ).length,
-    1
-  );
-  strictEqual(
-    stateWriteValue(ebxWrite),
-    ir.values.binary("add", ebx, ir.values.const(7))
-  );
-
-  writeWasmCpuStateSnapshot(stateView, { eip: startEip, ebx: 0x20, ecx: 1 });
-
-  const run = handle.run();
+  writeWasmCpuStateSnapshot(stateView, {
+    eip: startEip,
+    ebx: 0x20,
+    ecx: 1
+  });
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
   const state = readWasmCpuStateSnapshot(stateView);
 
-  deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
+  deepStrictEqual(exit, { kind: "hostTrap", vector: 0x2e });
+  deepStrictEqual(dispatches, []);
   strictEqual(state.eax, 7);
   strictEqual(state.ebx, 0x27);
   strictEqual(state.eip, startEip + 14);
   strictEqual(state.instructionCount, 5);
 });
 
-test("a folded taken jecxz truncates the block and dispatches to its target", () => {
-  // mov ecx, 0; jecxz +2; mov ebx, 7; int 0x2e — the pending ecx constant
-  // folds the branch taken, so the block ends there and the tail never runs.
-  const block = decodeBlock([
+test("a folded taken jecxz dispatches once and truncates the block", () => {
+  // mov ecx, 0; jecxz +2; mov ebx, 7; int 0x2e.
+  const targetEip = startEip + 9;
+  const artifact = compileArtifact([
     0xb9, 0x00, 0x00, 0x00, 0x00,
     0xe3, 0x02,
     0xbb, 0x07, 0x00, 0x00, 0x00,
     0xcd, 0x2e
-  ]);
-  const targetEip = startEip + 9;
-
-  strictEqual(block.instructions.length, 4);
-
-  const ir = buildIrBlock(block.instructions);
-  const nodes = entryActions(ir);
-
-  strictEqual(nodes.some((action) => action.kind === "if"), false);
-  strictEqual(nodes.at(-1)?.kind, "finish");
-
+  ], 4);
   const memories = createTestWasmMemories();
   const stateView = new DataView(memories.cpuStateMemory.buffer);
-  const handle = compileDecodedBlockHandle(block, {
-    cpuStateMemory: memories.cpuStateMemory,
-    guestMemory: memories.guestMemory
+  const dispatches: DispatchObservation[] = [];
+  const imported = artifact.program.functionImports[0];
+
+  strictEqual(artifact.program.functionImports.length, 1);
+  ok(imported !== undefined, "taken jecxz has no dispatch import");
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map<FunctionRef, Function>([[
+      imported.ref,
+      createDispatchRecorder(memories, dispatches)
+    ]])
   });
+  const entry = instance.functionExports.get(artifact.entry);
 
-  writeWasmCpuStateSnapshot(stateView, { eip: startEip, ebx: 0x20, ecx: 5 });
-
-  const run = handle.run();
+  writeWasmCpuStateSnapshot(stateView, {
+    eip: startEip,
+    ebx: 0x20,
+    ecx: 5
+  });
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
   const state = readWasmCpuStateSnapshot(stateView);
 
-  deepStrictEqual(run.exit, { kind: "linkStub", targetEip });
+  deepStrictEqual(exit, { kind: "instructionLimit" });
+  deepStrictEqual(dispatchTargets(dispatches), [targetEip]);
   strictEqual(state.ebx, 0x20);
   strictEqual(state.ecx, 0);
   strictEqual(state.eip, targetEip);
   strictEqual(state.instructionCount, 2);
 });
 
-test("a backward jcc to the block entry self-links as a return_call tail loop", () => {
+test("a backward jcc to the block entry invokes imported dispatch once", () => {
   // sub ecx, 1; jnz start; int 0x2e.
-  const block = decodeBlock([
+  const artifact = compileArtifact([
     0x83, 0xe9, 0x01,
     0x75, 0xfb,
     0xcd, 0x2e
-  ]);
-  const ir = buildIrBlock(block.instructions);
-  const bytes = encodeJitModule([{ entryEip: startEip, ir }]);
-  const opcodes = wasmBodyOpcodes(extractOnlyWasmFunctionBody(bytes));
+  ], 3);
+  const opcodes = wasmBodyOpcodes(
+    extractOnlyWasmFunctionBody(artifact.program.bytes)
+  );
   const memories = createTestWasmMemories();
   const stateView = new DataView(memories.cpuStateMemory.buffer);
-  const handle = compileDecodedBlockHandle(block, {
-    cpuStateMemory: memories.cpuStateMemory,
-    guestMemory: memories.guestMemory
-  });
+  const dispatches: DispatchObservation[] = [];
+  const imported = artifact.program.functionImports[0];
 
   strictEqual(opcodes.includes(wasmOpcode.returnCall), true);
+  strictEqual(artifact.program.functionImports.length, 1);
+  ok(imported !== undefined, "backward jcc has no dispatch import");
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map<FunctionRef, Function>([[
+      imported.ref,
+      createDispatchRecorder(memories, dispatches)
+    ]])
+  });
+  const entry = instance.functionExports.get(artifact.entry);
 
   writeWasmCpuStateSnapshot(stateView, { eip: startEip, ecx: 3 });
-
-  const run = handle.run();
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
   const state = readWasmCpuStateSnapshot(stateView);
 
-  deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
-  strictEqual(state.ecx, 0);
-  strictEqual(state.eip, startEip + 7);
-  strictEqual(state.instructionCount, 7);
+  deepStrictEqual(exit, { kind: "instructionLimit" });
+  deepStrictEqual(dispatchTargets(dispatches), [startEip]);
+  strictEqual(state.ecx, 2);
+  strictEqual(state.eip, startEip);
+  strictEqual(state.instructionCount, 2);
 });
 
-test("into mid-block traps only on OF and otherwise falls through inside the block", () => {
+test("into mid-block traps only on OF and otherwise continues", () => {
   // mov eax, 1; into; mov ebx, 2; int 0x2e.
-  const block = decodeBlock([
+  const artifact = compileArtifact([
     0xb8, 0x01, 0x00, 0x00, 0x00,
     0xce,
     0xbb, 0x02, 0x00, 0x00, 0x00,
     0xcd, 0x2e
-  ]);
+  ], 4);
   const memories = createTestWasmMemories();
   const stateView = new DataView(memories.cpuStateMemory.buffer);
-  const handle = compileDecodedBlockHandle(block, {
-    cpuStateMemory: memories.cpuStateMemory,
-    guestMemory: memories.guestMemory
+  const dispatches: DispatchObservation[] = [];
+
+  strictEqual(artifact.program.functionImports.length, 0);
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map()
   });
+  const entry = instance.functionExports.get(artifact.entry);
 
   writeWasmCpuStateSnapshot(stateView, { eip: startEip, OF: 0 });
-
-  const clearRun = handle.run();
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const clearExit = decodeEntryResult(entry());
   const clearState = readWasmCpuStateSnapshot(stateView);
 
-  deepStrictEqual(clearRun.exit, { kind: "hostTrap", vector: 0x2e });
+  deepStrictEqual(clearExit, { kind: "hostTrap", vector: 0x2e });
+  deepStrictEqual(dispatches, []);
   strictEqual(clearState.eax, 1);
   strictEqual(clearState.ebx, 2);
   strictEqual(clearState.eip, startEip + 13);
   strictEqual(clearState.instructionCount, 4);
 
-  writeWasmCpuStateSnapshot(stateView, { eip: startEip, ebx: 0x55, OF: 1 });
-
-  const setRun = handle.run();
+  writeWasmCpuStateSnapshot(stateView, {
+    eip: startEip,
+    ebx: 0x55,
+    OF: 1
+  });
+  const setExit = decodeEntryResult(entry());
   const setState = readWasmCpuStateSnapshot(stateView);
 
-  deepStrictEqual(setRun.exit, { kind: "hostTrap", vector: 4 });
+  deepStrictEqual(setExit, { kind: "hostTrap", vector: 4 });
+  deepStrictEqual(dispatches, []);
   strictEqual(setState.eax, 1);
   strictEqual(setState.ebx, 0x55);
   strictEqual(setState.eip, startEip + 6);
@@ -501,14 +483,17 @@ test("into mid-block traps only on OF and otherwise falls through inside the blo
 });
 
 test("a compiled MOV to CS raises invalid-opcode before segment-load handling", () => {
-  // mov cs, ax.
-  const block = decodeBlock([0x8e, 0xc8], startEip, 1);
+  const artifact = compileArtifact([0x8e, 0xc8], 1);
   const memories = createTestWasmMemories();
   const stateView = new DataView(memories.cpuStateMemory.buffer);
-  const handle = compileDecodedBlockHandle(block, {
-    cpuStateMemory: memories.cpuStateMemory,
-    guestMemory: memories.guestMemory
+  const dispatches: DispatchObservation[] = [];
+
+  strictEqual(artifact.program.functionImports.length, 0);
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map()
   });
+  const entry = instance.functionExports.get(artifact.entry);
 
   writeWasmCpuStateSnapshot(stateView, {
     eip: startEip,
@@ -516,210 +501,143 @@ test("a compiled MOV to CS raises invalid-opcode before segment-load handling", 
     csSelector: 0x1111,
     instructionCount: 7
   });
-
-  const run = handle.run();
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
   const state = readWasmCpuStateSnapshot(stateView);
 
-  deepStrictEqual(run.exit, { kind: "cpuException", exception: invalidOpcode() });
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: invalidOpcode()
+  });
+  deepStrictEqual(dispatches, []);
   strictEqual(state.eax, 0x1234_5678);
   strictEqual(state.csSelector, 0x1111);
   strictEqual(state.eip, startEip);
   strictEqual(state.instructionCount, 7);
 });
 
-test("a static jump to a block in the same raw module tail-calls it directly", () => {
-  const targetEip = startEip + 0x10;
-  // inc eax; jmp rel32 to targetEip.
-  const first = decodeBlock([0x40, 0xe9, 0x0a, 0x00, 0x00, 0x00]);
-  // inc eax; int 0x2e.
-  const second = decodeBlock([0x40, 0xcd, 0x2e], targetEip);
-  const compiled = compileProgram(buildJitProgram([
-    { entryEip: startEip, ir: buildIrBlock(first.instructions) },
-    { entryEip: targetEip, ir: buildIrBlock(second.instructions) }
-  ], undefined));
+test("a dynamic jump passes its full u32 target to imported dispatch", () => {
+  const targetEip = 0xf000_4000;
+  const artifact = compileArtifact([0xff, 0xe0], 1);
   const memories = createTestWasmMemories();
   const stateView = new DataView(memories.cpuStateMemory.buffer);
+  const dispatches: DispatchObservation[] = [];
+  const imported = artifact.program.functionImports[0];
 
-  writeWasmCpuStateSnapshot(stateView, { eip: startEip, eax: 0 });
+  strictEqual(artifact.program.functionImports.length, 1);
+  ok(imported !== undefined, "dynamic jump has no dispatch import");
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map<FunctionRef, Function>([[
+      imported.ref,
+      createDispatchRecorder(memories, dispatches)
+    ]])
+  });
+  const entry = instance.functionExports.get(artifact.entry);
 
-  const run = runCompiledJitEntry(compiled, startEip, memories);
-  const state = readWasmCpuStateSnapshot(stateView);
-
-  deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
-  strictEqual(state.eax, 2);
-  strictEqual(state.eip, targetEip + 3);
-  strictEqual(state.instructionCount, 4);
-});
-
-test("multi-block raw JIT construction shares status-flag resolver definitions", () => {
-  const secondEip = startEip + 0x10;
-  // setz al; int 0x2e. Both blocks call the same generated ZF resolver.
-  const first = decodeBlock([0x0f, 0x94, 0xc0, 0xcd, 0x2e]);
-  const second = decodeBlock([0x0f, 0x94, 0xc0, 0xcd, 0x2e], secondEip);
-  const compiled = compileProgram(buildJitProgram([
-    { entryEip: startEip, ir: buildIrBlock(first.instructions) },
-    { entryEip: secondEip, ir: buildIrBlock(second.instructions) }
-  ], undefined));
-  const memories = createTestWasmMemories();
-  const stateView = new DataView(memories.cpuStateMemory.buffer);
-
-  strictEqual(wasmDefinedFunctionCount(compiled.bytes), 3);
   writeWasmCpuStateSnapshot(stateView, {
-    eip: secondEip,
-    eax: 0,
-    ZF: 1
+    eip: startEip,
+    eax: targetEip
   });
-
-  const run = runCompiledJitEntry(compiled, secondEip, memories);
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
   const state = readWasmCpuStateSnapshot(stateView);
 
-  deepStrictEqual(run.exit, { kind: "hostTrap", vector: 0x2e });
-  strictEqual(state.eax, 1);
-});
-
-test("a dynamic jump returns the legacy transfer and resumes from flushed state", () => {
-  // jmp eax.
-  const block = decodeBlock([0xff, 0xe0]);
-  const memories = createTestWasmMemories();
-  const stateView = new DataView(memories.cpuStateMemory.buffer);
-  const handle = compileDecodedBlockHandle(block, {
-    cpuStateMemory: memories.cpuStateMemory,
-    guestMemory: memories.guestMemory
-  });
-
-  writeWasmCpuStateSnapshot(stateView, { eip: startEip, eax: 0x4000 });
-
-  const run = handle.run();
-  const state = readWasmCpuStateSnapshot(stateView);
-
-  deepStrictEqual(run.exit, { kind: "dynamicJump" });
-  strictEqual(state.eip, 0x4000);
+  deepStrictEqual(exit, { kind: "instructionLimit" });
+  deepStrictEqual(dispatchTargets(dispatches), [targetEip]);
+  strictEqual(state.eip, targetEip);
   strictEqual(state.instructionCount, 1);
 });
 
-function decodeBlock(
+test("straight-line fallthrough invokes imported dispatch once", () => {
+  const artifact = compileArtifact([0x40], 1);
+  const memories = createTestWasmMemories();
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
+  const dispatches: DispatchObservation[] = [];
+  const imported = artifact.program.functionImports[0];
+
+  strictEqual(artifact.program.functionImports.length, 1);
+  ok(imported !== undefined, "fallthrough block has no dispatch import");
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: memoryBindings(memories),
+    functions: new Map<FunctionRef, Function>([[
+      imported.ref,
+      createDispatchRecorder(memories, dispatches)
+    ]])
+  });
+  const entry = instance.functionExports.get(artifact.entry);
+
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, eax: 9 });
+  ok(typeof entry === "function", "compiled JIT entry is not callable");
+  const exit = decodeEntryResult(entry());
+
+  deepStrictEqual(exit, { kind: "instructionLimit" });
+  deepStrictEqual(dispatchTargets(dispatches), [startEip + 1]);
+  strictEqual(dispatches[0]?.state.eax, 10);
+  strictEqual(dispatches[0]?.state.eip, startEip + 1);
+  strictEqual(dispatches[0]?.state.instructionCount, 1);
+});
+
+type TestMemories = ReturnType<typeof createTestWasmMemories>;
+
+type DispatchObservation = Readonly<{
+  targetEip: number;
+  state: WasmCpuStateSnapshot;
+}>;
+
+function compileArtifact(
   bytes: readonly number[],
-  eip = startEip,
-  maxInstructions?: number
-): JitDecodedBlock {
-  const policy = maxInstructions === undefined
-    ? defaultJitBlockPolicy
-    : { instructionLimit: maxInstructions };
-  const memory = jitMemoryWithBytes(bytes, eip);
-
-  return decodeJitBlock(
-    snapshotInstructionBytes(
-      testExecutionModel.guestMemory.createReader(memory),
-      {
-        linearStart: eip,
-        byteLength: jitSnapshotRequestByteLength(policy)
-      }
-    ),
-    policy
-  );
-}
-
-function compileDecodedBlockHandle(
-  block: JitDecodedBlock,
-  options: InstantiateJitArtifactOptions
-): JitArtifactHandle {
-  const evidenceBytes = [
-    ...block.instructions.flatMap((instruction) => instruction.raw),
-    ...(block.terminator.kind === "cpuException" ? block.terminator.raw : [])
-  ];
-  const sourceMemory = jitMemoryWithBytes(evidenceBytes, block.startEip);
-  const instructionLimit = Math.max(
-    1,
-    block.instructions.length + (block.terminator.kind === "cpuException" ? 1 : 0)
-  );
-  const artifact = compileJitFromMemory({
-    memory: sourceMemory,
-    start: block.startEip,
+  instructionLimit: number,
+  eip = startEip
+): CompiledJitArtifact {
+  return compileJitFromMemory({
+    memory: jitMemoryWithBytes(bytes, eip),
+    start: eip,
     policy: { instructionLimit },
     model: testExecutionModel
   });
-
-  return instantiateJitArtifact(testExecutionModel, artifact, options);
 }
 
-function runCompiledJitEntry(
-  compiled: CompiledProgram,
-  entryEip: number,
-  memories: ReturnType<typeof createTestWasmMemories>
-): Readonly<{ exit: ReturnType<typeof decodeExit> | NonNullable<ReturnType<typeof decodeTransfer>> }> {
-  const instance = instantiateCompiledProgram(
-    compiled,
-    {
-      memories: new Map<ResourceRef, WebAssembly.Memory>([
-        [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-        [testExecutionModel.guestMemory.resource, memories.guestMemory]
-      ]),
-      functions: new Map()
-    }
+function createDispatchRecorder(
+  memories: TestMemories,
+  dispatches: DispatchObservation[]
+): (targetEip: number) => bigint {
+  return (targetEip: number): bigint => {
+    dispatches.push({
+      targetEip: targetEip >>> 0,
+      state: readWasmCpuStateSnapshot(
+        new DataView(memories.cpuStateMemory.buffer)
+      )
+    });
+    return encodedDispatchStop;
+  };
+}
+
+function decodeEntryResult(encoded: unknown): RunStop {
+  ok(
+    typeof encoded === "bigint",
+    `compiled JIT entry returned ${typeof encoded}, expected bigint`
   );
-  const exportName = jitBlockExportName(entryEip);
-  const exported = compiled.functionExports.find(
-    (candidate) => candidate.name === exportName
-  );
-
-  ok(exported !== undefined, `missing raw JIT export '${exportName}'`);
-  const value = instance.functionExports.get(exported.ref);
-
-  ok(typeof value === "function", `raw JIT export '${exportName}' is not callable`);
-  const encoded = value();
-
-  strictEqual(typeof encoded, "bigint");
-  return {
-    exit: decodeTransfer(encoded as bigint) ?? decodeExit(encoded as bigint)
-  };
+  return decodeExit(encoded);
 }
 
-function entryActions(block: IrBlock): readonly BodyNode[] {
-  return block.body.nodes;
+function memoryBindings(
+  memories: TestMemories
+): ReadonlyMap<ResourceRef, WebAssembly.Memory> {
+  return new Map([
+    [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
+    [testExecutionModel.guestMemory.resource, memories.guestMemory]
+  ]);
 }
 
-function syntheticBlock(withResolver: boolean): IrBlock {
-  const values = new ValueTable();
-  const builder = new RegionBuilder(values);
-  const stored = withResolver
-    ? builder.call(cpuStatusFlagResolvers.get("ZF"), [])[0]!
-    : values.const(7);
-  const result = buildExit(values, trapExit(values.const(0)));
-
-  builder.push(stateWrite(values, gprChannel("eax"), stored));
-  builder.finish({ kind: "exit", result });
-  return {
-    body: builder.build(),
-    values
-  };
+function dispatchTargets(
+  dispatches: readonly DispatchObservation[]
+): readonly number[] {
+  return dispatches.map((dispatch) => dispatch.targetEip);
 }
 
-function syntheticDispatchBlock(targetEip: number): IrBlock {
-  const values = new ValueTable();
-  const target = values.const(targetEip);
-
-  return {
-    body: {
-      nodes: [
-        stateWrite(values, coreStateFields.eip, target),
-        finishControl.create({
-          finish: { kind: "dispatch", targetEip: target }
-        })
-      ]
-    },
-    values
-  };
-}
-
-function accessesChannel(
-  block: IrBlock,
-  operation: Operation,
-  channel: InstructionStateChannel
-): boolean {
-  const expected = stateEffect(block.values, channel);
-  const actual = operation.directEffects.reads[0] ?? operation.directEffects.writes[0];
-
-  return actual !== undefined &&
-    covers(actual, expected) &&
-    covers(expected, actual);
+function isStore(opcode: number): boolean {
+  return opcode === wasmOpcode.i32Store ||
+    opcode === wasmOpcode.i32Store8 ||
+    opcode === wasmOpcode.i32Store16;
 }

@@ -2,7 +2,6 @@ import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { u32 } from "#core/numeric.js";
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { encodeTransfer } from "#engines/jit/legacy-transfer.js";
 import type { DispatchTarget, FallthroughTarget, LinkCompletion } from "./embed.js";
 
 // Exit and completion lowering for nested bodies emitted inline by the action
@@ -32,7 +31,6 @@ export type CompletionFrame = Readonly<{
 }>;
 
 type LinkedTarget = Readonly<
-  | { kind: "dynamic" }
   | { kind: "function"; functionIndex: number }
   | { kind: "table"; slot: number; typeIndex: number; tableIndex: number }
 >;
@@ -81,9 +79,10 @@ export function createCompletionFrame(
   function resolveLinkedTarget(link: LinkCompletion, eip: ValueId): LinkedTarget {
     const target = context.constValue(eip);
 
-    if (target === undefined) {
-      return { kind: "dynamic" };
-    }
+    assert(
+      target !== undefined,
+      "legacy link completion requires a constant dispatch target"
+    );
 
     const functionIndex = link.functionFor(target);
 
@@ -102,11 +101,6 @@ export function createCompletionFrame(
 
   function emitLinkedCompletion(target: LinkedTarget): void {
     switch (target.kind) {
-      case "dynamic":
-        body.i64Const(
-          encodeTransfer({ kind: "dynamicJump" })
-        ).returnFromFunction();
-        return;
       case "function":
         body.returnCallFunction(target.functionIndex);
         return;

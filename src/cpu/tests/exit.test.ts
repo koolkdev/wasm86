@@ -17,7 +17,6 @@ import {
   pageFault
 } from "#core/exceptions.js";
 import { instructionLimitExit } from "#interpreter/exits.js";
-import { encodeTransfer } from "#engines/jit/legacy-transfer.js";
 
 const validExits: readonly Readonly<{
   name: string;
@@ -95,13 +94,4 @@ test("Cpu exit decoder rejects a segment-load request with an invalid architectu
   const encoded = encodeVariant(exitLayout, segmentExit(0xff, 0x1234));
 
   throws(() => decodeExit(encoded), /invalid segment index/);
-});
-
-test("Cpu exit decoder rejects legacy JIT transfers", () => {
-  for (const encoded of [
-    encodeTransfer({ kind: "dynamicJump" }),
-    encodeTransfer({ kind: "linkStub", targetEip: 0x1234 })
-  ]) {
-    throws(() => decodeExit(encoded), /unknown cpu.exit variant tag: 0/);
-  }
 });

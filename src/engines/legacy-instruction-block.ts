@@ -20,8 +20,7 @@ export type LegacyInstructionBlock = Readonly<{
   finish(): IrBlock;
 }>;
 
-// The JIT still embeds IrBlock/Finish. This bridge owns that temporary outer
-// shape; all x86 construction stays in Core.
+// Consumerless compatibility bridge for generic block-root embedding.
 export function createLegacyInstructionBlock(
   construction: InstructionConstruction
 ): LegacyInstructionBlock {

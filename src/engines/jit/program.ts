@@ -1,339 +1,206 @@
 import { assert } from "#common/assert.js";
-import { u32 } from "#core/numeric.js";
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import {
-  ProgramBuilder,
-  type Program
-} from "#compiler/program/builder.js";
+import type { StorageEffects } from "#compiler/ir/effects.js";
+import type { CallTarget } from "#compiler/ir/invocation.js";
+import type { ResourceEffect, ResourceRef } from "#compiler/ir/resource.js";
+import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/program/function-type.js";
-import type { LegacyEffects } from "#compiler/program/legacy-body.js";
+import type { FunctionDefinition } from "#compiler/program/functions.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
 import {
   functionExportRef,
   functionRef,
-  signatureRef,
-  tableRef,
-  type FunctionRef,
-  type SignatureRef,
-  type TableRef
+  type FunctionExportRef
 } from "#compiler/program/refs.js";
-import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { ValueTable } from "#compiler/ir/values/table.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import {
+  createInstructionConstruction,
+  staticInstructionLocation,
+  type InstructionConstruction
+} from "#core/instruction/builder.js";
+import { staticOperandBinding } from "#core/instruction/static-binding.js";
+import type { InstructionTerminals } from "#core/instruction/terminal.js";
+import { exceptionExit } from "#core/exits.js";
+import { mapCpuException, type CpuException } from "#core/exceptions.js";
+import { u32 } from "#core/numeric.js";
+import type { StateAccess } from "#core/state/access.js";
+import { coreStateFields } from "#core/state/layout.js";
+import { buildExit } from "#cpu/exit.js";
+import { instructionCountField } from "#cpu/instruction-count.js";
 import type { ExecutionModel } from "#execution/model.js";
-import { programImportModuleName } from "#compiler/program/imports.js";
-import { encodeTransfer } from "./legacy-transfer.js";
-import type { IrBlock } from "#ir/block.js";
-import { walkBodyNodes } from "#ir/traverse.js";
-import {
-  jitModuleLinkFallbackExportName,
-  type JitLinkLayout
-} from "./compiled-blocks/module-link-table.js";
+import type { FunctionBuilder } from "#ir/function.js";
+import type { JitDecodedBlock } from "./decode-block.js";
 
-export const jitLinkTableImportName = "links";
-import { LegacyActionEmbeddingAdapter } from "./legacy-action-embedding.js";
-import {
-  LegacyNumericLinkAdapter,
-  type JitLink
-} from "./legacy-numeric-link.js";
+const jitBlockType = functionType([], ["i64"]);
+const jitDispatchType = functionType(["i32"], ["i64"]);
+const jitDispatchImportName = "dispatch";
 
 type JitProgram = Readonly<{
-  builder: ProgramBuilder;
-  blockSignature: SignatureRef;
-  cpuStateResource: ResourceRef;
-  guestMemoryResource: ResourceRef;
-  linkTable: TableRef | undefined;
+  program: Program;
+  entry: FunctionExportRef;
 }>;
-
-type JitProgramSourceBlock = Readonly<{
-  entryEip: number;
-  ir: IrBlock;
-}>;
-
-type JitProgramBlock = Readonly<{
-  entryEip: number;
-  exportName: string;
-  ir: IrBlock;
-  linkTargets: readonly number[];
-}>;
-
-const jitBlockFunctionType = functionType([], ["i64"]);
 
 export function buildJitProgram(
   model: ExecutionModel,
-  sourceBlocks: readonly JitProgramSourceBlock[],
-  linkLayout: JitLinkLayout | undefined
-): Program {
-  assert(sourceBlocks.length > 0, "cannot build an empty JIT program");
-  const blocks = prepareJitBlocks(sourceBlocks);
-  const links = snapshotLinkLayout(linkLayout);
-  const blockFunctions = createBlockFunctions(blocks);
-  const externalTargetEips = uniqueU32(
-    blocks
-      .flatMap((block) => block.linkTargets)
-      .filter((targetEip) => !blockFunctions.has(targetEip))
-  );
-  const tableTargetEips = links === undefined ? [] : [...links.keys()];
-  const program = createJitProgram(model, tableTargetEips);
-  const stubFunctions = declareLinkStubs(
-    program,
-    links === undefined ? externalTargetEips : tableTargetEips,
-    links !== undefined
-  );
-
-  const linksByTargetEip = declareLinks(
-    blocks,
-    blockFunctions,
-    stubFunctions,
-    program.linkTable,
-    links
-  );
-
-  declareBlocks(program, blocks, blockFunctions, linksByTargetEip, links);
-  return program.builder.finish();
-}
-
-export function jitBlockExportName(eip: number): string {
-  return `block_${u32(eip).toString(16)}`;
-}
-
-function prepareJitBlocks(blocks: readonly JitProgramSourceBlock[]): readonly JitProgramBlock[] {
-  const seen = new Set<number>();
-
-  return blocks.map((block) => {
-    const entryEip = u32(block.entryEip);
-
-    assert(!seen.has(entryEip), `duplicate JIT block module entry EIP: 0x${hex(entryEip)}`);
-    seen.add(entryEip);
-    return {
-      entryEip,
-      exportName: jitBlockExportName(entryEip),
-      ir: block.ir,
-      linkTargets: uniqueU32(jitBlockLinkTargets(block.ir))
-    };
-  });
-}
-
-export function jitBlockLinkTargets(ir: IrBlock): readonly number[] {
-  const targets: number[] = [];
-
-  walkBodyNodes(ir.body, (node) => {
-    if (node.kind === "finish" && node.finish.kind === "dispatch") {
-      const target = ir.values.constValue(node.finish.targetEip);
-
-      if (target !== undefined) {
-        targets.push(u32(target));
-      }
-    }
-  });
-
-  return targets;
-}
-
-function createJitProgram(
-  model: ExecutionModel,
-  tableTargetEips: readonly number[]
+  decoded: JitDecodedBlock
 ): JitProgram {
-  const builder = new ProgramBuilder(model.resources);
-  const blockSignature = signatureRef("jit.block-entry");
-  const cpuStateResource = model.cpuState.resource;
-  const guestMemoryResource = model.guestMemory.resource;
-  const linkTable = tableTargetEips.length === 0 ? undefined : tableRef("jit.links");
-
-  // Raw legacy JIT bodies still need their numeric type index for table links.
-  builder.signature({
-    ref: blockSignature,
-    type: jitBlockFunctionType
+  const program = new ProgramBuilder(model.resources);
+  const effects = jitExecutionEffects(
+    model.cpuState.resource,
+    model.guestMemory.resource
+  );
+  const dispatch = program.importFunction({
+    ref: functionRef("jit.dispatch"),
+    type: jitDispatchType,
+    effects,
+    moduleName: programImportModuleName,
+    name: jitDispatchImportName
   });
-  if (linkTable !== undefined) {
-    builder.importTable({
-      ref: linkTable,
-      moduleName: programImportModuleName,
-      name: jitLinkTableImportName,
-      limits: { minElements: tableTargetEips.length, maxElements: tableTargetEips.length }
-    });
+  const block = defineJitBlock(program, model, decoded, dispatch);
+  const entry = functionExportRef(
+    `jit.block-export.${hex(decoded.startEip)}`
+  );
+
+  program.exportFunction({
+    ref: entry,
+    name: `block_${hex(decoded.startEip)}`,
+    target: block.ref
+  });
+  return { program: program.finish(), entry };
+}
+
+function defineJitBlock(
+  program: ProgramBuilder,
+  model: ExecutionModel,
+  decoded: JitDecodedBlock,
+  dispatch: CallTarget
+): FunctionDefinition {
+  const instructionConstruction = createInstructionConstruction({
+    stateAccess: model.cpuState.access,
+    memory: model.guestMemory.access,
+    instructionCountField,
+    buildExit
+  });
+
+  return program.defineFunction({
+    ref: functionRef(`jit.block.${hex(decoded.startEip)}`),
+    type: jitBlockType,
+    effects: jitExecutionEffects(
+      model.cpuState.resource,
+      model.guestMemory.resource
+    )
+  }, (fn) => buildJitBlockBody(
+    fn,
+    decoded,
+    model.cpuState.access,
+    instructionConstruction,
+    dispatch
+  ));
+}
+
+function buildJitBlockBody(
+  fn: FunctionBuilder,
+  decoded: JitDecodedBlock,
+  stateAccess: StateAccess,
+  instructionConstruction: InstructionConstruction,
+  dispatch: CallTarget
+): void {
+  if (decoded.instructions.length === 0) {
+    assert(
+      decoded.terminator.kind === "cpuException",
+      "an empty decoded JIT block must end in a CPU exception"
+    );
+    const state = stateAccess.bind(fn.region);
+
+    state.write(
+      state.field(coreStateFields.eip),
+      fn.values.const(decoded.terminator.instructionStart)
+    );
+    fn.return([
+      buildCpuExceptionExit(fn.values, decoded.terminator.exception)
+    ]);
+    return;
   }
 
+  const builder = instructionConstruction.createBuilder(
+    fn.region,
+    jitInstructionTerminals(dispatch)
+  );
+
+  for (const instruction of decoded.instructions) {
+    const continues = builder.add(
+      instruction.spec.semantics,
+      instruction.operands.map(staticOperandBinding),
+      staticInstructionLocation(instruction.address, instruction.nextEip)
+    );
+
+    if (!continues) {
+      break;
+    }
+  }
+
+  const finalFallthrough = builder.finish();
+
+  if (finalFallthrough === undefined) {
+    return;
+  }
+  if (decoded.terminator.kind === "cpuException") {
+    const completedEip = fn.values.constValue(finalFallthrough);
+
+    assert(
+      completedEip !== undefined &&
+        u32(completedEip) === u32(decoded.terminator.instructionStart),
+      "a decode-time CPU exception does not follow the decoded instruction prefix"
+    );
+    fn.return([
+      buildCpuExceptionExit(fn.values, decoded.terminator.exception)
+    ]);
+    return;
+  }
+  fn.returnCall(dispatch, [finalFallthrough]);
+}
+
+function jitInstructionTerminals(dispatch: CallTarget): InstructionTerminals {
   return {
-    builder,
-    blockSignature,
-    cpuStateResource,
-    guestMemoryResource,
-    linkTable
+    dispatch: (region, targetEip) => {
+      region.returnCall(dispatch, [targetEip]);
+    },
+    returnExit: (region, result) => {
+      region.return([result]);
+    }
   };
 }
 
-function declareLinkStubs(
-  program: JitProgram,
-  targetEips: readonly number[],
-  exportFallbacks: boolean
-): ReadonlyMap<number, FunctionRef> {
-  const stubs = new Map<number, FunctionRef>();
-
-  for (const targetEip of targetEips) {
-    const stub = functionRef(`jit.stub.${hex(targetEip)}`);
-
-    stubs.set(targetEip, stub);
-    program.builder.legacyFunction({
-      ref: stub,
-      signature: program.blockSignature,
-      calls: [],
-      resources: [],
-      globals: [],
-      tables: [],
-      irBlocks: [],
-      effects: "none",
-      build: () => new WasmFunctionBodyEncoder()
-        .i64Const(encodeTransfer({ kind: "linkStub", targetEip }))
-        .finish()
-    });
-    if (exportFallbacks) {
-      program.builder.exportFunction({
-        ref: functionExportRef(`jit.stub-export.${hex(targetEip)}`),
-        name: jitModuleLinkFallbackExportName(targetEip),
-        target: stub
-      });
-    }
-  }
-  return stubs;
+function buildCpuExceptionExit(
+  values: ValueTable,
+  exception: CpuException<number>
+): ValueId {
+  return buildExit(
+    values,
+    exceptionExit(
+      mapCpuException(exception, (value) => values.const(value))
+    )
+  );
 }
 
-function createBlockFunctions(blocks: readonly JitProgramBlock[]): ReadonlyMap<number, FunctionRef> {
-  return new Map(blocks.map((block) => [
-    block.entryEip,
-    functionRef(`jit.block.${hex(block.entryEip)}`)
-  ]));
+function jitExecutionEffects(
+  cpuState: ResourceRef,
+  guestMemory: ResourceRef
+): StorageEffects {
+  const resources = [
+    wholeResourceEffect(cpuState),
+    wholeResourceEffect(guestMemory)
+  ];
+
+  return { reads: resources, writes: resources };
 }
 
-function declareLinks(
-  blocks: readonly JitProgramBlock[],
-  blockFunctions: ReadonlyMap<number, FunctionRef>,
-  stubFunctions: ReadonlyMap<number, FunctionRef>,
-  table: TableRef | undefined,
-  linkLayout: JitLinkLayout | undefined
-): ReadonlyMap<number, JitLink> {
-  return new Map(uniqueU32(blocks.flatMap((block) => block.linkTargets)).map((targetEip) => [
-    targetEip,
-    declareLink(targetEip, blockFunctions, stubFunctions, table, linkLayout)
-  ]));
-}
-
-function declareLink(
-  targetEip: number,
-  blockFunctions: ReadonlyMap<number, FunctionRef>,
-  stubFunctions: ReadonlyMap<number, FunctionRef>,
-  table: TableRef | undefined,
-  linkLayout: JitLinkLayout | undefined
-): JitLink {
-  const internalFunction = blockFunctions.get(targetEip);
-
-  if (internalFunction !== undefined) {
-    return { targetEip, target: { kind: "function", function: internalFunction } };
-  }
-
-  if (linkLayout === undefined) {
-    const stub = stubFunctions.get(targetEip);
-
-    assert(stub !== undefined, `missing JIT fallback stub for 0x${hex(targetEip)}`);
-    return { targetEip, target: { kind: "function", function: stub } };
-  }
-
-  assert(table !== undefined, `unknown JIT link target: 0x${hex(targetEip)}`);
-  assert(linkLayout.has(targetEip), `unknown JIT link table target: 0x${hex(targetEip)}`);
-  return { targetEip, target: { kind: "table", table } };
-}
-
-function declareBlocks(
-  program: JitProgram,
-  blocks: readonly JitProgramBlock[],
-  blockFunctions: ReadonlyMap<number, FunctionRef>,
-  linksByTargetEip: ReadonlyMap<number, JitLink>,
-  linkLayout: JitLinkLayout | undefined
-): void {
-  for (const block of blocks) {
-    const ref = blockFunctions.get(block.entryEip);
-
-    assert(ref !== undefined, `missing JIT block identity for 0x${hex(block.entryEip)}`);
-    const links = block.linkTargets.map((targetEip) => {
-      const link = linksByTargetEip.get(targetEip);
-
-      assert(link !== undefined, `missing JIT link declaration for target 0x${hex(targetEip)}`);
-      return link;
-    });
-    const directCalls = links.flatMap((link) =>
-      link.target.kind === "function" ? [link.target.function] : []
-    );
-    const adapter = new LegacyActionEmbeddingAdapter({
-      ir: block.ir,
-      links: new LegacyNumericLinkAdapter(links, linkLayout)
-    });
-
-    program.builder.legacyFunction({
-      ref,
-      signature: program.blockSignature,
-      calls: uniqueFunctionRefs(directCalls),
-      resources: [program.cpuStateResource, program.guestMemoryResource],
-      globals: [],
-      tables: links.some((link) => link.target.kind === "table") && program.linkTable !== undefined
-        ? [program.linkTable]
-        : [],
-      irBlocks: [{ block: block.ir, allowImplicitEntryFallthrough: false }],
-      effects: legacyJitEffects,
-      build: (context) => adapter.build(context)
-    });
-    program.builder.exportFunction({
-      ref: functionExportRef(`jit.block-export.${hex(block.entryEip)}`),
-      name: block.exportName,
-      target: ref
-    });
-  }
-}
-
-const legacyJitEffects: LegacyEffects = "world";
-
-function uniqueFunctionRefs(refs: readonly FunctionRef[]): readonly FunctionRef[] {
-  return [...new Set(refs)];
-}
-
-function snapshotLinkLayout(linkLayout: JitLinkLayout | undefined): JitLinkLayout | undefined {
-  if (linkLayout === undefined) {
-    return undefined;
-  }
-
-  const snapshot = new Map<number, number>();
-  const slots = new Set<number>();
-
-  for (const [rawTargetEip, slot] of linkLayout) {
-    const targetEip = u32(rawTargetEip);
-
-    assert(!snapshot.has(targetEip), `duplicate normalized JIT link target: 0x${hex(targetEip)}`);
-    assert(Number.isInteger(slot) && slot >= 0, `invalid JIT link slot for 0x${hex(targetEip)}: ${slot}`);
-    assert(!slots.has(slot), `duplicate JIT link slot: ${slot}`);
-    snapshot.set(targetEip, slot);
-    slots.add(slot);
-  }
-
-  for (const [targetEip, slot] of snapshot) {
-    assert(
-      slot < snapshot.size,
-      `JIT link slot out of range for 0x${hex(targetEip)}: ${slot}`
-    );
-  }
-
-  return snapshot;
-}
-
-function uniqueU32(values: readonly number[]): readonly number[] {
-  const unique: number[] = [];
-  const seen = new Set<number>();
-
-  for (const value of values) {
-    const normalized = u32(value);
-
-    if (!seen.has(normalized)) {
-      seen.add(normalized);
-      unique.push(normalized);
-    }
-  }
-
-  return unique;
+function wholeResourceEffect(resource: ResourceRef): ResourceEffect {
+  return {
+    space: "resource",
+    resource,
+    range: { basis: { kind: "resource" } }
+  };
 }
 
 function hex(value: number): string {

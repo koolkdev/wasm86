@@ -31,8 +31,7 @@ const testModuleRunExportName = "run";
 // function's n-th i32 parameter. Module assembly for real use is the
 // engines' job.
 
-// Canonical Cpu exits leave unused high bits clear, while legacy JIT
-// transfers require their high detail bits to be zero.
+// Canonical Cpu exits leave unused high bits clear.
 export const irBlockCompleted = -1n;
 export const testModuleMemoryIndex = {
   cpuState: 0,

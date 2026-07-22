@@ -26,7 +26,7 @@ import {
 import type { RunStop } from "./cpu.js";
 
 // Cpu resolves every configured owner's true exits once. Guest transfers use
-// dispatch (or the temporary JIT transfer codec) and never enter this layout.
+// dispatch and never enter this layout.
 export const exitLayout = createVariantLayout("cpu.exit", [
   coreExitSet,
   interpreterExitSet
