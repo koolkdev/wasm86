@@ -12,7 +12,7 @@ import {
   snapshotInstructionBytes,
   type InstructionByteSnapshot,
   type InstructionSnapshotRequest
-} from "#engines/jit/instruction-snapshot.js";
+} from "#jit/instruction-snapshot.js";
 
 test("flat instruction snapshots copy their complete readable request", () => {
   const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });

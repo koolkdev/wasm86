@@ -15,9 +15,9 @@ import {
   compileJitArtifact,
   compileJitFromMemory,
   type CompiledJitArtifact
-} from "#engines/jit/compile.js";
-import { snapshotInstructionBytes } from "#engines/jit/instruction-snapshot.js";
-import { jitSnapshotRequestByteLength } from "#engines/jit/policy.js";
+} from "#jit/compile.js";
+import { snapshotInstructionBytes } from "#jit/instruction-snapshot.js";
+import { jitSnapshotRequestByteLength } from "#jit/policy.js";
 import {
   PageFaultErrorCode,
   generalProtection,

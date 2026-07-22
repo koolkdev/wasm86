@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { encodeVariant } from "#compiler/layout/variant-codec.js";
 import { instantiateCompiledProgram } from "#compiler/program/instance.js";
 import { decodeExit, exitLayout } from "#cpu/exit.js";
-import { compileJitFromMemory } from "#engines/jit/compile.js";
+import { compileJitFromMemory } from "#jit/compile.js";
 import { instructionLimitExit } from "#interpreter/exits.js";
 import { writeBackingBytes } from "#memory/bytes.js";
 import {

@@ -7,16 +7,16 @@ import {
   invalidOpcode,
   pageFault
 } from "#core/exceptions.js";
-import { decodeJitBlock } from "#engines/jit/decode-block.js";
+import { decodeJitBlock } from "#jit/decode-block.js";
 import {
   defaultJitBlockPolicy,
   jitSnapshotRequestByteLength,
   type JitBlockPolicy
-} from "#engines/jit/policy.js";
+} from "#jit/policy.js";
 import {
   snapshotInstructionBytes,
   type InstructionByteSnapshot
-} from "#engines/jit/instruction-snapshot.js";
+} from "#jit/instruction-snapshot.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import { testExecutionModel } from "#test/support/execution-model.js";
 import { jitMemoryWithBytes } from "./decode-helpers.js";

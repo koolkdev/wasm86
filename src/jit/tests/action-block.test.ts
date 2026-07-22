@@ -15,7 +15,7 @@ import { decodeExit, exitLayout } from "#cpu/exit.js";
 import {
   compileJitFromMemory,
   type CompiledJitArtifact
-} from "#engines/jit/compile.js";
+} from "#jit/compile.js";
 import { instructionLimitExit } from "#interpreter/exits.js";
 import {
   extractOnlyWasmFunctionBody,

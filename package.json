@@ -31,9 +31,9 @@
       "types": "./src/interpreter/*",
       "default": "./dist/src/interpreter/*"
     },
-    "#engines/*": {
-      "types": "./src/engines/*",
-      "default": "./dist/src/engines/*"
+    "#jit/*": {
+      "types": "./src/jit/*",
+      "default": "./dist/src/jit/*"
     },
     "#common/*": {
       "types": "./src/common/*",
