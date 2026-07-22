@@ -160,3 +160,20 @@ test("undefined two-byte opcode path raises #UD after consuming the escape", asy
   deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
+
+test("the Interpreter rejects undefined F7 /1 before demanding its address bytes", async () => {
+  const interpreter = await instantiateInterpreter();
+  const eip = interpreter.guestView.byteLength - 2;
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0x1234_5678,
+    eip,
+    instructionCount: 7
+  });
+  writeInterpreterState(interpreter.stateView, initialState);
+  writeGuestBytes(interpreter.guestView, eip, [0xf7, 0x0d]);
+
+  const exit = interpreter.runFor(1);
+
+  deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
+  assertInterpreterStateEquals(interpreter.stateView, initialState);
+});

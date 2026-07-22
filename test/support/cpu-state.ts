@@ -85,6 +85,17 @@ export const wasmCpuStateFields = [
 export type WasmCpuStateField = (typeof wasmCpuStateFields)[number];
 export type WasmCpuStateSnapshot = Record<WasmCpuStateField, number>;
 export type WasmCpuStateInit = Partial<WasmCpuStateSnapshot>;
+type WasmCpuLazyFlagStateField =
+  | "lazyFlagsKind"
+  | "lazyFlagsA"
+  | "lazyFlagsB";
+export type WasmCpuArchitecturalStateSnapshot = Omit<
+  WasmCpuStateSnapshot,
+  WasmCpuLazyFlagStateField
+>;
+export type WasmCpuArchitecturalStateInit = Partial<
+  WasmCpuArchitecturalStateSnapshot
+>;
 export type WasmCpuStatusFlag = X86StatusFlag;
 export type WasmCpuExpectedLazyFlagState = Readonly<{
   kind: keyof typeof LAZY_FLAGS_KIND;
@@ -111,6 +122,14 @@ export function createWasmCpuStateSnapshot(overrides: WasmCpuStateInit = {}): Wa
   return readWasmCpuStateSnapshot(view);
 }
 
+export function createWasmCpuArchitecturalStateSnapshot(
+  overrides: WasmCpuArchitecturalStateInit = {}
+): WasmCpuArchitecturalStateSnapshot {
+  return wasmCpuArchitecturalStateOf(
+    createWasmCpuStateSnapshot(overrides)
+  );
+}
+
 export function readWasmCpuStateSnapshot(view: DataView): WasmCpuStateSnapshot {
   const state = {} as WasmCpuStateSnapshot;
 
@@ -118,6 +137,17 @@ export function readWasmCpuStateSnapshot(view: DataView): WasmCpuStateSnapshot {
     state[field] = readWasmCpuStateField(view, field);
   }
 
+  return state;
+}
+
+export function wasmCpuArchitecturalStateOf(
+  {
+    lazyFlagsKind: _lazyFlagsKind,
+    lazyFlagsA: _lazyFlagsA,
+    lazyFlagsB: _lazyFlagsB,
+    ...state
+  }: WasmCpuStateSnapshot
+): WasmCpuArchitecturalStateSnapshot {
   return state;
 }
 

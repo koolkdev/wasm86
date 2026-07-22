@@ -8,9 +8,8 @@ import {
 } from "#test/harness/compiled-instruction.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
-  createWasmCpuStateSnapshot,
-  type WasmCpuStateInit,
-  type WasmCpuStateSnapshot
+  createWasmCpuArchitecturalStateSnapshot,
+  type WasmCpuArchitecturalStateInit
 } from "#test/support/cpu-state.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 
@@ -19,8 +18,8 @@ const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 type SuccessfulMemoryCase = Readonly<{
   name: string;
   bytes: readonly number[];
-  initialState?: WasmCpuStateInit;
-  expectedState?: Partial<WasmCpuStateSnapshot>;
+  initialState?: WasmCpuArchitecturalStateInit;
+  expectedState?: WasmCpuArchitecturalStateInit;
   memoryPatches?: readonly MemoryPatch[];
   expectedMemory?: readonly MemorySnapshot[];
 }>;
@@ -34,7 +33,7 @@ type MemorySnapshot = MemoryPatch & Readonly<{
   byteLength: number;
 }>;
 
-test("compiled MOV ModRM memory forms cover 8-, 16-, and 32-bit reads", async () => {
+test("MOV ModRM memory forms cover 8-, 16-, and 32-bit reads", async () => {
   const address = 0x2000;
   const cases: readonly SuccessfulMemoryCase[] = [
     {
@@ -75,7 +74,7 @@ test("compiled MOV ModRM memory forms cover 8-, 16-, and 32-bit reads", async ()
   }
 });
 
-test("compiled MOV ModRM memory forms cover exact 8-, 16-, and 32-bit writes", async () => {
+test("MOV ModRM memory forms cover exact 8-, 16-, and 32-bit writes", async () => {
   const address = 0x2100;
   const cases: readonly SuccessfulMemoryCase[] = [
     {
@@ -106,7 +105,7 @@ test("compiled MOV ModRM memory forms cover exact 8-, 16-, and 32-bit writes", a
   }
 });
 
-test("compiled MOV C7 stores immediate words and dwords to memory", async () => {
+test("MOV C7 stores immediate words and dwords to memory", async () => {
   const address = 0x2200;
   const cases: readonly SuccessfulMemoryCase[] = [
     {
@@ -130,7 +129,7 @@ test("compiled MOV C7 stores immediate words and dwords to memory", async () => 
   }
 });
 
-test("compiled MOV moffs forms cover direct 8-, 16-, and 32-bit reads and writes", async () => {
+test("MOV moffs forms cover direct 8-, 16-, and 32-bit reads and writes", async () => {
   const readAddress = 0x2300;
   const writeAddress = 0x2400;
   const cases: readonly SuccessfulMemoryCase[] = [
@@ -185,7 +184,7 @@ test("compiled MOV moffs forms cover direct 8-, 16-, and 32-bit reads and writes
   }
 });
 
-test("compiled MOVZX and MOVSX extend byte and word memory sources", async () => {
+test("MOVZX and MOVSX extend byte and word memory sources", async () => {
   const address = 0x2500;
   const cases: readonly SuccessfulMemoryCase[] = [
     {
@@ -243,7 +242,7 @@ test("compiled MOVZX and MOVSX extend byte and word memory sources", async () =>
   }
 });
 
-test("compiled MOV stores a segment selector as exactly one word", async () => {
+test("MOV stores a segment selector as exactly one word", async () => {
   const address = 0x2600;
 
   await assertSuccessfulMemoryCase({
@@ -255,7 +254,42 @@ test("compiled MOV stores a segment selector as exactly one word", async () => {
   });
 });
 
-test("compiled MOV applies effective, default, and overridden segments", async () => {
+test("CMOVcc reads its memory source unconditionally and writes only a taken destination", async () => {
+  const address = 0x2700;
+  const sourceBytes = dwordBytes(0x1234_5678);
+  const cases: readonly SuccessfulMemoryCase[] = [
+    {
+      name: "CMOVNE taken memory source",
+      bytes: [0x0f, 0x45, 0x13],
+      initialState: {
+        ebx: address,
+        edx: 0xaaaa_1111,
+        ZF: 0
+      },
+      expectedState: { edx: 0x1234_5678 },
+      memoryPatches: [{ address, bytes: sourceBytes }],
+      expectedMemory: [memory(address, sourceBytes)]
+    },
+    {
+      name: "CMOVNE not-taken memory source",
+      bytes: [0x0f, 0x45, 0x13],
+      initialState: {
+        ebx: address,
+        edx: 0xaaaa_1111,
+        ZF: 1
+      },
+      expectedState: { edx: 0xaaaa_1111 },
+      memoryPatches: [{ address, bytes: sourceBytes }],
+      expectedMemory: [memory(address, sourceBytes)]
+    }
+  ];
+
+  for (const entry of cases) {
+    await assertSuccessfulMemoryCase(entry);
+  }
+});
+
+test("MOV applies effective, default, and overridden segments", async () => {
   const cases: readonly SuccessfulMemoryCase[] = [
     {
       name: "FS override on ModRM base",
@@ -327,7 +361,7 @@ test("compiled MOV applies effective, default, and overridden segments", async (
   }
 });
 
-test("compiled MOV accepts the last valid boundary address for each access width", async () => {
+test("MOV accepts the last valid boundary address for each access width", async () => {
   for (const width of [8, 16, 32] as const) {
     const byteLength = width / 8;
     const address = guestMemoryMinimumByteLength - byteLength;
@@ -352,7 +386,7 @@ test("compiled MOV accepts the last valid boundary address for each access width
   }
 });
 
-test("compiled MOV read guards report exact 1-, 2-, and 4-byte fault ranges", async () => {
+test("MOV read guards report exact 1-, 2-, and 4-byte fault ranges", async () => {
   for (const width of [8, 16, 32] as const) {
     const faultAddress = guestMemoryMinimumByteLength - width / 8 + 1;
 
@@ -365,7 +399,7 @@ test("compiled MOV read guards report exact 1-, 2-, and 4-byte fault ranges", as
   }
 });
 
-test("compiled MOV write guards fault before state or memory changes", async () => {
+test("MOV write guards fault before state or memory changes", async () => {
   for (const width of [8, 16, 32] as const) {
     const byteLength = width / 8;
     const faultAddress = guestMemoryMinimumByteLength - byteLength + 1;
@@ -386,7 +420,7 @@ test("compiled MOV write guards fault before state or memory changes", async () 
   }
 });
 
-test("faulting compiled moffs reads and writes preserve instruction-start state and memory", async () => {
+test("faulting moffs reads and writes preserve instruction-start state and memory", async () => {
   const faultAddress = guestMemoryMinimumByteLength - 2;
   const observedAddress = faultAddress - 2;
   const initialBytes = [0xaa, 0xbb, 0xcc, 0xdd];
@@ -409,7 +443,7 @@ test("faulting compiled moffs reads and writes preserve instruction-start state 
   });
 });
 
-test("faulting compiled segment-selector store reports a word write before committing", async () => {
+test("faulting segment-selector store reports a word write before committing", async () => {
   const faultAddress = guestMemoryMinimumByteLength - 1;
   const initialBytes = [0xaa];
 
@@ -423,8 +457,26 @@ test("faulting compiled segment-selector store reports a word write before commi
   });
 });
 
+test("not-taken CMOVcc reports its memory-source fault before any state write", async () => {
+  const faultAddress = guestMemoryMinimumByteLength - 3;
+  const sourceBytes = [0xaa, 0xbb, 0xcc];
+
+  await assertFaultingMemoryCase({
+    name: "not-taken CMOVNE dword read fault",
+    bytes: [0x0f, 0x45, 0x13],
+    initialState: {
+      ebx: faultAddress,
+      edx: 0xaaaa_1111,
+      ZF: 1
+    },
+    expectedExit: pageFaultStop(faultAddress, 0),
+    memoryPatches: [{ address: faultAddress, bytes: sourceBytes }],
+    expectedMemory: [memory(faultAddress, sourceBytes)]
+  });
+});
+
 async function assertSuccessfulMemoryCase(entry: SuccessfulMemoryCase): Promise<void> {
-  const initialState = createWasmCpuStateSnapshot({
+  const initialState = createWasmCpuArchitecturalStateSnapshot({
     ...allFlagsSet,
     eip: startAddress,
     instructionCount: 7,
@@ -452,7 +504,7 @@ async function assertFaultingMemoryCase(
     expectedExit: CompiledInstructionCompletion;
   }>
 ): Promise<void> {
-  const initialState = createWasmCpuStateSnapshot({
+  const initialState = createWasmCpuArchitecturalStateSnapshot({
     ...allFlagsSet,
     eip: startAddress,
     instructionCount: 7,
@@ -466,7 +518,11 @@ async function assertFaultingMemoryCase(
   });
 
   deepStrictEqual(result.completion, entry.expectedExit, entry.name);
-  deepStrictEqual(result.state, initialState, entry.name);
+  deepStrictEqual(
+    result.state,
+    initialState,
+    entry.name
+  );
   deepStrictEqual(result.memory, entry.expectedMemory ?? [], entry.name);
 }
 

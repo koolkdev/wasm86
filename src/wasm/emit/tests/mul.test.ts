@@ -1,20 +1,13 @@
-import { deepStrictEqual, ok as assertOk, strictEqual } from "node:assert";
+import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
 import { createInstructionFunction } from "./instruction-function.js";
-import { immBinding, regBinding, type OperandBinding } from "#core/instruction/bindings.js";
 import { gprChannel } from "#core/state/channels.js";
-import { coreStateFields } from "#core/state/layout.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
-import { decodeBytes, ok as decoded } from "#core/decoder/tests/helpers.js";
-import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import type { OperandWidth, RegName } from "#core/types.js";
 import {
-  assertLazyFlagState,
   readWasmCpuStateChannel,
-  readWasmCpuStateSnapshot,
-  wasmCpuStatusFlagsOf,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
@@ -114,85 +107,3 @@ test("unsigned dword product high-half lowering uses i64 shift", async () => {
   assertCompleted(run());
   strictEqual(readRegister(stateView, "edx"), 1);
 });
-
-test("decoded imul lowers through i64 product and writes explicit flags", async () => {
-  const instruction = decoded(decodeBytes([0x0f, 0xaf, 0xcb]));
-  const block = blockOf([instruction]);
-  const body = testFunctionBody(block);
-
-  strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64Mul), true);
-
-  const { stateView, run } = await instantiateTestFunction(block);
-
-  writeWasmCpuStateSnapshot(stateView, {
-    ecx: 0x4000_0000,
-    ebx: 2,
-    eip: instruction.address
-  });
-
-  assertCompleted(run());
-  strictEqual(readRegister(stateView, "ecx"), 0x8000_0000);
-  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
-  deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), {
-    CF: 1,
-    PF: 1,
-    AF: 0,
-    ZF: 0,
-    SF: 0,
-    OF: 1
-  });
-  assertLazyFlagState(stateView, { kind: "NONE", width: 0 });
-});
-
-test("decoded implicit mul lowers through unsigned i64 product and writes EDX:EAX", async () => {
-  const instruction = decoded(decodeBytes([0xf7, 0xe3]));
-  const block = blockOf([instruction]);
-  const body = testFunctionBody(block);
-
-  strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ExtendI32U), true);
-  strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ShrU), true);
-
-  const { stateView, run } = await instantiateTestFunction(block);
-
-  writeWasmCpuStateSnapshot(stateView, {
-    eax: 0xffff_ffff,
-    ebx: 2,
-    edx: 0x1234_5678,
-    eip: instruction.address
-  });
-
-  assertCompleted(run());
-  strictEqual(readRegister(stateView, "eax"), 0xffff_fffe);
-  strictEqual(readRegister(stateView, "edx"), 1);
-  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
-  deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), {
-    CF: 1,
-    PF: 1,
-    AF: 0,
-    ZF: 0,
-    SF: 0,
-    OF: 1
-  });
-  assertLazyFlagState(stateView, { kind: "NONE", width: 0 });
-});
-
-function blockOf(instructions: readonly IsaDecodedInstruction[]) {
-  const builder = createInstructionFunction();
-
-  for (const instruction of instructions) {
-    builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
-  }
-
-  return builder.finish();
-}
-
-function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBinding[] {
-  return instruction.operands.map((operand) => {
-    if (operand.kind === "reg") {
-      return regBinding(operand.alias.name);
-    }
-
-    assertOk(operand.kind === "imm", `unsupported operand in mul e2e: ${instruction.spec.id}`);
-    return immBinding(operand.value);
-  });
-}

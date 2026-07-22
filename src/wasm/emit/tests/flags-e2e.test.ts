@@ -28,100 +28,12 @@ import {
   instantiateTestFunction,
   testModuleMemoryIndex
 } from "./harness.js";
-import { aluReference, type AluFlags, type AluOp } from "./reference.js";
+import { aluReference, type AluFlags } from "./reference.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
 const lazyFlagsKindStateOffset = testExecutionModel.cpuState.layout.field(
   flagStateFields.lazyKind
 ).offset;
-
-// ALU r32 forms through the action pipeline, checked against reference.ts.
-
-// dst=ebx, src=ecx for every form: modrm 0xcb = mod 11, reg ecx, rm ebx.
-const aluCases: readonly Readonly<{
-  name: string;
-  op: AluOp;
-  bytes: readonly number[];
-  carryIn?: number;
-}>[] = [
-  { name: "add ebx, ecx", op: "add", bytes: [0x01, 0xcb] },
-  { name: "adc ebx, ecx", op: "adc", bytes: [0x11, 0xcb], carryIn: 1 },
-  { name: "or ebx, ecx", op: "or", bytes: [0x09, 0xcb] },
-  { name: "and ebx, ecx", op: "and", bytes: [0x21, 0xcb] },
-  { name: "sub ebx, ecx", op: "sub", bytes: [0x29, 0xcb] },
-  { name: "sbb ebx, ecx", op: "sbb", bytes: [0x19, 0xcb], carryIn: 1 },
-  { name: "xor ebx, ecx", op: "xor", bytes: [0x31, 0xcb] },
-  { name: "cmp ebx, ecx", op: "cmp", bytes: [0x39, 0xcb] },
-  { name: "test ebx, ecx", op: "test", bytes: [0x85, 0xcb] }
-];
-
-// Edge values per pair position: zero results, carries, signed overflow in
-// both directions, aux carry, and mixed bits for parity.
-const operandPairs: readonly Readonly<{ left: number; right: number }>[] = [
-  { left: 0x0000_0000, right: 0x0000_0000 },
-  { left: 0xffff_ffff, right: 0x0000_0001 },
-  { left: 0x7fff_ffff, right: 0x0000_0001 },
-  { left: 0x8000_0000, right: 0x0000_0001 },
-  { left: 0x8000_0000, right: 0x8000_0000 },
-  { left: 0x0000_0001, right: 0x0000_0002 },
-  { left: 0x0000_000f, right: 0x0000_0001 },
-  { left: 0x1234_5678, right: 0x9abc_def0 }
-];
-
-for (const aluCase of aluCases) {
-  test(`${aluCase.name} matches the SDM reference across edge values`, async () => {
-    for (const pair of operandPairs) {
-      const label = `${aluCase.name} with ${hex(pair.left)}, ${hex(pair.right)}`;
-      const instruction = ok(decodeBytes(aluCase.bytes));
-      const initial: Partial<WasmCpuStateSnapshot> = {
-        ebx: pair.left,
-        ecx: pair.right,
-        eip: instruction.address,
-        ...allFlagsSet
-      };
-      const reference = aluReference(aluCase.op, 32, pair.left, pair.right, aluCase.carryIn ?? 0);
-
-      const builder = createInstructionFunction();
-
-      builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
-
-      const { stateView, run } = await instantiateTestFunction(builder.finish());
-
-      writeWasmCpuStateSnapshot(stateView, initial);
-      strictEqual(run(), testFunctionCompleted, label);
-      if (aluCase.op === "add" || aluCase.op === "sub" || aluCase.op === "cmp") {
-        assertState(
-          stateView,
-          { regs: { ebx: reference.result, ecx: pair.right }, eip: instruction.nextEip, flags: allFlagsSet },
-          label
-        );
-        assertLazyFlagState(
-          stateView,
-          { kind: aluCase.op === "add" ? "ADD" : "SUB", width: 32, a: pair.left, b: pair.right },
-          label
-        );
-      } else if (aluCase.op === "and" || aluCase.op === "or" || aluCase.op === "xor" || aluCase.op === "test") {
-        assertState(
-          stateView,
-          { regs: { ebx: reference.result, ecx: pair.right }, eip: instruction.nextEip, flags: allFlagsSet },
-          label
-        );
-        assertLazyFlagState(
-          stateView,
-          { kind: "LOGIC_RESULT", width: 32, a: logicLazyResult(aluCase.op, pair.left, pair.right) },
-          label
-        );
-      } else {
-        assertState(
-          stateView,
-          { regs: { ebx: reference.result, ecx: pair.right }, eip: instruction.nextEip, flags: reference.flags },
-          label
-        );
-        assertLazyFlagState(stateView, { kind: "NONE", width: 0 }, label);
-      }
-    }
-  });
-}
 
 test("two adds in one block store one lazy add record, with the second add's source", async () => {
   // 0x7fff_fffe + 1 + 1: the adds disagree on SF/OF/AF/PF, so the collapsed
@@ -194,26 +106,4 @@ function bindingsFor(instruction: IsaDecodedInstruction): readonly OperandBindin
 
     return regBinding(operand.alias.base);
   });
-}
-
-function logicLazyResult(op: AluOp, left: number, right: number): number {
-  switch (op) {
-    case "and":
-    case "test":
-      return (left & right) >>> 0;
-    case "or":
-      return (left | right) >>> 0;
-    case "xor":
-      return (left ^ right) >>> 0;
-    case "add":
-    case "adc":
-    case "sub":
-    case "sbb":
-    case "cmp":
-      throw new Error(`unsupported logic lazy result op: ${op}`);
-  }
-}
-
-function hex(value: number): string {
-  return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
 }

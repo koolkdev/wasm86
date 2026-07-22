@@ -1,12 +1,15 @@
 import { ok } from "node:assert";
 
+import { createLayoutHostView } from "#compiler/layout/host-view.js";
+import { encodeVariant } from "#compiler/layout/variant-codec.js";
 import type { StorageAccess, StorageEffects } from "#compiler/ir/effects.js";
+import type { CallTarget } from "#compiler/ir/invocation.js";
 import { buildVariant } from "#compiler/ir/values/variant.js";
 import { compileProgram } from "#compiler/program/compile.js";
 import { instantiateCompiledProgram } from "#compiler/program/instance.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/program/function-type.js";
-import type { FunctionDefinition } from "#compiler/program/functions.js";
+import { programImportModuleName } from "#compiler/program/imports.js";
 import {
   functionExportRef,
   functionRef
@@ -18,12 +21,17 @@ import type {
   IsaDecodeReader
 } from "#core/decoder/types.js";
 import {
+  x86StatusFlags,
+  type X86StatusFlag
+} from "#core/flags/definitions.js";
+import {
   createInstructionConstruction,
   staticInstructionLocation
 } from "#core/instruction/builder.js";
 import { staticOperandBinding } from "#core/instruction/static-binding.js";
 import type { InstructionTerminals } from "#core/instruction/terminal.js";
 import type { RunStop } from "#cpu/cpu.js";
+import { createCpuStateHostView } from "#cpu/host-view.js";
 import {
   decodeExit
 } from "#cpu/exit.js";
@@ -42,8 +50,9 @@ import { readBackingByte, writeBackingBytes } from "#memory/bytes.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
   readWasmCpuStateSnapshot,
-  type WasmCpuStateInit,
-  type WasmCpuStateSnapshot,
+  wasmCpuArchitecturalStateOf,
+  type WasmCpuArchitecturalStateInit,
+  type WasmCpuArchitecturalStateSnapshot,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
@@ -52,6 +61,13 @@ const compiledInstructionExport = functionExportRef(
   "test.compiled-instruction.entry-export"
 );
 const compiledInstructionExportName = "run";
+const compiledInstructionDispatchRef = functionRef(
+  "test.compiled-instruction.dispatch"
+);
+const compiledInstructionDispatchStop = encodeVariant(
+  exitLayout,
+  instructionLimitExit()
+);
 
 export type CompiledInstructionMemoryPatch = Readonly<{
   address: number;
@@ -69,18 +85,19 @@ export type CompiledInstructionMemorySnapshot = CompiledInstructionMemoryRange &
 
 export type RunCompiledInstructionsInput = Readonly<{
   bytes: readonly number[];
-  initialState?: WasmCpuStateInit;
+  initialState?: WasmCpuArchitecturalStateInit;
   memoryPatches?: readonly CompiledInstructionMemoryPatch[];
   memoryRanges?: readonly CompiledInstructionMemoryRange[];
 }>;
 
 export type CompiledInstructionCompletion =
   | Exclude<RunStop, Readonly<{ kind: "instructionLimit" }>>
-  | Readonly<{ kind: "completed"; targetEip: number }>;
+  | Readonly<{ kind: "completed"; targetEip: number }>
+  | Readonly<{ kind: "dispatched"; targetEip: number }>;
 
 export type CompiledInstructionResult = Readonly<{
   completion: CompiledInstructionCompletion;
-  state: WasmCpuStateSnapshot;
+  state: WasmCpuArchitecturalStateSnapshot;
   memory: readonly CompiledInstructionMemorySnapshot[];
 }>;
 
@@ -108,7 +125,9 @@ export async function runCompiledInstructions(
   });
 
   ok(instructions.length > 0, "compiled instruction input decoded no instructions");
-  const program = compileProgram(buildInstructionProgram(instructions));
+  const built = buildInstructionProgram(instructions);
+  const program = compileProgram(built.program);
+  const dispatchTargets: number[] = [];
   const instance = instantiateCompiledProgram(
     program,
     {
@@ -116,7 +135,13 @@ export async function runCompiledInstructions(
         [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
         [testExecutionModel.guestMemory.resource, memories.guestMemory]
       ]),
-      functions: new Map()
+      functions: new Map([[
+        built.dispatch.ref,
+        (targetEip: number): bigint => {
+          dispatchTargets.push(targetEip >>> 0);
+          return compiledInstructionDispatchStop;
+        }
+      ]])
     }
   );
   const entry = instance.functionExports.get(compiledInstructionExport);
@@ -125,12 +150,24 @@ export async function runCompiledInstructions(
   const encodedExit: unknown = entry();
 
   ok(typeof encodedExit === "bigint", `compiled instruction returned ${typeof encodedExit}, expected bigint`);
-  const state = readWasmCpuStateSnapshot(stateView);
+  const rawState = readWasmCpuStateSnapshot(stateView);
+  const architecturalFlags = readArchitecturalStatusFlags(memories.cpuStateMemory);
+  const state = {
+    ...wasmCpuArchitecturalStateOf(rawState),
+    ...architecturalFlags
+  };
   const stop = decodeExit(encodedExit);
   // The local dispatch target uses the budget stop only as its completion
   // sentinel. Core exits reach this point unchanged.
+  ok(
+    dispatchTargets.length <= 1,
+    `compiled instruction dispatched ${dispatchTargets.length} times`
+  );
+  const dispatchedTarget = dispatchTargets[0];
   const completion: CompiledInstructionCompletion = stop.kind === "instructionLimit"
-    ? { kind: "completed", targetEip: state.eip }
+    ? dispatchedTarget === undefined
+      ? { kind: "completed", targetEip: state.eip }
+      : { kind: "dispatched", targetEip: dispatchedTarget }
     : stop;
 
   return {
@@ -141,6 +178,21 @@ export async function runCompiledInstructions(
       bytes: readMemoryRange(memories.guestMemory, range)
     }))
   };
+}
+
+function readArchitecturalStatusFlags(
+  memory: WebAssembly.Memory
+): Readonly<Record<X86StatusFlag, 0 | 1>> {
+  const flags = createCpuStateHostView(
+    createLayoutHostView(memory, cpuState.layout)
+  ).flags;
+  const result = {} as Record<X86StatusFlag, 0 | 1>;
+
+  for (const flag of x86StatusFlags) {
+    result[flag] = flags.readFlag(flag) ? 1 : 0;
+  }
+
+  return result;
 }
 
 function buildInstructionProgram(
@@ -156,8 +208,15 @@ function buildInstructionProgram(
   const entryType = functionType([], ["i64"]);
   const dispatchType = functionType(["i32"], ["i64"]);
 
-  const dispatch = program.defineFunction({
-    ref: functionRef("test.compiled-instruction.dispatch"),
+  const dispatch = program.importFunction({
+    ref: compiledInstructionDispatchRef,
+    type: dispatchType,
+    effects: noEffects,
+    moduleName: programImportModuleName,
+    name: "dispatch"
+  });
+  const fallthrough = program.defineFunction({
+    ref: functionRef("test.compiled-instruction.fallthrough"),
     type: dispatchType,
     effects: noEffects
   }, (fn) => {
@@ -184,7 +243,7 @@ function buildInstructionProgram(
     const finalFallthrough = builder.finish();
 
     if (finalFallthrough !== undefined) {
-      fn.returnCall(dispatch, [finalFallthrough]);
+      fn.returnCall(fallthrough, [finalFallthrough]);
     }
   });
 
@@ -193,11 +252,11 @@ function buildInstructionProgram(
     name: compiledInstructionExportName,
     target: entry.ref
   });
-  return program.finish();
+  return { program: program.finish(), dispatch };
 }
 
 function instructionFunctionTerminals(
-  dispatch: FunctionDefinition
+  dispatch: CallTarget
 ): InstructionTerminals {
   return {
     dispatch: (body, targetEip) => body.returnCall(dispatch, [targetEip]),

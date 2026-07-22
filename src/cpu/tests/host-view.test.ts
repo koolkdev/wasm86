@@ -3,8 +3,14 @@ import { test } from "node:test";
 
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import { createCpuStateHostView } from "#cpu/host-view.js";
+import { createFlagStateHostView } from "#core/flags/host-view.js";
 import { readRegisterAlias, writeRegisterAlias } from "#core/state/view.js";
-import { x86Flags } from "#core/flags/definitions.js";
+import {
+  x86Flags,
+  x86StatusFlags,
+  type X86StatusFlag
+} from "#core/flags/definitions.js";
+import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import { registerAlias } from "#core/registers.js";
 import {
   readWasmCpuStateSnapshot,
@@ -29,6 +35,7 @@ const allFlagBytesSet = {
   ID: 1
 } as const;
 const noFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
+type StatusFlagBytes = Readonly<Record<X86StatusFlag, 0 | 1>>;
 
 test("Cpu state host view rejects short memory", () => {
   throws(
@@ -67,6 +74,168 @@ test("Cpu state host view reads and writes architectural flags", () => {
 
   seed(memory, {});
   deepStrictEqual(wasmCpuStatusFlagsOf(snapshot(memory)), noFlags);
+});
+
+test("Cpu state host view resolves lazy status flags without changing their owner state", () => {
+  const cases = [
+    {
+      name: "ADD8 carry",
+      kind: LAZY_FLAGS_KIND.ADD,
+      width: 8,
+      a: 0xf0,
+      b: 0x70,
+      expected: { CF: 1, PF: 1, AF: 0, ZF: 0, SF: 0, OF: 0 }
+    },
+    {
+      name: "ADD16 signed overflow",
+      kind: LAZY_FLAGS_KIND.ADD,
+      width: 16,
+      a: 0x7fff,
+      b: 1,
+      expected: { CF: 0, PF: 1, AF: 1, ZF: 0, SF: 1, OF: 1 }
+    },
+    {
+      name: "ADD32 wraparound",
+      kind: LAZY_FLAGS_KIND.ADD,
+      width: 32,
+      a: 0xffff_ffff,
+      b: 1,
+      expected: { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 0, OF: 0 }
+    },
+    {
+      name: "SUB8 borrow",
+      kind: LAZY_FLAGS_KIND.SUB,
+      width: 8,
+      a: 0,
+      b: 1,
+      expected: { CF: 1, PF: 1, AF: 1, ZF: 0, SF: 1, OF: 0 }
+    },
+    {
+      name: "SUB16 signed overflow",
+      kind: LAZY_FLAGS_KIND.SUB,
+      width: 16,
+      a: 0x8000,
+      b: 1,
+      expected: { CF: 0, PF: 1, AF: 1, ZF: 0, SF: 0, OF: 1 }
+    },
+    {
+      name: "SUB32 zero",
+      kind: LAZY_FLAGS_KIND.SUB,
+      width: 32,
+      a: 5,
+      b: 5,
+      expected: { CF: 0, PF: 1, AF: 0, ZF: 1, SF: 0, OF: 0 }
+    },
+    {
+      name: "LOGIC_RESULT8 odd parity",
+      kind: LAZY_FLAGS_KIND.LOGIC_RESULT,
+      width: 8,
+      a: 1,
+      b: 0xaaaa_aaaa,
+      expected: { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 }
+    },
+    {
+      name: "LOGIC_RESULT16 sign",
+      kind: LAZY_FLAGS_KIND.LOGIC_RESULT,
+      width: 16,
+      a: 0x8000,
+      b: 0xaaaa_aaaa,
+      expected: { CF: 0, PF: 1, AF: 0, ZF: 0, SF: 1, OF: 0 }
+    },
+    {
+      name: "LOGIC_RESULT32 zero",
+      kind: LAZY_FLAGS_KIND.LOGIC_RESULT,
+      width: 32,
+      a: 0,
+      b: 0xaaaa_aaaa,
+      expected: { CF: 0, PF: 1, AF: 0, ZF: 1, SF: 0, OF: 0 }
+    }
+  ] as const satisfies readonly Readonly<{
+    name: string;
+    kind: Exclude<(typeof LAZY_FLAGS_KIND)[keyof typeof LAZY_FLAGS_KIND], 0>;
+    width: 8 | 16 | 32;
+    a: number;
+    b: number;
+    expected: StatusFlagBytes;
+  }>[];
+
+  for (const entry of cases) {
+    const backing = oppositeStatusFlags(entry.expected);
+    const { memory, state } = createState({
+      ...backing,
+      TF: 1,
+      DF: 0,
+      NT: 1,
+      AC: 0,
+      ID: 1,
+      lazyFlagsKind: lazyFlagsKindByte(entry.kind, entry.width),
+      lazyFlagsA: entry.a,
+      lazyFlagsB: entry.b
+    });
+    const directFlags = createFlagStateHostView(
+      createLayoutHostView(memory, testExecutionModel.cpuState.layout)
+    );
+    const before = snapshot(memory);
+
+    for (const flag of x86StatusFlags) {
+      strictEqual(directFlags.readFlagByte(flag), entry.expected[flag], `${entry.name} ${flag} byte`);
+      strictEqual(state.flags.readFlag(flag), entry.expected[flag] !== 0, `${entry.name} ${flag}`);
+    }
+    strictEqual(state.flags.readFlag("TF"), true, `${entry.name} TF`);
+    strictEqual(state.flags.readFlag("DF"), false, `${entry.name} DF`);
+    strictEqual(state.flags.readFlag("NT"), true, `${entry.name} NT`);
+    strictEqual(state.flags.readFlag("AC"), false, `${entry.name} AC`);
+    strictEqual(state.flags.readFlag("ID"), true, `${entry.name} ID`);
+    deepStrictEqual(snapshot(memory), before, `${entry.name} read mutated owner state`);
+  }
+});
+
+test("Cpu state host writes materialize lazy status flags before replacing one", () => {
+  const backing = {
+    CF: 0,
+    PF: 0,
+    AF: 0,
+    ZF: 0,
+    SF: 1,
+    OF: 1
+  } as const;
+  const { memory, state } = createState({
+    ...backing,
+    DF: 0,
+    lazyFlagsKind: lazyFlagsKindByte(LAZY_FLAGS_KIND.ADD, 32),
+    lazyFlagsA: 0xffff_ffff,
+    lazyFlagsB: 1
+  });
+
+  state.flags.writeFlag("DF", true);
+  deepStrictEqual(wasmCpuStatusFlagsOf(snapshot(memory)), backing);
+  strictEqual(snapshot(memory).lazyFlagsKind, lazyFlagsKindByte(LAZY_FLAGS_KIND.ADD, 32));
+
+  state.flags.writeFlag("CF", false);
+
+  deepStrictEqual(
+    x86StatusFlags.map((flag) => [flag, state.flags.readFlag(flag)]),
+    [
+      ["CF", false],
+      ["PF", true],
+      ["AF", true],
+      ["ZF", true],
+      ["SF", false],
+      ["OF", false]
+    ]
+  );
+  deepStrictEqual(wasmCpuStatusFlagsOf(snapshot(memory)), {
+    CF: 0,
+    PF: 1,
+    AF: 1,
+    ZF: 1,
+    SF: 0,
+    OF: 0
+  });
+  strictEqual(snapshot(memory).lazyFlagsKind, LAZY_FLAGS_KIND.NONE);
+  strictEqual(snapshot(memory).lazyFlagsA, 0xffff_ffff);
+  strictEqual(snapshot(memory).lazyFlagsB, 1);
+  strictEqual(state.flags.readFlag("DF"), true);
 });
 
 test("Cpu state host view supports full and aliased registers", () => {
@@ -171,4 +340,15 @@ function seed(memory: WebAssembly.Memory, initial: WasmCpuStateInit): void {
 
 function snapshot(memory: WebAssembly.Memory) {
   return readWasmCpuStateSnapshot(new DataView(memory.buffer));
+}
+
+function oppositeStatusFlags(flags: StatusFlagBytes): StatusFlagBytes {
+  return {
+    CF: flags.CF === 0 ? 1 : 0,
+    PF: flags.PF === 0 ? 1 : 0,
+    AF: flags.AF === 0 ? 1 : 0,
+    ZF: flags.ZF === 0 ? 1 : 0,
+    SF: flags.SF === 0 ? 1 : 0,
+    OF: flags.OF === 0 ? 1 : 0
+  };
 }

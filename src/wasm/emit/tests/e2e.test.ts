@@ -12,12 +12,10 @@ import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js
 import type { SemanticTemplate } from "#core/semantics/builder.js";
 import type { RegName } from "#core/types.js";
 import { coreStateFields } from "#core/state/layout.js";
-import { aluSemantic } from "#core/semantics/alu.js";
 import { movSemantic, movsxSemantic, movzxSemantic } from "#core/semantics/mov.js";
 import { xchgSemantic } from "#core/semantics/xchg.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
-  assertLazyFlagState,
   readWasmCpuStateChannel,
   readWasmCpuStateField,
   writeWasmCpuStateSnapshot
@@ -105,21 +103,6 @@ test("chained movs forward one read to both destinations", async () => {
   strictEqual(readRegister(stateView, "ebx"), 0xdeadbeef);
   strictEqual(readRegister(stateView, "ecx"), 0xdeadbeef);
   strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), 0x1004);
-});
-
-test("xchg eax, ebx swaps the registers", async () => {
-  const builder = createInstructionFunction();
-
-  builder.add(xchgSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1002));
-
-  const { stateView, run } = await instantiateTestFunction(builder.finish());
-
-  writeWasmCpuStateSnapshot(stateView, { eax: 0x11111111, ebx: 0x22222222 });
-  assertCompleted(run());
-  // The captured snapshot is load-bearing here: reloading ebx at its use
-  // would observe the just-stored eax and leave both registers equal.
-  strictEqual(readRegister(stateView, "eax"), 0x22222222);
-  strictEqual(readRegister(stateView, "ebx"), 0x11111111);
 });
 
 test("xchg eax, eax emits no register-state Wasm access", async () => {
@@ -212,38 +195,6 @@ test("movsx r32, r8/r16 sign-extends through marked loads", async () => {
   assertCompleted(run());
   strictEqual(readRegister(stateView, "ebx"), 0xfffffff6);
   strictEqual(readRegister(stateView, "ecx"), 0xfffff678);
-});
-
-test("add al, imm8 stays on the byte channel with byte-wide flags", async () => {
-  const builder = createInstructionFunction();
-
-  builder.add(aluSemantic("add", 8), [regBinding("al"), immBinding(0x70)], loc(0x1000, 0x1002));
-
-  const block = builder.finish();
-
-  const { stateView, run } = await instantiateTestFunction(block);
-
-  writeWasmCpuStateSnapshot(stateView, { eax: 0x123456f0 });
-  assertCompleted(run());
-  // 0xf0 + 0x70 = 0x160: the byte wraps and carries out.
-  strictEqual(readRegister(stateView, "eax"), 0x12345660);
-  assertLazyFlagState(stateView, { kind: "ADD", width: 8, a: 0xf0, b: 0x70 });
-});
-
-test("add ax, imm16 stays on the word channel", async () => {
-  const builder = createInstructionFunction();
-
-  builder.add(aluSemantic("add", 16), [regBinding("ax"), immBinding(0x2001)], loc(0x1000, 0x1004));
-
-  const block = builder.finish();
-
-  const { stateView, run } = await instantiateTestFunction(block);
-
-  writeWasmCpuStateSnapshot(stateView, { eax: 0x1234f00f });
-  assertCompleted(run());
-  // 0xf00f + 0x2001 = 0x11010: the word wraps and carries out.
-  strictEqual(readRegister(stateView, "eax"), 0x12341010);
-  assertLazyFlagState(stateView, { kind: "ADD", width: 16, a: 0xf00f, b: 0x2001 });
 });
 
 test("mov ah and mov al merge through memory for a final 32-bit read", async () => {

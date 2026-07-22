@@ -3,8 +3,8 @@ import { test } from "node:test";
 
 import { startAddress } from "#test/support/addresses.js";
 import {
-  createWasmCpuStateSnapshot,
-  type WasmCpuStateInit
+  createWasmCpuArchitecturalStateSnapshot,
+  type WasmCpuArchitecturalStateInit
 } from "#test/support/cpu-state.js";
 import { runCompiledInstructions } from "#test/harness/compiled-instruction.js";
 
@@ -25,8 +25,8 @@ const allFlagsSet = {
 type MovRegisterCase = Readonly<{
   name: string;
   bytes: readonly number[];
-  initialState: WasmCpuStateInit;
-  expectedState: WasmCpuStateInit;
+  initialState: WasmCpuArchitecturalStateInit;
+  expectedState: WasmCpuArchitecturalStateInit;
   instructionCount?: number;
 }>;
 
@@ -113,6 +113,12 @@ const modRmCases: readonly MovRegisterCase[] = [
     expectedState: { ecx: 0x8765_4321 }
   },
   {
+    name: "66 8C copies FS into AX and preserves upper EAX",
+    bytes: [0x66, 0x8c, 0xe0],
+    initialState: { eax: 0xffff_ffff, fsSelector: 0x8001 },
+    expectedState: { eax: 0xffff_8001 }
+  },
+  {
     name: "8C zero-extends FS into EAX",
     bytes: [0x8c, 0xe0],
     initialState: { eax: 0xffff_ffff, fsSelector: 0x8001 },
@@ -186,18 +192,52 @@ const extensionCases: readonly MovRegisterCase[] = [
   }
 ];
 
+const conditionalCases: readonly MovRegisterCase[] = [
+  {
+    name: "0F 44 copies ECX into EDX when ZF is set",
+    bytes: [0x0f, 0x44, 0xd1],
+    initialState: {
+      ecx: 0x1234_5678,
+      edx: 0xaaaa_1111,
+      ZF: 1
+    },
+    expectedState: { edx: 0x1234_5678 }
+  },
+  {
+    name: "66 0F 44 copies CX into DX when ZF is set",
+    bytes: [0x66, 0x0f, 0x44, 0xd1],
+    initialState: {
+      ecx: 0x3333_2222,
+      edx: 0xaaaa_1111,
+      ZF: 1
+    },
+    expectedState: { edx: 0xaaaa_2222 }
+  },
+  {
+    name: "66 0F 44 preserves EDX when ZF is clear",
+    bytes: [0x66, 0x0f, 0x44, 0xd1],
+    initialState: {
+      ecx: 0x3333_2222,
+      edx: 0xaaaa_1111,
+      ZF: 0
+    },
+    expectedState: { edx: 0xaaaa_1111 }
+  }
+];
+
 for (const entry of [
   ...immediateCases,
   ...modRmCases,
   ...groupedImmediateCases,
-  ...extensionCases
+  ...extensionCases,
+  ...conditionalCases
 ]) {
-  test(`compiled ${entry.name}`, async () => {
+  test(entry.name, async () => {
     await assertMovRegisterCase(entry);
   });
 }
 
-test("compiled MOVSX word result is visible through later byte, word, and dword MOV aliases", async () => {
+test("MOVSX word result is visible through later byte, word, and dword MOV aliases", async () => {
   await assertMovRegisterCase({
     name: "MOVSX alias sequence",
     bytes: [
@@ -223,7 +263,7 @@ test("compiled MOVSX word result is visible through later byte, word, and dword 
   });
 });
 
-test("compiled MOVSX reads a word value written by a preceding narrow MOV", async () => {
+test("MOVSX reads a word value written by a preceding narrow MOV", async () => {
   await assertMovRegisterCase({
     name: "MOV to MOVSX dependency",
     bytes: [
@@ -245,7 +285,7 @@ test("compiled MOVSX reads a word value written by a preceding narrow MOV", asyn
 
 async function assertMovRegisterCase(entry: MovRegisterCase): Promise<void> {
   const instructionCount = entry.instructionCount ?? 1;
-  const initialState = createWasmCpuStateSnapshot({
+  const initialState = createWasmCpuArchitecturalStateSnapshot({
     ...allFlagsSet,
     eip: startAddress,
     instructionCount: 7,

@@ -3,15 +3,13 @@ import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
 import {
-  createInstructionFunction,
-  testInstructionDispatch
+  createInstructionFunction
 } from "#test/support/instruction-function.js";
 import { subFlagSource } from "#core/flags/lazy/sources.js";
 import { immBinding, memBinding, regBinding, staticMemSegment } from "#core/instruction/bindings.js";
 import { flagStateFields } from "#core/flags/layout.js";
 import type { InstructionStateChannel } from "../state/channels.js";
 import { gprChannel } from "#core/state/channels.js";
-import { coreStateFields } from "#core/state/layout.js";
 import type { IfControl, LoopControl } from "#compiler/ir/controls/index.js";
 import type { BodyNode, Body, IrBlock } from "#ir/block.js";
 import type { IrFunction } from "#ir/function.js";
@@ -30,7 +28,6 @@ import {
 } from "#core/semantics/strings.js";
 import { validateIrFunction } from "#ir/validate.js";
 import {
-  stateWrite,
   stateWriteValue,
   isStateRead,
   isStateWrite,
@@ -115,28 +112,6 @@ function backEdgeUpdates(body: Body): readonly ValueId[] {
 
 function stateWrites(nodes: readonly BodyNode[]): StateWriteOperation[] {
   return nodes.filter(isStateWrite);
-}
-
-function faultArmWrites(body: Body): StateWriteOperation[] {
-  const guardArm = body.nodes.find(
-    (node): node is IfControl => node.kind === "if" && node.thenBody.nodes[0]?.kind !== "loopContinue"
-  );
-
-  ok(guardArm !== undefined, "loop body has a guard fault arm");
-  return stateWrites(guardArm.thenBody.nodes);
-}
-
-function writeFor(
-  block: IrBlock,
-  writes: readonly StateWriteOperation[],
-  channel: InstructionStateChannel
-): StateWriteOperation {
-  const write = writes.find((node) =>
-    writesStateChannel(block.values, node, channel)
-  );
-
-  ok(write !== undefined, `state write for ${channel.kind} exists`);
-  return write;
 }
 
 function readFor(
@@ -283,132 +258,6 @@ test("the iteration path has no state ops; carried commits sit in the exit tail"
   deepStrictEqual(tailWrites.map(stateWriteValue), updates);
 });
 
-test("a mid-body fault restores iteration-start carried values and the rep eip", () => {
-  const block = repMovsBlock();
-  const loop = findLoop(block);
-  const writes = faultArmWrites(loop.body);
-
-  const channels = [gprChannel("esi"), gprChannel("edi"), gprChannel("ecx")];
-
-  for (let index = 0; index < loop.carried.length; index += 1) {
-    strictEqual(
-      stateWriteValue(writeFor(block, writes, channels[index]!)),
-      loop.carried[index]!.loopInput
-    );
-  }
-
-  const eipWrite = writes.find((node) =>
-    writesStateChannel(block.values, node, coreStateFields.eip)
-  );
-
-  ok(eipWrite !== undefined, "fault arm flushes eip");
-  strictEqual(block.values.constValue(stateWriteValue(eipWrite)), repEip);
-});
-
-// The if whose then-body holds the loop: the loop's enter join.
-function loopEnterIf(block: IrBlock): IfControl {
-  const entry = block.body.nodes.find(
-    (node): node is IfControl =>
-      node.kind === "if" && node.thenBody.nodes.some((nested) => nested.kind === "loop")
-  );
-
-  ok(entry !== undefined, "loop entry if exists");
-  return entry;
-}
-
-// A channel dirtied before the loop survives only as the cell seed, which the
-// ran arm consumes; the zero-trip arm must commit it or memory keeps the
-// stale pre-loop value.
-test("a dirty-at-entry carried channel commits its seed on the zero-trip arm", () => {
-  const builder = createInstructionFunction();
-
-  builder.add(movSemantic(32), [regBinding("ecx"), regBinding("ebx")], loc(repEip - 2, repEip));
-  builder.add(repMovsSemantic(32), [siOperand(), diOperand()], loc(repEip, repNextEip));
-
-  const block = builder.finish();
-  const loop = findLoop(block);
-  const enterIf = loopEnterIf(block);
-
-  ok(enterIf.elseBody !== undefined, "the loop entry if has a zero-trip arm");
-
-  const elseWrites = stateWrites(enterIf.elseBody.nodes);
-  const ecxCell = carriedCellFor(block, loop, gprChannel("ecx"));
-
-  ok(ecxCell !== undefined, "loop carries ecx");
-  strictEqual(
-    stateWriteValue(writeFor(block, elseWrites, gprChannel("ecx"))),
-    ecxCell.seed
-  );
-
-  // Memory-backed carried channels already read back correctly when the loop
-  // never runs; only dirty-at-entry channels commit here.
-  for (const reg of ["esi", "edi"] as const) {
-    ok(
-      elseWrites.every((write) =>
-        !writesStateChannel(block.values, write, gprChannel(reg))
-      ),
-      `${reg} gets no zero-trip commit`
-    );
-  }
-
-  // A lone rep dirties nothing before the loop: no else arm at all.
-  strictEqual(loopEnterIf(repMovsBlock()).elseBody, undefined);
-});
-
-// The count is not carried: the root settles extra completed units as
-// (entryEcx - exitEcx) - enter, then implicit fallthrough folds in the instruction itself.
-test("the root count write folds the ecx delta over the block's read", () => {
-  const block = repMovsBlock();
-  const v = block.values;
-  const loop = findLoop(block);
-  const enterIf = loopEnterIf(block);
-  const loopIndex = enterIf.thenBody.nodes.findIndex((node) => node.kind === "loop");
-
-  ok(loopIndex >= 0, "loop entry arm holds a loop");
-
-  const enteredAfterLoop = enterIf.thenBody.nodes.slice(loopIndex + 1);
-  const rootAfterEntry = block.body.nodes.slice(block.body.nodes.indexOf(enterIf) + 1);
-  const exitEcxRead = readFor(block, rootAfterEntry, gprChannel("ecx"));
-  const countRead = readFor(block, rootAfterEntry, instructionCountField);
-  const completion = block.body.nodes.at(-1);
-
-  deepStrictEqual(stateTraffic(enteredAfterLoop), []);
-  ok(exitEcxRead !== undefined, "the count settle re-reads ecx after the loop");
-  ok(countRead !== undefined, "the count folds from a post-entry read");
-  const exitEcx = exitEcxRead.outputs[0];
-  const count = countRead.outputs[0];
-
-  ok(exitEcx !== undefined && count !== undefined, "post-loop reads have outputs");
-  ok(
-    completion?.kind === "return" &&
-      completion.source.kind === "invocation" &&
-      completion.source.invocation.target === testInstructionDispatch,
-    "fallthrough dispatches"
-  );
-  const targetEip = completion.source.invocation.inputs[0]?.value;
-
-  ok(targetEip !== undefined, "dispatch has a target EIP");
-  strictEqual(v.constValue(targetEip), repNextEip);
-
-  const ecxSeed = carriedCellFor(block, loop, gprChannel("ecx"))!.seed;
-  const delta = v.binary(
-    "sub",
-    v.binary("sub", ecxSeed, exitEcx),
-    enterIf.condition
-  );
-
-  deepStrictEqual(
-    stateWrites(rootAfterEntry).filter((node) =>
-      writesStateChannel(v, node, instructionCountField)
-    ),
-    [stateWrite(
-      v,
-      instructionCountField,
-      v.binary("add", v.binary("add", count, delta), v.const(1))
-    )]
-  );
-});
-
 test("instructions after the loop rebase the count from state", () => {
   const builder = createInstructionFunction();
 
@@ -447,10 +296,6 @@ test("rep lods carries its accumulator instead of writing it through each iterat
   const iterationWrites = stateWrites(loop.body.nodes.slice(0, backEdge + 1));
 
   deepStrictEqual(iterationWrites, []);
-  strictEqual(
-    stateWriteValue(writeFor(block, faultArmWrites(loop.body), gprChannel("al"))),
-    loop.carried[0]!.loopInput
-  );
 });
 
 test("repe cmps carries the lazy flag cells and updates them per unit", () => {
@@ -470,17 +315,6 @@ test("repe cmps carries the lazy flag cells and updates them per unit", () => {
   ];
 
   assertCarriedChannels(block, loop, channels);
-
-  // A first-unit fault must report the pre-rep flags: the lazy cells seed
-  // from state and restore through their loop inputs like any carried cell.
-  const writes = faultArmWrites(loop.body);
-
-  for (let index = 0; index < loop.carried.length; index += 1) {
-    strictEqual(
-      stateWriteValue(writeFor(block, writes, channels[index]!)),
-      loop.carried[index]!.loopInput
-    );
-  }
 
   const updates = backEdgeUpdates(loop.body);
   const kindCell = carriedCellFor(block, loop, flagStateFields.lazyKind);

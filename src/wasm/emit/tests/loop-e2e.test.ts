@@ -1,4 +1,4 @@
-import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert";
+import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
@@ -16,7 +16,6 @@ import { repMovsSemantic } from "#core/semantics/strings.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   readWasmCpuStateChannel,
-  readWasmCpuStateField,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import {
@@ -417,44 +416,6 @@ function repMovsdFunction(): TestFunction {
   );
   return builder.finish();
 }
-
-test("rep movsd runs its whole count in one dispatch with an exact count", async () => {
-  const { stateView, guestView, run } = await instantiateTestFunction(repMovsdFunction());
-
-  writeWasmCpuStateSnapshot(stateView, { ecx: 3, esi: 0x20, edi: 0x40, eip: repEip });
-  guestView.setUint32(0x20, 0x1111_2222, true);
-  guestView.setUint32(0x24, 0x3333_4444, true);
-  guestView.setUint32(0x28, 0x5555_6666, true);
-
-  strictEqual(run(), testFunctionCompleted);
-  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 0);
-  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("esi")), 0x2c);
-  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("edi")), 0x4c);
-  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), repNextEip);
-  strictEqual(readWasmCpuStateField(stateView, "instructionCount"), 3);
-  deepStrictEqual(
-    [0x40, 0x44, 0x48].map((address) => guestView.getUint32(address, true)),
-    [0x1111_2222, 0x3333_4444, 0x5555_6666]
-  );
-});
-
-test("a mid-string fault commits partial progress with eip at the rep", async () => {
-  const { stateView, guestView, run } = await instantiateTestFunction(repMovsdFunction());
-  const guestByteLength = guestView.byteLength;
-
-  writeWasmCpuStateSnapshot(stateView, { ecx: 2, esi: 0x20, edi: guestByteLength - 4, eip: repEip });
-  guestView.setUint32(0x20, 0x1111_2222, true);
-  guestView.setUint32(0x24, 0x3333_4444, true);
-
-  notStrictEqual(run(), testFunctionCompleted);
-  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 1);
-  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("esi")), 0x24);
-  strictEqual(readWasmCpuStateChannel(stateView, gprChannel("edi")), guestByteLength);
-  strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), repEip);
-  // The count is not carried: a mid-rep fault reports the pre-rep count.
-  strictEqual(readWasmCpuStateField(stateView, "instructionCount"), 0);
-  strictEqual(guestView.getUint32(guestByteLength - 4, true), 0x1111_2222);
-});
 
 const stateLoadOpcodes: readonly number[] = [
   wasmOpcode.i32Load,
