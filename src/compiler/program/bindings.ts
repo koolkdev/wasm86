@@ -1,18 +1,17 @@
 import { assert } from "#common/assert.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { FunctionType } from "./function-type.js";
-import type { FunctionDefinition } from "./functions.js";
-import type { TableRef } from "./refs.js";
+import type { FunctionRef, TableRef } from "./refs.js";
 
 export interface ModuleBindings {
-  readonly functionIndex: (definition: FunctionDefinition) => number;
+  readonly functionIndex: (ref: FunctionRef) => number;
   readonly typeIndex: (type: FunctionType) => number;
   readonly tableIndex: (ref: TableRef) => number;
   readonly resourceIndex: (ref: ResourceRef) => number;
 }
 
 type ModuleBindingIndices = Readonly<{
-  functionDefinitions: ReadonlyMap<FunctionDefinition, number>;
+  functions: ReadonlyMap<FunctionRef, number>;
   types: ReadonlyMap<FunctionType, number>;
   tables: ReadonlyMap<TableRef, number>;
   resources: ReadonlyMap<ResourceRef, number>;
@@ -20,10 +19,10 @@ type ModuleBindingIndices = Readonly<{
 
 export function createModuleBindings(indices: ModuleBindingIndices): ModuleBindings {
   return {
-    functionIndex(definition) {
-      const index = indices.functionDefinitions.get(definition);
+    functionIndex(ref) {
+      const index = indices.functions.get(ref);
 
-      assert(index !== undefined, `missing resolved function ${definition.ref.id}`);
+      assert(index !== undefined, `missing resolved function ${ref.id}`);
       return index;
     },
     typeIndex(type) {

@@ -478,7 +478,7 @@ test("an indirect invocation return emits arguments, selector, and return_call_i
   control.emit({
     ...rawControlTarget(body),
     bindings: createModuleBindings({
-      functionDefinitions: new Map(),
+      functions: new Map(),
       types: new Map([[type, 5]]),
       tables: new Map([[table, 6]]),
       resources: new Map()
@@ -617,9 +617,9 @@ function rawControlTarget(
   return {
     body,
     bindings: createModuleBindings({
-      functionDefinitions: expectedFunction === undefined
+      functions: expectedFunction === undefined
         ? new Map()
-        : new Map([[expectedFunction, 7]]),
+        : new Map([[expectedFunction.ref, 7]]),
       types: new Map(),
       tables: new Map(),
       resources: new Map()

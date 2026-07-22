@@ -52,10 +52,13 @@ export async function instantiateInterpreter(): Promise<InterpreterHarness> {
   const guestView = new DataView(guestMemory.buffer);
   const instance = instantiateCompiledProgram(
     compiledInterpreter.program,
-    new Map([
-      [testExecutionModel.cpuState.resource, cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, guestMemory]
-    ])
+    {
+      memories: new Map([
+        [testExecutionModel.cpuState.resource, cpuStateMemory],
+        [testExecutionModel.guestMemory.resource, guestMemory]
+      ]),
+      functions: new Map()
+    }
   );
   const run = instance.functionExports.get(compiledInterpreter.entry);
 

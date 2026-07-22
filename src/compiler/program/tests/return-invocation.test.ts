@@ -164,7 +164,7 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
   strictEqual(callerFunction.body.body.nodes[0]?.kind, "return");
   const emitted = emitFunction(callerFunction.body, {
     bindings: createModuleBindings({
-      functionDefinitions: new Map([[target, 1]]),
+      functions: new Map([[target.ref, 1]]),
       types: new Map(),
       tables: new Map(),
       resources: new Map()

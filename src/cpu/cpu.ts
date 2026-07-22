@@ -53,7 +53,10 @@ export function createCpu({
   );
   memories.set(stateDefinition.resource, cpuStateMemory);
 
-  const instance = instantiateCompiledProgram(interpreter.program, memories);
+  const instance = instantiateCompiledProgram(interpreter.program, {
+    memories,
+    functions: new Map()
+  });
   const entry = instance.functionExports.get(interpreter.entry);
 
   assert(

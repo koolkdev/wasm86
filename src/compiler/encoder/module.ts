@@ -18,6 +18,7 @@ import {
 
 export class WasmModuleEncoder {
   readonly #types: WasmFunctionType[] = [];
+  readonly #functionImports: FunctionImport[] = [];
   readonly #memoryImports: MemoryImport[] = [];
   readonly #tableImports: TableImport[] = [];
   readonly #functions: number[] = [];
@@ -37,6 +38,18 @@ export class WasmModuleEncoder {
     return index;
   }
 
+  importFunction(moduleName: string, name: string, typeIndex: number): number {
+    this.#validateFunctionTypeIndex(typeIndex);
+    if (this.#functions.length > 0) {
+      throw new Error("cannot import a Wasm function after adding a defined function");
+    }
+
+    const functionIndex = this.#functionImports.length;
+
+    this.#functionImports.push({ moduleName, name, typeIndex });
+    return functionIndex;
+  }
+
   importMemory(moduleName: string, name: string, limits: WasmMemoryLimits): number {
     validateMemoryLimits(limits);
 
@@ -54,11 +67,9 @@ export class WasmModuleEncoder {
   }
 
   addFunction(typeIndex: number, body: EncodedWasmFunctionBody): number {
-    if (!Number.isInteger(typeIndex) || typeIndex < 0 || typeIndex >= this.#types.length) {
-      throw new RangeError(`unknown Wasm function type index: ${typeIndex}`);
-    }
+    this.#validateFunctionTypeIndex(typeIndex);
 
-    const functionIndex = this.#functions.length;
+    const functionIndex = this.#functionImports.length + this.#functions.length;
     this.#functions.push(typeIndex);
     this.#bodies.push({ bytes: body.bytes, branchHints: body.branchHints });
     return functionIndex;
@@ -71,7 +82,9 @@ export class WasmModuleEncoder {
   }
 
   exportFunction(name: string, functionIndex: number): void {
-    if (!Number.isInteger(functionIndex) || functionIndex < 0 || functionIndex >= this.#functions.length) {
+    const functionCount = this.#functionImports.length + this.#functions.length;
+
+    if (!Number.isInteger(functionIndex) || functionIndex < 0 || functionIndex >= functionCount) {
       throw new RangeError(`unknown Wasm function index: ${functionIndex}`);
     }
 
@@ -101,7 +114,18 @@ export class WasmModuleEncoder {
   }
 
   #writeImportSection(section: ByteSink): void {
-    section.writeVecLength(this.#memoryImports.length + this.#tableImports.length);
+    section.writeVecLength(
+      this.#functionImports.length +
+        this.#memoryImports.length +
+        this.#tableImports.length
+    );
+
+    for (const entry of this.#functionImports) {
+      section.writeName(entry.moduleName);
+      section.writeName(entry.name);
+      section.writeByte(wasmExternalKind.function);
+      section.writeU32(entry.typeIndex);
+    }
 
     for (const entry of this.#memoryImports) {
       section.writeName(entry.moduleName);
@@ -172,22 +196,28 @@ export class WasmModuleEncoder {
   }
 
   #hasImports(): boolean {
-    return this.#memoryImports.length + this.#tableImports.length > 0;
+    return this.#functionImports.length + this.#memoryImports.length + this.#tableImports.length > 0;
   }
 
   #writeBranchHintSection(section: ByteSink): void {
     section.writeName("metadata.code.branch_hint");
     section.writeVecLength(this.#bodies.filter((body) => body.branchHints.length > 0).length);
 
-    for (let functionIndex = 0; functionIndex < this.#bodies.length; functionIndex += 1) {
-      const body = this.#bodies[functionIndex];
+    for (let bodyIndex = 0; bodyIndex < this.#bodies.length; bodyIndex += 1) {
+      const body = this.#bodies[bodyIndex];
 
       if (body === undefined || body.branchHints.length === 0) {
         continue;
       }
 
-      section.writeU32(functionIndex);
+      section.writeU32(this.#functionImports.length + bodyIndex);
       writeBranchHints(section, body.branchHints);
+    }
+  }
+
+  #validateFunctionTypeIndex(typeIndex: number): void {
+    if (!Number.isInteger(typeIndex) || typeIndex < 0 || typeIndex >= this.#types.length) {
+      throw new RangeError(`unknown Wasm function type index: ${typeIndex}`);
     }
   }
 }
@@ -204,6 +234,12 @@ type MemoryImport = Readonly<{
   moduleName: string;
   name: string;
   limits: WasmMemoryLimits;
+}>;
+
+type FunctionImport = Readonly<{
+  moduleName: string;
+  name: string;
+  typeIndex: number;
 }>;
 
 export type WasmGlobalDefinition =

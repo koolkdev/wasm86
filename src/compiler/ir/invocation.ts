@@ -4,8 +4,7 @@ import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ValueInput } from "#compiler/ir/values/types.js";
 import type { ModuleBindings } from "#compiler/program/bindings.js";
 import type { FunctionType } from "#compiler/program/function-type.js";
-import type { FunctionDefinition } from "#compiler/program/functions.js";
-import type { TableRef } from "#compiler/program/refs.js";
+import type { FunctionRef, TableRef } from "#compiler/program/refs.js";
 import type { ValueUseEmitter } from "#ir/node.js";
 
 export type InvocationEmitTarget = Readonly<{
@@ -13,8 +12,13 @@ export type InvocationEmitTarget = Readonly<{
   bindings: ModuleBindings;
 }>;
 
+export type DirectFunctionTarget = CallTarget & Readonly<{
+  ref: FunctionRef;
+  isAvailableTo(owner: object): boolean;
+}>;
+
 export type CallTargetReferences = Readonly<{
-  functions: readonly FunctionDefinition[];
+  functions: readonly DirectFunctionTarget[];
   types: readonly FunctionType[];
   tables: readonly TableRef[];
 }>;

@@ -1,11 +1,13 @@
 import type { WasmTableLimits } from "#compiler/encoder/module.js";
 import type { wasmValueType } from "#compiler/encoder/types.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
+import type { DirectFunctionTarget } from "#compiler/ir/invocation.js";
 import type { BodyPlacement } from "#compiler/placement/place.js";
 import type { IrBlock } from "#ir/block.js";
 import type { IrFunction } from "#ir/function.js";
 import type { FunctionType } from "./function-type.js";
 import type { FunctionDefinition } from "./functions.js";
+import type { FunctionImport } from "./imports.js";
 import type {
   LegacyEffects,
   LegacyFunctionDeclaration
@@ -50,7 +52,7 @@ export type LegacyFunction = Readonly<{
   ref: FunctionRef;
   signature: SignatureRef;
   calls: readonly FunctionRef[];
-  callTargets: readonly FunctionDefinition[];
+  callTargets: readonly DirectFunctionTarget[];
   indirectTypes: readonly FunctionType[];
   resources: readonly ResourceRef[];
   globals: readonly GlobalRef[];
@@ -66,7 +68,7 @@ export type DefinedFunction = Readonly<{
   ref: FunctionRef;
   type: FunctionType;
   effects: StorageEffects;
-  directTargets: readonly FunctionDefinition[];
+  directTargets: readonly DirectFunctionTarget[];
   indirectTypes: readonly FunctionType[];
   resources: readonly ResourceRef[];
   tables: readonly TableRef[];
@@ -74,7 +76,7 @@ export type DefinedFunction = Readonly<{
   placement: BodyPlacement;
 }>;
 
-export type FunctionDeclaration = LegacyFunction | FunctionDefinition;
+export type FunctionDeclaration = LegacyFunction | FunctionDefinition | FunctionImport;
 export type ProgramFunction = LegacyFunction | DefinedFunction;
 
 declare const programBrand: unique symbol;
@@ -83,6 +85,7 @@ export type ProgramData = Readonly<{
   functionTypes: readonly FunctionType[];
   signatures: readonly Signature[];
   memoryImports: readonly MemoryImport[];
+  functionImports: readonly FunctionImport[];
   tables: readonly TableImport[];
   globals: readonly InternalGlobal[];
   functions: readonly ProgramFunction[];

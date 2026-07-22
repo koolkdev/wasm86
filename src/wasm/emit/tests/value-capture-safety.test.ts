@@ -284,7 +284,7 @@ test("an exported trapping value evaluates at the fragment boundary", async () =
     body,
     scratch,
     bindings: createModuleBindings({
-      functionDefinitions: new Map(),
+      functions: new Map(),
       types: new Map(),
       tables: new Map(),
       resources: new Map([

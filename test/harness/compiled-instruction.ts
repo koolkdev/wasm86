@@ -111,10 +111,13 @@ export async function runCompiledInstructions(
   const program = compileProgram(buildInstructionProgram(instructions));
   const instance = instantiateCompiledProgram(
     program,
-    new Map([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
-    ])
+    {
+      memories: new Map([
+        [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
+        [testExecutionModel.guestMemory.resource, memories.guestMemory]
+      ]),
+      functions: new Map()
+    }
   );
   const entry = instance.functionExports.get(compiledInstructionExport);
 

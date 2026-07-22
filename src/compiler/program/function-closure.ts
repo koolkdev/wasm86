@@ -1,8 +1,10 @@
 import { assert } from "#common/assert.js";
 import type { BodyAnalysis } from "#compiler/analysis/model.js";
+import type { DirectFunctionTarget } from "#compiler/ir/invocation.js";
 import { placeFunction, type BodyPlacement } from "#compiler/placement/place.js";
 import { buildFunction, type IrFunction } from "#ir/function.js";
-import type { FunctionDefinition } from "./functions.js";
+import { FunctionDefinition } from "./functions.js";
+import { FunctionImport } from "./imports.js";
 
 export type ClosedFunction = Readonly<{
   body: IrFunction;
@@ -19,6 +21,7 @@ export type CloseFunctionsOptions = Readonly<{
   declaredFunctions: readonly FunctionDefinition[];
   rootPlacements: readonly BodyPlacement[];
   declareFunction(definition: FunctionDefinition): void;
+  retainFunctionImport(imported: FunctionImport): void;
 }>;
 
 export function closeFunctions(options: CloseFunctionsOptions): FunctionClosure {
@@ -27,10 +30,10 @@ export function closeFunctions(options: CloseFunctionsOptions): FunctionClosure 
   const pending: FunctionDefinition[] = [];
   let next = 0;
 
-  const assertOwned = (definition: FunctionDefinition): void => {
+  const assertOwned = (target: DirectFunctionTarget): void => {
     assert(
-      definition.canBeUsedBy(options.owner),
-      `function ${definition.ref.id} belongs to another program`
+      target.isAvailableTo(options.owner),
+      `function ${target.ref.id} belongs to another program`
     );
   };
   const enqueue = (definition: FunctionDefinition): void => {
@@ -45,10 +48,18 @@ export function closeFunctions(options: CloseFunctionsOptions): FunctionClosure 
     for (const site of analysis.invocations()) {
       const mustExecute = analysis.invocationMustExecute(site);
 
-      for (const definition of site.invocation.target.references.functions) {
-        assertOwned(definition);
+      for (const target of site.invocation.target.references.functions) {
+        assertOwned(target);
         if (mustExecute) {
-          enqueue(definition);
+          if (target instanceof FunctionImport) {
+            options.retainFunctionImport(target);
+          } else {
+            assert(
+              target instanceof FunctionDefinition,
+              `unknown direct function target ${target.ref.id}`
+            );
+            enqueue(target);
+          }
         }
       }
     }

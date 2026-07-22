@@ -349,7 +349,7 @@ test("indirect invocations own their selector, effects, and emission", () => {
     body,
     cellLocal: () => 0,
     bindings: createModuleBindings({
-      functionDefinitions: new Map(),
+      functions: new Map(),
       types: new Map([[type, 8]]),
       tables: new Map([[table, 9]]),
       resources: new Map()
@@ -414,7 +414,7 @@ test("resource and cell emission call their definition-specific target services"
       return 2;
     },
     bindings: createModuleBindings({
-      functionDefinitions: new Map(),
+      functions: new Map(),
       types: new Map(),
       tables: new Map(),
       resources: new Map([[resource, 3]])
@@ -453,9 +453,9 @@ function operationTarget(
     body,
     cellLocal: () => 0,
     bindings: createModuleBindings({
-      functionDefinitions: expectedFunction === undefined
+      functions: expectedFunction === undefined
         ? new Map()
-        : new Map([[expectedFunction, 7]]),
+        : new Map([[expectedFunction.ref, 7]]),
       types: new Map(),
       tables: new Map(),
       resources: new Map()

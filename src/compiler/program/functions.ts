@@ -1,7 +1,7 @@
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type {
-  CallTarget,
   CallTargetReferences,
+  DirectFunctionTarget,
   InvocationEmitTarget
 } from "#compiler/ir/invocation.js";
 import type { FunctionBuilder } from "#ir/function.js";
@@ -18,7 +18,7 @@ export type FunctionDefinitionOptions = Readonly<{
   build: BuildFunction;
 }>;
 
-export class FunctionDefinition implements CallTarget {
+export class FunctionDefinition implements DirectFunctionTarget {
   readonly ref: FunctionRef;
   readonly type: FunctionType;
   readonly effects: StorageEffects;
@@ -36,7 +36,7 @@ export class FunctionDefinition implements CallTarget {
     this.#buildFunction = options.build;
   }
 
-  canBeUsedBy(owner: object): boolean {
+  isAvailableTo(owner: object): boolean {
     return this.#owner === undefined || this.#owner === owner;
   }
 
@@ -49,11 +49,11 @@ export class FunctionDefinition implements CallTarget {
   }
 
   emitCall(context: InvocationEmitTarget): void {
-    context.body.callFunction(context.bindings.functionIndex(this));
+    context.body.callFunction(context.bindings.functionIndex(this.ref));
   }
 
   emitReturnCall(context: InvocationEmitTarget): void {
-    context.body.returnCallFunction(context.bindings.functionIndex(this));
+    context.body.returnCallFunction(context.bindings.functionIndex(this.ref));
   }
 
   build(fn: FunctionBuilder): void {

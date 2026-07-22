@@ -49,7 +49,7 @@ type DecodeReadFragment = Readonly<{
 }>;
 
 const stateBindings = createModuleBindings({
-  functionDefinitions: new Map(),
+  functions: new Map(),
   types: new Map(),
   tables: new Map(),
   resources: new Map([
@@ -57,7 +57,7 @@ const stateBindings = createModuleBindings({
   ])
 });
 const decodeBindings = createModuleBindings({
-  functionDefinitions: new Map(),
+  functions: new Map(),
   types: new Map(),
   tables: new Map(),
   resources: new Map([

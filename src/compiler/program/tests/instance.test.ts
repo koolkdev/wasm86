@@ -35,7 +35,10 @@ test("compiled program instances bind arbitrary external names and resolve exact
   new DataView(memory.buffer).setUint32(0, 42, true);
   const instance = instantiateCompiledProgram(
     fixture.compiled,
-    new Map([[fixture.resource, memory]])
+    {
+      memories: new Map([[fixture.resource, memory]]),
+      functions: new Map()
+    }
   );
   const read = instance.functionExports.get(fixture.exportRef);
 
@@ -45,7 +48,10 @@ test("compiled program instances bind arbitrary external names and resolve exact
 
 test("compiled program instances reject a missing memory binding", () => {
   throws(
-    () => instantiateCompiledProgram(fixture.compiled, new Map()),
+    () => instantiateCompiledProgram(fixture.compiled, {
+      memories: new Map(),
+      functions: new Map()
+    }),
     /missing memory binding for program resource test\.instance\.memory/
   );
 });
@@ -57,7 +63,10 @@ test("compiled program instances reject a same-ID foreign resource ref", () => {
   throws(
     () => instantiateCompiledProgram(
       fixture.compiled,
-      new Map([[foreignResource, memory]])
+      {
+        memories: new Map([[foreignResource, memory]]),
+        functions: new Map()
+      }
     ),
     /missing memory binding for program resource test\.instance\.memory/
   );
@@ -71,7 +80,10 @@ test("compiled program instances accept memory from another realm", () => {
   new DataView(memory.buffer).setUint32(0, 42, true);
   const instance = instantiateCompiledProgram(
     fixture.compiled,
-    new Map([[fixture.resource, memory]])
+    {
+      memories: new Map([[fixture.resource, memory]]),
+      functions: new Map()
+    }
   );
   const read = instance.functionExports.get(fixture.exportRef);
 
@@ -86,7 +98,10 @@ test("compiled program instances reject undersized memory before instantiation",
   throws(
     () => instantiateCompiledProgram(
       undersizedFixture.compiled,
-      new Map([[undersizedFixture.resource, memory]])
+      {
+        memories: new Map([[undersizedFixture.resource, memory]]),
+        functions: new Map()
+      }
     ),
     /memory binding for program resource test\.instance\.memory is smaller than its declared minimum/
   );
@@ -96,7 +111,10 @@ test("compiled program instances do not resolve a same-ID foreign export ref", (
   const memory = new WebAssembly.Memory({ initial: 1 });
   const instance = instantiateCompiledProgram(
     fixture.compiled,
-    new Map([[fixture.resource, memory]])
+    {
+      memories: new Map([[fixture.resource, memory]]),
+      functions: new Map()
+    }
   );
   const foreignExport = functionExportRef(fixture.exportRef.id);
 

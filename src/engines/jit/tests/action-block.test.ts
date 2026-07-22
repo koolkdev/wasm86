@@ -649,10 +649,13 @@ function runCompiledJitEntry(
 ): Readonly<{ exit: ReturnType<typeof decodeExit> | NonNullable<ReturnType<typeof decodeTransfer>> }> {
   const instance = instantiateCompiledProgram(
     compiled,
-    new Map<ResourceRef, WebAssembly.Memory>([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
-    ])
+    {
+      memories: new Map<ResourceRef, WebAssembly.Memory>([
+        [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
+        [testExecutionModel.guestMemory.resource, memories.guestMemory]
+      ]),
+      functions: new Map()
+    }
   );
   const exportName = jitBlockExportName(entryEip);
   const exported = compiled.functionExports.find(

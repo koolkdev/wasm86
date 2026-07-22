@@ -8,6 +8,7 @@ import {
   type WasmValueType
 } from "#compiler/encoder/types.js";
 import { emitFunction } from "#wasm/emit/action.js";
+import type { DirectFunctionTarget } from "#compiler/ir/invocation.js";
 import type {
   FunctionExportRef,
   FunctionRef,
@@ -21,7 +22,6 @@ import type {
   LegacyFunctionBodyContext
 } from "./legacy-body.js";
 import type { FunctionType } from "./function-type.js";
-import type { FunctionDefinition } from "./functions.js";
 import type { Program, ProgramFunction } from "./model.js";
 import type { MemoryImport } from "./resources.js";
 import { validateProgramEncoding } from "./validate.js";
@@ -34,9 +34,16 @@ export type CompiledFunctionExport = Readonly<{
   name: string;
 }>;
 
+export type CompiledFunctionImport = Readonly<{
+  ref: FunctionRef;
+  moduleName: string;
+  name: string;
+}>;
+
 export type CompiledProgram = Readonly<{
   bytes: Uint8Array<ArrayBuffer>;
   memoryImports: readonly MemoryImport[];
+  functionImports: readonly CompiledFunctionImport[];
   functionExports: readonly CompiledFunctionExport[];
 }>;
 
@@ -54,6 +61,11 @@ export function compileProgram(program: Program): CompiledProgram {
   return {
     bytes: encodeProgram(program),
     memoryImports: program.memoryImports,
+    functionImports: program.functionImports.map(({ ref, moduleName, name }) => ({
+      ref,
+      moduleName,
+      name
+    })),
     functionExports: program.exports.map(({ ref, name }) => ({ ref, name }))
   };
 }
@@ -68,12 +80,40 @@ function encodeProgram(program: Program): Uint8Array<ArrayBuffer> {
   const module = new WasmModuleEncoder();
 
   addFunctionTypes(module, layout);
+  addFunctionImports(module, program, layout);
   addMemoryImports(module, program, layout);
   addTableImports(module, program, layout);
   addGlobals(module, program, layout);
   addFunctions(module, program, layout, bodies);
   addExports(module, program, layout);
   return module.encode();
+}
+
+function addFunctionImports(
+  module: WasmModuleEncoder,
+  program: Program,
+  layout: ProgramLayout
+): void {
+  for (const imported of program.functionImports) {
+    const typeIndex = layout.typeIndices.get(imported.type);
+    const expectedIndex = layout.functionIndices.get(imported.ref);
+
+    assert(
+      typeIndex !== undefined,
+      `missing layout for function import ${imported.ref.id} type`
+    );
+    assert(
+      expectedIndex !== undefined,
+      `missing layout for function import ${imported.ref.id}`
+    );
+    const index = module.importFunction(
+      imported.moduleName,
+      imported.name,
+      typeIndex
+    );
+
+    assert(index === expectedIndex, `unexpected Wasm function import index: ${index}`);
+  }
 }
 
 function addFunctionTypes(module: WasmModuleEncoder, layout: ProgramLayout): void {
@@ -187,7 +227,13 @@ function layoutProgram(program: Program): ProgramLayout {
     types,
     signatureIndices,
     typeIndices,
-    functionIndices: new Map(program.functions.map((fn, index) => [fn.ref, index])),
+    functionIndices: new Map([
+      ...program.functionImports.map((fn, index) => [fn.ref, index] as const),
+      ...program.functions.map((fn, index) => [
+        fn.ref,
+        program.functionImports.length + index
+      ] as const)
+    ]),
     memoryIndices: new Map(
       program.memoryImports.map((memory, index) => [memory.ref, index])
     ),
@@ -218,8 +264,8 @@ function buildLegacyBody(
 
   assert(signatureIndex !== undefined, `missing layout for program signature ${fn.signature.id}`);
 
-  const functions = resolveFunctionIndices(layout, fn);
-  const definitions = resolveDefinitionIndices(layout, fn.callTargets);
+  const legacyFunctions = resolveFunctionIndices(layout, fn);
+  const directFunctions = resolveDirectFunctionIndices(layout, fn.callTargets);
   const types = resolveTypeIndices(layout, fn.indirectTypes);
   const resources = resolveResourceIndices(layout, fn.resources);
 
@@ -236,12 +282,12 @@ function buildLegacyBody(
 
   const context = {
     bindings: createModuleBindings({
-      functionDefinitions: definitions,
+      functions: directFunctions,
       types,
       tables,
       resources
     }),
-    functions,
+    functions: legacyFunctions,
     globals,
     signatureIndex,
     placements: program.placements
@@ -253,13 +299,13 @@ function buildDefinedBody(
   layout: ProgramLayout,
   fn: DefinedFunction
 ): EncodedWasmFunctionBody {
-  const definitions = resolveDefinitionIndices(layout, fn.directTargets);
+  const functions = resolveDirectFunctionIndices(layout, fn.directTargets);
   const types = resolveTypeIndices(layout, fn.indirectTypes);
   const resources = resolveResourceIndices(layout, fn.resources);
   const tables = resolveTableIndices(layout, fn.tables);
   return emitFunction(fn.body, {
     bindings: createModuleBindings({
-      functionDefinitions: definitions,
+      functions,
       types,
       tables,
       resources
@@ -328,17 +374,17 @@ function resolveFunctionIndices(
   return functions;
 }
 
-function resolveDefinitionIndices(
+function resolveDirectFunctionIndices(
   layout: ProgramLayout,
-  calls: readonly FunctionDefinition[]
-): ReadonlyMap<FunctionDefinition, number> {
-  const functions = new Map<FunctionDefinition, number>();
+  calls: readonly DirectFunctionTarget[]
+): ReadonlyMap<FunctionRef, number> {
+  const functions = new Map<FunctionRef, number>();
 
   for (const call of calls) {
     const functionIndex = layout.functionIndices.get(call.ref);
 
     assert(functionIndex !== undefined, `missing layout for called program function ${call.ref.id}`);
-    functions.set(call, functionIndex);
+    functions.set(call.ref, functionIndex);
   }
   return functions;
 }

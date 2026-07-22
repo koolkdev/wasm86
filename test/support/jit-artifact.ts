@@ -33,7 +33,10 @@ export function instantiateJitArtifact(
     [model.cpuState.resource, options.cpuStateMemory],
     [model.guestMemory.resource, options.guestMemory]
   ]);
-  const instance = instantiateCompiledProgram(artifact.program, memories);
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories,
+    functions: new Map()
+  });
   const exportName = jitBlockExportName(artifact.entryEip);
   const exported = artifact.program.functionExports.find(
     (candidate) => candidate.name === exportName

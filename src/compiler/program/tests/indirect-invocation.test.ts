@@ -83,7 +83,7 @@ test("dead pure indirect invocations retain neither types nor tables", () => {
   deepStrictEqual(linked.tables, []);
   const body = emitFunction(linked.body, {
     bindings: createModuleBindings({
-      functionDefinitions: new Map(),
+      functions: new Map(),
       types: new Map(),
       tables: new Map(),
       resources: new Map()
@@ -385,7 +385,7 @@ test("defined functions bind ordinary and returning indirect invocations", async
   }
 
   const bindings = createModuleBindings({
-    functionDefinitions: new Map(),
+    functions: new Map(),
     types: new Map([[type, 5]]),
     tables: new Map([[table, 7]]),
     resources: new Map()

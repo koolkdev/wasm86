@@ -8,6 +8,10 @@ import {
   FunctionDefinition
 } from "./functions.js";
 import type { LegacyFunctionDeclaration } from "./legacy-body.js";
+import {
+  FunctionImport,
+  type FunctionImportDeclaration
+} from "./imports.js";
 import { linkProgram } from "./link.js";
 import type { FunctionType } from "./function-type.js";
 import type {
@@ -80,6 +84,14 @@ export class ProgramBuilder {
 
     this.#functions.add(fn);
     return fn.ref;
+  }
+
+  importFunction(declaration: FunctionImportDeclaration): FunctionImport {
+    this.#assertOpen();
+    const imported = new FunctionImport(declaration, this.#owner);
+
+    this.#functions.add(imported);
+    return imported;
   }
 
   defineFunction(

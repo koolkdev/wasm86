@@ -615,7 +615,7 @@ test("an effectful function call stays single and conditional inside its selecte
   deepStrictEqual(callerDefinition.effects, effects);
   const emitted = emitFunction(callerDefinition.body, {
     bindings: createModuleBindings({
-      functionDefinitions: new Map([[callee, 0]]),
+      functions: new Map([[callee.ref, 0]]),
       types: new Map(),
       tables: new Map(),
       resources: new Map()

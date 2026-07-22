@@ -49,7 +49,7 @@ test("compiled programs preserve reachable memories, exact exports, and runnable
 
   deepStrictEqual(
     Object.keys(compiled).sort(),
-    ["bytes", "functionExports", "memoryImports"]
+    ["bytes", "functionExports", "functionImports", "memoryImports"]
   );
   strictEqual(compiled.memoryImports.length, 1);
   strictEqual(compiled.memoryImports[0]?.ref, fixture.used);
@@ -62,6 +62,7 @@ test("compiled programs preserve reachable memories, exact exports, and runnable
   strictEqual(compiled.functionExports.length, 1);
   strictEqual(compiled.functionExports[0]?.ref, exportRef);
   strictEqual(compiled.functionExports[0]?.name, "read");
+  deepStrictEqual(compiled.functionImports, []);
 
   const memory = new WebAssembly.Memory({ initial: 1 });
 

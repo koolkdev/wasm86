@@ -2,7 +2,10 @@ import { assert } from "#common/assert.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import { wasmPageByteLength } from "./pages.js";
 import type { CompiledProgram } from "./compile.js";
-import type { FunctionExportRef } from "./refs.js";
+import type {
+  FunctionExportRef,
+  FunctionRef
+} from "./refs.js";
 
 const compiledModules = new WeakMap<CompiledProgram, WebAssembly.Module>();
 
@@ -10,14 +13,22 @@ export type ProgramInstance = Readonly<{
   functionExports: ReadonlyMap<FunctionExportRef, WebAssembly.ExportValue>;
 }>;
 
+export type ProgramBindings = Readonly<{
+  memories: ReadonlyMap<ResourceRef, WebAssembly.Memory>;
+  functions: ReadonlyMap<FunctionRef, Function>;
+}>;
+
 export function instantiateCompiledProgram(
   program: CompiledProgram,
-  memories: ReadonlyMap<ResourceRef, WebAssembly.Memory>
+  bindings: ProgramBindings
 ): ProgramInstance {
-  const importsByModule = new Map<string, Map<string, WebAssembly.Memory>>();
+  const importsByModule = new Map<
+    string,
+    Map<string, WebAssembly.ImportValue>
+  >();
 
   for (const imported of program.memoryImports) {
-    const memory = memories.get(imported.ref);
+    const memory = bindings.memories.get(imported.ref);
 
     assert(
       memory !== undefined,
@@ -28,13 +39,17 @@ export function instantiateCompiledProgram(
       `memory binding for program resource ${imported.ref.id} is smaller than its declared minimum`
     );
 
-    let moduleImports = importsByModule.get(imported.moduleName);
+    addImport(importsByModule, imported.moduleName, imported.name, memory);
+  }
 
-    if (moduleImports === undefined) {
-      moduleImports = new Map();
-      importsByModule.set(imported.moduleName, moduleImports);
-    }
-    moduleImports.set(imported.name, memory);
+  for (const imported of program.functionImports) {
+    const fn = bindings.functions.get(imported.ref);
+
+    assert(
+      fn !== undefined,
+      `missing function binding for program function ${imported.ref.id}`
+    );
+    addImport(importsByModule, imported.moduleName, imported.name, fn);
   }
 
   const imports: WebAssembly.Imports = Object.fromEntries(
@@ -63,4 +78,19 @@ export function instantiateCompiledProgram(
   }
 
   return { functionExports };
+}
+
+function addImport(
+  importsByModule: Map<string, Map<string, WebAssembly.ImportValue>>,
+  moduleName: string,
+  name: string,
+  value: WebAssembly.ImportValue
+): void {
+  let moduleImports = importsByModule.get(moduleName);
+
+  if (moduleImports === undefined) {
+    moduleImports = new Map();
+    importsByModule.set(moduleName, moduleImports);
+  }
+  moduleImports.set(name, value);
 }

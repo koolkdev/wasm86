@@ -1,6 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { BodyAnalysis } from "#compiler/analysis/model.js";
 import type { EncodedWasmFunctionBody } from "#compiler/encoder/function-body.js";
+import type { DirectFunctionTarget } from "#compiler/ir/invocation.js";
 import type {
   StorageAccess,
   StorageEffects
@@ -12,6 +13,7 @@ import type { IrBlock } from "#ir/block.js";
 import { validateDeclaredStorageEffects } from "#ir/validate/effects.js";
 import type { FunctionType } from "./function-type.js";
 import { FunctionDefinition } from "./functions.js";
+import { FunctionImport } from "./imports.js";
 import type { LinkProgramOptions } from "./link.js";
 import type {
   DefinedFunction,
@@ -41,6 +43,11 @@ export function validateProgramDeclarations(
   validateDeclarations(declarations.globals);
   validateDeclarations(declarations.exports);
   validateExportNames(declarations.exports);
+  validateExternalImportNames(
+    declarations.resources.memoryImports,
+    declarations.functions.filter(isFunctionImport),
+    declarations.tables
+  );
 
   for (const signature of declarations.signatures) {
     validateFunctionType(signature.type);
@@ -61,6 +68,10 @@ export function validateProgramDeclarations(
       validateFunctionDefinitionDeclaration(declarations, fn);
       continue;
     }
+    if (fn instanceof FunctionImport) {
+      validateFunctionImportDeclaration(declarations, fn);
+      continue;
+    }
 
     assert(
       fn.effects === "none" || fn.effects === "world",
@@ -71,8 +82,10 @@ export function validateProgramDeclarations(
       `unknown program signature ${fn.signature.id} declared by function ${fn.ref.id}`
     );
     for (const call of fn.calls) {
+      const target = functionsByRef.get(call);
+
       assert(
-        functionsByRef.has(call),
+        target !== undefined && !(target instanceof FunctionImport),
         `unknown program function ${call.id} called by function ${fn.ref.id}`
       );
     }
@@ -101,7 +114,10 @@ export function validateProgramDeclarations(
   for (const signature of declarations.signatures) {
     assert(
       functions.some(
-        (fn) => !(fn instanceof FunctionDefinition) && fn.signature === signature.ref
+        (fn) =>
+          !(fn instanceof FunctionDefinition) &&
+          !(fn instanceof FunctionImport) &&
+          fn.signature === signature.ref
       ),
       `program signature ${signature.ref.id} is not used by a legacy function`
     );
@@ -111,7 +127,7 @@ export function validateProgramDeclarations(
     const target = functionsByRef.get(exported.target);
 
     assert(
-      target !== undefined,
+      target !== undefined && !(target instanceof FunctionImport),
       `unknown program function ${exported.target.id} exported by ${exported.ref.id}`
     );
   }
@@ -139,18 +155,36 @@ export function validateProgramFunctionDeclaration(
 
 export function validateLinkedProgramFunctions(
   declarations: readonly FunctionDeclaration[],
+  functionImports: readonly FunctionImport[],
   functions: readonly ProgramFunction[]
 ): void {
+  const localDeclarations = declarations.filter(
+    (declaration) => !(declaration instanceof FunctionImport)
+  );
+
   assert(
-    functions.length === declarations.length,
+    functions.length === localDeclarations.length,
     "linked program omitted a declared function"
   );
-  const declared = new Set(declarations.map((declaration) => declaration.ref));
+  const declared = new Set(
+    localDeclarations.map((declaration) => declaration.ref)
+  );
+  const declaredImports = new Set(
+    declarations
+      .filter(isFunctionImport)
+      .map((imported) => imported.ref)
+  );
 
   for (const fn of functions) {
     assert(
       declared.has(fn.ref),
       `linked undeclared program function ${fn.ref.id}`
+    );
+  }
+  for (const imported of functionImports) {
+    assert(
+      declaredImports.has(imported.ref),
+      `linked undeclared program function import ${imported.ref.id}`
     );
   }
 }
@@ -160,7 +194,7 @@ function validateFunctionDefinitionDeclaration(
   definition: FunctionDefinition
 ): void {
   assert(
-    definition.canBeUsedBy(declarations.owner),
+    definition.isAvailableTo(declarations.owner),
     `function ${definition.ref.id} belongs to another program`
   );
   validateFunctionType(definition.type);
@@ -169,14 +203,40 @@ function validateFunctionDefinitionDeclaration(
     `function ${definition.ref.id} declared`
   );
   for (const access of [...definition.effects.reads, ...definition.effects.writes]) {
-    if (access.space === "resource") {
-      assert(
-        declarations.resources.memoryImports.some(
-          (memory) => memory.ref === access.resource
-        ),
-        `unknown program resource ${access.resource.id} declared by function ${definition.ref.id}`
-      );
-    }
+    validateFunctionResourceEffect(declarations, definition.ref.id, access);
+  }
+}
+
+function validateFunctionImportDeclaration(
+  declarations: LinkProgramOptions,
+  imported: FunctionImport
+): void {
+  assert(
+    imported.isAvailableTo(declarations.owner),
+    `function ${imported.ref.id} belongs to another program`
+  );
+  validateFunctionType(imported.type);
+  validateDeclaredStorageEffects(
+    imported.effects,
+    `function import ${imported.ref.id} declared`
+  );
+  for (const access of [...imported.effects.reads, ...imported.effects.writes]) {
+    validateFunctionResourceEffect(declarations, imported.ref.id, access);
+  }
+}
+
+function validateFunctionResourceEffect(
+  declarations: LinkProgramOptions,
+  functionId: string,
+  access: StorageAccess
+): void {
+  if (access.space === "resource") {
+    assert(
+      declarations.resources.memoryImports.some(
+        (memory) => memory.ref === access.resource
+      ),
+      `unknown program resource ${access.resource.id} declared by function ${functionId}`
+    );
   }
 }
 
@@ -188,12 +248,27 @@ export function validateProgram(program: Program): void {
   validateResourceDeclarations(program.memoryImports);
   validateDeclarations(program.tables);
   validateDeclarations(program.globals);
-  validateDeclarations(program.functions);
+  validateDeclarations([
+    ...program.functionImports,
+    ...program.functions
+  ]);
   validateDeclarations(program.exports);
   validateExportNames(program.exports);
+  validateExternalImportNames(
+    program.memoryImports,
+    program.functionImports,
+    program.tables
+  );
 
   for (const signature of program.signatures) {
     validateFunctionType(signature.type);
+  }
+  for (const imported of program.functionImports) {
+    validateFunctionType(imported.type);
+    validateDeclaredStorageEffects(
+      imported.effects,
+      `function import ${imported.ref.id} declared`
+    );
   }
   for (const fn of program.functions) {
     if (fn.kind === "legacy") {
@@ -218,6 +293,13 @@ export function validateProgram(program: Program): void {
   const tables = new Set(program.tables.map((table) => table.ref));
   const globals = new Set(program.globals.map((global) => global.ref));
   const functions = new Map(program.functions.map((fn) => [fn.ref, fn]));
+  const callTargets = new Map<
+    FunctionRef,
+    ProgramFunction | FunctionImport
+  >([
+    ...program.functionImports.map((imported) => [imported.ref, imported] as const),
+    ...program.functions.map((fn) => [fn.ref, fn] as const)
+  ]);
 
   validateProgramFunctionTypes(program, signatures);
 
@@ -229,7 +311,7 @@ export function validateProgram(program: Program): void {
       );
     }
 
-    validateKnownDirectTargets(fn, functions);
+    validateKnownDirectTargets(fn, callTargets);
     for (const resource of fn.resources) {
       assert(
         memories.has(resource),
@@ -269,6 +351,8 @@ export function validateProgram(program: Program): void {
       `unknown program function ${exported.target.id} exported by ${exported.ref.id}`
     );
   }
+
+  validateRequiredFunctionImports(program);
 
   const retainedBodies = new Set<IrBlock>();
 
@@ -321,6 +405,15 @@ function validateProgramFunctionTypes(
       if (!requiredTypes.includes(fn.type)) {
         requiredTypes.push(fn.type);
       }
+    }
+  }
+  for (const imported of program.functionImports) {
+    assert(
+      functionTypes.has(imported.type),
+      `function import ${imported.ref.id} type is missing from the program function types`
+    );
+    if (!requiredTypes.includes(imported.type)) {
+      requiredTypes.push(imported.type);
     }
   }
   for (const fn of program.functions) {
@@ -400,11 +493,21 @@ function collectDeclaredFunctions(
     add(declaration);
   }
   for (const declaration of declarations) {
-    if (declaration instanceof FunctionDefinition) {
+    if (
+      declaration instanceof FunctionDefinition ||
+      declaration instanceof FunctionImport
+    ) {
       continue;
     }
     for (const target of declaration.callTargets) {
-      add(target);
+      if (target instanceof FunctionDefinition) {
+        add(target);
+      } else {
+        assert(
+          target instanceof FunctionImport && byRef.get(target.ref) === target,
+          `unknown program function import ${target.ref.id}`
+        );
+      }
     }
   }
   return functions;
@@ -597,6 +700,42 @@ function validateResourceDeclarations(
   }
 }
 
+type ExternalImportDeclaration = Readonly<{
+  ref: Readonly<{ id: string }>;
+  moduleName: string;
+  name: string;
+}>;
+
+function validateExternalImportNames(
+  memories: readonly ExternalImportDeclaration[],
+  functions: readonly ExternalImportDeclaration[],
+  tables: readonly ExternalImportDeclaration[]
+): void {
+  const namesByModule = new Map<string, Set<string>>();
+
+  for (const imported of [...functions, ...memories, ...tables]) {
+    assert(
+      imported.moduleName.length > 0,
+      `program import ${imported.ref.id} has an empty external module name`
+    );
+    assert(
+      imported.name.length > 0,
+      `program import ${imported.ref.id} has an empty external field name`
+    );
+    let names = namesByModule.get(imported.moduleName);
+
+    if (names === undefined) {
+      names = new Set();
+      namesByModule.set(imported.moduleName, names);
+    }
+    assert(
+      !names.has(imported.name),
+      `duplicate program import external identity: ${imported.moduleName}.${imported.name}`
+    );
+    names.add(imported.name);
+  }
+}
+
 function validateExportNames(exports: readonly FunctionExport[]): void {
   const names = new Set<string>();
 
@@ -632,17 +771,25 @@ function validateFunctionType(type: Readonly<{
 
 function validateKnownDirectTargets(
   fn: ProgramFunction,
-  functions: ReadonlyMap<ProgramFunction["ref"], ProgramFunction>
+  functions: ReadonlyMap<FunctionRef, ProgramFunction | FunctionImport>
 ): void {
   const directRefs = fn.kind === "legacy"
     ? fn.calls
     : fn.directTargets.map((target) => target.ref);
 
   for (const ref of directRefs) {
+    const linked = functions.get(ref);
+
     assert(
-      functions.has(ref),
+      linked !== undefined,
       `unknown program function ${ref.id} called by function ${fn.ref.id}`
     );
+    if (fn.kind === "legacy" && linked instanceof FunctionImport) {
+      assert(
+        fn.callTargets.includes(linked),
+        `legacy function ${fn.ref.id} has a raw call to function import ${ref.id}`
+      );
+    }
   }
   const directTargets = fn.kind === "legacy" ? fn.callTargets : fn.directTargets;
 
@@ -653,12 +800,21 @@ function validateKnownDirectTargets(
       linked !== undefined,
       `unknown program function ${target.ref.id} called by function ${fn.ref.id}`
     );
-    assert(
-      linked.kind === "function" &&
-        linked.type === target.type &&
-        linked.effects === target.effects,
-      `function ${target.ref.id} call target does not match its linked definition`
-    );
+    if (target instanceof FunctionImport) {
+      assert(
+        linked === target,
+        `function ${target.ref.id} call target does not match its linked import`
+      );
+    } else {
+      assert(
+        target instanceof FunctionDefinition &&
+          !(linked instanceof FunctionImport) &&
+          linked.kind === "function" &&
+          linked.type === target.type &&
+          linked.effects === target.effects,
+        `function ${target.ref.id} call target does not match its linked definition`
+      );
+    }
     if (fn.kind === "legacy") {
       assert(
         fn.calls.includes(target.ref),
@@ -666,6 +822,30 @@ function validateKnownDirectTargets(
       );
     }
   }
+}
+
+function validateRequiredFunctionImports(program: Program): void {
+  const required = new Set<FunctionImport>();
+
+  for (const fn of program.functions) {
+    const targets = fn.kind === "legacy" ? fn.callTargets : fn.directTargets;
+
+    for (const target of targets) {
+      if (target instanceof FunctionImport) {
+        required.add(target);
+      }
+    }
+  }
+  for (const imported of program.functionImports) {
+    assert(
+      required.has(imported),
+      `program contains an unrequired function import ${imported.ref.id}`
+    );
+  }
+  assert(
+    required.size === program.functionImports.length,
+    "program omitted a required function import"
+  );
 }
 
 function validateLegacyFunction(
@@ -749,7 +929,7 @@ function validateDefinedFunction(
   const invocations = placement.analysis.invocations()
     .filter((site) => placement.analysis.invocationMustExecute(site))
     .map((site) => site.invocation);
-  const directTargets: FunctionDefinition[] = [];
+  const directTargets: DirectFunctionTarget[] = [];
   const indirectTypes: FunctionType[] = [];
   const tables: TableRef[] = [];
 
@@ -868,6 +1048,12 @@ function validateRecordedIndices(
 
 function sameIdentitySequence<T>(a: readonly T[], b: readonly T[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function isFunctionImport(
+  declaration: FunctionDeclaration
+): declaration is FunctionImport {
+  return declaration instanceof FunctionImport;
 }
 
 function unique<T>(values: readonly T[]): readonly T[] {
