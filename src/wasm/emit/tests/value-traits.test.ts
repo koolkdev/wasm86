@@ -53,10 +53,10 @@ test("classifies every i32 and i64 binary operator", () => {
   for (const [operator, expected] of entries(binaryOperatorNonTrapping)) {
     const values = new ValueTable();
     const a = values.addNodeOutput();
-    const b = values.external(0);
+    const b = values.parameter(0, "i32");
     const binary32 = values.binary(operator, a, b);
     const a64 = values.extend64(32, values.addNodeOutput(), true);
-    const b64 = values.extend64(32, values.external(1), false);
+    const b64 = values.extend64(32, values.parameter(1, "i32"), false);
     const binary64 = values.binary64(operator, a64, b64);
 
     strictEqual(values.isNonTrapping(binary32), expected, `${operator} i32`);
@@ -67,7 +67,11 @@ test("classifies every i32 and i64 binary operator", () => {
 test("recognizes division and remainder by nonzero constants as nontrapping", () => {
   for (const operator of ["div_u", "rem_s", "rem_u"] as const) {
     const values = new ValueTable();
-    const binary32 = values.binary(operator, values.external(0), values.const(17));
+    const binary32 = values.binary(
+      operator,
+      values.parameter(0, "i32"),
+      values.const(17)
+    );
     const binary64 = values.binary64(operator, values.const64(23n), values.const64(17n));
 
     strictEqual(values.isNonTrapping(binary32), true, `${operator} i32`);
@@ -77,8 +81,9 @@ test("recognizes division and remainder by nonzero constants as nontrapping", ()
 
 test("recognizes signed division by a safe constant divisor", () => {
   const values = new ValueTable();
-  const bySeventeen = values.binary("div_s", values.external(0), values.const(17));
-  const byNegativeOne = values.binary("div_s", values.external(0), values.const(-1));
+  const dividend = values.parameter(0, "i32");
+  const bySeventeen = values.binary("div_s", dividend, values.const(17));
+  const byNegativeOne = values.binary("div_s", dividend, values.const(-1));
 
   strictEqual(values.isNonTrapping(bySeventeen), true);
   strictEqual(values.isNonTrapping(byNegativeOne), false);
@@ -86,7 +91,7 @@ test("recognizes signed division by a safe constant divisor", () => {
 
 test("keeps zero divisors and signed-overflow cases trapping", () => {
   const values = new ValueTable();
-  const dividend = values.external(0);
+  const dividend = values.parameter(0, "i32");
   const byZero = [
     values.binary("div_s", dividend, values.const(0)),
     values.binary("div_u", dividend, values.const(0)),
@@ -110,7 +115,7 @@ test("classifies constants and runtime-bound values as nontrapping leaves", () =
   const leaves = [
     values.const(1),
     values.const64(2n),
-    values.external(0),
+    values.parameter(0, "i32"),
     values.addNodeOutput(),
     values.addLoopInput()
   ];
@@ -137,12 +142,12 @@ test("propagates trapping children through every nontrapping binary wrapper", ()
 
     const values = new ValueTable();
     const safe = values.addNodeOutput();
-    const divisor = values.external(0);
+    const divisor = values.parameter(0, "i32");
     const trapping = values.binary("div_u", safe, divisor);
     const trapping64 = values.binary64(
       "div_u",
       values.extend64(32, values.addNodeOutput(), true),
-      values.extend64(32, values.external(1), false)
+      values.extend64(32, values.parameter(1, "i32"), false)
     );
     const safe64 = values.extend64(32, values.addNodeOutput(), true);
     const left32 = values.binary(operator, trapping, safe);
@@ -160,7 +165,11 @@ test("propagates trapping children through every nontrapping binary wrapper", ()
 test("propagates trapping children through every unary wrapper", () => {
   const values = new ValueTable();
   const safe = values.addNodeOutput();
-  const trapping = values.binary("rem_s", safe, values.external(0));
+  const trapping = values.binary(
+    "rem_s",
+    safe,
+    values.parameter(0, "i32")
+  );
   const wrapped = entries(unaryOperators).map(([operator]) => (
     [operator, values.unary(operator, safe), values.unary(operator, trapping)] as const
   ));
@@ -175,15 +184,23 @@ test("propagates either trapping operand through every i32 and i64 compare", () 
   for (const [operator] of entries(compareOperators)) {
     const values = new ValueTable();
     const safe = values.addNodeOutput();
-    const otherSafe = values.external(2);
-    const trapping = values.binary("div_s", safe, values.external(0));
+    const otherSafe = values.parameter(2, "i32");
+    const trapping = values.binary(
+      "div_s",
+      safe,
+      values.parameter(0, "i32")
+    );
     const trapping64 = values.binary64(
       "rem_u",
       values.extend64(32, values.addNodeOutput(), true),
-      values.extend64(32, values.external(1), false)
+      values.extend64(32, values.parameter(1, "i32"), false)
     );
     const safe64 = values.extend64(32, values.addNodeOutput(), true);
-    const otherSafe64 = values.extend64(32, values.external(3), false);
+    const otherSafe64 = values.extend64(
+      32,
+      values.parameter(3, "i32"),
+      false
+    );
     const safe32 = values.compare(32, operator, safe, otherSafe);
     const safeComparison64 = values.compare64(operator, safe64, otherSafe64);
     const left32 = values.compare(32, operator, trapping, safe);
@@ -202,11 +219,15 @@ test("propagates either trapping operand through every i32 and i64 compare", () 
 
 test("propagates trapping children through truncate and extend wrappers", () => {
   const values = new ValueTable();
-  const trapping = values.binary("div_u", values.addNodeOutput(), values.external(0));
+  const trapping = values.binary(
+    "div_u",
+    values.addNodeOutput(),
+    values.parameter(0, "i32")
+  );
   const trapping64 = values.binary64(
     "div_s",
     values.extend64(32, values.addNodeOutput(), true),
-    values.extend64(32, values.external(1), false)
+    values.extend64(32, values.parameter(1, "i32"), false)
   );
   const wrappers: readonly ValueId[] = [
     values.truncate(8, trapping),
@@ -224,12 +245,24 @@ test("propagates trapping children through truncate and extend wrappers", () => 
 
 test("requires all three eager select children to be nontrapping", () => {
   const values = new ValueTable();
-  const safeCondition = values.external(0);
+  const safeCondition = values.parameter(0, "i32");
   const safeTrue = values.addNodeOutput();
   const safeFalse = values.addLoopInput();
-  const trappingCondition = values.binary("div_u", values.addNodeOutput(), values.external(1));
-  const trappingTrue = values.binary("rem_s", values.addNodeOutput(), values.external(2));
-  const trappingFalse = values.binary("div_s", values.addNodeOutput(), values.external(3));
+  const trappingCondition = values.binary(
+    "div_u",
+    values.addNodeOutput(),
+    values.parameter(1, "i32")
+  );
+  const trappingTrue = values.binary(
+    "rem_s",
+    values.addNodeOutput(),
+    values.parameter(2, "i32")
+  );
+  const trappingFalse = values.binary(
+    "div_s",
+    values.addNodeOutput(),
+    values.parameter(3, "i32")
+  );
   const allSafe = values.select(safeCondition, safeTrue, safeFalse);
   const unsafeCondition = values.select(trappingCondition, safeTrue, safeFalse);
   const unsafeTrue = values.select(safeCondition, trappingTrue, safeFalse);

@@ -1,4 +1,3 @@
-import { finishControl, type FinishControl } from "./finish.js";
 import { ifControl, type IfControl } from "./if.js";
 import {
   loopContinueControl,
@@ -10,7 +9,6 @@ import { returnControl, type ReturnControl } from "./return.js";
 import { switchControl, type SwitchControl } from "./switch.js";
 
 export {
-  finishControl,
   ifControl,
   loopContinueControl,
   loopControl,
@@ -21,13 +19,6 @@ export type {
   ControlBase,
   ControlEmitTarget
 } from "./definition.js";
-export type {
-  DispatchFinish,
-  ExitFinish,
-  Finish,
-  FinishControl,
-  FinishControlArgs
-} from "./finish.js";
 export type {
   BranchHint,
   IfControl,
@@ -61,7 +52,6 @@ export type StructuredControl =
 
 export type TerminalControl =
   | LoopContinueControl
-  | FinishControl
   | ReturnControl;
 
 export type Control = StructuredControl | TerminalControl;

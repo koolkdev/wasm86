@@ -6,7 +6,7 @@ import type {
 } from "#compiler/ir/operations/index.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { bodyFinal, type Body, type BodyNode, type IrBlock } from "#ir/block.js";
+import type { Body, BodyNode, IrBlock } from "#ir/block.js";
 import type {
   BodyAnalysis,
   BodyPathStep,
@@ -20,11 +20,8 @@ import type {
 } from "./model.js";
 import { SiteIndex } from "./sites.js";
 
-export function analyzeBody(
-  block: IrBlock,
-  exportedOutputs: Iterable<ValueId> = []
-): BodyAnalysis {
-  return new BodyAnalyzer(block, exportedOutputs);
+export function analyzeBody(block: IrBlock): BodyAnalysis {
+  return new BodyAnalyzer(block);
 }
 
 const noWrites: readonly StorageAccess[] = [];
@@ -49,8 +46,6 @@ class BodyAnalyzer implements BodyAnalysis {
   readonly #controlProductions = new Map<ValueId, ControlProduction>();
 
   readonly #useCounts: Uint32Array;
-  readonly #exportedOutputs: ValueId[];
-
   readonly #operations: OperationSite[] = [];
   readonly #operationSet = new Set<Operation>();
   readonly #invocations: InvocationSite[] = [];
@@ -59,17 +54,12 @@ class BodyAnalyzer implements BodyAnalysis {
     Operation | null
   >();
 
-  constructor(
-    block: IrBlock,
-    exportedOutputs: Iterable<ValueId>
-  ) {
+  constructor(block: IrBlock) {
     this.#block = block;
     this.#siteIndex = new SiteIndex(block.body);
     this.#useCounts = new Uint32Array(block.values.size());
-    this.#exportedOutputs = [...exportedOutputs];
 
     this.#walkBody(block.body);
-    this.#recordExportDemands();
     this.#seedRoots();
     this.#propagateUses();
     if (this.#recordRequiredOperationDemands()) {
@@ -144,10 +134,6 @@ class BodyAnalyzer implements BodyAnalysis {
 
     assert(writes !== undefined, `site ${site} has no writes`);
     return writes;
-  }
-
-  exportedOutputs(): readonly ValueId[] {
-    return this.#exportedOutputs;
   }
 
   operations(): readonly OperationSite[] {
@@ -337,18 +323,6 @@ class BodyAnalyzer implements BodyAnalysis {
       producer: { site },
       dependencies
     });
-  }
-
-  #recordExportDemands(): void {
-    const body = this.#block.body;
-    const lastNodeIndex = body.nodes.length - 1;
-    const site = bodyFinal(body) === undefined
-      ? this.bodyEndSite(body)
-      : this.siteOf(body, lastNodeIndex);
-
-    for (const output of this.#exportedOutputs) {
-      this.#roots.push({ value: output, consumedAt: site });
-    }
   }
 
   #recordRequiredOperationDemands(): boolean {

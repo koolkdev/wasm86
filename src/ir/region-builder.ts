@@ -9,17 +9,15 @@ import {
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import { callOperation } from "#compiler/ir/operations/call.js";
 import {
-  finishControl,
   ifControl,
   loopContinueControl,
   loopControl,
   returnControl,
   switchControl,
   type BranchHint,
-  type Finish,
   type LoopCarriedCell
 } from "#compiler/ir/controls/index.js";
-import type { Body, BodyNode, IrBlock } from "./block.js";
+import type { Body, BodyNode } from "./block.js";
 import {
   type Operation,
   type OperationFactory,
@@ -253,11 +251,6 @@ export class RegionBuilder {
     this.#emit(switchControl.create({ selector, cases, defaultBody }));
   }
 
-  // Terminates this body: fault arms, trap arms, the root.
-  finish(finish: Finish): void {
-    this.#emit(finishControl.create({ finish }));
-  }
-
   return(results: readonly ValueId[]): void {
     this.#emit(returnControl.create({
       source: { kind: "values", values: results }
@@ -346,12 +339,4 @@ class BufferedBodyNodeSink implements BodyNodeSink {
   nodes(): readonly BodyNode[] {
     return this.#nodes;
   }
-}
-
-export function buildIrBlock(build: (b: RegionBuilder) => ValueId | void): IrBlock {
-  const values = new ValueTable();
-  const builder = new RegionBuilder(values);
-  const result = build(builder);
-
-  return { values, body: builder.build(result ?? undefined) };
 }

@@ -10,7 +10,7 @@ import type {
   OperationEmitTarget
 } from "#compiler/ir/operations/definition.js";
 import type { ValueEmitContext } from "#compiler/ir/values/definition.js";
-import type { ExternalValueId, ValueId, ValueType } from "#compiler/ir/values/types.js";
+import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { PlacementIndex } from "#compiler/placement/index.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
@@ -25,10 +25,8 @@ export type ValueEmitterContext = Readonly<{
   analysis: BodyAnalysis;
   plan: PlacementPlan;
   index: PlacementIndex;
-  // Physical plan local -> the scratch local reserved for this fragment.
+  // Physical plan local -> the scratch local reserved for this function.
   locals: readonly number[];
-  // External id -> the Wasm local supplied by the embedding.
-  externalLocals: ReadonlyMap<ExternalValueId, number>;
   bindings: ModuleBindings;
 }>;
 
@@ -70,12 +68,6 @@ export class ValueEmitter implements ValueUseEmitter {
       body: context.body,
       emitUse: (id) => this.emitUse(id),
       emitNodeOutput: (id) => this.#emitSource(id),
-      emitExternal: (external) => {
-        const local = context.externalLocals.get(external);
-
-        assert(local !== undefined, `no local bound for external value ${external}`);
-        context.body.localGet(local);
-      },
       emitParameter: (index) => context.body.localGet(index),
       emitLoopInput: (id) => context.body.localGet(this.valueLocal(id))
     };

@@ -5,27 +5,62 @@ import { analyzeBody } from "#compiler/analysis/analyze.js";
 import {
   ifControl,
   loopContinueControl,
-  loopControl
+  loopControl,
+  returnControl
 } from "#compiler/ir/controls/index.js";
+import { valueId } from "#compiler/ir/values/id.js";
 import type {
   PlacementPlan,
   ValuePlacement
 } from "#compiler/placement/model.js";
 import { planPlacement } from "#compiler/placement/plan.js";
 import { validatePlacement } from "#compiler/placement/validate.js";
-import type { Body, IrBlock } from "#ir/block.js";
+import { functionType } from "#compiler/program/function-type.js";
+import type { Body, BodyNode, IrBlock } from "#ir/block.js";
+import type { IrFunction } from "#ir/function.js";
 import {
   compilerTestValues,
   resourceReadNode,
   resourceWriteNode
 } from "#ir/tests/storage-op-helpers.js";
 
+function functionBlock(block: IrBlock): IrFunction {
+  (block.body.nodes as BodyNode[]).push(returnControl.create({
+    source: { kind: "values", values: [] }
+  }));
+  const parameters = Array.from(
+    { length: block.values.size() },
+    (_, raw) => valueId(raw)
+  ).filter((value) => block.values.node(value).kind === "parameter")
+    .sort((a, b) => {
+      const first = block.values.node(a);
+      const second = block.values.node(b);
+
+      return first.kind === "parameter" && second.kind === "parameter"
+        ? first.index - second.index
+        : 0;
+    });
+
+  return {
+    ...block,
+    type: functionType(
+      parameters.map((parameter) => block.values.valueType(parameter)),
+      []
+    ),
+    parameters
+  };
+}
+
+function analyzeFunction(block: IrBlock) {
+  return analyzeBody(functionBlock(block));
+}
+
 test("accepts condition-frontier and earlier-frontier captures", () => {
   const values = compilerTestValues();
   const quotient = values.binary(
     "div_u",
-    values.external(0),
-    values.external(1)
+    values.parameter(0, "i32"),
+    values.parameter(1, "i32")
   );
   const adjusted = values.binary("add", quotient, values.const(1));
   const firstThen: Body = {
@@ -44,7 +79,7 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
       })]
     }
   };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
   const plan = planPlacement(block, analysis);
 
   doesNotThrow(() => validatePlacement(block, analysis, plan));
@@ -52,15 +87,15 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
   const laterValues = compilerTestValues();
   const earlierQuotient = laterValues.binary(
     "div_u",
-    laterValues.external(0),
-    laterValues.external(1)
+    laterValues.parameter(0, "i32"),
+    laterValues.parameter(1, "i32")
   );
   const laterAdjusted = laterValues.binary(
     "add",
     earlierQuotient,
     laterValues.const(1)
   );
-  const condition = laterValues.external(2);
+  const condition = laterValues.parameter(2, "i32");
   const laterThen: Body = {
     nodes: [resourceWriteNode(laterValues, 0, laterAdjusted)]
   };
@@ -80,7 +115,7 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
       ]
     }
   };
-  const laterAnalysis = analyzeBody(laterBlock);
+  const laterAnalysis = analyzeFunction(laterBlock);
   const laterPlan = planPlacement(laterBlock, laterAnalysis);
 
   doesNotThrow(() => validatePlacement(laterBlock, laterAnalysis, laterPlan));
@@ -88,11 +123,11 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
 
 test("rejects a raw trapping value hoisted above sibling arms", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const quotient = values.binary(
     "div_u",
-    values.external(1),
-    values.external(2)
+    values.parameter(1, "i32"),
+    values.parameter(2, "i32")
   );
   const thenBody: Body = {
     nodes: [resourceWriteNode(values, 0, quotient)]
@@ -106,7 +141,7 @@ test("rejects a raw trapping value hoisted above sibling arms", () => {
       nodes: [ifControl.create({ condition, thenBody, elseBody })]
     }
   };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
   const placements = new Array<ValuePlacement | undefined>(values.size());
 
   placements[quotient] = {
@@ -128,15 +163,15 @@ test("rejects a raw trapping value hoisted above sibling arms", () => {
 
 test("rejects at-use placement without a direct demand", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
-  const quotient = values.binary("div_u", values.external(1), values.external(2));
+  const condition = values.parameter(0, "i32");
+  const quotient = values.binary("div_u", values.parameter(1, "i32"), values.parameter(2, "i32"));
   const thenBody: Body = { nodes: [resourceWriteNode(values, 0, quotient)] };
   const elseBody: Body = { nodes: [resourceWriteNode(values, 1, quotient)] };
   const block: IrBlock = {
     values,
     body: { nodes: [ifControl.create({ condition, thenBody, elseBody })] }
   };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
   const placements = new Array<ValuePlacement | undefined>(values.size());
 
   placements[quotient] = {
@@ -167,7 +202,7 @@ test("rejects a producer anchor before its authored definition", () => {
       ]
     }
   };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
   const plan = planPlacement(block, analysis);
   const placements = [...plan.values];
 
@@ -189,7 +224,7 @@ test("rejects a producer anchor before its authored definition", () => {
 
 test("rejects an anchor that does not dominate every selected use", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const output = values.addNodeOutput();
   const thenBody: Body = {
     nodes: [resourceWriteNode(values, 0, output)]
@@ -206,7 +241,7 @@ test("rejects an anchor that does not dominate every selected use", () => {
       ]
     }
   };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
   const plan = planPlacement(block, analysis);
   const placements = [...plan.values];
 
@@ -238,7 +273,7 @@ test("rejects producer movement across an alias but accepts a live snapshot", ()
       ]
     }
   };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
   const plan = planPlacement(block, analysis);
 
   doesNotThrow(() => validatePlacement(block, analysis, plan));
@@ -277,7 +312,7 @@ test("rejects overlapping value lifetimes assigned to one local", () => {
       ]
     }
   };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
   const plan = planPlacement(block, analysis);
   const placements = [...plan.values];
 
@@ -311,7 +346,7 @@ test("keeps an outer capture live through repeated loop uses", () => {
       ]
     }
   };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
   const plan = planPlacement(block, analysis);
 
   doesNotThrow(() => validatePlacement(block, analysis, plan));
@@ -344,7 +379,7 @@ test("rejects hoisting a loop-dependent recipe to the preheader", () => {
       })]
     }
   };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
   const plan = planPlacement(block, analysis);
   const placements = [...plan.values];
 
@@ -366,7 +401,7 @@ test("rejects hoisting a loop-dependent recipe to the preheader", () => {
 
 test("accepts leaving a loop-invariant recipe at its use", () => {
   const values = compilerTestValues();
-  const invariant = values.binary("add", values.external(0), values.const(1));
+  const invariant = values.binary("add", values.parameter(0, "i32"), values.const(1));
   const loopBody: Body = {
     nodes: [
       resourceWriteNode(values, 0, invariant),
@@ -379,7 +414,7 @@ test("accepts leaving a loop-invariant recipe at its use", () => {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
     }
   };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
   const plan = planPlacement(block, analysis);
   const placements = [...plan.values];
 

@@ -3,39 +3,25 @@ import {
   bodyCompletes,
   bodyFinal,
   type Body,
-  type BodyNode,
-  type IrBlock
+  type BodyNode
 } from "#ir/block.js";
 import type { ControlEmitTarget } from "#compiler/ir/controls/index.js";
-import type { ExternalValueId, ValueId } from "#compiler/ir/values/types.js";
-import {
-  placeBody,
-  type BodyPlacement
-} from "#compiler/placement/place.js";
+import type { BodyPlacement } from "#compiler/placement/place.js";
 import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
 import {
   WasmFunctionBodyEncoder,
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
-import { createCompletionFrame } from "./completion-frame.js";
-import type { FragmentEmbedding, FunctionEmbedding } from "./embed.js";
+import { createFunctionFrame } from "./completion-frame.js";
 import { ValueEmitter, wasmTypeForValue } from "./value-emitter.js";
 import type { ModuleBindings } from "#compiler/program/bindings.js";
 import type { IrFunction } from "#ir/function.js";
 
-export type ActionFragmentContext = Readonly<{
+type FunctionBodyEmitContext = Readonly<{
   body: WasmFunctionBodyEncoder;
   scratch: WasmLocalScratchAllocator;
-  externalLocals?: ReadonlyMap<ExternalValueId, number>;
   bindings: ModuleBindings;
-  placement?: BodyPlacement | undefined;
-  embedding: FragmentEmbedding;
-}>;
-
-export type ActionFunctionContext = Readonly<{
-  bindings: ModuleBindings;
-  placement?: BodyPlacement | undefined;
-  embedding: FunctionEmbedding;
+  placement: BodyPlacement;
 }>;
 
 export type FunctionEmitContext = Readonly<{
@@ -50,39 +36,20 @@ export function emitFunction(
   const body = new WasmFunctionBodyEncoder(fn.parameters.length);
   const scratch = new WasmLocalScratchAllocator(body);
 
-  emitActionFragment(fn, {
+  emitFunctionBody(fn, {
     body,
     scratch,
     bindings: context.bindings,
-    placement: context.placement,
-    embedding: {}
+    placement: context.placement
   });
   scratch.assertClear();
   return body.finish();
 }
 
-export function emitActionFunction(
-  block: IrBlock,
-  context: ActionFunctionContext
-): EncodedWasmFunctionBody {
-  const body = new WasmFunctionBodyEncoder();
-  const scratch = new WasmLocalScratchAllocator(body);
-
-  emitActionFragment(block, {
-    body,
-    scratch,
-    bindings: context.bindings,
-    placement: context.placement,
-    embedding: context.embedding
-  });
-  scratch.assertClear();
-  return body.finish();
-}
-
-export function emitActionFragment(block: IrBlock, context: ActionFragmentContext): void {
-  const { body, embedding } = context;
-  const exportLocals = embedding.outputs ?? new Map<ValueId, number>();
-  const placement = resolvePlacement(block, context, exportLocals.keys());
+function emitFunctionBody(block: IrFunction, context: FunctionBodyEmitContext): void {
+  const { body } = context;
+  const placement = context.placement;
+  assert(placement.block === block, "placement belongs to another IR function");
   const { analysis, plan, index } = placement;
   const locals = plan.localTypes.map((type) =>
     context.scratch.allocLocal(wasmTypeForValue(type))
@@ -96,21 +63,9 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       plan,
       index,
       locals,
-      externalLocals: context.externalLocals ?? new Map(),
       bindings: context.bindings
     });
-    const frame = createCompletionFrame({
-      body,
-      dispatch: embedding.dispatch,
-      fallthrough: embedding.fallthrough,
-      emitValue: (id) => valueEmitter.emitUse(id),
-      constValue: (id) => block.values.constValue(id)
-    });
-    const rootFinal = bodyFinal(block.body);
-    const exportSite = analysis.siteOf(
-      block.body,
-      rootFinal === undefined ? block.body.nodes.length : block.body.nodes.length - 1
-    );
+    const frame = createFunctionFrame({ body });
     // The innermost open loop's actual Wasm locals, aligned with its cells.
     const loopLocals: (readonly number[])[] = [];
     const controlTarget: ControlEmitTarget = {
@@ -148,8 +103,6 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
         return locals;
       },
       emitLoopBranch: () => frame.emitLoopContinue(),
-      emitExit: (result) => frame.emitExit(result),
-      emitDispatch: (targetEip) => frame.emitDispatch(targetEip),
       sealCompletedStructuredControl() {
         // Wasm cannot infer that every lowered arm exits through its nested
         // control flow, so make the structured join explicitly unreachable.
@@ -165,15 +118,6 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
       const site = analysis.siteOf(nodeBody, nodeIndex);
 
       valueEmitter.withSite(site, () => {
-        if (site === exportSite) {
-          for (const value of analysis.exportedOutputs()) {
-            const local = exportLocals.get(value);
-
-            assert(local !== undefined, `exported value ${value} has no embedding local`);
-            valueEmitter.emitUse(value);
-            body.localSet(local);
-          }
-        }
         emit();
       });
     }
@@ -222,40 +166,10 @@ export function emitActionFragment(block: IrBlock, context: ActionFragmentContex
     }
 
     emitBody(block.body);
-    if (rootFinal === undefined) {
-      frame.emitFallthrough();
-    }
     valueEmitter.assertComplete();
   } finally {
     for (const local of [...locals].reverse()) {
       context.scratch.freeLocal(local);
     }
   }
-}
-
-function resolvePlacement(
-  block: IrBlock,
-  context: ActionFragmentContext,
-  outputs: Iterable<ValueId>
-): BodyPlacement {
-  const exportedOutputs = [...outputs];
-  const placement = context.placement;
-
-  if (placement === undefined) {
-    return placeBody(block, {
-      exportedOutputs,
-      allowImplicitEntryFallthrough: context.embedding.fallthrough !== undefined
-    });
-  }
-
-  assert(placement.block === block, "placement belongs to another IR block");
-  assert(
-    sameValues(placement.analysis.exportedOutputs(), exportedOutputs),
-    "placement has different exported outputs"
-  );
-  return placement;
-}
-
-function sameValues(a: readonly ValueId[], b: readonly ValueId[]): boolean {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
 }

@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import { i32 } from "#core/numeric.js";
 import type { ValueDefinition } from "./definition.js";
-import type { ExternalValueId, ValueType, WidthBounds } from "./types.js";
+import type { ValueType, WidthBounds } from "./types.js";
 import { unboundedWidthBounds } from "./width-bounds.js";
 
 type ConstArgs = Readonly<{ value: number }>;
@@ -16,9 +16,6 @@ type UnreachableNode = Readonly<UnreachableArgs & { kind: "unreachable" }>;
 type NodeOutputArgs = Readonly<{ type: ValueType }>;
 type NodeOutputNode = Readonly<NodeOutputArgs & { kind: "nodeOutput" }>;
 type LoopInputNode = Readonly<{ kind: "loopInput" }>;
-
-type ExternalArgs = Readonly<{ external: ExternalValueId }>;
-type ExternalNode = Readonly<ExternalArgs & { kind: "external" }>;
 
 type ParameterArgs = Readonly<{ index: number; type: ValueType }>;
 type ParameterNode = Readonly<ParameterArgs & { kind: "parameter" }>;
@@ -75,15 +72,6 @@ export const loopInputValue: ValueDefinition<undefined, LoopInputNode> = {
   widthBounds: () => unboundedWidthBounds,
   captureMode: "reemit",
   emit: (id, _node, target) => target.emitLoopInput(id)
-};
-
-export const externalValue: ValueDefinition<ExternalArgs, ExternalNode> = {
-  create: ({ external }) => ({ kind: "external", external }),
-  identity: { kind: "canonical", key: (node) => [node.external] },
-  resultType: () => "i32",
-  widthBounds: () => unboundedWidthBounds,
-  captureMode: "reemit",
-  emit: (_id, node, target) => target.emitExternal(node.external)
 };
 
 export const parameterValue: ValueDefinition<ParameterArgs, ParameterNode> = {

@@ -72,7 +72,6 @@ export type BodyAnalysis = Readonly<{
   isLive(id: ValueId): boolean;
   useCount(id: ValueId): number;
   writesAt(site: SiteId): readonly StorageAccess[];
-  exportedOutputs(): readonly ValueId[];
 
   operations(): readonly OperationSite[];
   invocations(): readonly InvocationSite[];

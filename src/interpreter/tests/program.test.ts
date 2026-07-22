@@ -23,24 +23,19 @@ test("interpreter closes as a compiler program with an exact parameterless entry
   const run = program.functions.find((fn) => fn.ref === runExport.target);
 
   ok(run !== undefined, "missing interpreter run function declaration");
-  ok(run.kind === "function", "interpreter run must use compiler IR");
   deepStrictEqual(run.type.parameters, []);
   deepStrictEqual(run.type.results, ["i64"]);
-  deepStrictEqual(program.signatures, []);
   ok(program.functionTypes.includes(run.type), "interpreter program must include the run type");
-
-  ok(
-    program.functions.every((fn) => fn.kind === "function"),
-    "interpreter program must not retain a legacy body"
-  );
-  deepStrictEqual(program.globals, []);
 });
 
 test("interpreter links the zero-argument status-flag resolver family", () => {
   const { program } = interpreterProgram();
-  const expectedResolvers = createStatusFlagResolvers(
+  const resolverFamily = createStatusFlagResolvers(
     testExecutionModel.cpuState.access
-  ).members(x86StatusFlags);
+  );
+  const expectedResolvers = x86StatusFlags.map((flag) =>
+    resolverFamily.get(flag)
+  );
 
   for (const expected of expectedResolvers) {
     const resolver = program.functions.find(
@@ -48,7 +43,6 @@ test("interpreter links the zero-argument status-flag resolver family", () => {
     );
 
     ok(resolver !== undefined, `missing status-flag resolver ${expected.ref.id}`);
-    ok(resolver.kind === "function", `status-flag resolver ${expected.ref.id} must use compiler IR`);
     strictEqual(resolver.type, expected.type);
     ok(
       program.functionTypes.includes(resolver.type),
@@ -144,7 +138,7 @@ function interpreterRun() {
   ok(runExport !== undefined, "missing exact Interpreter entry export declaration");
   const run = program.functions.find((fn) => fn.ref === runExport.target);
 
-  ok(run !== undefined && run.kind === "function", "missing compiler IR Interpreter run");
+  ok(run !== undefined, "missing compiler IR Interpreter run");
   return run;
 }
 

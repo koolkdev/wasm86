@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { resourceRef } from "#compiler/ir/resource.js";
 import {
   createProgramResources,
-  memoryImportFor,
   type MemoryImport
 } from "#compiler/program/resources.js";
 
@@ -14,18 +13,8 @@ test("program resources retain owner-provided memory imports", () => {
   const resources = createProgramResources([state, guest]);
 
   deepStrictEqual(resources.memoryImports, [state, guest]);
-  strictEqual(memoryImportFor(resources, state.ref), state);
-  strictEqual(memoryImportFor(resources, guest.ref), guest);
-});
-
-test("program resource lookup uses exact resource identity", () => {
-  const state = memoryImport("test.state", "state");
-  const resources = createProgramResources([state]);
-
-  throws(
-    () => memoryImportFor(resources, resourceRef(state.ref.id)),
-    /unknown program resource test.state/
-  );
+  strictEqual(resources.memoryImports[0], state);
+  strictEqual(resources.memoryImports[1], guest);
 });
 
 test("program resources reject duplicate refs and external names", () => {
@@ -52,8 +41,8 @@ test("same-id resource refs remain distinct", () => {
   const second = memoryImport("state", "second");
   const resources = createProgramResources([first, second]);
 
-  strictEqual(memoryImportFor(resources, first.ref), first);
-  strictEqual(memoryImportFor(resources, second.ref), second);
+  strictEqual(resources.memoryImports[0]?.ref, first.ref);
+  strictEqual(resources.memoryImports[1]?.ref, second.ref);
 });
 
 test("external memory identity compares module and field names separately", () => {

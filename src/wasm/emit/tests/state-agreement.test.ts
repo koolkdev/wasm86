@@ -1,7 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { ValueTable } from "#compiler/ir/values/table.js";
 import {
   createLayoutHostView,
   type LayoutHostView
@@ -17,8 +16,6 @@ import { u32 } from "#core/numeric.js";
 import { createCoreStateHostView } from "#core/state/host-view.js";
 import type { MutableCoreStateView } from "#core/state/view.js";
 import { reg32, segmentRegisters, type Reg32 } from "#core/types.js";
-import type { IrBlock } from "#ir/block.js";
-import { RegionBuilder } from "#ir/region-builder.js";
 import { flagStateFields } from "#core/flags/layout.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 import type { InstructionStateChannel } from "#core/instruction/state/channels.js";
@@ -40,7 +37,12 @@ import {
   cpuStateAccess,
   testExecutionModel
 } from "#test/support/execution-model.js";
-import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import {
+  completedTestFunction,
+  testFunctionCompleted,
+  instantiateTestFunction,
+  type TestFunction
+} from "./harness.js";
 
 type OwnerViews = Readonly<{
   core: MutableCoreStateView;
@@ -237,7 +239,7 @@ for (const agreement of [...fullMemberCases, ...narrowGprCases]) {
   test(`host and generated state access agree for ${agreement.name}`, async () => {
     const destination = destinationFor(agreement.location);
     const block = agreementBlock(agreement.location, destination, agreement.generatedWrite);
-    const { stateMemory, run } = await instantiateIrBlock(block);
+    const { stateMemory, run } = await instantiateTestFunction(block);
     const combined = createCpuStateHostView(
       createLayoutHostView(stateMemory, testExecutionModel.cpuState.layout)
     );
@@ -246,7 +248,7 @@ for (const agreement of [...fullMemberCases, ...narrowGprCases]) {
     initial[agreement.field] = agreement.hostSeed;
     writeWasmCpuStateSnapshot(new DataView(stateMemory.buffer), initial);
 
-    strictEqual(run(), irBlockCompleted, `${agreement.name}: generated block completed`);
+    strictEqual(run(), testFunctionCompleted, `${agreement.name}: generated block completed`);
     strictEqual(
       combined.core.readReg32(destination),
       agreement.expectedGeneratedRead,
@@ -270,21 +272,16 @@ function agreementBlock(
   source: InstructionStateChannel,
   destination: Reg32,
   generatedWrite: number
-): IrBlock {
-  const values = new ValueTable();
-  const builder = new RegionBuilder(values);
-  const state = cpuStateAccess.bind(builder);
-  const generatedValue = values.const(generatedWrite);
-  const sourceOperand = stateOperand(state, source);
-  const readOutput = state.read(sourceOperand);
+): TestFunction {
+  return completedTestFunction(0, (fn) => {
+    const state = cpuStateAccess.bind(fn.region);
+    const generatedValue = fn.values.const(generatedWrite);
+    const sourceOperand = stateOperand(state, source);
+    const readOutput = state.read(sourceOperand);
 
-  state.write(state.gpr(destination), readOutput);
-  state.write(sourceOperand, generatedValue);
-
-  return {
-    body: builder.build(),
-    values
-  };
+    state.write(state.gpr(destination), readOutput);
+    state.write(sourceOperand, generatedValue);
+  });
 }
 
 function stateOperand(

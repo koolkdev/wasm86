@@ -1,7 +1,6 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
@@ -15,28 +14,19 @@ import { functionType } from "#compiler/program/function-type.js";
 import {
   functionExportRef,
   functionRef,
-  signatureRef,
   tableRef
 } from "#compiler/program/refs.js";
 import { createProgramResources } from "#compiler/program/resources.js";
-import { buildIrBlock } from "#ir/region-builder.js";
 import { emitFunction } from "#wasm/emit/action.js";
 
 const noEffects = { reads: [], writes: [] } as const;
 
 const effectfulResource = resourceRef("test.effectful-indirect-resource");
-const legacyResource = resourceRef("test.legacy-indirect-resource");
 const indirectInvocationResources = createProgramResources([
   {
     ref: effectfulResource,
     moduleName: "test",
     name: "effectfulIndirectResource",
-    limits: { minPages: 1 }
-  },
-  {
-    ref: legacyResource,
-    moduleName: "test",
-    name: "legacyIndirectResource",
     limits: { minPages: 1 }
   }
 ]);
@@ -72,10 +62,9 @@ test("dead pure indirect invocations retain neither types nor tables", () => {
   const closed = program.finish();
   const linked = closed.functions.find((fn) => fn.ref === caller.ref);
 
-  if (linked === undefined || linked.kind !== "function") {
+  if (linked === undefined) {
     throw new Error("missing dead indirect caller");
   }
-  deepStrictEqual(closed.signatures, []);
   deepStrictEqual(closed.functionTypes, [callerType]);
   strictEqual(closed.functionTypes[0], callerType);
   strictEqual(closed.functionTypes.includes(indirectType), false);
@@ -91,8 +80,7 @@ test("dead pure indirect invocations retain neither types nor tables", () => {
     placement: linked.placement
   });
 
-  deepStrictEqual(body.references.typeIndices, []);
-  deepStrictEqual(body.references.tableIndices, []);
+  strictEqual(wasmBodyOpcodes(body.bytes).includes(wasmOpcode.callIndirect), false);
   compileBytes(closed);
 });
 
@@ -135,7 +123,7 @@ test("resultless indirect invocations retain their declared writes", () => {
   const closed = program.finish();
   const linked = closed.functions.find((fn) => fn.ref === caller.ref);
 
-  if (linked === undefined || linked.kind !== "function") {
+  if (linked === undefined) {
     throw new Error("missing effectful indirect caller");
   }
   deepStrictEqual(closed.functionTypes, [callerType, indirectType]);
@@ -171,113 +159,6 @@ test("resultless indirect invocations retain their declared writes", () => {
     () => undeclared.finish(),
     /undeclared-effectful-indirect-caller.*undeclared write effect/
   );
-});
-
-test("legacy symbolic blocks inherit live indirect dependencies", async () => {
-  const program = createTestProgram();
-  const indirectType = functionType([], []);
-  const entryType = functionType([], []);
-  const signature = signatureRef("test.legacy-indirect-signature");
-  const table = tableRef("test.legacy-indirect-table");
-  const resource = legacyResource;
-  const write: ResourceEffect = {
-    space: "resource",
-    resource,
-    range: {
-      basis: { kind: "resource" },
-      slice: { byteOffset: 0, byteLength: 4 }
-    }
-  };
-  const effects = { reads: [], writes: [write] } as const;
-
-  let indirectTypeIndex: number | undefined;
-  let entryTypeIndex: number | undefined;
-
-  program.signature({ ref: signature, type: entryType });
-  program.importTable({
-    ref: table,
-    moduleName: "test",
-    name: "legacyIndirectTable",
-    limits: { minElements: 1 }
-  });
-  const target = program.defineFunction({
-    ref: functionRef("test.legacy-indirect-target"),
-    type: indirectType,
-    effects: noEffects
-  }, (fn) => fn.return([]));
-  const block = buildIrBlock((body) => {
-    body.call(body.indirectTarget({
-      table,
-      type: indirectType,
-      effects,
-      elementIndex: body.values.const(0)
-    }), []);
-  });
-  const entry = functionRef("test.legacy-indirect-entry");
-
-  program.legacyFunction({
-    ref: entry,
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [{ block, allowImplicitEntryFallthrough: true }],
-    build: (context) => {
-      const typeIndex = context.bindings.typeIndex(indirectType);
-      const tableIndex = context.bindings.tableIndex(table);
-
-      indirectTypeIndex = typeIndex;
-      entryTypeIndex = context.signatureIndex;
-
-      return new WasmFunctionBodyEncoder()
-        .i32Const(0)
-        .callIndirect(typeIndex, tableIndex)
-        .finish();
-    }
-  });
-  program.exportFunction({
-    ref: functionExportRef("test.legacy-indirect-target-export"),
-    name: "target",
-    target: target.ref
-  });
-  program.exportFunction({
-    ref: functionExportRef("test.legacy-indirect-entry-export"),
-    name: "entry",
-    target: entry
-  });
-
-  const closed = program.finish();
-  const linked = closed.functions.find((fn) => fn.ref === entry);
-
-  if (linked === undefined || linked.kind !== "legacy") {
-    throw new Error("missing legacy indirect entry");
-  }
-  deepStrictEqual(closed.functionTypes, [indirectType, entryType]);
-  strictEqual(closed.functionTypes[0], indirectType);
-  strictEqual(closed.functionTypes[1], entryType);
-  deepStrictEqual(linked.indirectTypes, [indirectType]);
-  deepStrictEqual(linked.tables, [table]);
-
-  const importedTable = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
-  const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(compileBytes(closed)),
-    {
-      test: {
-        legacyIndirectResource: new WebAssembly.Memory({ initial: 1 }),
-        legacyIndirectTable: importedTable
-      }
-    }
-  );
-  const exportedTarget = instance.exports.target;
-  const exportedEntry = instance.exports.entry;
-
-  if (typeof exportedTarget !== "function" || typeof exportedEntry !== "function") {
-    throw new Error("missing legacy indirect exports");
-  }
-  importedTable.set(0, exportedTarget);
-  strictEqual(exportedEntry(), undefined);
-  strictEqual(indirectTypeIndex, entryTypeIndex);
 });
 
 test("defined functions bind ordinary and returning indirect invocations", async () => {
@@ -369,13 +250,10 @@ test("defined functions bind ordinary and returning indirect invocations", async
 
   if (
     ordinaryFunction === undefined ||
-    ordinaryFunction.kind !== "function" ||
-    returningFunction === undefined ||
-    returningFunction.kind !== "function"
+    returningFunction === undefined
   ) {
     throw new Error("missing indirect caller functions");
   }
-  deepStrictEqual(closed.signatures, []);
   deepStrictEqual(closed.functionTypes, [type]);
   strictEqual(closed.functionTypes[0], type);
   for (const fn of [ordinaryFunction, returningFunction]) {
@@ -401,11 +279,6 @@ test("defined functions bind ordinary and returning indirect invocations", async
 
   ok(wasmBodyOpcodes(ordinaryBody.bytes).includes(wasmOpcode.callIndirect));
   ok(wasmBodyOpcodes(returningBody.bytes).includes(wasmOpcode.returnCallIndirect));
-  deepStrictEqual(ordinaryBody.references.typeIndices, [5]);
-  deepStrictEqual(ordinaryBody.references.tableIndices, [7]);
-  deepStrictEqual(returningBody.references.typeIndices, [5]);
-  deepStrictEqual(returningBody.references.tableIndices, [7]);
-
   const importedTable = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
   const dummyImportedTable = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
   const instance = await WebAssembly.instantiate(

@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import { buildDefinition } from "#build";
 import type { EncodedWasmFunctionBody } from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
 import {
@@ -12,22 +11,13 @@ import type { DirectFunctionTarget } from "#compiler/ir/invocation.js";
 import type {
   FunctionExportRef,
   FunctionRef,
-  GlobalRef,
-  SignatureRef,
   TableRef
 } from "./refs.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import { createModuleBindings } from "./bindings.js";
-import type {
-  LegacyFunctionBodyContext
-} from "./legacy-body.js";
 import type { FunctionType } from "./function-type.js";
 import type { Program, ProgramFunction } from "./model.js";
 import type { MemoryImport } from "./resources.js";
-import { validateProgramEncoding } from "./validate.js";
-
-type LegacyFunction = Extract<ProgramFunction, { kind: "legacy" }>;
-type DefinedFunction = Extract<ProgramFunction, { kind: "function" }>;
 
 export type CompiledFunctionExport = Readonly<{
   ref: FunctionExportRef;
@@ -49,12 +39,10 @@ export type CompiledProgram = Readonly<{
 
 type ProgramLayout = Readonly<{
   types: readonly WasmFunctionType[];
-  signatureIndices: ReadonlyMap<SignatureRef, number>;
   typeIndices: ReadonlyMap<FunctionType, number>;
   functionIndices: ReadonlyMap<FunctionRef, number>;
   memoryIndices: ReadonlyMap<ResourceRef, number>;
   tableIndices: ReadonlyMap<TableRef, number>;
-  globalIndices: ReadonlyMap<GlobalRef, number>;
 }>;
 
 export function compileProgram(program: Program): CompiledProgram {
@@ -72,18 +60,14 @@ export function compileProgram(program: Program): CompiledProgram {
 
 function encodeProgram(program: Program): Uint8Array<ArrayBuffer> {
   const layout = layoutProgram(program);
-  const bodies = program.functions.map((fn) => buildFunctionBody(program, layout, fn));
+  const bodies = program.functions.map((fn) => buildFunctionBody(layout, fn));
 
-  if (buildDefinition.validation) {
-    validateProgramEncoding(program, bodies, layout);
-  }
   const module = new WasmModuleEncoder();
 
   addFunctionTypes(module, layout);
   addFunctionImports(module, program, layout);
   addMemoryImports(module, program, layout);
   addTableImports(module, program, layout);
-  addGlobals(module, program, layout);
   addFunctions(module, program, layout, bodies);
   addExports(module, program, layout);
   return module.encode();
@@ -144,16 +128,6 @@ function addTableImports(module: WasmModuleEncoder, program: Program, layout: Pr
   }
 }
 
-function addGlobals(module: WasmModuleEncoder, program: Program, layout: ProgramLayout): void {
-  for (const global of program.globals) {
-    const expectedIndex = layout.globalIndices.get(global.ref);
-
-    assert(expectedIndex !== undefined, `missing layout for program global ${global.ref.id}`);
-    const index = module.addGlobal(global);
-    assert(index === expectedIndex, `unexpected Wasm global index: ${index}`);
-  }
-}
-
 function addFunctions(
   module: WasmModuleEncoder,
   program: Program,
@@ -161,27 +135,14 @@ function addFunctions(
   bodies: readonly EncodedWasmFunctionBody[]
 ): void {
   for (const [declarationIndex, fn] of program.functions.entries()) {
-    let typeIndex: number | undefined;
-
-    switch (fn.kind) {
-      case "legacy":
-        typeIndex = layout.signatureIndices.get(fn.signature);
-        assert(
-          typeIndex !== undefined,
-          `missing layout for program signature ${fn.signature.id}`
-        );
-        break;
-      case "function":
-        typeIndex = layout.typeIndices.get(fn.type);
-        assert(
-          typeIndex !== undefined,
-          `missing layout for function ${fn.ref.id} type`
-        );
-        break;
-    }
+    const typeIndex = layout.typeIndices.get(fn.type);
     const expectedIndex = layout.functionIndices.get(fn.ref);
     const body = bodies[declarationIndex];
 
+    assert(
+      typeIndex !== undefined,
+      `missing layout for function ${fn.ref.id} type`
+    );
     assert(expectedIndex !== undefined, `missing layout for program function ${fn.ref.id}`);
     assert(body !== undefined, `missing encoded body for program function ${fn.ref.id}`);
     const index = module.addFunction(typeIndex, body);
@@ -200,7 +161,6 @@ function addExports(module: WasmModuleEncoder, program: Program, layout: Program
 
 function layoutProgram(program: Program): ProgramLayout {
   const types: WasmFunctionType[] = [];
-  const signatureIndices = new Map<SignatureRef, number>();
   const typeIndices = new Map<FunctionType, number>();
 
   for (const type of program.functionTypes) {
@@ -213,19 +173,8 @@ function layoutProgram(program: Program): ProgramLayout {
     }
     typeIndices.set(type, index);
   }
-  for (const signature of program.signatures) {
-    const index = typeIndices.get(signature.type);
-
-    assert(
-      index !== undefined,
-      `program signature ${signature.ref.id} has no function type index`
-    );
-    signatureIndices.set(signature.ref, index);
-  }
-
   return {
     types,
-    signatureIndices,
     typeIndices,
     functionIndices: new Map([
       ...program.functionImports.map((fn, index) => [fn.ref, index] as const),
@@ -237,67 +186,13 @@ function layoutProgram(program: Program): ProgramLayout {
     memoryIndices: new Map(
       program.memoryImports.map((memory, index) => [memory.ref, index])
     ),
-    tableIndices: new Map(program.tables.map((table, index) => [table.ref, index])),
-    globalIndices: new Map(program.globals.map((global, index) => [global.ref, index]))
+    tableIndices: new Map(program.tables.map((table, index) => [table.ref, index]))
   };
 }
 
 function buildFunctionBody(
-  program: Program,
   layout: ProgramLayout,
   fn: ProgramFunction
-): EncodedWasmFunctionBody {
-  switch (fn.kind) {
-    case "legacy":
-      return buildLegacyBody(program, layout, fn);
-    case "function":
-      return buildDefinedBody(layout, fn);
-  }
-}
-
-function buildLegacyBody(
-  program: Program,
-  layout: ProgramLayout,
-  fn: LegacyFunction
-): EncodedWasmFunctionBody {
-  const signatureIndex = layout.signatureIndices.get(fn.signature);
-
-  assert(signatureIndex !== undefined, `missing layout for program signature ${fn.signature.id}`);
-
-  const legacyFunctions = resolveFunctionIndices(layout, fn);
-  const directFunctions = resolveDirectFunctionIndices(layout, fn.callTargets);
-  const types = resolveTypeIndices(layout, fn.indirectTypes);
-  const resources = resolveResourceIndices(layout, fn.resources);
-
-  const globals = new Map<GlobalRef, number>();
-
-  for (const global of fn.globals) {
-    const globalIndex = layout.globalIndices.get(global);
-
-    assert(globalIndex !== undefined, `missing layout for program global ${global.id}`);
-    globals.set(global, globalIndex);
-  }
-
-  const tables = resolveTableIndices(layout, fn.tables);
-
-  const context = {
-    bindings: createModuleBindings({
-      functions: directFunctions,
-      types,
-      tables,
-      resources
-    }),
-    functions: legacyFunctions,
-    globals,
-    signatureIndex,
-    placements: program.placements
-  } satisfies LegacyFunctionBodyContext;
-  return fn.build(context);
-}
-
-function buildDefinedBody(
-  layout: ProgramLayout,
-  fn: DefinedFunction
 ): EncodedWasmFunctionBody {
   const functions = resolveDirectFunctionIndices(layout, fn.directTargets);
   const types = resolveTypeIndices(layout, fn.indirectTypes);
@@ -357,21 +252,6 @@ function resolveResourceIndices(
     resources.set(resource, memoryIndex);
   }
   return resources;
-}
-
-function resolveFunctionIndices(
-  layout: ProgramLayout,
-  fn: LegacyFunction
-): ReadonlyMap<FunctionRef, number> {
-  const functions = new Map<FunctionRef, number>();
-
-  for (const call of fn.calls) {
-    const functionIndex = layout.functionIndices.get(call);
-
-    assert(functionIndex !== undefined, `missing layout for called program function ${call.id}`);
-    functions.set(call, functionIndex);
-  }
-  return functions;
 }
 
 function resolveDirectFunctionIndices(

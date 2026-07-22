@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { BodyAnalysis, SiteId } from "#compiler/analysis/model.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { bodyFinal, type IrBlock } from "#ir/block.js";
+import type { IrBlock } from "#ir/block.js";
 
 // A capture at an ordinary site runs on entry. Structured headers first emit
 // their operands, so captured recipes may also replay locals materialized by
@@ -73,11 +73,6 @@ export function canCaptureAtDeadline(
     }
   };
 
-  if (exportSite(block, analysis) === site) {
-    for (const output of analysis.exportedOutputs()) {
-      visitDirectUse(output);
-    }
-  }
   for (const operand of record.node.operands) {
     visitDirectUse(operand);
   }
@@ -91,15 +86,6 @@ export function canCaptureAtDeadline(
     value,
     (candidate) => bound.has(candidate) || isAvailableAtCapture(candidate)
   );
-}
-
-function exportSite(block: IrBlock, analysis: BodyAnalysis): SiteId | undefined {
-  if (analysis.exportedOutputs().length === 0) {
-    return undefined;
-  }
-  return bodyFinal(block.body) === undefined
-    ? analysis.bodyEndSite(block.body)
-    : analysis.siteOf(block.body, block.body.nodes.length - 1);
 }
 
 function canEvaluateWithoutTrap(

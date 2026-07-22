@@ -1,7 +1,6 @@
 import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import type { OperandWidth } from "#core/types.js";
 import type {
-  ExternalValueId,
   ValueId,
   ValueInput,
   ValueType,
@@ -45,7 +44,6 @@ export type ValueFoldContext = ValueBoundsContext & ValueTrapContext & Readonly<
 export type ValueEmitTarget = Readonly<{
   body: WasmFunctionBodyEncoder;
   emitNodeOutput(id: ValueId): void;
-  emitExternal(external: ExternalValueId): void;
   emitParameter(index: number): void;
   emitLoopInput(id: ValueId): void;
 }>;

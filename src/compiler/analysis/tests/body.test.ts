@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { analyzeBody } from "#compiler/analysis/analyze.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import {
-  finishControl,
   ifControl,
   loopContinueControl,
   loopControl,
@@ -16,9 +15,17 @@ import {
   Invocation
 } from "#compiler/ir/invocation.js";
 import { callOperation } from "#compiler/ir/operations/index.js";
+import { valueId } from "#compiler/ir/values/id.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { BodyNode, Body, IrBlock } from "#ir/block.js";
+import {
+  bodyCompletes,
+  bodyFinal,
+  type BodyNode,
+  type Body,
+  type IrBlock
+} from "#ir/block.js";
+import type { IrFunction } from "#ir/function.js";
 import { functionType } from "#compiler/program/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef, tableRef } from "#compiler/program/refs.js";
@@ -33,9 +40,55 @@ import {
 
 const noEffects: StorageEffects = { reads: [], writes: [] };
 
+function functionBlock(
+  block: IrBlock,
+  returned: readonly ValueId[] = []
+): IrFunction {
+  if (!bodyCompletes(block.body)) {
+    (block.body.nodes as BodyNode[]).push(returnControl.create({
+      source: { kind: "values", values: returned }
+    }));
+  }
+
+  const parameters = Array.from(
+    { length: block.values.size() },
+    (_, raw) => valueId(raw)
+  ).filter((value) => block.values.node(value).kind === "parameter")
+    .sort((a, b) => {
+      const first = block.values.node(a);
+      const second = block.values.node(b);
+
+      return first.kind === "parameter" && second.kind === "parameter"
+        ? first.index - second.index
+        : 0;
+    });
+  const final = bodyFinal(block.body);
+  const results = final?.kind === "return"
+    ? final.source.kind === "values"
+      ? final.source.values.map((result) => block.values.valueType(result))
+      : final.source.invocation.target.type.results
+    : [];
+
+  return {
+    ...block,
+    type: functionType(
+      parameters.map((parameter) => block.values.valueType(parameter)),
+      results
+    ),
+    parameters
+  };
+}
+
+function analyzeFunction(
+  block: IrBlock,
+  returned: readonly ValueId[] = []
+) {
+  return analyzeBody(functionBlock(block, returned));
+}
+
 test("sites form one dense preorder and expose body geometry", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const written = values.const(7);
   const loopSeed = values.const(0);
   const loopInput = values.addLoopInput();
@@ -50,7 +103,7 @@ test("sites form one dense preorder and expose body geometry", () => {
     body: loopBody
   });
   const body: Body = { nodes: [branch, loop] };
-  const analysis = analyzeBody({ values, body });
+  const analysis = analyzeFunction({ values, body });
 
   deepStrictEqual(
     analysis.sites().map((site) => [site.id, site.kind, site.nodeIndex]),
@@ -61,12 +114,13 @@ test("sites form one dense preorder and expose body geometry", () => {
       [3, "node", 1],
       [4, "node", 0],
       [5, "bodyEnd", 1],
-      [6, "bodyEnd", 2]
+      [6, "node", 2],
+      [7, "bodyEnd", 3]
     ]
   );
-  strictEqual(analysis.sites().length, 7);
+  strictEqual(analysis.sites().length, 8);
   strictEqual(analysis.siteOf(body, 0), 0);
-  strictEqual(analysis.bodyEndSite(body), 6);
+  strictEqual(analysis.bodyEndSite(body), 7);
   deepStrictEqual(analysis.path(body, loopBody), [{ body: loopBody, owner: 3 }]);
   deepStrictEqual(analysis.path(loopBody, thenBody), undefined);
   strictEqual(analysis.isLoopBody(loopBody), true);
@@ -93,7 +147,7 @@ test("dead producer chains stay dead", () => {
   const address = values.binary("add", base, values.const(4));
   const byteLength = values.const(4);
   const readBase = resourceReadNode(values, base, 0);
-  const analysis = analyzeBody({
+  const analysis = analyzeFunction({
     values,
     body: { nodes: [readBase] }
   });
@@ -108,12 +162,12 @@ test("dead producer chains stay dead", () => {
 
 test("semantic producer inputs are charged once however often the output is used", () => {
   const values = compilerTestValues();
-  const address = values.external(0);
+  const address = values.parameter(0, "i32");
   const loaded = values.addNodeOutput();
   const read = memoryReadOperation(loaded, address, 32);
   const firstWrite = resourceWriteNode(values, 0, loaded);
   const secondWrite = resourceWriteNode(values, 1, loaded);
-  const analysis = analyzeBody({
+  const analysis = analyzeFunction({
     values,
     body: { nodes: [read, firstWrite, secondWrite] }
   });
@@ -127,10 +181,10 @@ test("semantic producer inputs are charged once however often the output is used
 
 test("each semantic operation input contributes one use", () => {
   const values = compilerTestValues();
-  const stored = values.external(0);
-  const address = values.external(1);
+  const stored = values.parameter(0, "i32");
+  const address = values.parameter(1, "i32");
   const write = memoryWriteOperation(address, stored, 32);
-  const analysis = analyzeBody({
+  const analysis = analyzeFunction({
     values,
     body: { nodes: [write] }
   });
@@ -149,7 +203,7 @@ test("compound dependency edges are charged once per live recipe", () => {
   const values = compilerTestValues();
   const read = values.addNodeOutput();
   const doubled = values.binary("add", read, read);
-  const analysis = analyzeBody({
+  const analysis = analyzeFunction({
     values,
     body: {
       nodes: [
@@ -166,11 +220,11 @@ test("compound dependency edges are charged once per live recipe", () => {
 
 test("selected-body uses count separately while their shared recipe runs once", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const read = values.addNodeOutput();
   const one = values.const(1);
   const sum = values.binary("add", read, one);
-  const analysis = analyzeBody({
+  const analysis = analyzeFunction({
     values,
     body: {
       nodes: [
@@ -193,7 +247,7 @@ test("selected-body uses count separately while their shared recipe runs once", 
 test("a use authored in a loop counts once, independent of runtime iterations", () => {
   const values = compilerTestValues();
   const output = values.addNodeOutput();
-  const analysis = analyzeBody({
+  const analysis = analyzeFunction({
     values,
     body: {
       nodes: [
@@ -214,16 +268,16 @@ test("a use authored in a loop counts once, independent of runtime iterations", 
   strictEqual(analysis.useCount(output), 1);
 });
 
-test("operation, control, loop, and finish operands seed liveness", () => {
+test("operation, control, loop, and return operands seed liveness", () => {
   const values = compilerTestValues();
   const mutated = values.const(11);
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const nestedMutation = values.const(12);
   const loopSeed = values.const(13);
   const loopInput = values.addLoopInput();
   const increment = values.const(1);
   const loopUpdate = values.binary("add", loopInput, increment);
-  const finishResult = values.const64(14n);
+  const returnResult = values.const64(14n);
   const nodes: readonly BodyNode[] = [
     resourceWriteNode(values, 0, mutated),
     ifControl.create({
@@ -238,14 +292,14 @@ test("operation, control, loop, and finish operands seed liveness", () => {
         nodes: [loopContinueControl.create({ updates: [loopUpdate] })]
       }
     }),
-    finishControl.create({
-      finish: {
-        kind: "exit",
-        result: finishResult
+    returnControl.create({
+      source: {
+        kind: "values",
+        values: [returnResult]
       }
     })
   ];
-  const analysis = analyzeBody({ values, body: { nodes } });
+  const analysis = analyzeFunction({ values, body: { nodes } });
 
   for (const live of [
     mutated,
@@ -255,7 +309,7 @@ test("operation, control, loop, and finish operands seed liveness", () => {
     loopInput,
     increment,
     loopUpdate,
-    finishResult
+    returnResult
   ]) {
     strictEqual(analysis.isLive(live), true, `expected value ${live} to be live`);
   }
@@ -263,7 +317,7 @@ test("operation, control, loop, and finish operands seed liveness", () => {
 
 test("an unreachable arm result executes even when its join is dead", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const safeResult = values.const(7);
   const unreachableResult = values.unreachable();
   const output = values.addNodeOutput();
@@ -276,7 +330,7 @@ test("an unreachable arm result executes even when its join is dead", () => {
     elseBody
   });
   const block: IrBlock = { values, body: { nodes: [control] } };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
   const unreachableRoot = analysis.roots().find(
     (root) => root.value === unreachableResult
   );
@@ -295,16 +349,18 @@ test("an unreachable arm result executes even when its join is dead", () => {
     site: analysis.siteOf(block.body, 0)
   });
 
-  const exported = analyzeBody(block, [output]);
+  strictEqual(block.body.nodes.at(-1)?.kind, "return");
+  (block.body.nodes as BodyNode[]).pop();
+  const returned = analyzeFunction(block, [output]);
 
-  strictEqual(exported.useCount(output), 1);
-  strictEqual(exported.useCount(safeResult), 1);
-  strictEqual(exported.useCount(unreachableResult), 1);
+  strictEqual(returned.useCount(output), 1);
+  strictEqual(returned.useCount(safeResult), 1);
+  strictEqual(returned.useCount(unreachableResult), 1);
 });
 
 test("a switch retains arm recipes exactly when its output is live", () => {
   const values = compilerTestValues();
-  const selector = values.external(0);
+  const selector = values.parameter(0, "i32");
   const read = values.addNodeOutput();
   const one = values.const(1);
   const firstResult = values.binary("add", read, one);
@@ -327,14 +383,16 @@ test("a switch retains arm recipes exactly when its output is live", () => {
       })]
     }
   };
-  const dead = analyzeBody(block);
+  const dead = analyzeFunction(block);
 
   strictEqual(dead.useCount(selector), 1);
   for (const value of [output, firstResult, read, one, defaultResult]) {
     strictEqual(dead.useCount(value), 0, `expected value ${value} to be dead`);
   }
 
-  const live = analyzeBody(block, [output]);
+  strictEqual(block.body.nodes.at(-1)?.kind, "return");
+  (block.body.nodes as BodyNode[]).pop();
+  const live = analyzeFunction(block, [output]);
 
   strictEqual(live.useCount(selector), 1);
   strictEqual(live.useCount(output), 1);
@@ -346,7 +404,7 @@ test("a switch retains arm recipes exactly when its output is live", () => {
 
 test("a control-only switch retains selector and arm effects without a join output", () => {
   const values = compilerTestValues();
-  const selector = values.external(0);
+  const selector = values.parameter(0, "i32");
   const selectedValue = values.const(11);
   const fallbackValue = values.const(22);
   const selectedBody: Body = {
@@ -368,7 +426,7 @@ test("a control-only switch retains selector and arm effects without a join outp
       })]
     }
   };
-  const analysis = analyzeBody(block);
+  const analysis = analyzeFunction(block);
 
   strictEqual(analysis.isLive(selector), true);
   strictEqual(analysis.isLive(selectedValue), true);
@@ -385,39 +443,10 @@ test("a control-only switch retains selector and arm effects without a join outp
       ["bodyEnd", 1],
       ["node", 0],
       ["bodyEnd", 1],
-      ["bodyEnd", 1]
+      ["node", 1],
+      ["bodyEnd", 2]
     ]
   );
-});
-
-test("export roots preserve order and use the terminal boundary", () => {
-  const values = compilerTestValues();
-  const first = values.addNodeOutput();
-  const second = values.addNodeOutput();
-  const exitResult = values.const64(0n);
-  const finish = finishControl.create({
-    finish: {
-      kind: "exit",
-      result: exitResult
-    }
-  });
-  const body: Body = {
-    nodes: [
-      resourceReadNode(values, first, 0),
-      resourceReadNode(values, second, 1),
-      finish
-    ]
-  };
-  const outputs: readonly ValueId[] = [second, first, second];
-  const analysis = analyzeBody({ values, body }, outputs);
-  const roots = analysis.roots().slice(-outputs.length);
-  const terminal = analysis.siteOf(body, body.nodes.length - 1);
-
-  deepStrictEqual(analysis.exportedOutputs(), outputs);
-  deepStrictEqual(roots.map((root) => root.value), outputs);
-  strictEqual(roots.every((root) => root.consumedAt === terminal), true);
-  strictEqual(analysis.useCount(first), 1);
-  strictEqual(analysis.useCount(second), 2);
 });
 
 test("pure call execution follows result liveness", () => {
@@ -449,7 +478,7 @@ test("pure call execution follows result liveness", () => {
   const firstCall = call(first);
   const secondCall = call(second);
   const deadCall = call(dead);
-  const analysis = analyzeBody({
+  const analysis = analyzeFunction({
     values,
     body: {
       nodes: [
@@ -476,7 +505,7 @@ test("pure call execution follows result liveness", () => {
 
 test("effectful calls remain live even when their result is unused", () => {
   const values = compilerTestValues();
-  const argument = values.external(0);
+  const argument = values.parameter(0, "i32");
   const output = values.addNodeOutput();
   const target = new FunctionDefinition({
     ref: functionRef("tests.analysis.effectful-call"),
@@ -494,7 +523,7 @@ test("effectful calls remain live even when their result is unused", () => {
     },
     () => output
   );
-  const analysis = analyzeBody({ values, body: { nodes: [call] } });
+  const analysis = analyzeFunction({ values, body: { nodes: [call] } });
   const invocation = analysis.invocations()[0]!;
 
   strictEqual(analysis.isLive(output), false);
@@ -504,7 +533,7 @@ test("effectful calls remain live even when their result is unused", () => {
 
 test("invocation liveness follows its owning node", () => {
   const values = compilerTestValues();
-  const argument = values.external(0);
+  const argument = values.parameter(0, "i32");
   const target = new FunctionDefinition({
     ref: functionRef("tests.analysis.return-call"),
     type: functionType(["i32"], []),
@@ -523,7 +552,7 @@ test("invocation liveness follows its owning node", () => {
     throw new Error("resultless invocation allocated an output");
   });
   const body: Body = { nodes: [ordinaryCall, returned] };
-  const analysis = analyzeBody({ values, body });
+  const analysis = analyzeFunction({ values, body });
   const [callSite, returnSite] = analysis.invocations();
 
   strictEqual(analysis.invocationMustExecute(callSite!), false);
@@ -543,8 +572,8 @@ test("invocation liveness follows its owning node", () => {
 
 test("returned indirect invocations root arguments and the table index", () => {
   const values = compilerTestValues();
-  const argument = values.external(0);
-  const elementIndex = values.external(1);
+  const argument = values.parameter(0, "i32");
+  const elementIndex = values.parameter(1, "i32");
   const invocation = Invocation.create({
     target: IndirectCallTarget.create({
       table: tableRef("tests.analysis.indirect-call"),
@@ -557,7 +586,7 @@ test("returned indirect invocations root arguments and the table index", () => {
   const returned = returnControl.create({
     source: { kind: "invocation", invocation }
   });
-  const analysis = analyzeBody({ values, body: { nodes: [returned] } });
+  const analysis = analyzeFunction({ values, body: { nodes: [returned] } });
 
   strictEqual(analysis.isLive(argument), true);
   strictEqual(analysis.isLive(elementIndex), true);
@@ -569,7 +598,7 @@ test("returned indirect invocations root arguments and the table index", () => {
 
 test("queries reject unknown values, sites, and bodies", () => {
   const values = compilerTestValues();
-  const analysis = analyzeBody({ values, body: { nodes: [] } });
+  const analysis = analyzeFunction({ values, body: { nodes: [] } });
   const unknownValue = 99 as ValueId;
   const foreignBody: Body = { nodes: [] };
 

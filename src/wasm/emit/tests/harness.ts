@@ -1,245 +1,218 @@
 import { assert } from "#common/assert.js";
-import type { IrBlock } from "#ir/block.js";
-import { programImportModuleName } from "#compiler/program/imports.js";
-import {
-  WasmFunctionBodyEncoder,
-  type EncodedWasmFunctionBody
-} from "#compiler/encoder/function-body.js";
-import { WasmLocalScratchAllocator } from "#compiler/encoder/local-scratch.js";
-import { WasmModuleEncoder } from "#compiler/encoder/module.js";
-import { wasmValueType } from "#compiler/encoder/types.js";
+import type { StorageAccess, StorageEffects } from "#compiler/ir/effects.js";
+import type { CompiledProgram } from "#compiler/program/compile.js";
 import { compileProgram } from "#compiler/program/compile.js";
-import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
+import { instantiateCompiledProgram } from "#compiler/program/instance.js";
+import { ProgramBuilder } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/program/function-type.js";
-import type { LegacyFunctionBodyContext } from "#compiler/program/legacy-body.js";
 import {
   functionExportRef,
-  functionRef,
-  signatureRef
+  functionRef
 } from "#compiler/program/refs.js";
-import { emitActionFragment } from "#wasm/emit/action.js";
-import { guestMemoryMinimumPages } from "#memory/constants.js";
-import { testExecutionModel } from "#test/support/execution-model.js";
+import type { FunctionBuilder } from "#ir/function.js";
+import { wasmSectionId } from "#compiler/encoder/types.js";
+import {
+  cpuState,
+  guestMemoryResource,
+  testExecutionModel
+} from "#test/support/execution-model.js";
+import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 
-const testModuleRunExportName = "run";
+const testFunctionExport = functionExportRef("test.wasm-function.entry-export");
+const testFunctionExportName = "run";
 
-// Test-only module wrapper around the action emitter: imported state + guest
-// memories, one run export returning the encoded i64 exit. The harness
-// embeds like any host: dispatch escapes through an explicit block branch,
-// bare action-body fallthrough reaches the sentinel tail lexically, and
-// reports return their real encoded exits. External value n is the
-// function's n-th i32 parameter. Module assembly for real use is the
-// engines' job.
-
-// Canonical Cpu exits leave unused high bits clear.
-export const irBlockCompleted = -1n;
+export const testFunctionCompleted = -1n;
 export const testModuleMemoryIndex = {
   cpuState: 0,
   guest: 1
 } as const;
 
-export type InstantiatedIrBlock = Readonly<{
+export type TestFunction = Readonly<{
+  parameterCount: number;
+  build(fn: FunctionBuilder): void;
+}>;
+
+export type InstantiatedTestFunction = Readonly<{
   stateMemory: WebAssembly.Memory;
   stateView: DataView;
   guestView: DataView;
-  run(...externals: number[]): bigint;
+  run(...parameters: number[]): bigint;
 }>;
 
-// The fragment with direct exits to the sentinel tail.
-export function irBlockBody(
-  block: IrBlock,
-  externalParamCount = 0
-): EncodedWasmFunctionBody {
-  let encodedBody: EncodedWasmFunctionBody | undefined;
-  const program = createIrBlockProgram(
-    block,
-    externalParamCount,
-    (body) => (encodedBody = body)
-  );
-
-  compileProgram(program);
-  assert(encodedBody !== undefined, "test IR block body was not encoded");
-  return encodedBody;
-}
-
-function emitIrBlockBody(
-  block: IrBlock,
-  externalParamCount: number,
-  context: LegacyFunctionBodyContext
-): EncodedWasmFunctionBody {
-  const body = new WasmFunctionBodyEncoder(externalParamCount);
-  const scratch = new WasmLocalScratchAllocator(body);
-  const placement = context.placements.get(block);
-
-  assert(placement !== undefined, "missing test IR block placement");
-
-  body.block();
-  emitActionFragment(block, {
-    body,
-    scratch,
-    externalLocals: new Map(Array.from({ length: externalParamCount }, (_, id) => [id, id])),
-    bindings: context.bindings,
-    placement,
-    embedding: {
-      dispatch: { kind: "br", depth: 0 },
-      fallthrough: { kind: "fallthrough" }
-    }
-  });
-  body.endBlock();
-  scratch.assertClear();
-  return body.i64Const(irBlockCompleted).finish();
-}
-
-export async function instantiateIrBlock(
-  block: IrBlock,
-  externalParamCount = 0
-): Promise<InstantiatedIrBlock> {
-  const state = new WebAssembly.Memory({
-    initial: testExecutionModel.cpuState.memoryImport.limits.minPages
-  });
-  const guest = new WebAssembly.Memory({
-    initial: testExecutionModel.guestMemory.memoryImport.limits.minPages
-  });
-  const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeIrBlockModule(block, externalParamCount)),
-    {
-      [programImportModuleName]: {
-        [testExecutionModel.cpuState.memoryImport.name]: state,
-        [testExecutionModel.guestMemory.memoryImport.name]: guest
-      }
-    }
-  );
-  const run = instance.exports[testModuleRunExportName];
-
+export function testFunction(
+  parameterCount: number,
+  build: (fn: FunctionBuilder) => void
+): TestFunction {
   assert(
-    typeof run === "function",
-    `missing Wasm ${testModuleRunExportName} export`
+    Number.isInteger(parameterCount) && parameterCount >= 0,
+    `invalid test function parameter count: ${parameterCount}`
   );
+  return { parameterCount, build };
+}
+
+export function completedTestFunction(
+  parameterCount: number,
+  build: (fn: FunctionBuilder) => void
+): TestFunction {
+  return testFunction(parameterCount, (fn) => {
+    build(fn);
+    returnTestFunctionCompleted(fn);
+  });
+}
+
+export function returnTestFunctionCompleted(fn: FunctionBuilder): void {
+  fn.return([fn.values.const64(testFunctionCompleted)]);
+}
+
+export function compileTestFunction(fixture: TestFunction): CompiledProgram {
+  return compileProgram(buildTestProgram(fixture));
+}
+
+export function testFunctionBody(fixture: TestFunction): Uint8Array<ArrayBuffer> {
+  return firstWasmFunctionBody(compileTestFunction(fixture).bytes);
+}
+
+export function testFunctionBranchHints(fixture: TestFunction): readonly number[] {
+  const compiled = compileTestFunction(fixture);
+  const module = new WebAssembly.Module(compiled.bytes);
+  const sections = WebAssembly.Module.customSections(
+    module,
+    "metadata.code.branch_hint"
+  );
+
+  if (sections.length === 0) {
+    return [];
+  }
+  assert(sections.length === 1, "test function has duplicate branch-hint sections");
+  const section = new Uint8Array(sections[0]!);
+  let cursor = readU32(section, 0);
+  const functionCount = cursor.value;
+  const values: number[] = [];
+
+  for (let functionEntry = 0; functionEntry < functionCount; functionEntry += 1) {
+    const functionIndex = readU32(section, cursor.nextOffset);
+    const hintCount = readU32(section, functionIndex.nextOffset);
+
+    cursor = hintCount;
+    for (let hintIndex = 0; hintIndex < hintCount.value; hintIndex += 1) {
+      const offset = readU32(section, cursor.nextOffset);
+      const metadataCount = readU32(section, offset.nextOffset);
+
+      assert(metadataCount.value === 1, "unexpected branch-hint metadata count");
+      const value = readU32(section, metadataCount.nextOffset);
+
+      if (functionIndex.value === 0) {
+        values.push(value.value);
+      }
+      cursor = value;
+    }
+  }
+  return values;
+}
+
+export async function instantiateTestFunction(
+  fixture: TestFunction
+): Promise<InstantiatedTestFunction> {
+  const memories = createTestWasmMemories();
+  const compiled = compileTestFunction(fixture);
+  const instance = instantiateCompiledProgram(compiled, {
+    memories: new Map([
+      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
+      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+    ]),
+    functions: new Map()
+  });
+  const run = instance.functionExports.get(testFunctionExport);
+
+  assert(typeof run === "function", `missing Wasm ${testFunctionExportName} export`);
 
   return {
-    stateMemory: state,
-    stateView: new DataView(state.buffer),
-    guestView: new DataView(guest.buffer),
-    run: (...externals) => (run as (...args: number[]) => bigint)(...externals)
+    stateMemory: memories.cpuStateMemory,
+    stateView: new DataView(memories.cpuStateMemory.buffer),
+    guestView: new DataView(memories.guestMemory.buffer),
+    run: (...parameters) => (run as (...args: number[]) => bigint)(...parameters)
   };
 }
 
-// Same wrapper around an already finished body — typically a hand-written
-// embedder function with fragments emitted inline.
-export async function instantiateFunctionBody(
-  body: EncodedWasmFunctionBody,
-  paramCount = 0
-): Promise<InstantiatedIrBlock> {
-  const state = new WebAssembly.Memory({ initial: 1 });
-  const guest = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
-  const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(encodeFunctionBodyModule(body, paramCount)),
-    {
-      [programImportModuleName]: {
-        [testExecutionModel.cpuState.memoryImport.name]: state,
-        [testExecutionModel.guestMemory.memoryImport.name]: guest
-      }
-    }
-  );
-  const run = instance.exports[testModuleRunExportName];
+function buildTestProgram(fixture: TestFunction) {
+  const program = new ProgramBuilder(testExecutionModel.resources);
+  const entry = program.defineFunction({
+    ref: functionRef("test.wasm-function.entry"),
+    type: functionType(
+      Array.from({ length: fixture.parameterCount }, () => "i32" as const),
+      ["i64"]
+    ),
+    effects: testFunctionEffects
+  }, (fn) => fixture.build(fn));
 
-  assert(
-    typeof run === "function",
-    `missing Wasm ${testModuleRunExportName} export`
-  );
-
-  return {
-    stateMemory: state,
-    stateView: new DataView(state.buffer),
-    guestView: new DataView(guest.buffer),
-    run: (...externals) => (run as (...args: number[]) => bigint)(...externals)
-  };
+  program.exportFunction({
+    ref: testFunctionExport,
+    name: testFunctionExportName,
+    target: entry.ref
+  });
+  return program.finish();
 }
 
-function encodeFunctionBodyModule(body: EncodedWasmFunctionBody, paramCount: number): Uint8Array<ArrayBuffer> {
-  const module = new WasmModuleEncoder();
-  const typeIndex = initializeTestModule(module, paramCount);
+const wholeCpuState: StorageAccess = {
+  space: "resource",
+  resource: cpuState.resource,
+  range: { basis: { kind: "resource" } }
+};
+const wholeGuestMemory: StorageAccess = {
+  space: "resource",
+  resource: guestMemoryResource,
+  range: { basis: { kind: "resource" } }
+};
+const testFunctionEffects: StorageEffects = {
+  reads: [wholeCpuState, wholeGuestMemory],
+  writes: [wholeCpuState, wholeGuestMemory]
+};
 
-  module.exportFunction(testModuleRunExportName, module.addFunction(typeIndex, body));
-  return module.encode();
-}
-
-function encodeIrBlockModule(
-  block: IrBlock,
-  externalParamCount: number
+function firstWasmFunctionBody(
+  moduleBytes: Uint8Array<ArrayBuffer>
 ): Uint8Array<ArrayBuffer> {
-  return compileProgram(
-    createIrBlockProgram(block, externalParamCount)
-  ).bytes;
+  let offset = 8;
+
+  while (offset < moduleBytes.length) {
+    const sectionId = moduleBytes[offset];
+
+    assert(sectionId !== undefined, "missing Wasm section id");
+    const sectionSize = readU32(moduleBytes, offset + 1);
+    const sectionStart = sectionSize.nextOffset;
+    const sectionEnd = sectionStart + sectionSize.value;
+
+    if (sectionId === wasmSectionId.code) {
+      const functionCount = readU32(moduleBytes, sectionStart);
+
+      assert(functionCount.value > 0, "test module has no Wasm function bodies");
+      const bodySize = readU32(moduleBytes, functionCount.nextOffset);
+      const bodyStart = bodySize.nextOffset;
+
+      return moduleBytes.slice(bodyStart, bodyStart + bodySize.value);
+    }
+    offset = sectionEnd;
+  }
+  throw new Error("missing Wasm code section");
 }
 
-function createIrBlockProgram(
-  block: IrBlock,
-  externalParamCount: number,
-  bodyEncoded?: (body: EncodedWasmFunctionBody) => void
-): Program {
-  const builder = new ProgramBuilder(testExecutionModel.resources);
-  const entryType = functionType(
-    Array.from({ length: externalParamCount }, () => "i32" as const),
-    ["i64"]
-  );
-  const entrySignature = signatureRef("test.ir-block-entry-signature");
-  const entry = functionRef("test.ir-block-entry");
-  const cpuStateRef = testExecutionModel.cpuState.resource;
-  const guestMemoryRef = testExecutionModel.guestMemory.resource;
+type U32Read = Readonly<{ value: number; nextOffset: number }>;
 
-  builder.signature({ ref: entrySignature, type: entryType });
-  builder.legacyFunction({
-    ref: entry,
-    signature: entrySignature,
-    calls: [],
-    resources: [cpuStateRef, guestMemoryRef],
-    globals: [],
-    tables: [],
-    irBlocks: [{ block, allowImplicitEntryFallthrough: true }],
-    build: (context) => {
-      assert(
-        context.bindings.resourceIndex(cpuStateRef) === testModuleMemoryIndex.cpuState,
-        "unexpected CPU-state memory import index"
-      );
-      const body = emitIrBlockBody(block, externalParamCount, context);
+function readU32(bytes: Uint8Array, start: number): U32Read {
+  let value = 0;
+  let shift = 0;
+  let offset = start;
 
-      bodyEncoded?.(body);
-      return body;
+  while (offset < bytes.length) {
+    const byte = bytes[offset];
+
+    assert(byte !== undefined, "truncated u32 LEB128");
+    value |= (byte & 0x7f) << shift;
+    offset += 1;
+    if ((byte & 0x80) === 0) {
+      return { value: value >>> 0, nextOffset: offset };
     }
-  });
-  builder.exportFunction({
-    ref: functionExportRef("test.ir-block-entry-export"),
-    name: testModuleRunExportName,
-    target: entry
-  });
-  return builder.finish();
-}
-
-function initializeTestModule(module: WasmModuleEncoder, paramCount: number): number {
-  const cpuStateMemoryIndex = module.importMemory(
-    programImportModuleName,
-    testExecutionModel.cpuState.memoryImport.name,
-    { minPages: 1 }
-  );
-  const guestMemoryIndex = module.importMemory(
-    programImportModuleName,
-    testExecutionModel.guestMemory.memoryImport.name,
-    {
-      minPages: guestMemoryMinimumPages
-    }
-  );
-
-  assert(
-    cpuStateMemoryIndex === testModuleMemoryIndex.cpuState &&
-      guestMemoryIndex === testModuleMemoryIndex.guest,
-    "unexpected Wasm memory import order"
-  );
-
-  const typeIndex = module.addFunctionType({
-    params: Array.from({ length: paramCount }, () => wasmValueType.i32),
-    results: [wasmValueType.i64]
-  });
-
-  return typeIndex;
+    shift += 7;
+    assert(shift < 35, "u32 LEB128 is too wide");
+  }
+  throw new Error("truncated u32 LEB128");
 }

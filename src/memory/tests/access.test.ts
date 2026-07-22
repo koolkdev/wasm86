@@ -28,7 +28,7 @@ test("Memory access construction expands one WRITE access into generic RMW opera
   const values = new ValueTable();
   const body = new RegionBuilder(values);
   const memory = guestMemoryAccess.bind(body);
-  const start = values.external(0);
+  const start = values.parameter(0, "i32");
   const byteLength = values.const(8);
   const { access, fault } = memory.resolve({ start, byteLength }, "write");
   const loaded = memory.load(access, values.const(0), 16, { signed: true });
@@ -110,7 +110,7 @@ test("a parent-created access emits through the child region that consumes it", 
   const parent = new RegionBuilder(values);
   const child = parent.child();
   const { access } = guestMemoryAccess.bind(parent).resolve(
-    { start: values.external(0), byteLength: values.const(4) },
+    { start: values.parameter(0, "i32"), byteLength: values.const(4) },
     "read"
   );
 

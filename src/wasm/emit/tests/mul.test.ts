@@ -2,7 +2,7 @@ import { deepStrictEqual, ok as assertOk, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
+import { createInstructionFunction } from "./instruction-function.js";
 import { immBinding, regBinding, type OperandBinding } from "#core/instruction/bindings.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
@@ -19,14 +19,14 @@ import {
 } from "#test/support/cpu-state.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
-import { irBlockBody, irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import { testFunctionBody, testFunctionCompleted, instantiateTestFunction } from "./harness.js";
 
 function readRegister(view: DataView, name: RegName): number {
   return readWasmCpuStateChannel(view, gprChannel(name));
 }
 
 function assertCompleted(exit: bigint): void {
-  strictEqual(exit, irBlockCompleted);
+  strictEqual(exit, testFunctionCompleted);
 }
 
 type SignedProductTruncationCase = Readonly<{
@@ -48,7 +48,7 @@ for (const entry of [
   { name: "i32 min times minus one differs", width: 32, left: 0x8000_0000, right: -1, truncatedDiffers: 1 }
 ] as const satisfies readonly SignedProductTruncationCase[]) {
   test(`signed product truncation lowering: ${entry.name}`, async () => {
-    const builder = createLegacyInstructionBlock();
+    const builder = createInstructionFunction();
     const template: SemanticTemplate = (s, v) => {
       const left = v.extend64(entry.width, s.read(s.reg("eax"), { width: 32 }), true);
       const right = v.extend64(entry.width, s.read(s.reg("ebx"), { width: 32 }), true);
@@ -61,7 +61,7 @@ for (const entry of [
 
     builder.add(template, [], loc(0x1000, 0x1001));
 
-    const { stateView, run } = await instantiateIrBlock(builder.finish());
+    const { stateView, run } = await instantiateTestFunction(builder.finish());
 
     writeWasmCpuStateSnapshot(stateView, { eax: entry.left, ebx: entry.right });
     assertCompleted(run());
@@ -70,7 +70,7 @@ for (const entry of [
 }
 
 test("i32 multiply lowers to wasm i32.mul", async () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
   const template: SemanticTemplate = (s, v) => {
     s.write(s.reg("edx"), v.binary("mul", s.read(s.reg("eax"), { width: 32 }), s.read(s.reg("ebx"), { width: 32 })), { width: 32 });
   };
@@ -78,11 +78,11 @@ test("i32 multiply lowers to wasm i32.mul", async () => {
   builder.add(template, [], loc(0x1000, 0x1001));
 
   const block = builder.finish();
-  const body = irBlockBody(block).bytes;
+  const body = testFunctionBody(block);
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i32Mul), true);
 
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0x4000_0000, ebx: 2 });
   assertCompleted(run());
@@ -90,7 +90,7 @@ test("i32 multiply lowers to wasm i32.mul", async () => {
 });
 
 test("unsigned dword product high-half lowering uses i64 shift", async () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
   const template: SemanticTemplate = (s, v) => {
     const left = v.extend64(32, s.read(s.reg("eax"), { width: 32 }), false);
     const right = v.extend64(32, s.read(s.reg("ebx"), { width: 32 }), false);
@@ -103,12 +103,12 @@ test("unsigned dword product high-half lowering uses i64 shift", async () => {
   builder.add(template, [], loc(0x1000, 0x1001));
 
   const block = builder.finish();
-  const body = irBlockBody(block).bytes;
+  const body = testFunctionBody(block);
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ExtendI32U), true);
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ShrU), true);
 
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0xffff_ffff, ebx: 2 });
   assertCompleted(run());
@@ -118,11 +118,11 @@ test("unsigned dword product high-half lowering uses i64 shift", async () => {
 test("decoded imul lowers through i64 product and writes explicit flags", async () => {
   const instruction = decoded(decodeBytes([0x0f, 0xaf, 0xcb]));
   const block = blockOf([instruction]);
-  const body = irBlockBody(block).bytes;
+  const body = testFunctionBody(block);
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64Mul), true);
 
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, {
     ecx: 0x4000_0000,
@@ -147,12 +147,12 @@ test("decoded imul lowers through i64 product and writes explicit flags", async 
 test("decoded implicit mul lowers through unsigned i64 product and writes EDX:EAX", async () => {
   const instruction = decoded(decodeBytes([0xf7, 0xe3]));
   const block = blockOf([instruction]);
-  const body = irBlockBody(block).bytes;
+  const body = testFunctionBody(block);
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ExtendI32U), true);
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ShrU), true);
 
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, {
     eax: 0xffff_ffff,
@@ -177,7 +177,7 @@ test("decoded implicit mul lowers through unsigned i64 product and writes EDX:EA
 });
 
 function blockOf(instructions: readonly IsaDecodedInstruction[]) {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   for (const instruction of instructions) {
     builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));

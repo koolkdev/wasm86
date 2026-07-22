@@ -37,13 +37,6 @@ import type { NestedBody } from "./node.js";
 import { validateDeclaredStorageEffects } from "./validate/effects.js";
 import { validateResourceOperation } from "./validate/resource.js";
 
-export type ValidateIrBlockOptions = Readonly<{
-  allowImplicitEntryFallthrough?: boolean;
-  // Values the embedder consumes at the root body's dispatch/fallthrough
-  // boundary. They are not represented by nodes inside IrBlock.
-  exportedOutputs?: Iterable<ValueId>;
-}>;
-
 type BodyNodeSite = Readonly<{
   body: Body;
   nodeIndex: number;
@@ -72,19 +65,12 @@ type FunctionValidation = Readonly<{
   results: readonly ValueType[];
 }>;
 
-export function validateIrBlock(
-  block: IrBlock,
-  options: ValidateIrBlockOptions = {}
-): void {
-  new IrValidator(block, undefined).validate(options);
-}
-
 export function validateIrFunction(fn: IrFunction): void {
   new IrValidator(fn, {
     parameters: fn.parameters,
     parameterTypes: fn.type.parameters,
     results: fn.type.results
-  }).validate({});
+  }).validate();
 }
 
 // Validation has two phases. Indexing establishes the unique body tree and all
@@ -96,16 +82,16 @@ class IrValidator {
   readonly #producers = new Map<ValueId, BodyNodeSite>();
   readonly #loopInputs = new Map<ValueId, Body>();
   readonly #cellSeeds = new Map<CellRef, BodyNodeSite>();
-  readonly #function: FunctionValidation | undefined;
+  readonly #function: FunctionValidation;
   readonly #parameterValues = new Set<ValueId>();
 
-  constructor(block: IrBlock, fn: FunctionValidation | undefined) {
+  constructor(block: IrBlock, fn: FunctionValidation) {
     this.#block = block;
     this.#function = fn;
     this.#bodyOwners.set(block.body, null);
   }
 
-  validate(options: ValidateIrBlockOptions): void {
+  validate(): void {
     this.#validateParameters();
     this.#indexBody(this.#block.body, "body");
     this.#assertEveryNodeOutputHasProducer();
@@ -114,13 +100,7 @@ class IrValidator {
       ownerOutput: undefined,
       enclosingLoop: undefined
     });
-    this.#validateBoundaryOutputs(options.exportedOutputs ?? []);
-
-    assert(
-      bodyCompletes(this.#block.body) ||
-        options.allowImplicitEntryFallthrough === true,
-      "root body does not complete"
-    );
+    assert(bodyCompletes(this.#block.body), "root body does not complete");
   }
 
   // Phase 1 indexes producers and lexical definitions before checking uses.
@@ -310,17 +290,6 @@ class IrValidator {
           operands,
           control.updates,
           `${path} operands do not match its updates`
-        );
-        assertNoDirectEffects(directEffects, path);
-        return;
-      case "finish":
-        assertNoControlResults(outputs, nestedBodies, path);
-        assertSameValues(
-          operands,
-          [control.finish.kind === "exit"
-            ? control.finish.result
-            : control.finish.targetEip],
-          `${path} operands do not match its finish value`
         );
         assertNoDirectEffects(directEffects, path);
         return;
@@ -552,9 +521,6 @@ class IrValidator {
       case "loopContinue":
         this.#validateLoopContinue(node.updates, site, context);
         return;
-      case "finish":
-        this.#validateFinish(node, site.path);
-        return;
       case "return":
         this.#validateReturn(node, site.path);
         return;
@@ -641,21 +607,6 @@ class IrValidator {
         this.#block.values.valueType(update) === this.#block.values.valueType(input),
         `${site.path} update ${index} does not match its loop input type`
       );
-    }
-  }
-
-  #validateFinish(
-    control: Extract<Control, { kind: "finish" }>,
-    path: string
-  ): void {
-    assert(this.#function === undefined, `${path} uses a block finish in a function`);
-
-    switch (control.finish.kind) {
-      case "dispatch":
-        return;
-      case "exit":
-        assertValueType(this.#block, control.finish.result, "i64", `${path} exit result`);
-        return;
     }
   }
 
@@ -784,32 +735,9 @@ class IrValidator {
     }
   }
 
-  #validateBoundaryOutputs(outputs: Iterable<ValueId>): void {
-    const nodeIndex = bodyCompletes(this.#block.body)
-      ? this.#block.body.nodes.length - 1
-      : this.#block.body.nodes.length;
-
-    for (const output of outputs) {
-      this.#validateValueUse(
-        output,
-        { body: this.#block.body, nodeIndex, path: "body boundary" },
-        `exported output ${output}`
-      );
-    }
-  }
-
   #validateParameters(): void {
     const fn = this.#function;
 
-    if (fn === undefined) {
-      for (let raw = 0; raw < this.#block.values.size(); raw += 1) {
-        assert(
-          this.#block.values.node(valueId(raw)).kind !== "parameter",
-          `block body declares function parameter value ${raw}`
-        );
-      }
-      return;
-    }
     assert(
       fn.parameters.length === fn.parameterTypes.length,
       `function declares ${fn.parameters.length} parameters for ${fn.parameterTypes.length} types`
@@ -846,7 +774,6 @@ class IrValidator {
   ): void {
     const fn = this.#function;
 
-    assert(fn !== undefined, `${path} returns from a block body`);
     const source = control.source;
 
     if (source.kind === "invocation") {

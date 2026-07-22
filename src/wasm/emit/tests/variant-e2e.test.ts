@@ -12,8 +12,7 @@ import {
   createVariantLayout,
   variantSet
 } from "#compiler/layout/variant.js";
-import { buildIrBlock } from "#ir/region-builder.js";
-import { instantiateIrBlock } from "./harness.js";
+import { instantiateTestFunction, testFunction } from "./harness.js";
 
 test("generated and host encoders share one resolved variant codec", async () => {
   const address = new VariantFieldRef("generated.exit.fault.address", "u32");
@@ -25,18 +24,18 @@ test("generated and host encoders share one resolved variant codec", async () =>
       fault
     ])
   ]);
-  const block = buildIrBlock((body) => {
-    const result = buildVariant(body.values, layout, {
+  const fixture = testFunction(2, (fn) => {
+    const result = buildVariant(fn.values, layout, {
       variant: fault,
       payload: [
-        { field: address, value: body.values.external(0) },
-        { field: detail, value: body.values.external(1) }
+        { field: address, value: fn.parameters[0]! },
+        { field: detail, value: fn.parameters[1]! }
       ]
     });
 
-    body.finish({ kind: "exit", result });
+    fn.return([result]);
   });
-  const instance = await instantiateIrBlock(block, 2);
+  const instance = await instantiateTestFunction(fixture);
   const generated = instance.run(-4, 0x8001);
   const host = encodeVariant(layout, {
     variant: fault,

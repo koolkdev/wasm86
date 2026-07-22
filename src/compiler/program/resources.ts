@@ -59,18 +59,6 @@ export function createProgramResources(
   return { memoryImports: [...memoryImports] };
 }
 
-export function memoryImportFor(
-  resources: ProgramResources,
-  resource: ResourceRef
-): MemoryImport {
-  const memory = resources.memoryImports.find(
-    (candidate) => candidate.ref === resource
-  );
-
-  assert(memory !== undefined, `unknown program resource ${resource.id}`);
-  return memory;
-}
-
 function validatePageCount(value: number, label: string): void {
   assert(
     Number.isInteger(value) && value >= 0 && value <= maximumWasmMemoryPages,

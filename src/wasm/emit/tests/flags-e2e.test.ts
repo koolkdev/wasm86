@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
+import { createInstructionFunction } from "./instruction-function.js";
 import { regBinding, type OperandBinding } from "#core/instruction/bindings.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
@@ -23,9 +23,9 @@ import {
 import { testExecutionModel } from "#test/support/execution-model.js";
 import { wasmBodyMemoryAccesses } from "#compiler/encoder/tests/body-opcodes.js";
 import {
-  irBlockBody,
-  irBlockCompleted,
-  instantiateIrBlock,
+  testFunctionBody,
+  testFunctionCompleted,
+  instantiateTestFunction,
   testModuleMemoryIndex
 } from "./harness.js";
 import { aluReference, type AluFlags, type AluOp } from "./reference.js";
@@ -81,14 +81,14 @@ for (const aluCase of aluCases) {
       };
       const reference = aluReference(aluCase.op, 32, pair.left, pair.right, aluCase.carryIn ?? 0);
 
-      const builder = createLegacyInstructionBlock();
+      const builder = createInstructionFunction();
 
       builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
 
-      const { stateView, run } = await instantiateIrBlock(builder.finish());
+      const { stateView, run } = await instantiateTestFunction(builder.finish());
 
       writeWasmCpuStateSnapshot(stateView, initial);
-      strictEqual(run(), irBlockCompleted, label);
+      strictEqual(run(), testFunctionCompleted, label);
       if (aluCase.op === "add" || aluCase.op === "sub" || aluCase.op === "cmp") {
         assertState(
           stateView,
@@ -128,13 +128,13 @@ test("two adds in one block store one lazy add record, with the second add's sou
   // stores observably carry the second instruction's values.
   const first = ok(decodeBytes([0x01, 0xcb]));
   const second = ok(decodeBytes([0x01, 0xcb], first.nextEip));
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(first.spec.semantics, bindingsFor(first), loc(first.address, first.nextEip));
   builder.add(second.spec.semantics, bindingsFor(second), loc(second.address, second.nextEip));
 
   const block = builder.finish();
-  const body = irBlockBody(block).bytes;
+  const body = testFunctionBody(block);
 
   // Dead writes collapse to one encoded lazy-kind store for the final source.
   strictEqual(
@@ -158,10 +158,10 @@ test("two adds in one block store one lazy add record, with the second add's sou
   const afterFirst = aluReference("add", 32, 0x7fff_fffe, 0x0000_0001);
   const reference = aluReference("add", 32, afterFirst.result, 0x0000_0001);
 
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, initial);
-  strictEqual(run(), irBlockCompleted);
+  strictEqual(run(), testFunctionCompleted);
   assertState(
     stateView,
     { regs: { ebx: reference.result, ecx: 0x0000_0001 }, eip: second.nextEip, flags: allFlagsSet },

@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
+import { createInstructionFunction } from "./instruction-function.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
 import {
@@ -15,7 +15,7 @@ import {
 import { decodeBytes, ok as decoded } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import type { RegName } from "#core/types.js";
-import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import { testFunctionCompleted, instantiateTestFunction } from "./harness.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 
@@ -24,7 +24,7 @@ function readRegister(view: DataView, name: RegName): number {
 }
 
 function assertCompleted(exit: bigint): void {
-  strictEqual(exit, irBlockCompleted);
+  strictEqual(exit, testFunctionCompleted);
 }
 
 test("decoded CBW and CWDE sign-extend into the accumulator without touching flags", async () => {
@@ -69,7 +69,7 @@ async function runDecoded(
 ) {
   const instruction = decoded(decodeBytes(bytes));
   const block = blockOf(instruction);
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, { ...initialState, eip: instruction.address });
   assertCompleted(run());
@@ -78,7 +78,7 @@ async function runDecoded(
 }
 
 function blockOf(instruction: IsaDecodedInstruction) {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(instruction.spec.semantics, [], loc(instruction.address, instruction.nextEip));
   return builder.finish();

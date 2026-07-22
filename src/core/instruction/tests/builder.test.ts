@@ -12,7 +12,10 @@ import {
   valueInstructionLocation,
   type InstructionBuilder
 } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
+import {
+  createInstructionFunction,
+  testInstructionDispatch
+} from "#test/support/instruction-function.js";
 import {
   immBinding,
   immDynamicBinding,
@@ -34,14 +37,16 @@ import {
 } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
 import {
-  finishControl,
   ifControl,
-  type Finish,
   type IfControl,
+  returnControl,
   type SwitchControl
 } from "#compiler/ir/controls/index.js";
 import type { BodyNode, Body, IrBlock } from "#ir/block.js";
-import { validateIrBlock } from "#ir/validate.js";
+import type { IrFunction } from "#ir/function.js";
+import { validateIrFunction } from "#ir/validate.js";
+import { Invocation } from "#compiler/ir/invocation.js";
+import { functionType } from "#compiler/program/function-type.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import { ValueTable, type ValueNode } from "#compiler/ir/values/table.js";
 import { valueId } from "#compiler/ir/values/id.js";
@@ -177,8 +182,9 @@ function isInstructionCountNode(values: ValueTable, node: BodyNode): boolean {
 
 function entryNodes(block: IrBlock): readonly BodyNode[] {
   const final = block.body.nodes.at(-1);
-  const dispatchTarget = final?.kind === "finish" && final.finish.kind === "dispatch"
-    ? final.finish.targetEip
+  const termination = testTermination(final);
+  const dispatchTarget = termination?.kind === "dispatch"
+    ? termination.targetEip
     : undefined;
 
   return rawEntryNodes(block).filter((node) =>
@@ -202,19 +208,19 @@ function buildValueInstructionBlock(
   values: ValueTable,
   build: (instructions: InstructionBuilder) => void,
   completionEvents: CompletionEvent[] = []
-): IrBlock {
-  const region = new RegionBuilder(values);
-  const finishDispatch = (
+): IrFunction {
+  const region = new RegionBuilder(values, undefined, ["i64"]);
+  const returnDispatch = (
     kind: CompletionEvent["kind"],
     body: RegionBuilder,
     targetEip: ValueId
   ): void => {
     completionEvents.push({ kind, targetEip });
-    body.finish({ kind: "dispatch", targetEip });
+    body.returnCall(testInstructionDispatch, [targetEip]);
   };
   const terminals: InstructionTerminals = {
-    dispatch: (body, targetEip) => finishDispatch("dispatch", body, targetEip),
-    returnExit: (body, result) => body.finish({ kind: "exit", result })
+    dispatch: (body, targetEip) => returnDispatch("dispatch", body, targetEip),
+    returnExit: (body, result) => body.return([result])
   };
   const instructions = testInstructionConstruction.createBuilder(
     region,
@@ -225,16 +231,59 @@ function buildValueInstructionBlock(
   const finalFallthrough = instructions.finish();
 
   if (finalFallthrough !== undefined) {
-    finishDispatch("fallthrough", region, finalFallthrough);
+    returnDispatch("fallthrough", region, finalFallthrough);
   }
-  return { body: region.build(), values };
+  const parameters = Array.from({ length: values.size() }, (_, raw) => valueId(raw))
+    .filter((value) => values.node(value).kind === "parameter")
+    .sort((a, b) => {
+      const first = values.node(a);
+      const second = values.node(b);
+
+      return first.kind === "parameter" && second.kind === "parameter"
+        ? first.index - second.index
+        : 0;
+    });
+  const parameterTypes = parameters.map((parameter) =>
+    values.valueType(parameter)
+  );
+
+  return {
+    type: functionType(parameterTypes, ["i64"]),
+    parameters,
+    body: region.build(),
+    values
+  };
 }
+
+type TestTermination = Readonly<
+  | { kind: "dispatch"; targetEip: ValueId }
+  | { kind: "exit"; result: ValueId }
+>;
 
 type TerminatingBodyView = Readonly<{
   nodes: readonly BodyNode[];
   flushes: readonly StateWriteOperation[];
-  terminator: Finish;
+  terminator: TestTermination;
 }>;
+
+function testTermination(node: BodyNode | undefined): TestTermination | undefined {
+  if (node?.kind !== "return") {
+    return undefined;
+  }
+  const { source } = node;
+
+  if (source.kind === "invocation") {
+    const targetEip = source.invocation.inputs[0]?.value;
+
+    return source.invocation.target === testInstructionDispatch &&
+      targetEip !== undefined
+      ? { kind: "dispatch", targetEip }
+      : undefined;
+  }
+  const result = source.values[0];
+
+  return result === undefined ? undefined : { kind: "exit", result };
+}
 
 function nestedBodies(block: IrBlock): readonly Body[] {
   const bodies: Body[] = [];
@@ -254,20 +303,21 @@ function nestedBodies(block: IrBlock): readonly Body[] {
 
 function nestedBodyView(block: IrBlock, index: number): TerminatingBodyView {
   const body = nestedBodies(block).filter(
-    (nested) => nested.nodes.at(-1)?.kind === "finish"
+    (nested) => testTermination(nested.nodes.at(-1)) !== undefined
   )[index - 1];
 
   ok(body !== undefined, `nested body ${index} exists`);
 
   const terminator = body.nodes[body.nodes.length - 1];
+  const termination = testTermination(terminator);
 
-  ok(terminator !== undefined && terminator.kind === "finish", `nested body ${index} ends with a finish`);
+  ok(termination !== undefined, `nested body ${index} ends with a return`);
   return {
     nodes: body.nodes,
     flushes: body.nodes.slice(0, -1).filter(
       isStateWrite
     ),
-    terminator: terminator.finish
+    terminator: termination
   };
 }
 
@@ -305,40 +355,44 @@ function memoryGuard(
   })];
 }
 
-function finishDispatch(targetEip: ValueId): BodyNode {
-  return finishControl.create({
-    finish: { kind: "dispatch", targetEip }
+function dispatchReturn(targetEip: ValueId): BodyNode {
+  return returnControl.create({
+    source: {
+      kind: "invocation",
+      invocation: Invocation.create({
+        target: testInstructionDispatch,
+        arguments: [{ value: targetEip, type: "i32" }]
+      })
+    }
   });
 }
 
-function finishTrap(values: ValueTable, vector: ValueId): BodyNode {
-  return finishControl.create({ finish: trapExit(values, vector) });
+function returnTrap(values: ValueTable, vector: ValueId): BodyNode {
+  return exitReturn(trapExit(values, vector));
 }
 
-function trapExit(values: ValueTable, vector: ValueId): Finish {
+function trapExit(values: ValueTable, vector: ValueId): TestTermination {
   return {
     kind: "exit",
     result: buildExit(values, coreTrapExit(vector))
   };
 }
 
-function finishSegmentLoad(
+function returnSegmentLoad(
   values: ValueTable,
   segment: ValueId,
   selector: ValueId
 ): BodyNode {
-  return finishControl.create({
-    finish: {
-      kind: "exit",
-      result: buildExit(values, segmentExit(segment, selector))
-    }
+  return exitReturn({
+    kind: "exit",
+    result: buildExit(values, segmentExit(segment, selector))
   });
 }
 
 function exceptionExit(
   values: ValueTable,
   exception: CpuException<ValueId>
-): Finish {
+): TestTermination {
   return {
     kind: "exit",
     result: buildExit(
@@ -348,18 +402,18 @@ function exceptionExit(
   };
 }
 
-function finishException(
+function returnException(
   values: ValueTable,
   exception: CpuException<ValueId>
 ): BodyNode {
-  return finishControl.create({ finish: exceptionExit(values, exception) });
+  return exitReturn(exceptionExit(values, exception));
 }
 
 function pageFaultStop(
   values: ValueTable,
   access: MemoryDataAccessIntent,
   payload: ValueId
-): Finish {
+): TestTermination {
   const errorCode = values.const(
     access === "write" ? PageFaultErrorCode.WRITE : 0
   );
@@ -367,10 +421,17 @@ function pageFaultStop(
   return exceptionExit(values, pageFault(payload, errorCode));
 }
 
-function assertSameFinishGraph(
+function exitReturn(termination: TestTermination): BodyNode {
+  ok(termination.kind === "exit", "exit return requires an exit result");
+  return returnControl.create({
+    source: { kind: "values", values: [termination.result] }
+  });
+}
+
+function assertSameTerminationGraph(
   values: ValueTable,
-  actual: Finish,
-  buildExpected: (expectedValues: ValueTable) => Finish
+  actual: TestTermination,
+  buildExpected: (expectedValues: ValueTable) => TestTermination
 ): void {
   const expectedValues = values.fork();
   const expected = buildExpected(expectedValues);
@@ -381,7 +442,7 @@ function assertSameFinishGraph(
   switch (actual.kind) {
     case "dispatch":
       if (expected.kind !== "dispatch") {
-        throw new Error(`expected ${expected.kind} finish, got dispatch`);
+        throw new Error(`expected ${expected.kind} return, got dispatch`);
       }
       assertSameValueGraphBetween(
         values,
@@ -393,7 +454,7 @@ function assertSameFinishGraph(
       return;
     case "exit":
       if (expected.kind !== "exit") {
-        throw new Error(`expected ${expected.kind} finish, got exit`);
+        throw new Error(`expected ${expected.kind} return, got exit`);
       }
       assertSameValueGraphBetween(
         values,
@@ -462,7 +523,6 @@ function assertSameValueGraphBetween(
     case "loopInput":
     case "const":
     case "const64":
-    case "external":
     case "parameter":
     case "unreachable":
       strictEqual(actual, expected);
@@ -517,7 +577,6 @@ function valueNodeProperties(node: ValueNode): unknown {
     case "loopInput":
     case "const":
     case "const64":
-    case "external":
     case "parameter":
     case "unreachable":
       return node;
@@ -635,7 +694,7 @@ function assertResolvedStatusFlag(block: IrBlock, id: ValueId, flag: X86StatusFl
 }
 
 test("mov r32, imm32 flushes the register write and dispatches at the next eip", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], loc(0x401000, 0x401005));
 
@@ -646,7 +705,7 @@ test("mov r32, imm32 flushes the register write and dispatches at the next eip",
 
   deepStrictEqual(entryNodes(block), [
     stateWrite(v, gprChannel("eax"), v.const(0x12345678)),
-    finishDispatch(v.const(0x401005))
+    dispatchReturn(v.const(0x401005))
   ]);
   deepStrictEqual(v.node(v.const(0x12345678)), { kind: "const", value: 0x12345678 });
   // The instruction-start eip, immediate, next eip, and count advance.
@@ -654,7 +713,7 @@ test("mov r32, imm32 flushes the register write and dispatches at the next eip",
 });
 
 test("pending writes overwrite per channel and consts deduplicate across instructions", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
   const mov = movSemantic(32);
 
   builder.add(mov, [regBinding("eax"), immBinding(7)], loc(0x1000, 0x1005));
@@ -666,7 +725,7 @@ test("pending writes overwrite per channel and consts deduplicate across instruc
   deepStrictEqual(entryNodes(block), [
     stateWrite(block.values, gprChannel("eax"), block.values.const(9)),
     stateWrite(block.values, gprChannel("ecx"), block.values.const(7)),
-    finishDispatch(block.values.const(0x100f))
+    dispatchReturn(block.values.const(0x100f))
   ]);
 
   // 7, 9, the four eip constants, and the count read with its three folded
@@ -675,7 +734,7 @@ test("pending writes overwrite per channel and consts deduplicate across instruc
 });
 
 test("mov r32, r32 records one execution-state resource read and forwards its leaf", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1000, 0x1002));
 
@@ -685,7 +744,7 @@ test("mov r32, r32 records one execution-state resource read and forwards its le
   deepStrictEqual(entryNodes(block), [
     stateRead(v, 2, gprChannel("eax")),
     stateWrite(v, gprChannel("ebx"), 2),
-    finishDispatch(v.const(0x1002))
+    dispatchReturn(v.const(0x1002))
   ]);
   deepStrictEqual(v.node(valueId(2)), { kind: "nodeOutput", type: "i32" });
   // The instruction-start eip, read leaf, next eip, and count advance.
@@ -693,7 +752,7 @@ test("mov r32, r32 records one execution-state resource read and forwards its le
 });
 
 test("repeated get of an unwritten channel returns the same leaf across instructions", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
   const mov = movSemantic(32);
 
   builder.add(mov, [regBinding("ebx"), regBinding("eax")], loc(0x1000, 0x1002));
@@ -705,12 +764,12 @@ test("repeated get of an unwritten channel returns the same leaf across instruct
     stateRead(block.values, 2, gprChannel("eax")),
     stateWrite(block.values, gprChannel("ebx"), 2),
     stateWrite(block.values, gprChannel("ecx"), 2),
-    finishDispatch(block.values.const(0x1004))
+    dispatchReturn(block.values.const(0x1004))
   ]);
 });
 
 test("add eax, imm32 commits a lazy add record and writes the register", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
 
@@ -728,7 +787,7 @@ test("add eax, imm32 commits a lazy add record and writes the register", () => {
 });
 
 test("two adds in one block flush one lazy add record, second instruction wins", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
   const add = aluSemantic("add", 32);
 
   builder.add(add, [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
@@ -757,7 +816,7 @@ test("two adds in one block flush one lazy add record, second instruction wins",
 });
 
 test("inc flushes a full explicit image with CF preserved through a resolver call", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(unaryAluSemantic("inc", 32), [regBinding("eax")], loc(0x1000, 0x1001));
 
@@ -776,7 +835,7 @@ test("inc flushes a full explicit image with CF preserved through a resolver cal
 });
 
 test("cmp commits a lazy sub record but no register or explicit flags", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(cmpSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1002));
 
@@ -787,11 +846,11 @@ test("cmp commits a lazy sub record but no register or explicit flags", () => {
   assertLazyRecord(writes, block.values, { kind: "SUB", width: 32, left: outputOf(reads[0]!), right: outputOf(reads[1]!) });
   strictEqual(writes.length, 3);
   strictEqual(stateWriteFor(block, writes, coreStateFields.eip), undefined);
-  deepStrictEqual(entryNodes(block).at(-1), finishDispatch(block.values.const(0x1002)));
+  deepStrictEqual(entryNodes(block).at(-1), dispatchReturn(block.values.const(0x1002)));
 });
 
 test("zero-count shift writes neither the destination nor flags", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(shiftSemantic("shr", 32, "imm8"), [regBinding("eax"), immBinding(0)], loc(0x1000, 0x1003));
 
@@ -808,7 +867,7 @@ const directZfTemplate: SemanticTemplate = (s, v) => {
 };
 
 test("writeFlag flushes a full explicit image with omitted flags preserved through resolver calls", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(directZfTemplate, [], loc(0x1000, 0x1002));
 
@@ -834,7 +893,7 @@ test("writeFlag flushes a full explicit image with omitted flags preserved throu
 });
 
 test("an omitted direct flag write preserves the previous instruction's pending flag", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
   builder.add(directZfTemplate, [], loc(0x1003, 0x1005));
@@ -857,7 +916,7 @@ test("an omitted direct flag write preserves the previous instruction's pending 
 });
 
 test("xchg eax, ebx swaps pendings through two reads with no temporaries", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(xchgSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1002));
 
@@ -868,7 +927,7 @@ test("xchg eax, ebx swaps pendings through two reads with no temporaries", () =>
     stateRead(block.values, 3, gprChannel("ebx")),
     stateWrite(block.values, gprChannel("ebx"), 2),
     stateWrite(block.values, gprChannel("eax"), 3),
-    finishDispatch(block.values.const(0x1002))
+    dispatchReturn(block.values.const(0x1002))
   ]);
 
   // The instruction-start eip, two read leaves, next eip, and count advance — no
@@ -877,7 +936,7 @@ test("xchg eax, ebx swaps pendings through two reads with no temporaries", () =>
 });
 
 test("mov r8, r8 reads and writes byte channels with no bit algebra", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(8), [regBinding("bl"), regBinding("ah")], loc(0x1000, 0x1002));
 
@@ -886,7 +945,7 @@ test("mov r8, r8 reads and writes byte channels with no bit algebra", () => {
   deepStrictEqual(entryNodes(block), [
     stateRead(block.values, 2, gprChannel("ah")),
     stateWrite(block.values, gprChannel("bl"), 2),
-    finishDispatch(block.values.const(0x1002))
+    dispatchReturn(block.values.const(0x1002))
   ]);
   // The instruction-start eip, read leaf, next eip, and count advance — no
   // masks or shifts were created.
@@ -894,7 +953,7 @@ test("mov r8, r8 reads and writes byte channels with no bit algebra", () => {
 });
 
 test("write al then read eax flushes the byte and reloads the word", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(8), [regBinding("al"), immBinding(0x12)], loc(0x1000, 0x1002));
   builder.add(movSemantic(32), [regBinding("ebx"), regBinding("eax")], loc(0x1002, 0x1004));
@@ -906,12 +965,12 @@ test("write al then read eax flushes the byte and reloads the word", () => {
     stateWrite(v, gprChannel("al"), v.const(0x12)),
     stateRead(v, 7, gprChannel("eax")),
     stateWrite(v, gprChannel("ebx"), 7),
-    finishDispatch(v.const(0x1004))
+    dispatchReturn(v.const(0x1004))
   ]);
 });
 
 test("write eax then read al flushes the word and reloads the byte", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], loc(0x1000, 0x1005));
   builder.add(movSemantic(8), [regBinding("bl"), regBinding("al")], loc(0x1005, 0x1007));
@@ -923,12 +982,12 @@ test("write eax then read al flushes the word and reloads the byte", () => {
     stateWrite(v, gprChannel("eax"), v.const(0x12345678)),
     stateRead(v, 7, gprChannel("al")),
     stateWrite(v, gprChannel("bl"), 7),
-    finishDispatch(v.const(0x1007))
+    dispatchReturn(v.const(0x1007))
   ]);
 });
 
 test("write al then write eax drops the byte pending with no flush", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(8), [regBinding("al"), immBinding(0x12)], loc(0x1000, 0x1002));
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], loc(0x1002, 0x1007));
@@ -938,12 +997,12 @@ test("write al then write eax drops the byte pending with no flush", () => {
 
   deepStrictEqual(entryNodes(block), [
     stateWrite(v, gprChannel("eax"), v.const(0x12345678)),
-    finishDispatch(v.const(0x1007))
+    dispatchReturn(v.const(0x1007))
   ]);
 });
 
 test("write eax then read ah reloads through the high-byte channel", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x12345678)], loc(0x1000, 0x1005));
   builder.add(movSemantic(8), [regBinding("bl"), regBinding("ah")], loc(0x1005, 0x1007));
@@ -956,7 +1015,7 @@ test("write eax then read ah reloads through the high-byte channel", () => {
 });
 
 test("ax and al pendings mix without touching flag pendings", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(aluSemantic("add", 8), [regBinding("al"), regBinding("bl")], loc(0x1000, 0x1002));
   builder.add(movSemantic(8), [regBinding("ah"), immBinding(0x12)], loc(0x1002, 0x1004));
@@ -994,7 +1053,7 @@ test("ax and al pendings mix without touching flag pendings", () => {
 });
 
 test("movzx r32, r8 forwards the unsigned byte read unmasked", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movzxSemantic(8, 32), [regBinding("ebx"), regBinding("al")], loc(0x1000, 0x1003));
 
@@ -1003,13 +1062,13 @@ test("movzx r32, r8 forwards the unsigned byte read unmasked", () => {
   deepStrictEqual(entryNodes(block), [
     stateRead(block.values, 2, gprChannel("al")),
     stateWrite(block.values, gprChannel("ebx"), 2),
-    finishDispatch(block.values.const(0x1003))
+    dispatchReturn(block.values.const(0x1003))
   ]);
   strictEqual(block.values.size(), 7);
 });
 
 test("movsx r32, r8 marks the read for a sign-extending load", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movsxSemantic(8, 32), [regBinding("ebx"), regBinding("al")], loc(0x1000, 0x1003));
 
@@ -1018,7 +1077,7 @@ test("movsx r32, r8 marks the read for a sign-extending load", () => {
   deepStrictEqual(entryNodes(block), [
     stateRead(block.values, 2, gprChannel("al"), true),
     stateWrite(block.values, gprChannel("ebx"), 2),
-    finishDispatch(block.values.const(0x1003))
+    dispatchReturn(block.values.const(0x1003))
   ]);
   strictEqual(block.values.size(), 7);
 });
@@ -1027,7 +1086,7 @@ test("narrow signed compares sign-extend both operands", () => {
   const cmp8: SemanticTemplate = (s, v) => {
     s.write(s.operand(0), v.compare(8, "lt_s", s.read(s.operand(0), { width: 32 }), s.read(s.operand(1), { width: 32 })), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(cmp8, [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1002));
 
@@ -1050,7 +1109,7 @@ test("an 8-bit unsigned compare of covered operands creates no truncations", () 
   const cmpAl: SemanticTemplate = (s, v) => {
     s.write(s.operand(0), v.compare(8, "lt_u", s.read(s.operand(0), { width: 8 }), s.read(s.operand(1), { width: 8 })), { width: 8 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(cmpAl, [regBinding("al"), immBinding(5)], loc(0x1000, 0x1002));
 
@@ -1074,7 +1133,7 @@ test("an 8-bit equality on an unproven value keeps its mask", () => {
 
     s.write(s.operand(0), v.compare(8, "eq", sum, v.const(0)), { width: 8 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(cmpSum, [regBinding("al"), regBinding("bl")], loc(0x1000, 0x1002));
 
@@ -1096,7 +1155,7 @@ test("a signed byte get feeds a signed compare with no extra extends", () => {
 
     s.write(s.operand(0), v.compare(8, "lt_s", a, b), { width: 8 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(cmpSigned, [regBinding("al"), regBinding("bl")], loc(0x1000, 0x1002));
 
@@ -1121,7 +1180,7 @@ test("value methods build through the builder", () => {
 
     s.write(s.operand(0), v.select(negative, v.binary("sub", zero, value), value), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(abs, [regBinding("eax")], loc(0x1000, 0x1003));
 
@@ -1135,7 +1194,7 @@ test("value methods build through the builder", () => {
   deepStrictEqual(entryNodes(block), [
     stateRead(block.values, outputOf(read), gprChannel("eax")),
     stateWrite(block.values, gprChannel("eax"), selected),
-    finishDispatch(block.values.const(0x1003))
+    dispatchReturn(block.values.const(0x1003))
   ]);
   deepStrictEqual(block.values.node(compare), { kind: "compare", type: "i32", operator: "lt_s", a: outputOf(read), b: zero });
   deepStrictEqual(block.values.node(negated), { kind: "binary", type: "i32", operator: "sub", a: zero, b: outputOf(read) });
@@ -1143,7 +1202,7 @@ test("value methods build through the builder", () => {
 });
 
 test("jmp dispatches at the target", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(jmpSemantic(), [immBinding(0x2000)], loc(0x1000, 0x1005));
 
@@ -1151,12 +1210,12 @@ test("jmp dispatches at the target", () => {
 
   strictEqual(nestedBodies(block).length, 0);
   deepStrictEqual(entryNodes(block), [
-    finishDispatch(block.values.const(0x2000))
+    dispatchReturn(block.values.const(0x2000))
   ]);
 });
 
 test("16-bit jmp truncates the target before dispatch", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(jmpSemantic(16), [immBinding(0x1234_2000)], loc(0x1000, 0x1004));
 
@@ -1164,12 +1223,12 @@ test("16-bit jmp truncates the target before dispatch", () => {
   const target = block.values.const(0x2000);
 
   deepStrictEqual(entryNodes(block), [
-    finishDispatch(target)
+    dispatchReturn(target)
   ]);
 });
 
 test("16-bit call pushes a word return address and dispatches to a word target", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(callSemantic(16), [regBinding("ax")], loc(0x1000, 0x1004));
 
@@ -1185,12 +1244,12 @@ test("16-bit call pushes a word return address and dispatches to a word target",
     ...memoryGuard(block, 1, nextEsp, 2, "write"),
     memoryWriteOperation(nextEsp, v.const(0x1004), 16),
     stateWrite(v, gprChannel("esp"), nextEsp),
-    finishDispatch(ax)
+    dispatchReturn(ax)
   ]);
 });
 
 test("a jump flushes earlier pendings and dispatches at the target eip", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
   builder.add(jmpSemantic(), [immBinding(0x2000)], loc(0x1005, 0x100a));
@@ -1200,12 +1259,12 @@ test("a jump flushes earlier pendings and dispatches at the target eip", () => {
 
   deepStrictEqual(entryNodes(block), [
     stateWrite(v, gprChannel("eax"), v.const(0x77)),
-    finishDispatch(v.const(0x2000))
+    dispatchReturn(v.const(0x2000))
   ]);
 });
 
 test("a block ended by a jump rejects further instructions", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(jmpSemantic(), [immBinding(0x2000)], loc(0x1000, 0x1005));
 
@@ -1221,7 +1280,7 @@ test("a root CPU exception exits at the faulting instruction", () => {
   const fault: SemanticTemplate = (s) => {
     s.cpuException(exception);
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
   builder.add(fault, [], loc(0x1005, 0x1006));
@@ -1232,7 +1291,7 @@ test("a root CPU exception exits at the faulting instruction", () => {
   deepStrictEqual(entryNodes(block), [
     stateWrite(v, gprChannel("eax"), v.const(0x77)),
     stateWrite(v, coreStateFields.eip, v.const(0x1005)),
-    finishException(v, exception)
+    returnException(v, exception)
   ]);
   strictEqual(stateWriteFor(block, stateWrites(block), instructionCountField), undefined);
 });
@@ -1242,17 +1301,17 @@ test("a terminal finish stops the remaining semantic body", () => {
     s.hostTrap(v.const(3));
     writeDsMemory(s, v, v.const(0x2000), v.const(1), 32);
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(trapThenSet, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   strictEqual(entryNodes(block).some((node) => isMemoryWrite(node)), false);
   deepStrictEqual(
     entryNodes(block).at(-1),
-    finishTrap(block.values, block.values.const(3))
+    returnTrap(block.values, block.values.const(3))
   );
 });
 
@@ -1261,14 +1320,14 @@ test("a dispatch stops a later terminator in the same semantic body", () => {
     s.jump(v.const(0x2000));
     s.hostTrap(v.const(3));
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(jumpThenTrap, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
 
-  validateIrBlock(block);
-  deepStrictEqual(entryNodes(block), [finishDispatch(block.values.const(0x2000))]);
+  validateIrFunction(block);
+  deepStrictEqual(entryNodes(block), [dispatchReturn(block.values.const(0x2000))]);
 });
 
 test("a semantic if body terminates only its taken arm", () => {
@@ -1277,7 +1336,7 @@ test("a semantic if body terminates only its taken arm", () => {
       then.jump(v.const(0x2000));
     });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(jumpInIf, [], loc(0x1000, 0x1005));
 
@@ -1285,7 +1344,7 @@ test("a semantic if body terminates only its taken arm", () => {
 
   strictEqual(nestedBodies(block).length, 1);
   deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "dispatch", targetEip: block.values.const(0x2000) });
-  deepStrictEqual(rawEntryNodes(block)[rawEntryNodes(block).length - 1], finishDispatch(block.values.const(0x1005)));
+  deepStrictEqual(rawEntryNodes(block)[rawEntryNodes(block).length - 1], dispatchReturn(block.values.const(0x1005)));
 });
 
 test("a constant-false semantic if is not emitted or built", () => {
@@ -1295,7 +1354,7 @@ test("a constant-false semantic if is not emitted or built", () => {
     });
     s.write(s.reg("eax"), v.const(7), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(skippedIf, [], loc(0x1000, 0x1005));
 
@@ -1316,13 +1375,13 @@ test("a constant-false semantic if builds only its else arm in the containing sc
     }, (otherwise) => otherwise.write(otherwise.reg("eax"), v.const(7), { width: 32 }));
     s.write(s.reg("ebx"), s.read(s.reg("eax"), { width: 32 }), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(selectElse, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   strictEqual(entryNodes(block).some((node) => node.kind === "if"), false);
   strictEqual(nestedBodies(block).length, 0);
   strictEqual(
@@ -1342,7 +1401,7 @@ test("a dynamic semantic ifElse emits both arms", () => {
     }, (otherwise) => otherwise.write(otherwise.reg("ebx"), v.const(2), { width: 32 }), "likely");
     s.write(s.reg("ecx"), s.read(s.reg("ebx"), { width: 32 }), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(selectRegister, [], loc(0x1000, 0x1005));
 
@@ -1350,7 +1409,7 @@ test("a dynamic semantic ifElse emits both arms", () => {
   const branch = ifNode(block);
   const ebxAfterJoin = stateReadFor(block, entryNodes(block), gprChannel("ebx"));
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   ok(branch.elseBody !== undefined, "dynamic branch has an explicit else body");
   strictEqual(branch.hint, "likely");
   deepStrictEqual(branch.thenBody.nodes, [
@@ -1374,14 +1433,14 @@ test("ifElse arms reconcile sibling writes with dirty parent state", () => {
       then.write(then.reg("eax"), v.const(1), { width: 32 });
     }, (otherwise) => otherwise.write(otherwise.reg("ebx"), v.const(2), { width: 32 }));
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(reconcileParent, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
   const branch = ifNode(block);
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   ok(branch.elseBody !== undefined, "dynamic branch has an explicit else body");
   deepStrictEqual(branch.thenBody.nodes, [
     stateWrite(block.values, gprChannel("eax"), block.values.const(1)),
@@ -1405,32 +1464,33 @@ test("a sibling exception is isolated from a continuing memory-write arm", () =>
       });
     }, (otherwise) => otherwise.cpuException(invalidOpcode()));
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(storeOrFault, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
   const branch = ifNode(block);
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   ok(branch.elseBody !== undefined, "dynamic branch has an explicit else body");
   strictEqual(branch.thenBody.nodes.some((node) => isMemoryWrite(node)), true);
   strictEqual(branch.elseBody.nodes.some((node) => isMemoryWrite(node)), false);
   const exceptionTerminator = branch.elseBody.nodes.at(-1);
+  const exceptionTermination = testTermination(exceptionTerminator);
 
-  ok(exceptionTerminator?.kind === "finish", "exception arm ends with a finish");
+  ok(exceptionTermination?.kind === "exit", "exception arm returns an exit");
   deepStrictEqual(
-    exceptionTerminator.finish,
+    exceptionTermination,
     exceptionExit(block.values, invalidOpcode())
   );
   strictEqual(entryNodes(block).some((node) => isMemoryWrite(node)), false);
-  deepStrictEqual(entryNodes(block).at(-1), finishDispatch(block.values.const(0x1005)));
+  deepStrictEqual(entryNodes(block).at(-1), dispatchReturn(block.values.const(0x1005)));
 });
 
 test("sibling exception exits are encoded independently", () => {
   const values = new ValueTable();
-  const faultAddress = values.external(0);
-  const condition = values.external(1);
+  const faultAddress = values.parameter(0, "i32");
+  const condition = values.parameter(1, "i32");
   const faultInArm: SemanticTemplate = (s, v) => {
     const exception = pageFault(
       faultAddress,
@@ -1447,25 +1507,23 @@ test("sibling exception exits are encoded independently", () => {
     builder.add(faultInArm, [], loc(0x1000, 0x1005));
   });
   const branch = ifNode(block);
-  const firstFinish = branch.thenBody.nodes.at(-1);
-  const secondFinish = branch.elseBody?.nodes.at(-1);
+  const firstReturn = testTermination(branch.thenBody.nodes.at(-1));
+  const secondReturn = testTermination(branch.elseBody?.nodes.at(-1));
 
   ok(
-    firstFinish !== undefined && firstFinish.kind === "finish" &&
-      firstFinish.finish.kind === "exit",
+    firstReturn?.kind === "exit",
     "first fault arm must return an encoded exit"
   );
   ok(
-    secondFinish !== undefined && secondFinish.kind === "finish" &&
-      secondFinish.finish.kind === "exit",
+    secondReturn?.kind === "exit",
     "second fault arm must return an encoded exit"
   );
-  notStrictEqual(firstFinish.finish.result, secondFinish.finish.result);
+  notStrictEqual(firstReturn.result, secondReturn.result);
   assertSameValueGraphBetween(
     values,
-    firstFinish.finish.result,
+    firstReturn.result,
     values,
-    secondFinish.finish.result,
+    secondReturn.result,
     valueGraphComparison()
   );
 });
@@ -1479,23 +1537,23 @@ test("an ifElse with two completing arms completes the root semantic path", () =
     );
     s.write(s.reg("ebx"), v.const(7), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   const continues = builder.add(trapEitherWay, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
   const branch = ifNode(block);
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   strictEqual(continues, false);
   ok(branch.elseBody !== undefined, "completing branch has an else body");
   deepStrictEqual(
     branch.thenBody.nodes.at(-1),
-    finishTrap(block.values, block.values.const(1))
+    returnTrap(block.values, block.values.const(1))
   );
   deepStrictEqual(
     branch.elseBody.nodes.at(-1),
-    finishTrap(block.values, block.values.const(2))
+    returnTrap(block.values, block.values.const(2))
   );
   strictEqual(
     stateWriteFor(block, stateWrites(block), gprChannel("ebx")) !== undefined,
@@ -1516,19 +1574,19 @@ test("a completing nested ifElse stops only its containing arm", () => {
     });
     s.write(s.reg("ecx"), v.const(9), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(nestedDispatch, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   strictEqual(entryNodes(block).some((node) => isMemoryWrite(node)), false);
   strictEqual(
     stateWriteValue(stateWriteFor(block, stateWrites(block), gprChannel("ecx"))!),
     block.values.const(9)
   );
-  deepStrictEqual(rawEntryNodes(block).at(-1), finishDispatch(block.values.const(0x1005)));
+  deepStrictEqual(rawEntryNodes(block).at(-1), dispatchReturn(block.values.const(0x1005)));
 });
 
 test("a constant-true semantic if builds its arm in the containing scope", () => {
@@ -1559,7 +1617,7 @@ test("a constant-true semantic if builds its arm in the containing scope", () =>
     });
     s.write(s.reg("ebx"), s.read(s.reg("eax"), { width: 32 }), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(inlinedIf, [], loc(0x1000, 0x1005));
 
@@ -1571,7 +1629,7 @@ test("a constant-true semantic if builds its arm in the containing scope", () =>
     (node): node is MemoryWriteOperation => isMemoryWrite(node)
   );
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   ok(load !== undefined, "constant arm memory read exists");
   strictEqual(nestedBodies(block).length, 0);
   strictEqual(load.inputs[0]!.value, block.values.const(0x2000));
@@ -1596,23 +1654,23 @@ test("a constant-true semantic if with a completing arm stops its containing flo
     s.if(v.const(1), (then) => then.jump(v.const(0x2000)));
     writeDsMemory(s, v, v.const(0x3000), v.const(7), 32);
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   const continues = builder.add(jumpThenStore, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   strictEqual(continues, false);
   strictEqual(nestedBodies(block).length, 0);
-  deepStrictEqual(entryNodes(block), [finishDispatch(block.values.const(0x2000))]);
+  deepStrictEqual(entryNodes(block), [dispatchReturn(block.values.const(0x2000))]);
 });
 
 test("a generic CS operand write requests a segment load without imposing MOV validation", () => {
   const writeSegment: SemanticTemplate = (s, v) => {
     s.write(s.operand(0), v.const(0x1234), { width: 16 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     writeSegment,
@@ -1622,7 +1680,7 @@ test("a generic CS operand write requests a segment load without imposing MOV va
 
   const block = builder.finish();
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   strictEqual(nestedBodies(block).length, 0);
   deepStrictEqual(entryNodes(block), [
     stateWrite(
@@ -1630,7 +1688,7 @@ test("a generic CS operand write requests a segment load without imposing MOV va
       coreStateFields.eip,
       block.values.const(0x1000)
     ),
-    finishSegmentLoad(
+    returnSegmentLoad(
       block.values,
       block.values.const(segmentRegisterIndex("cs")),
       block.values.const(0x1234)
@@ -1639,7 +1697,7 @@ test("a generic CS operand write requests a segment load without imposing MOV va
 });
 
 test("a constant-true invalid-CS arm stops before building the segment-load tail", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     movToSregSemantic(),
@@ -1649,7 +1707,7 @@ test("a constant-true invalid-CS arm stops before building the segment-load tail
 
   const block = builder.finish();
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   strictEqual(
     entryNodes(block).some(
       (node) => readsStateChannel(block.values, node, gprChannel("ax"))
@@ -1658,13 +1716,13 @@ test("a constant-true invalid-CS arm stops before building the segment-load tail
   );
   deepStrictEqual(
     entryNodes(block).at(-1),
-    finishException(block.values, invalidOpcode())
+    returnException(block.values, invalidOpcode())
   );
 });
 
 test("a dynamic MOV-to-segment guards CS before reading its source", () => {
   const values = new ValueTable();
-  const segmentIndex = values.external(0);
+  const segmentIndex = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movToSregSemantic(),
@@ -1677,7 +1735,7 @@ test("a dynamic MOV-to-segment guards CS before reading its source", () => {
   const guard = ifNode(block);
   const source = stateReadFor(block, nodes, gprChannel("ax"));
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   ok(source !== undefined, "the non-CS path reads the selector source");
   deepStrictEqual(guard, ifControl.create({
     condition: v.compare(
@@ -1694,7 +1752,7 @@ test("a dynamic MOV-to-segment guards CS before reading its source", () => {
     guard,
     stateRead(v, outputOf(source), gprChannel("ax")),
     stateWrite(v, coreStateFields.eip, v.const(0x1000)),
-    finishSegmentLoad(v, v.external(0), outputOf(source))
+    returnSegmentLoad(v, segmentIndex, outputOf(source))
   ]);
 });
 
@@ -1706,13 +1764,13 @@ test("a constant-true completing if stops only its containing dynamic arm", () =
     });
     s.write(s.reg("ebx"), v.const(9), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(nestedJump, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   strictEqual(nestedBodies(block).length, 1);
   deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "dispatch", targetEip: block.values.const(0x2000) });
   strictEqual(entryNodes(block).some((node) => isMemoryWrite(node)), false);
@@ -1720,7 +1778,7 @@ test("a constant-true completing if stops only its containing dynamic arm", () =
     stateWriteValue(stateWriteFor(block, stateWrites(block), gprChannel("ebx"))!),
     block.values.const(9)
   );
-  deepStrictEqual(rawEntryNodes(block)[rawEntryNodes(block).length - 1], finishDispatch(block.values.const(0x1005)));
+  deepStrictEqual(rawEntryNodes(block)[rawEntryNodes(block).length - 1], dispatchReturn(block.values.const(0x1005)));
 });
 
 test("a nested semantic if terminator does not terminate the containing arm", () => {
@@ -1732,17 +1790,17 @@ test("a nested semantic if terminator does not terminate the containing arm", ()
       then.jump(v.const(0x3000));
     });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(nestedJump, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   strictEqual(nestedBodies(block).length, 2);
   deepStrictEqual(nestedBodyView(block, 1).terminator, { kind: "dispatch", targetEip: block.values.const(0x3000) });
   deepStrictEqual(nestedBodyView(block, 2).terminator, { kind: "dispatch", targetEip: block.values.const(0x2000) });
-  deepStrictEqual(rawEntryNodes(block)[rawEntryNodes(block).length - 1], finishDispatch(block.values.const(0x1005)));
+  deepStrictEqual(rawEntryNodes(block)[rawEntryNodes(block).length - 1], dispatchReturn(block.values.const(0x1005)));
 });
 
 test("a dynamic if arm cannot leak an operand address into its parent scope", () => {
@@ -1754,7 +1812,7 @@ test("a dynamic if arm cannot leak an operand address into its parent scope", ()
     });
     s.write(s.reg("ebx"), s.address(operand), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     resolveAddressInArm,
@@ -1770,7 +1828,7 @@ test("a dynamic if arm cannot leak an operand address into its parent scope", ()
     gprChannel("eax")
   );
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   ok(parentRead !== undefined, "parent address read exists");
   ok(armRead !== undefined, "arm address read exists");
   ok(outputOf(parentRead) !== outputOf(armRead), "parent recomputes the arm-local address");
@@ -1782,8 +1840,8 @@ test("a dynamic if arm cannot leak an operand address into its parent scope", ()
 
 test("sibling operand addresses are constructed independently", () => {
   const values = new ValueTable();
-  const base = values.external(0);
-  const condition = values.external(1);
+  const base = values.parameter(0, "i32");
+  const condition = values.parameter(1, "i32");
   let firstAddress: ValueId | undefined;
   let secondAddress: ValueId | undefined;
   const useAddressInArm: SemanticTemplate = (s) => {
@@ -1847,7 +1905,7 @@ test("a loop-local operand address cannot escape into the parent scope", () => {
     });
     s.write(s.reg("ebx"), s.address(operand), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     resolveAddressInLoop,
@@ -1861,7 +1919,7 @@ test("a loop-local operand address cannot escape into the parent scope", () => {
       readsStateChannel(block.values, node, gprChannel("eax"))
   );
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   strictEqual(eaxReads.length, 2);
   strictEqual(
     stateWriteValue(stateWriteFor(block, stateWrites(block), gprChannel("ebx"))!),
@@ -1878,7 +1936,7 @@ test("a segment load inside a loop body fails loudly", () => {
   };
 
   throws(
-    () => createLegacyInstructionBlock().add(segmentLoadInLoop, [segmentBinding("ds")], loc(0x1000, 0x1005)),
+    () => createInstructionFunction().add(segmentLoadInLoop, [segmentBinding("ds")], loc(0x1000, 0x1005)),
     /segment load inside a loop body/
   );
 });
@@ -1894,7 +1952,7 @@ test("a segment update captured outside a loop binds its loop consumer", () => {
   };
 
   throws(
-    () => createLegacyInstructionBlock().add(
+    () => createInstructionFunction().add(
       segmentLoadInLoop,
       [segmentBinding("ds")],
       loc(0x1000, 0x1005)
@@ -1904,7 +1962,7 @@ test("a segment update captured outside a loop binds its loop consumer", () => {
 });
 
 test("jcc after cmp source uses the source-derived condition as a side exit", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(cmpSemantic(32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
   builder.add(jccSemantic("E"), [immBinding(0x2000)], loc(0x1003, 0x1005));
@@ -1935,11 +1993,11 @@ test("jcc after cmp source uses the source-derived condition as a side exit", ()
 
   assertLazyRecord(stateWrites(block), v, { kind: "SUB", width: 32, left: eax, right: v.const(5) });
   strictEqual(stateWriteFor(block, stateWrites(block), coreStateFields.eip), undefined);
-  deepStrictEqual(nodes[nodes.length - 1], finishDispatch(v.const(0x1005)));
+  deepStrictEqual(nodes[nodes.length - 1], dispatchReturn(v.const(0x1005)));
 });
 
 test("jcc side exit consumes eip in a terminating state scope and preserves fallthrough state", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
   builder.add(jccSemantic("E"), [immBinding(0x2000)], loc(0x1005, 0x1007));
@@ -1972,11 +2030,11 @@ test("jcc side exit consumes eip in a terminating state scope and preserves fall
     stateWriteValue(stateWriteFor(block, stateWrites(block), gprChannel("eax"))!),
     v.const(0x77)
   );
-  deepStrictEqual(rawEntryNodes(block)[rawEntryNodes(block).length - 1], finishDispatch(v.const(0x1007)));
+  deepStrictEqual(rawEntryNodes(block)[rawEntryNodes(block).length - 1], dispatchReturn(v.const(0x1007)));
 });
 
 test("jcc after test source uses the source-derived condition with no flag byte reads", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(testInstructionSemantic(32), [regBinding("eax"), regBinding("ebx")], loc(0x1000, 0x1002));
   builder.add(jccSemantic("E"), [immBinding(0x2000)], loc(0x1002, 0x1004));
@@ -2011,7 +2069,7 @@ const subSourceThenJccTemplate: SemanticTemplate = (s, v) => {
 };
 
 test("jcc after a sub flag source uses the source-derived condition", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(subSourceThenJccTemplate, [], loc(0x1000, 0x1005));
 
@@ -2022,7 +2080,7 @@ test("jcc after a sub flag source uses the source-derived condition", () => {
 });
 
 test("jcc after 16-bit cmp source sign-extends operands for signed direct conditions", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(cmpSemantic(16), [regBinding("ax"), regBinding("bx")], loc(0x1000, 0x1002));
   builder.add(jccSemantic("L"), [immBinding(0x2000)], loc(0x1002, 0x1004));
@@ -2044,7 +2102,7 @@ test("jcc after 16-bit cmp source sign-extends operands for signed direct condit
 });
 
 test("jcc after 8-bit cmp source sign-extends operands for signed direct conditions", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(cmpSemantic(8), [regBinding("al"), regBinding("bl")], loc(0x1000, 0x1002));
   builder.add(jccSemantic("GE"), [immBinding(0x2000)], loc(0x1002, 0x1004));
@@ -2066,7 +2124,7 @@ test("jcc after 8-bit cmp source sign-extends operands for signed direct conditi
 });
 
 test("jcc after 16-bit cmp immediate source sign-extends immediates for signed direct conditions", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(cmpSemantic(16), [regBinding("ax"), immBinding(0x8000)], loc(0x1000, 0x1004));
   builder.add(jccSemantic("LE"), [immBinding(0x2000)], loc(0x1004, 0x1006));
@@ -2088,7 +2146,7 @@ test("jcc after 16-bit cmp immediate source sign-extends immediates for signed d
 });
 
 test("int flushes pending state with the resume eip before a host trap exit", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
   builder.add(intSemantic(), [immBinding(0x21)], loc(0x1005, 0x1007));
@@ -2100,12 +2158,12 @@ test("int flushes pending state with the resume eip before a host trap exit", ()
   deepStrictEqual(entryNodes(block), [
     stateWrite(v, gprChannel("eax"), v.const(0x77)),
     stateWrite(v, coreStateFields.eip, v.const(0x1007)),
-    finishTrap(v, v.const(0x21))
+    returnTrap(v, v.const(0x21))
   ]);
 });
 
 test("int3 flushes the constant breakpoint vector as a host trap", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(int3Semantic(), [], loc(0x1000, 0x1001));
 
@@ -2114,12 +2172,12 @@ test("int3 flushes the constant breakpoint vector as a host trap", () => {
 
   deepStrictEqual(entryNodes(block), [
     stateWrite(v, coreStateFields.eip, v.const(0x1001)),
-    finishTrap(v, v.const(3))
+    returnTrap(v, v.const(3))
   ]);
 });
 
 test("into emits a completed-path conditional host trap and fallthrough state", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
   builder.add(intoSemantic(), [], loc(0x1005, 0x1006));
@@ -2148,8 +2206,8 @@ test("into emits a completed-path conditional host trap and fallthrough state", 
 });
 
 test("jecxz and loop branches dispatch through ecx-derived conditions without flag writes", () => {
-  const jecxzBuilder = createLegacyInstructionBlock();
-  const loopBuilder = createLegacyInstructionBlock();
+  const jecxzBuilder = createInstructionFunction();
+  const loopBuilder = createInstructionFunction();
 
   jecxzBuilder.add(jecxzSemantic(), [immBinding(0x2000)], loc(0x1000, 0x1002));
   loopBuilder.add(loopSemantic("none"), [immBinding(0x2000)], loc(0x1000, 0x1002));
@@ -2185,7 +2243,7 @@ test("jecxz and loop branches dispatch through ecx-derived conditions without fl
 });
 
 test("flat32 segment set exits through the fault path without segment writes", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("ecx"), immBinding(0x77)], loc(0x1000, 0x1005));
   builder.add(movToSregSemantic(), [segmentBinding("ds"), regBinding("ax")], loc(0x1005, 0x1007));
@@ -2201,13 +2259,13 @@ test("flat32 segment set exits through the fault path without segment writes", (
     stateRead(v, ax, gprChannel("ax")),
     stateWrite(v, gprChannel("ecx"), v.const(0x77)),
     stateWrite(v, coreStateFields.eip, v.const(0x1005)),
-    finishSegmentLoad(v, v.const(segmentRegisterIndex("ds")), ax)
+    returnSegmentLoad(v, v.const(segmentRegisterIndex("ds")), ax)
   ]);
   strictEqual(stateWrites(block).length, 2);
 });
 
 test("a block ended by a host trap rejects further instructions", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(intSemantic(), [immBinding(3)], loc(0x1000, 0x1002));
 
@@ -2219,7 +2277,7 @@ test("a block ended by a host trap rejects further instructions", () => {
 });
 
 test("setcc after cmp source consumes the source-derived condition", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(cmpSemantic(32), [regBinding("ebx"), immBinding(5)], loc(0x1000, 0x1003));
   builder.add(setccSemantic("B"), [regBinding("al")], loc(0x1003, 0x1006));
@@ -2247,7 +2305,7 @@ const logicSourceThenSetccTemplate: SemanticTemplate = (s, v) => {
 };
 
 test("setcc after a logic flag source uses the source-derived condition", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(logicSourceThenSetccTemplate, [], loc(0x1000, 0x1005));
 
@@ -2268,7 +2326,7 @@ test("setcc after a logic flag source uses the source-derived condition", () => 
 });
 
 test("setcc with no pending flag value builds a lazy condition switch", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(setccSemantic("A"), [regBinding("al")], loc(0x1000, 0x1003));
 
@@ -2308,7 +2366,7 @@ test("setcc with no pending flag value builds a lazy condition switch", () => {
 });
 
 test("setcc after an intervening add uses the latest source-expanded flag expression", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(cmpSemantic(32), [regBinding("ebx"), immBinding(5)], loc(0x1000, 0x1003));
   builder.add(aluSemantic("add", 32), [regBinding("ecx"), immBinding(1)], loc(0x1003, 0x1006));
@@ -2335,7 +2393,7 @@ test("setcc after an intervening add uses the latest source-expanded flag expres
 });
 
 test("pushfd reuses pending arithmetic flags and reads non-arithmetic flags", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(aluSemantic("add", 32), [regBinding("eax"), immBinding(1)], loc(0x1000, 0x1003));
   builder.add(pushfdSemantic(), [], loc(0x1003, 0x1004));
@@ -2355,7 +2413,7 @@ test("pushfd reuses pending arithmetic flags and reads non-arithmetic flags", ()
 });
 
 test("pushf reuses pending arithmetic flags and reads only low non-arithmetic flags", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(aluSemantic("add", 32), [regBinding("eax"), immBinding(1)], loc(0x1000, 0x1003));
   builder.add(pushfSemantic(), [], loc(0x1003, 0x1005));
@@ -2380,7 +2438,7 @@ test("pushf reuses pending arithmetic flags and reads only low non-arithmetic fl
 });
 
 test("popfd writes every stored flag from the popped image", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(popfdSemantic(), [], loc(0x1000, 0x1001));
 
@@ -2424,7 +2482,7 @@ test("popfd writes every stored flag from the popped image", () => {
 });
 
 test("popf writes only stored low-16 modeled flags", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(popfSemantic(), [], loc(0x1000, 0x1002));
 
@@ -2477,7 +2535,7 @@ test("writes to immediate operand bindings fail loudly", () => {
   for (const dynamic of [false, true]) {
     const values = new ValueTable();
     const binding = dynamic
-      ? immDynamicBinding(values.external(0))
+      ? immDynamicBinding(values.parameter(0, "i32"))
       : immBinding(0);
 
     throws(
@@ -2498,7 +2556,7 @@ test("updates reject immediate operand bindings before returning a handle", () =
   for (const dynamic of [false, true]) {
     const values = new ValueTable();
     const binding = dynamic
-      ? immDynamicBinding(values.external(0))
+      ? immDynamicBinding(values.parameter(0, "i32"))
       : immBinding(0);
 
     throws(
@@ -2514,7 +2572,7 @@ test("updates reject immediate operand bindings before returning a handle", () =
 test("a template width that disagrees with its register binding fails loudly", () => {
   throws(
     () =>
-      createLegacyInstructionBlock().add(
+      createInstructionFunction().add(
         movSemantic(8),
         [regBinding("eax"), immBinding(1)],
         loc(0x1000, 0x1002)
@@ -2524,7 +2582,7 @@ test("a template width that disagrees with its register binding fails loudly", (
 });
 
 test("a failed instruction poisons the builder, discarding its partial pendings", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
   const setThenFail: Parameters<typeof builder.add>[0] = (s, v) => {
     s.write(s.operand(0), v.const(1), { width: 32 });
     s.write(s.operand(1), v.const(2), { width: 32 });
@@ -2544,19 +2602,19 @@ test("a failed instruction poisons the builder, discarding its partial pendings"
 });
 
 test("a builder with no instructions cannot finish", () => {
-  throws(() => createLegacyInstructionBlock().finish(), /no instructions were added/);
+  throws(() => createInstructionFunction().finish(), /no instructions were added/);
 });
 
 test("missing operand bindings fail loudly", () => {
   throws(
     () =>
-      createLegacyInstructionBlock().add(movSemantic(32), [regBinding("eax")], loc(0x1000, 0x1005)),
+      createInstructionFunction().add(movSemantic(32), [regBinding("eax")], loc(0x1000, 0x1005)),
     /missing operand binding for operand 1/
   );
 });
 
 test("a finished builder rejects further use", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(1)], loc(0x1000, 0x1005));
   builder.finish();
@@ -2570,7 +2628,7 @@ test("a finished builder rejects further use", () => {
 });
 
 test("mov [ebx+8], eax guards before the store and flushes eip into the fault edge", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     movSemantic(32),
@@ -2590,7 +2648,7 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
     stateRead(v, outputOf(ebx), gprChannel("ebx")),
     ...memoryGuard(block, 1, address, 4, "write"),
     memoryWriteOperation(address, outputOf(eax), 32),
-    finishDispatch(v.const(0x1003))
+    dispatchReturn(v.const(0x1003))
   ]);
 
   const edge = nestedBodyView(block, 1);
@@ -2598,7 +2656,7 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
   deepStrictEqual(edge.flushes, [
     stateWrite(v, coreStateFields.eip, v.const(0x1000))
   ]);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     edge.terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", address)
@@ -2606,7 +2664,7 @@ test("mov [ebx+8], eax guards before the store and flushes eip into the fault ed
 });
 
 test("add [ebx], r32 resolves once with a WRITE fault before its read and write", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     aluSemantic("add", 32),
@@ -2644,7 +2702,7 @@ test("add [ebx], r32 resolves once with a WRITE fault before its read and write"
   const eipFlushes = [stateWrite(v, coreStateFields.eip, v.const(0x1000))];
 
   deepStrictEqual(nestedBodyView(block, 1).flushes, eipFlushes);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", address)
@@ -2652,7 +2710,7 @@ test("add [ebx], r32 resolves once with a WRITE fault before its read and write"
 });
 
 test("a later guard's edge flushes earlier pendings with the faulting eip", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
   builder.add(
@@ -2689,7 +2747,7 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
     ),
     v.const(0x1003)
   );
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", address)
@@ -2704,7 +2762,7 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
     sum
   );
   strictEqual(stateWriteFor(block, mainWrites, coreStateFields.eip), undefined);
-  deepStrictEqual(entryNodes(block).at(-1), finishDispatch(v.const(0x1006)));
+  deepStrictEqual(entryNodes(block).at(-1), dispatchReturn(v.const(0x1006)));
 
   const store = entryNodes(block).find(
     (node): node is MemoryWriteOperation => isMemoryWrite(node)
@@ -2714,7 +2772,7 @@ test("a later guard's edge flushes earlier pendings with the faulting eip", () =
 });
 
 test("lea builds general modrm addresses from channel reads", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     leaSemantic(32),
@@ -2735,12 +2793,12 @@ test("lea builds general modrm addresses from channel reads", () => {
     stateRead(v, ebx, gprChannel("ebx")),
     stateRead(v, esi, gprChannel("esi")),
     stateWrite(v, gprChannel("eax"), address),
-    finishDispatch(v.const(0x1007))
+    dispatchReturn(v.const(0x1007))
   ]);
 });
 
 test("lea uses the effective offset without adding segment bases", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     leaSemantic(32),
@@ -2755,13 +2813,13 @@ test("lea uses the effective offset without adding segment bases", () => {
   deepStrictEqual(entryNodes(block), [
     stateRead(v, ebx, gprChannel("ebx")),
     stateWrite(v, gprChannel("eax"), ebx),
-    finishDispatch(v.const(0x1004))
+    dispatchReturn(v.const(0x1004))
   ]);
 });
 
 test("flat segment memory operands use the effective offset directly", () => {
   for (const segment of ["cs", "ds", "es", "ss"] as const) {
-    const builder = createLegacyInstructionBlock();
+    const builder = createInstructionFunction();
 
     builder.add(
       movSemantic(32),
@@ -2787,7 +2845,7 @@ test("flat segment memory operands use the effective offset directly", () => {
 });
 
 test("fs and gs memory operands add the segment base to the effective offset", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     movSemantic(32),
@@ -2811,12 +2869,12 @@ test("fs and gs memory operands add the segment base to the effective offset", (
     ...memoryGuard(block, 1, address, 4, "read"),
     memoryReadOperation(outputOf(read), address, 32),
     stateWrite(v, gprChannel("eax"), outputOf(read)),
-    finishDispatch(v.const(0x1004))
+    dispatchReturn(v.const(0x1004))
   ]);
 });
 
 test("an absolute address is just its displacement constant", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     movSemantic(32),
@@ -2834,14 +2892,14 @@ test("an absolute address is just its displacement constant", () => {
   deepStrictEqual(entryNodes(block), [
     read,
     stateWrite(v, gprChannel("eax"), outputOf(read)),
-    finishDispatch(v.const(0x1005))
+    dispatchReturn(v.const(0x1005))
   ]);
   strictEqual(read.inputs[0]!.value, address);
   strictEqual(nestedBodies(block).length, 0);
 });
 
 test("movzx r32, byte [mem] forwards the unsigned load unmasked", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     movzxSemantic(8, 32),
@@ -2864,7 +2922,7 @@ test("movzx r32, byte [mem] forwards the unsigned load unmasked", () => {
 });
 
 test("movsx r32, byte [mem] marks the load signed with no extra extend", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     movsxSemantic(8, 32),
@@ -2887,7 +2945,7 @@ test("movsx r32, byte [mem] marks the load signed with no extra extend", () => {
 });
 
 test("xchg [ebx], ebx stores through the original address, not the new ebx", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     xchgSemantic(32),
@@ -2911,7 +2969,7 @@ test("xchg [ebx], ebx stores through the original address, not the new ebx", () 
     memoryReadOperation(load, ebx, 32),
     memoryWriteOperation(ebx, ebx, 32),
     stateWrite(v, gprChannel("ebx"), load),
-    finishDispatch(v.const(0x1002))
+    dispatchReturn(v.const(0x1002))
   ]);
 });
 
@@ -2930,7 +2988,7 @@ test("a validated DS WRITE access lowers read and write nodes at its address", (
       width: 32
     });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(incMem, [], loc(0x1000, 0x1006));
 
@@ -2947,7 +3005,7 @@ test("a validated DS WRITE access lowers read and write nodes at its address", (
   deepStrictEqual(entryNodes(block), [
     read,
     write,
-    finishDispatch(v.const(0x1006))
+    dispatchReturn(v.const(0x1006))
   ]);
   strictEqual(nestedBodies(block).length, 0);
   strictEqual(read.inputs[0]!.value, address);
@@ -2964,7 +3022,7 @@ test("a folded byte length selects the static flat guard path", () => {
     foldedByteLength = byteLength;
     guardDsMemory(s, address, byteLength, "read");
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(foldedGuard, [], loc(0x1000, 0x1005));
 
@@ -2983,7 +3041,7 @@ test("memory resolution is nonterminal and adds no IR nodes", () => {
 
     s.write(s.reg("eax"), v.const(7), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(template, [], loc(0x1000, 0x1001));
   const block = builder.finish();
@@ -3008,7 +3066,7 @@ test("memory guard emits the canonical fault selection without a transfer", () =
     });
     s.write(s.reg("ebx"), v.const(7), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(checkedAccess, [], loc(0x1000, 0x1001));
   const block = builder.finish();
@@ -3021,7 +3079,7 @@ test("memory guard emits the canonical fault selection without a transfer", () =
   strictEqual(nodes.filter((node) => node.kind === "if").length, 1);
   strictEqual(ifNode(block).hint, "unlikely");
   strictEqual(nestedBodies(block).length, 1);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     block.values,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", address)
@@ -3046,7 +3104,7 @@ test("guarded memory access remains reusable in a child semantic region", () => 
       then.memory.store(access, { value: v.const(1), width: 32 });
     });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(checkedStoreArm, [], loc(0x1000, 0x1001));
   const block = builder.finish();
@@ -3067,7 +3125,7 @@ test("guarded memory access remains reusable in a child semantic region", () => 
     storeSelection.thenBody.nodes.filter((node) => isMemoryWrite(node)).length,
     1
   );
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     block.values,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", address)
@@ -3089,7 +3147,7 @@ test("a resolve caller selects its access fault before loading", () => {
     }, "unlikely");
     s.memory.load(resolution.access, { byteOffset: v.const(0), width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(manualLoad, [], loc(0x1000, 0x1001));
 
@@ -3098,7 +3156,7 @@ test("a resolve caller selects its access fault before loading", () => {
 
   strictEqual(nodes.filter((node) => isMemoryRead(node)).length, 1);
   strictEqual(nodes.filter((node) => node.kind === "if").length, 1);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     block.values,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "read", address)
@@ -3113,7 +3171,7 @@ test("constant memory access offsets must fit their resolved range", () => {
   };
 
   throws(
-    () => createLegacyInstructionBlock().add(outOfRange, [], loc(0x1000, 0x1001)),
+    () => createInstructionFunction().add(outOfRange, [], loc(0x1000, 0x1001)),
     /exceeds 4-byte resolution/
   );
 });
@@ -3125,7 +3183,7 @@ test("constant relative offsets become memory immediates at the upper boundary",
 
     s.memory.store(access, { byteOffset: v.const(4), value: value, width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(boundaryAccess, [], loc(0x1000, 0x1001));
   const nodes = entryNodes(builder.finish());
@@ -3172,18 +3230,18 @@ test("READ and WRITE resolutions retain their exact fault intents", () => {
       width: 32
     });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(bothIntents, [], loc(0x1000, 0x1001));
   const block = builder.finish();
 
   strictEqual(nestedBodies(block).length, 2);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     block.values,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "read", address)
   );
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     block.values,
     nestedBodyView(block, 2).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", address)
@@ -3193,7 +3251,7 @@ test("READ and WRITE resolutions retain their exact fault intents", () => {
 test("address of a non-mem operand binding fails loudly", () => {
   throws(
     () =>
-      createLegacyInstructionBlock().add(
+      createInstructionFunction().add(
         leaSemantic(32),
         [regBinding("eax"), regBinding("ebx")],
         loc(0x1000, 0x1002)
@@ -3212,7 +3270,7 @@ const setRegThenStore: SemanticTemplate = (s, v) => {
 };
 
 test("a guard after a register write restores the pre-instruction value in its edge", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x111)], loc(0x1000, 0x1005));
   builder.add(setRegThenStore, [regBinding("eax")], loc(0x1005, 0x100b));
@@ -3227,7 +3285,7 @@ test("a guard after a register write restores the pre-instruction value in its e
     stateWrite(v, gprChannel("eax"), v.const(0x111)),
     stateWrite(v, coreStateFields.eip, v.const(0x1005))
   ]);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", address)
@@ -3246,7 +3304,7 @@ test("a guard after a register write restores the pre-instruction value in its e
 });
 
 test("a guard after writing a previously-clean register omits the channel from its edge", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(setRegThenStore, [regBinding("eax")], loc(0x1000, 0x1006));
 
@@ -3259,7 +3317,7 @@ test("a guard after writing a previously-clean register omits the channel from i
   deepStrictEqual(nestedBodyView(block, 1).flushes, [
     stateWrite(v, coreStateFields.eip, v.const(0x1000))
   ]);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", address)
@@ -3271,7 +3329,7 @@ test("a guard after writing a previously-clean register omits the channel from i
 });
 
 test("pop [ebx] guards the stack read first and omits boundary-absent esp from its write edge", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(popSemantic(), [mem({ base: "ebx", scale: 1, disp: 0 })], loc(0x1000, 0x1002));
 
@@ -3293,7 +3351,7 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
     ...memoryGuard(block, 2, ebx, 4, "write"),
     memoryWriteOperation(ebx, popValue, 32),
     stateWrite(v, gprChannel("esp"), nextEsp),
-    finishDispatch(v.const(0x1002))
+    dispatchReturn(v.const(0x1002))
   ]);
 
   // esp was boundary-absent, so neither edge writes it — not even the write
@@ -3301,13 +3359,13 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
   const eipFlushes = [stateWrite(v, coreStateFields.eip, v.const(0x1000))];
 
   deepStrictEqual(nestedBodyView(block, 1).flushes, eipFlushes);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "read", esp)
   );
   deepStrictEqual(nestedBodyView(block, 2).flushes, eipFlushes);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 2).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", ebx)
@@ -3315,7 +3373,7 @@ test("pop [ebx] guards the stack read first and omits boundary-absent esp from i
 });
 
 test("pop fs:[ebx] writes to the linear destination address", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(popSemantic(), [mem({ segment: "fs", base: "ebx", scale: 1, disp: 0 })], loc(0x1000, 0x1002));
 
@@ -3339,9 +3397,9 @@ test("pop fs:[ebx] writes to the linear destination address", () => {
     ...memoryGuard(block, 2, address, 4, "write"),
     memoryWriteOperation(address, popValue, 32),
     stateWrite(v, gprChannel("esp"), nextEsp),
-    finishDispatch(v.const(0x1002))
+    dispatchReturn(v.const(0x1002))
   ]);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 2).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", address)
@@ -3349,7 +3407,7 @@ test("pop fs:[ebx] writes to the linear destination address", () => {
 });
 
 test("pop [ebx] write edge restores a previous instruction's pending esp", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("esp"), immBinding(0x30)], loc(0x1000, 0x1005));
   builder.add(popSemantic(), [mem({ base: "ebx", scale: 1, disp: 0 })], loc(0x1005, 0x1007));
@@ -3364,7 +3422,7 @@ test("pop [ebx] write edge restores a previous instruction's pending esp", () =>
     stateWrite(v, gprChannel("esp"), v.const(0x30)),
     stateWrite(v, coreStateFields.eip, v.const(0x1005))
   ]);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", outputOf(ebxRead))
@@ -3376,7 +3434,7 @@ test("pop [ebx] write edge restores a previous instruction's pending esp", () =>
 });
 
 test("pop [esp] builds the destination address from the incremented esp", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(popSemantic(), [mem({ base: "esp", scale: 1, disp: 0 })], loc(0x1000, 0x1003));
 
@@ -3395,12 +3453,12 @@ test("pop [esp] builds the destination address from the incremented esp", () => 
     ...memoryGuard(block, 2, nextEsp, 4, "write"),
     memoryWriteOperation(nextEsp, popValue, 32),
     stateWrite(v, gprChannel("esp"), nextEsp),
-    finishDispatch(v.const(0x1003))
+    dispatchReturn(v.const(0x1003))
   ]);
 });
 
 test("pop [esp+k] adds the displacement to the incremented esp", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(popSemantic(), [mem({ base: "esp", scale: 1, disp: 8 })], loc(0x1000, 0x1004));
 
@@ -3431,7 +3489,7 @@ test("a fault branch after a memory write in the same instruction fails loudly",
 
   throws(
     () =>
-      createLegacyInstructionBlock().add(storeThenFault, [], loc(0x1000, 0x1006)),
+      createInstructionFunction().add(storeThenFault, [], loc(0x1000, 0x1006)),
     /CPU exception cannot follow a memory write/
   );
 });
@@ -3451,7 +3509,7 @@ test("memory resolution itself may follow a memory write", () => {
       intent: "read"
     });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(storeThenResolve, [], loc(0x1000, 0x1006));
 
@@ -3467,7 +3525,7 @@ test("a continuing dynamic arm carries its memory write into the parent scope", 
   };
 
   throws(
-    () => createLegacyInstructionBlock().add(armStoreThenException, [], loc(0x1000, 0x1005)),
+    () => createInstructionFunction().add(armStoreThenException, [], loc(0x1000, 0x1005)),
     /CPU exception cannot follow a memory write/
   );
 });
@@ -3482,7 +3540,7 @@ test("a loop carries its memory write into the parent scope", () => {
   };
 
   throws(
-    () => createLegacyInstructionBlock().add(loopStoreThenException, [], loc(0x1000, 0x1005)),
+    () => createInstructionFunction().add(loopStoreThenException, [], loc(0x1000, 0x1005)),
     /CPU exception cannot follow a memory write/
   );
 });
@@ -3495,13 +3553,13 @@ test("a terminating dynamic arm does not carry its memory write into the skipped
     });
     s.cpuException(invalidOpcode());
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(armStoreThenJump, [], loc(0x1000, 0x1005));
 
   const block = builder.finish();
 
-  validateIrBlock(block);
+  validateIrFunction(block);
   strictEqual(
     nestedBodies(block)[0]?.nodes.some((node) => isMemoryWrite(node)),
     true
@@ -3509,7 +3567,7 @@ test("a terminating dynamic arm does not carry its memory write into the skipped
   strictEqual(entryNodes(block).some((node) => isMemoryWrite(node)), false);
   deepStrictEqual(
     entryNodes(block).at(-1),
-    finishException(block.values, invalidOpcode())
+    returnException(block.values, invalidOpcode())
   );
 });
 
@@ -3522,15 +3580,15 @@ test("a guard after flushing a channel first written this instruction fails loud
 
   throws(
     () =>
-      createLegacyInstructionBlock().add(flushThenGuard, [regBinding("al"), regBinding("ax")], loc(0x1000, 0x1003)),
+      createInstructionFunction().add(flushThenGuard, [regBinding("al"), regBinding("ax")], loc(0x1000, 0x1003)),
     /unrestorable/
   );
 });
 
 test("add r/m32, r32 with both operands dynamic reads, then writes, in one block", () => {
   const values = new ValueTable();
-  const dst = values.external(0);
-  const src = values.external(1);
+  const dst = values.parameter(0, "i32");
+  const src = values.parameter(1, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       aluSemantic("add", 32),
@@ -3544,7 +3602,6 @@ test("add r/m32, r32 with both operands dynamic reads, then writes, in one block
   const sum = v.binary("add", outputOf(reads[0]!), outputOf(reads[1]!));
 
   strictEqual(nestedBodies(block).length, 0);
-  deepStrictEqual(block.values.node(dst), { kind: "external", external: 0 });
   deepStrictEqual(nodes[0], dynamicGprRead(v, outputOf(reads[0]!), dst, 32));
   deepStrictEqual(nodes[1], dynamicGprRead(v, outputOf(reads[1]!), src, 32));
   deepStrictEqual(nodes[2], dynamicGprWrite(v, dst, 32, sum));
@@ -3556,7 +3613,7 @@ test("add r/m32, r32 with both operands dynamic reads, then writes, in one block
 
 test("a static register read keeps its order across a dynamic write", () => {
   const values = new ValueTable();
-  const dynamicReg = values.external(0);
+  const dynamicReg = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movSemantic(32),
@@ -3570,13 +3627,13 @@ test("a static register read keeps its order across a dynamic write", () => {
   deepStrictEqual(entryNodes(block), [
     stateRead(v, outputOf(read), gprChannel("ebx")),
     dynamicGprWrite(v, dynamicReg, 32, outputOf(read)),
-    finishDispatch(v.const(0x1002))
+    dispatchReturn(v.const(0x1002))
   ]);
 });
 
 test("dirty GPR pendings flush before dynamic access; flags and eip ride through", () => {
   const values = new ValueTable();
-  const dynamicReg = values.external(0);
+  const dynamicReg = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(aluSemantic("add", 32), [regBinding("eax"), immBinding(5)], loc(0x1000, 0x1003));
     builder.add(
@@ -3620,7 +3677,7 @@ test("dirty GPR pendings flush before dynamic access; flags and eip ride through
 
 test("a dynamic write invalidates static GPR pendings for later instructions", () => {
   const values = new ValueTable();
-  const dynamicReg = values.external(0);
+  const dynamicReg = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
     builder.add(movSemantic(32), [regDynamicBinding(dynamicReg), immBinding(5)], loc(0x1005, 0x100b));
@@ -3646,7 +3703,7 @@ test("a dynamic write invalidates static GPR pendings for later instructions", (
 
 test("a dynamic read leaves flushed pendings serving later static reads", () => {
   const values = new ValueTable();
-  const dynamicReg = values.external(0);
+  const dynamicReg = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
     builder.add(movSemantic(32), [regBinding("ebx"), regDynamicBinding(dynamicReg)], loc(0x1005, 0x100b));
@@ -3677,7 +3734,7 @@ test("a dynamic read leaves flushed pendings serving later static reads", () => 
 
 test("pop r/mDyn flushes the incremented esp before the dynamic store, after the guard", () => {
   const values = new ValueTable();
-  const dynamicReg = values.external(0);
+  const dynamicReg = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(popSemantic(), [regDynamicBinding(dynamicReg)], loc(0x1000, 0x1002));
   });
@@ -3698,13 +3755,13 @@ test("pop r/mDyn flushes the incremented esp before the dynamic store, after the
     memoryReadOperation(popValue, esp, 32),
     stateWrite(v, gprChannel("esp"), nextEsp),
     dynamicGprWrite(v, dynamicReg, 32, popValue),
-    finishDispatch(v.const(0x1002))
+    dispatchReturn(v.const(0x1002))
   ]);
 });
 
 test("an 8-bit template width lowers a one-byte dynamic slot", () => {
   const values = new ValueTable();
-  const dynamicReg = values.external(0);
+  const dynamicReg = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movSemantic(8),
@@ -3723,13 +3780,13 @@ test("an 8-bit template width lowers a one-byte dynamic slot", () => {
   deepStrictEqual(entryNodes(block), [
     dynamicGprRead(v, outputOf(read), dynamicReg, 8),
     stateWrite(v, gprChannel("bl"), outputOf(read)),
-    finishDispatch(v.const(0x1002))
+    dispatchReturn(v.const(0x1002))
   ]);
 });
 
 test("a 16-bit set through a dynamic register stores a two-byte slot", () => {
   const values = new ValueTable();
-  const dynamicReg = values.external(0);
+  const dynamicReg = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movSemantic(16),
@@ -3747,7 +3804,7 @@ test("a 16-bit set through a dynamic register stores a two-byte slot", () => {
 
 test("movsx r32, r8 from a dynamic register marks the read signed with no extra extend", () => {
   const values = new ValueTable();
-  const dynamicReg = values.external(0);
+  const dynamicReg = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movsxSemantic(8, 32),
@@ -3780,7 +3837,7 @@ test("a guard after a dynamic flush of an instruction-written register fails lou
     guardDsMemory(s, s.read(s.reg("ecx"), { width: 32 }), v.const(4), "read");
   };
   const values = new ValueTable();
-  const dynamicReg = values.external(0);
+  const dynamicReg = values.parameter(0, "i32");
 
   throws(
     () =>
@@ -3801,7 +3858,7 @@ test("a guard after a dynamic write fails loudly", () => {
     guardDsMemory(s, s.read(s.reg("ebx"), { width: 32 }), v.const(4), "write");
   };
   const values = new ValueTable();
-  const dynamicReg = values.external(0);
+  const dynamicReg = values.parameter(0, "i32");
 
   throws(
     () =>
@@ -3837,10 +3894,9 @@ test("ValueId register, immediate, and location bindings stay function-local", (
 
   deepStrictEqual(write, dynamicGprWrite(values, regIndex, 32, immediate));
   deepStrictEqual(completions, [{ kind: "fallthrough", targetEip: nextEip }]);
-  ok(!nodeKinds(block).includes("external"));
 });
 
-test("ValueId memory sources resolve without external-value rematerialization", () => {
+test("ValueId memory sources resolve from function parameters", () => {
   const values = new ValueTable();
   const instructionStart = values.parameter(0, "i32");
   const nextEip = values.parameter(1, "i32");
@@ -3871,7 +3927,6 @@ test("ValueId memory sources resolve without external-value rematerialization", 
   ok(faultEip !== undefined, "expected the fault path to restore eip");
   strictEqual(load.inputs[0]?.value, address);
   strictEqual(stateWriteValue(faultEip), instructionStart);
-  ok(!nodeKinds(block).includes("external"));
 });
 
 test("a ValueId deferred memory base is read inside the instruction", () => {
@@ -3902,7 +3957,6 @@ test("a ValueId deferred memory base is read inside the instruction", () => {
     stateWriteValue(stateWriteFor(block, stateWrites(block), gprChannel("eax"))!),
     values.binary("add", outputOf(baseRead), offset)
   );
-  ok(!nodeKinds(block).includes("external"));
 });
 
 test("a ValueId segment binding reaches segment selection and load", () => {
@@ -3920,23 +3974,22 @@ test("a ValueId segment binding reaches segment selection and load", () => {
   ok(source !== undefined, "expected a selector source read");
   deepStrictEqual(
     entryNodes(block).at(-1),
-    finishSegmentLoad(values, segmentIndex, outputOf(source))
+    returnSegmentLoad(values, segmentIndex, outputOf(source))
   );
-  ok(!nodeKinds(block).includes("external"));
 });
 
 test("finish publishes final fallthrough without choosing its continuation", () => {
   const values = new ValueTable();
-  const region = new RegionBuilder(values);
+  const region = new RegionBuilder(values, undefined, ["i64"]);
   const instructionStart = values.parameter(0, "i32");
   const nextEip = values.parameter(1, "i32");
   const terminalEvents: CompletionEvent[] = [];
   const builder = testInstructionConstruction.createBuilder(region, {
       dispatch: (body, targetEip) => {
         terminalEvents.push({ kind: "dispatch", targetEip });
-        body.finish({ kind: "dispatch", targetEip });
+        body.returnCall(testInstructionDispatch, [targetEip]);
       },
-      returnExit: (body, result) => body.finish({ kind: "exit", result })
+      returnExit: (body, result) => body.return([result])
   });
 
   strictEqual(builder.add(
@@ -3954,10 +4007,10 @@ test("finish publishes final fallthrough without choosing its continuation", () 
   ok(eipWrite !== undefined, "final fallthrough did not publish eip");
   strictEqual(stateWriteValue(eipWrite), nextEip);
   deepStrictEqual(terminalEvents, []);
-  ok(!openBody.nodes.some((node) => node.kind === "finish"));
+  ok(!openBody.nodes.some((node) => node.kind === "return"));
 
-  region.finish({ kind: "dispatch", targetEip: nextEip });
-  deepStrictEqual(region.build().nodes.at(-1), finishDispatch(nextEip));
+  region.returnCall(testInstructionDispatch, [nextEip]);
+  deepStrictEqual(region.build().nodes.at(-1), dispatchReturn(nextEip));
 });
 
 test("Core distinguishes ordinary fallthrough from taken dispatch", () => {
@@ -4008,8 +4061,8 @@ test("Core distinguishes ordinary fallthrough from taken dispatch", () => {
 
 test("Core commits a runtime next EIP before dispatch", () => {
   const values = new ValueTable();
-  const instructionStart = values.external(0);
-  const nextEip = values.external(1);
+  const instructionStart = values.parameter(0, "i32");
+  const nextEip = values.parameter(1, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movSemantic(32),
@@ -4021,7 +4074,7 @@ test("Core commits a runtime next EIP before dispatch", () => {
 
   deepStrictEqual(entryNodes(block), [
     stateWrite(v, gprChannel("eax"), v.const(5)),
-    finishDispatch(nextEip)
+    dispatchReturn(nextEip)
   ]);
   const rawNodes = rawEntryNodes(block);
   const finishIndex = rawNodes.length - 1;
@@ -4038,8 +4091,8 @@ test("Core commits a runtime next EIP before dispatch", () => {
 
 test("a fault edge restores a runtime eip", () => {
   const values = new ValueTable();
-  const instructionStart = values.external(4);
-  const nextEip = values.external(5);
+  const instructionStart = values.parameter(0, "i32");
+  const nextEip = values.parameter(1, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movSemantic(32),
@@ -4053,7 +4106,7 @@ test("a fault edge restores a runtime eip", () => {
   deepStrictEqual(nestedBodyView(block, 1).flushes, [
     stateWrite(v, coreStateFields.eip, instructionStart)
   ]);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "read", address)
@@ -4065,23 +4118,24 @@ test("a fault edge restores a runtime eip", () => {
     ),
     [stateWrite(v, coreStateFields.eip, nextEip)]
   );
-  deepStrictEqual(entryNodes(block).at(-1), finishDispatch(nextEip));
+  deepStrictEqual(entryNodes(block).at(-1), dispatchReturn(nextEip));
 });
 
 // The memDynamicBase address: the in-block base register read plus the
-// pre-summed offset external.
+// pre-summed offset parameter.
 function dynamicAddress(block: IrBlock, baseRead: StateReadOperation): ValueId {
   const v = block.values;
 
-  return v.binary("add", outputOf(baseRead), v.external(1));
+  return v.binary("add", outputOf(baseRead), v.parameter(1, "i32"));
 }
 
 function dynamicBaseRead(block: IrBlock): StateReadOperation {
   const v = block.values;
-  const expected = dynamicGprRead(v, valueId(0), v.external(0), 32);
+  const baseIndex = v.parameter(0, "i32");
+  const expected = dynamicGprRead(v, valueId(0), baseIndex, 32);
   const read = entryNodes(block).find(
     (node): node is StateReadOperation =>
-      readsDynamicGpr(v, node, v.external(0), 32) &&
+      readsDynamicGpr(v, node, baseIndex, 32) &&
       node.inputs[0]?.value === expected.inputs[0]?.value
   );
 
@@ -4104,9 +4158,9 @@ function dynamicSegmentBaseRead(
   return read;
 }
 
-test("a memOffset operand guards and accesses the external address", () => {
+test("a memOffset operand guards and accesses the parameter address", () => {
   const values = new ValueTable();
-  const runtimeAddress = values.external(7);
+  const runtimeAddress = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movSemantic(32),
@@ -4127,9 +4181,9 @@ test("a memOffset operand guards and accesses the external address", () => {
     ...memoryGuard(block, 1, address, 4, "read"),
     memoryReadOperation(outputOf(load), address, 32),
     stateWrite(v, gprChannel("eax"), outputOf(load)),
-    finishDispatch(v.const(0x1006))
+    dispatchReturn(v.const(0x1006))
   ]);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "read", address)
@@ -4138,8 +4192,8 @@ test("a memOffset operand guards and accesses the external address", () => {
 
 test("a segmented memOffset operand adds the selected segment base", () => {
   const values = new ValueTable();
-  const offset = values.external(7);
-  const segmentIndex = values.external(8);
+  const offset = values.parameter(0, "i32");
+  const segmentIndex = values.parameter(1, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movSemantic(32),
@@ -4162,9 +4216,9 @@ test("a segmented memOffset operand adds the selected segment base", () => {
     ...memoryGuard(block, 1, address, 4, "read"),
     memoryReadOperation(outputOf(load), address, 32),
     stateWrite(v, gprChannel("eax"), outputOf(load)),
-    finishDispatch(v.const(0x1006))
+    dispatchReturn(v.const(0x1006))
   ]);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "read", address)
@@ -4173,8 +4227,8 @@ test("a segmented memOffset operand adds the selected segment base", () => {
 
 test("a memDynamicBase operand reads the base register inside the block", () => {
   const values = new ValueTable();
-  const baseIndex = values.external(0);
-  const runtimeOffset = values.external(1);
+  const baseIndex = values.parameter(0, "i32");
+  const runtimeOffset = values.parameter(1, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movSemantic(32),
@@ -4197,9 +4251,9 @@ test("a memDynamicBase operand reads the base register inside the block", () => 
     ...memoryGuard(block, 1, address, 4, "read"),
     memoryReadOperation(outputOf(load), address, 32),
     stateWrite(v, gprChannel("eax"), outputOf(load)),
-    finishDispatch(v.const(0x1006))
+    dispatchReturn(v.const(0x1006))
   ]);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "read", address)
@@ -4208,8 +4262,8 @@ test("a memDynamicBase operand reads the base register inside the block", () => 
 
 test("fs memDynamicBase operands add the segment base to the dynamic effective address", () => {
   const values = new ValueTable();
-  const baseIndex = values.external(0);
-  const runtimeOffset = values.external(1);
+  const baseIndex = values.parameter(0, "i32");
+  const runtimeOffset = values.parameter(1, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       aluSemantic("add", 32),
@@ -4245,9 +4299,9 @@ test("fs memDynamicBase operands add the segment base to the dynamic effective a
 
 test("dynamic memDynamicBase segments read the selected segment base", () => {
   const values = new ValueTable();
-  const baseIndex = values.external(0);
-  const runtimeOffset = values.external(1);
-  const segmentIndex = values.external(2);
+  const baseIndex = values.parameter(0, "i32");
+  const runtimeOffset = values.parameter(1, "i32");
+  const segmentIndex = values.parameter(2, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       aluSemantic("add", 32),
@@ -4284,8 +4338,8 @@ test("dynamic memDynamicBase segments read the selected segment base", () => {
 
 test("lea with memDynamicBase uses the dynamic effective address without segment bases", () => {
   const values = new ValueTable();
-  const baseIndex = values.external(0);
-  const offset = values.external(1);
+  const baseIndex = values.parameter(0, "i32");
+  const offset = values.parameter(1, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       leaSemantic(32),
@@ -4303,14 +4357,14 @@ test("lea with memDynamicBase uses the dynamic effective address without segment
   deepStrictEqual(entryNodes(block), [
     dynamicGprRead(v, outputOf(baseRead), baseIndex, 32),
     stateWrite(v, gprChannel("eax"), address),
-    finishDispatch(v.const(0x1003))
+    dispatchReturn(v.const(0x1003))
   ]);
 });
 
 test("a read+write memDynamicBase operand reads the base once and reuses the address", () => {
   const values = new ValueTable();
-  const baseIndex = values.external(0);
-  const offset = values.external(1);
+  const baseIndex = values.parameter(0, "i32");
+  const offset = values.parameter(1, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       aluSemantic("add", 32),
@@ -4335,8 +4389,8 @@ test("a read+write memDynamicBase operand reads the base once and reuses the add
 
 test("pop [memDynamicBase] flushes esp before the base read and restores it on the write edge", () => {
   const values = new ValueTable();
-  const baseIndex = values.external(0);
-  const offset = values.external(1);
+  const baseIndex = values.parameter(0, "i32");
+  const offset = values.parameter(1, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       popSemantic(),
@@ -4365,7 +4419,7 @@ test("pop [memDynamicBase] flushes esp before the base read and restores it on t
     dynamicGprRead(v, outputOf(baseRead), baseIndex, 32),
     ...memoryGuard(block, 2, address, 4, "write"),
     memoryWriteOperation(address, popValue, 32),
-    finishDispatch(v.const(0x1003))
+    dispatchReturn(v.const(0x1003))
   ]);
 
   // The read guard predates the flush: its edge omits esp (cpu state memory
@@ -4374,7 +4428,7 @@ test("pop [memDynamicBase] flushes esp before the base read and restores it on t
   deepStrictEqual(nestedBodyView(block, 1).flushes, [
     stateWrite(v, coreStateFields.eip, v.const(0x1000))
   ]);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 1).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "read", esp)
@@ -4383,7 +4437,7 @@ test("pop [memDynamicBase] flushes esp before the base read and restores it on t
     stateWrite(v, gprChannel("esp"), esp),
     stateWrite(v, coreStateFields.eip, v.const(0x1000))
   ]);
-  assertSameFinishGraph(
+  assertSameTerminationGraph(
     v,
     nestedBodyView(block, 2).terminator,
     (expectedValues) => pageFaultStop(expectedValues, "write", address)
@@ -4396,8 +4450,8 @@ test("a guard after a memDynamicBase flush of a never-read register fails loudly
     guardDsMemory(s, s.address(s.operand(0)), v.const(4), "write");
   };
   const values = new ValueTable();
-  const baseIndex = values.external(0);
-  const offset = values.external(1);
+  const baseIndex = values.parameter(0, "i32");
+  const offset = values.parameter(1, "i32");
 
   throws(
     () =>
@@ -4414,7 +4468,7 @@ test("a guard after a memDynamicBase flush of a never-read register fails loudly
 
 test("a narrow runtime immediate truncates to the access width", () => {
   const values = new ValueTable();
-  const immediate = values.external(0);
+  const immediate = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movSemantic(8),
@@ -4435,7 +4489,7 @@ test("a narrow runtime immediate truncates to the access width", () => {
 
 test("a signed runtime immediate sign-extends instead of masking", () => {
   const values = new ValueTable();
-  const immediate = values.external(0);
+  const immediate = values.parameter(0, "i32");
   const block = buildValueInstructionBlock(values, (builder) => {
     builder.add(
       movsxSemantic(8, 32),
@@ -4463,7 +4517,7 @@ function instructionCountRead(block: IrBlock): StateReadOperation {
 }
 
 test("every instruction advances the instruction-count field once, flushed once", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
   const mov = movSemantic(32);
 
   builder.add(mov, [regBinding("eax"), immBinding(7)], loc(0x1000, 0x1005));
@@ -4487,7 +4541,7 @@ test("every instruction advances the instruction-count field once, flushed once"
 });
 
 test("conditional jump side exit and fallthrough flush the advanced count", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(jccSemantic("E"), [immBinding(0x2000)], loc(0x1000, 0x1002));
 
@@ -4540,7 +4594,7 @@ test("conditional jump side exit and fallthrough flush the advanced count", () =
 });
 
 test("a fault edge restores the boundary count", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("eax"), immBinding(0x77)], loc(0x1000, 0x1005));
   builder.add(
@@ -4567,7 +4621,7 @@ test("a fault edge restores the boundary count", () => {
 });
 
 test("a host trap flushes the advanced count", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(intSemantic(), [immBinding(0x21)], loc(0x1000, 0x1002));
 

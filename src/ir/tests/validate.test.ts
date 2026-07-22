@@ -2,7 +2,6 @@ import { doesNotThrow, ok, throws } from "node:assert";
 import { test } from "node:test";
 
 import {
-  finishControl,
   ifControl,
   loopContinueControl,
   loopControl,
@@ -17,7 +16,7 @@ import type { OperationResult } from "#compiler/ir/operations/definition.js";
 import type { BodyNode, Body, IrBlock } from "#ir/block.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import type { IrFunction } from "#ir/function.js";
-import { validateIrBlock, validateIrFunction } from "#ir/validate.js";
+import { validateIrFunction } from "#ir/validate.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import {
@@ -74,19 +73,55 @@ function entryBlock(values: ValueTable, nodes: readonly BodyNode[]): IrBlock {
   };
 }
 
-function finishDispatch(targetEip: number): BodyNode {
-  return finishControl.create({
-    finish: { kind: "dispatch", targetEip: valueId(targetEip) }
+const validationDispatch = testFunctionDefinition(
+  "validation.dispatch",
+  ["i32"],
+  ["i64"]
+);
+
+function dispatchReturn(targetEip: number): BodyNode {
+  return returnControl.create({
+    source: {
+      kind: "invocation",
+      invocation: Invocation.create({
+        target: validationDispatch,
+        arguments: [{ value: valueId(targetEip), type: "i32" }]
+      })
+    }
   });
 }
 
-function finishExit(values: ValueTable): BodyNode {
-  return finishControl.create({
-    finish: { kind: "exit", result: values.const64(0n) }
+function exitReturn(values: ValueTable): BodyNode {
+  return returnControl.create({
+    source: { kind: "values", values: [values.const64(0n)] }
   });
 }
 
-const finishDispatch0 = finishDispatch(0);
+const dispatchReturn0 = dispatchReturn(0);
+
+function validateFunctionBlock(block: IrBlock): void {
+  const parameters = Array.from(
+    { length: block.values.size() },
+    (_, raw) => valueId(raw)
+  ).filter((value) => block.values.node(value).kind === "parameter")
+    .sort((a, b) => {
+      const first = block.values.node(a);
+      const second = block.values.node(b);
+
+      return first.kind === "parameter" && second.kind === "parameter"
+        ? first.index - second.index
+        : 0;
+    });
+
+  validateIrFunction({
+    ...block,
+    type: functionType(
+      parameters.map((parameter) => block.values.valueType(parameter)),
+      ["i64"]
+    ),
+    parameters
+  });
+}
 
 function testCell(): CellRef<"i32"> {
   return new CellRef("i32");
@@ -156,32 +191,17 @@ function blockWithResourceOperation(
   values: ValueTable,
   operation: ResourceOperation
 ): IrBlock {
-  return entryBlock(values, [operation, finishExit(values)]);
+  return entryBlock(values, [operation, exitReturn(values)]);
 }
-
-test("a body ending with a finish exit validates", () => {
-  doesNotThrow(() => validateIrBlock(blockWith((values) => [finishExit(values)])));
-});
-
-test("a body ending with a finish dispatch validates", () => {
-  doesNotThrow(() => validateIrBlock(blockWith([finishDispatch0])));
-});
-
-test("an implicit fragment body end validates only when allowed", () => {
-  const block = blockWith((values) => [resourceWriteNode(values, 0, 0)]);
-
-  throws(() => validateIrBlock(block), /root body does not complete/);
-  doesNotThrow(() => validateIrBlock(block, { allowImplicitEntryFallthrough: true }));
-});
 
 test("a terminal if with both bodies complete validates", () => {
   doesNotThrow(() =>
-    validateIrBlock(
+    validateFunctionBlock(
       blockWith([
         ifControl.create({
           condition: valueId(0),
-          thenBody: { nodes: [finishDispatch0] },
-          elseBody: { nodes: [finishDispatch(1)] }
+          thenBody: { nodes: [dispatchReturn0] },
+          elseBody: { nodes: [dispatchReturn(1)] }
         })
       ])
     )
@@ -272,56 +292,39 @@ test("a returned invocation validates exact arguments and value types", () => {
   );
 });
 
-test("a returned invocation is rejected in a block body", () => {
-  const values = new ValueTable();
-  const target = testFunctionDefinition("validation.block-return-call", [], []);
-
-  throws(
-    () => validateIrBlock(entryBlock(values, [
-      returnControl.create({
-        source: {
-          kind: "invocation",
-          invocation: Invocation.create({ target, arguments: [] })
-        }
-      })
-    ])),
-    /returns from a block body/
-  );
-});
-
-test("a node after the finish exit terminator is rejected", () => {
+test("a node after a value return is rejected", () => {
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         blockWith((values) => [
-          finishExit(values),
+          exitReturn(values),
           resourceWriteNode(values, 0, 0)
         ])
       ),
-    /has nodes after its terminal finish control/
+    /has nodes after its terminal return control/
   );
 });
 
-test("a node after a finish dispatch terminator is rejected", () => {
+test("a node after an invocation return is rejected", () => {
   throws(
     () =>
-      validateIrBlock(blockWith((values) => [
-        finishDispatch0,
+      validateFunctionBlock(blockWith((values) => [
+        dispatchReturn0,
         resourceWriteNode(values, 0, 0)
       ])),
-    /has nodes after its terminal finish control/
+    /has nodes after its terminal return control/
   );
 });
 
 test("a node after a terminal if is rejected", () => {
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         blockWith((values) => [
         ifControl.create({
           condition: valueId(0),
-          thenBody: { nodes: [finishDispatch0] },
-          elseBody: { nodes: [finishExit(values)] }
+          thenBody: { nodes: [dispatchReturn0] },
+          elseBody: { nodes: [exitReturn(values)] }
         }),
           resourceWriteNode(values, 0, 0)
         ])
@@ -332,14 +335,14 @@ test("a node after a terminal if is rejected", () => {
 
 test("a body that does not complete is rejected", () => {
   throws(
-    () => validateIrBlock(blockWith((values) => [resourceWriteNode(values, 0, 0)])),
+    () => validateFunctionBlock(blockWith((values) => [resourceWriteNode(values, 0, 0)])),
     /root body does not complete/
   );
 });
 
-test("dispatch target must be a known value", () => {
+test("a returned invocation argument must be a known value", () => {
   throws(
-    () => validateIrBlock(blockWith([finishDispatch(99)])),
+    () => validateFunctionBlock(blockWith([dispatchReturn(99)])),
     /unknown value id 99/
   );
 });
@@ -351,10 +354,10 @@ test("operation output bounds must match the operation signature", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(missingBounds, [
           memoryReadOperation(missingBoundsOutput, missingBoundsAddress, 8),
-          finishExit(missingBounds)
+          exitReturn(missingBounds)
         ])
       ),
     /resource\.read operation output \d+ has the wrong bounds/
@@ -366,10 +369,10 @@ test("operation output bounds must match the operation signature", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(overlyNarrow, [
           memoryReadOperation(overlyNarrowOutput, overlyNarrowAddress, 32),
-          finishExit(overlyNarrow)
+          exitReturn(overlyNarrow)
         ])
       ),
     /resource\.read operation output \d+ has the wrong bounds/
@@ -396,10 +399,10 @@ test("valid narrow signed resource read and write nodes validate", () => {
     value
   });
 
-  doesNotThrow(() => validateIrBlock(entryBlock(values, [
+  doesNotThrow(() => validateFunctionBlock(entryBlock(values, [
     read,
     write,
-    finishExit(values)
+    exitReturn(values)
   ])));
 });
 
@@ -422,7 +425,7 @@ test("resource operation validation rejects invalid displacements", () => {
         });
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, operation)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, operation)),
       /address displacement must be an unsigned 32-bit integer/
     );
   }
@@ -443,7 +446,7 @@ test("resource operation validation rejects invalid width and signedness", () =>
     const operation = { ...read, signed: true } as ResourceOperation;
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, operation)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, operation)),
       /signedness is valid only for a narrow read/
     );
   }
@@ -465,7 +468,7 @@ test("resource operation validation rejects invalid width and signedness", () =>
     } as unknown as ResourceOperation;
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, operation)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, operation)),
       /width must be 8, 16, or 32/
     );
   }
@@ -508,7 +511,7 @@ test("resource operation validation rejects malformed identities and range bases
     }, allocateOutput(values));
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, operation)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, operation)),
       expected
     );
   }
@@ -549,7 +552,7 @@ test("resource operation validation rejects invalid byte slices", () => {
     }, allocateOutput(values));
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, operation)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, operation)),
       expected
     );
   }
@@ -571,7 +574,7 @@ test("resource operation validation rejects a slice smaller than its transfer", 
   }, allocateOutput(values));
 
   throws(
-    () => validateIrBlock(blockWithResourceOperation(values, operation)),
+    () => validateFunctionBlock(blockWithResourceOperation(values, operation)),
     /range byte length 1 must contain its 32-bit transfer/
   );
 });
@@ -592,7 +595,7 @@ test("resource operation validation accepts a containing conservative slice", ()
   }, allocateOutput(values));
 
   doesNotThrow(
-    () => validateIrBlock(blockWithResourceOperation(values, operation))
+    () => validateFunctionBlock(blockWithResourceOperation(values, operation))
   );
 });
 
@@ -615,7 +618,7 @@ test("resource operation validation rejects incoherent retained effects", () => 
     } as unknown as ResourceOperation;
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, forged)),
       /effects must read its exact resource effect and write nothing/
     );
   }
@@ -640,7 +643,7 @@ test("resource operation validation rejects incoherent retained effects", () => 
     } as unknown as ResourceOperation;
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, forged)),
       /effects must write its exact resource effect and read nothing/
     );
   }
@@ -667,7 +670,7 @@ test("resource operation validation rejects incoherent retained effects", () => 
     } as unknown as ResourceOperation;
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, forged)),
       /effects must read its exact resource effect and write nothing/
     );
   }
@@ -689,7 +692,7 @@ test("resource operation validation rejects incoherent retained effects", () => 
     } as unknown as ResourceOperation;
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, forged)),
       /must reference its exact resource binding/
     );
   }
@@ -714,7 +717,7 @@ test("resource operation validation rejects incoherent retained inputs", () => {
     } as unknown as ResourceOperation;
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, forged)),
       /must have exactly one i32 address input/
     );
   }
@@ -743,7 +746,7 @@ test("resource operation validation rejects incoherent retained inputs", () => {
     } as unknown as ResourceOperation;
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, forged)),
       /must have exactly one i32 address and one i32 value input/
     );
   }
@@ -768,7 +771,7 @@ test("resource operation validation rejects incoherent retained results", () => 
     } as unknown as ResourceOperation;
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, forged)),
       /must have an i32 result/
     );
   }
@@ -792,7 +795,7 @@ test("resource operation validation rejects incoherent retained results", () => 
     } as unknown as ResourceOperation;
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, forged)),
       /signed result bounds must match its mechanical load bounds/
     );
   }
@@ -818,7 +821,7 @@ test("resource operation validation rejects incoherent retained results", () => 
     } as unknown as ResourceOperation;
 
     throws(
-      () => validateIrBlock(blockWithResourceOperation(values, forged)),
+      () => validateFunctionBlock(blockWithResourceOperation(values, forged)),
       /must not have results/
     );
   }
@@ -838,7 +841,7 @@ test("unsigned resource read bounds may refine within mechanical bounds", () => 
   }, allocateOutput(validValues));
 
   doesNotThrow(
-    () => validateIrBlock(blockWithResourceOperation(validValues, valid))
+    () => validateFunctionBlock(blockWithResourceOperation(validValues, valid))
   );
 
   const wideValues = new ValueTable();
@@ -854,7 +857,7 @@ test("unsigned resource read bounds may refine within mechanical bounds", () => 
   }, allocateOutput(wideValues));
 
   throws(
-    () => validateIrBlock(blockWithResourceOperation(wideValues, tooWide)),
+    () => validateFunctionBlock(blockWithResourceOperation(wideValues, tooWide)),
     /result bounds exceed its mechanical load bounds/
   );
 
@@ -874,18 +877,18 @@ test("unsigned resource read bounds may refine within mechanical bounds", () => 
   }, allocateOutput(malformedValues));
 
   throws(
-    () => validateIrBlock(blockWithResourceOperation(malformedValues, malformed)),
+    () => validateFunctionBlock(blockWithResourceOperation(malformedValues, malformed)),
     /result 0 bounds are malformed/
   );
 });
 
-test("a nested dispatch is generic control", () => {
+test("nested invocation and value returns are generic control", () => {
   doesNotThrow(() =>
-    validateIrBlock(
+    validateFunctionBlock(
       blockWith((values) => [ifControl.create({
         condition: valueId(0),
-        thenBody: { nodes: [finishDispatch0] },
-        elseBody: { nodes: [finishExit(values)] }
+        thenBody: { nodes: [dispatchReturn0] },
+        elseBody: { nodes: [exitReturn(values)] }
       })])
     )
   );
@@ -917,11 +920,11 @@ function switchBlock(
   };
   const node = switchControl.create(args);
 
-  return entryBlock(values, [node, finishExit(values)]);
+  return entryBlock(values, [node, exitReturn(values)]);
 }
 
 test("a switch whose bodies all carry results validates", () => {
-  doesNotThrow(() => validateIrBlock(switchBlock({})));
+  doesNotThrow(() => validateFunctionBlock(switchBlock({})));
 });
 
 test("a control-only switch accepts fallthrough bodies without results", () => {
@@ -936,9 +939,9 @@ test("a control-only switch accepts fallthrough bodies without results", () => {
     defaultBody: { nodes: [] }
   });
 
-  doesNotThrow(() => validateIrBlock({
+  doesNotThrow(() => validateFunctionBlock({
     values,
-    body: { nodes: [selection, finishExit(values)] }
+    body: { nodes: [selection, exitReturn(values)] }
   }));
 });
 
@@ -946,18 +949,18 @@ test("a control-only switch accepts bodies that all escape", () => {
   const values = new ValueTable();
   const selection = switchControl.create({
     selector: values.const(0),
-    cases: [{ matches: [0], body: { nodes: [finishExit(values)] } }],
-    defaultBody: { nodes: [finishExit(values)] }
+    cases: [{ matches: [0], body: { nodes: [exitReturn(values)] } }],
+    defaultBody: { nodes: [exitReturn(values)] }
   });
 
-  doesNotThrow(() => validateIrBlock({ values, body: { nodes: [selection] } }));
+  doesNotThrow(() => validateFunctionBlock({ values, body: { nodes: [selection] } }));
 });
 
 test("a value-producing switch still requires every body result", () => {
   throws(
     () =>
-      validateIrBlock(switchBlock((values) => ({
-        cases: [{ matches: [0], body: { nodes: [finishExit(values)] } }]
+      validateFunctionBlock(switchBlock((values) => ({
+        cases: [{ matches: [0], body: { nodes: [exitReturn(values)] } }]
       }))),
     /case\[0\] must carry a result/
   );
@@ -973,7 +976,7 @@ test("a control-only switch rejects a body result", () => {
   });
 
   throws(
-    () => validateIrBlock({ values, body: { nodes: [selection, finishExit(values)] } }),
+    () => validateFunctionBlock({ values, body: { nodes: [selection, exitReturn(values)] } }),
     /case\[0\] carries a result without an owner output/
   );
 });
@@ -983,7 +986,7 @@ test("a result on the root body is rejected", () => {
   const result = values.const(1);
 
   throws(
-    () => validateIrBlock({ values, body: { nodes: [finishExit(values)], result } }),
+    () => validateFunctionBlock({ values, body: { nodes: [exitReturn(values)], result } }),
     /body carries a result without an owner output/
   );
 });
@@ -991,13 +994,13 @@ test("a result on the root body is rejected", () => {
 test("a result under an output-less owner is rejected", () => {
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         blockWith((values) => [
           ifControl.create({
             condition: valueId(0),
-            thenBody: { nodes: [finishExit(values)], result: valueId(1) }
+            thenBody: { nodes: [exitReturn(values)], result: valueId(1) }
           }),
-          finishExit(values)
+          exitReturn(values)
         ])
       ),
     /thenBody carries a result without an owner output/
@@ -1007,8 +1010,8 @@ test("a result under an output-less owner is rejected", () => {
 test("a result on a completing body is rejected", () => {
   throws(
     () =>
-      validateIrBlock(switchBlock((values) => ({
-        cases: [{ matches: [0], body: { nodes: [finishExit(values)], result: valueId(2) } }]
+      validateFunctionBlock(switchBlock((values) => ({
+        cases: [{ matches: [0], body: { nodes: [exitReturn(values)], result: valueId(2) } }]
       }))),
     /case\[0\] carries a result but completes/
   );
@@ -1017,7 +1020,7 @@ test("a result on a completing body is rejected", () => {
 test("an output-owner body that neither escapes nor carries a result is rejected", () => {
   throws(
     () =>
-      validateIrBlock(switchBlock({ defaultBody: { nodes: [] } })),
+      validateFunctionBlock(switchBlock({ defaultBody: { nodes: [] } })),
     /default must carry a result/
   );
 });
@@ -1025,7 +1028,7 @@ test("an output-owner body that neither escapes nor carries a result is rejected
 test("a duplicate switch case match is rejected", () => {
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         switchBlock({
           cases: [
             { matches: [1], body: { nodes: [], result: valueId(2) } },
@@ -1040,7 +1043,7 @@ test("a duplicate switch case match is rejected", () => {
 test("an overlapping switch case match is rejected", () => {
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         switchBlock({
           cases: [
             {
@@ -1058,18 +1061,18 @@ test("an overlapping switch case match is rejected", () => {
 test("a negative switch case match is rejected", () => {
   throws(
     () =>
-      validateIrBlock(switchBlock({ cases: [{ matches: [-1], body: { nodes: [], result: valueId(2) } }] })),
+      validateFunctionBlock(switchBlock({ cases: [{ matches: [-1], body: { nodes: [], result: valueId(2) } }] })),
     /case match -1 is not an integer in \[0, 255\]/
   );
 });
 
 test("a switch case match beyond the dense-table bound is rejected", () => {
   doesNotThrow(() =>
-    validateIrBlock(switchBlock({ cases: [{ matches: [maxSwitchMatch], body: { nodes: [], result: valueId(2) } }] }))
+    validateFunctionBlock(switchBlock({ cases: [{ matches: [maxSwitchMatch], body: { nodes: [], result: valueId(2) } }] }))
   );
   throws(
     () =>
-      validateIrBlock(switchBlock({ cases: [{ matches: [maxSwitchMatch + 1], body: { nodes: [], result: valueId(2) } }] })),
+      validateFunctionBlock(switchBlock({ cases: [{ matches: [maxSwitchMatch + 1], body: { nodes: [], result: valueId(2) } }] })),
     /case match 256 is not an integer in \[0, 255\]/
   );
 });
@@ -1077,10 +1080,10 @@ test("a switch case match beyond the dense-table bound is rejected", () => {
 test("a switch without a default body is rejected", () => {
   const block = switchBlock({});
   const node = block.body.nodes[0];
-  const finish = block.body.nodes[1];
+  const terminal = block.body.nodes[1];
 
   ok(node?.kind === "switch");
-  ok(finish !== undefined);
+  ok(terminal !== undefined);
   const nestedBodies = node.nestedBodies.slice(0, -1);
   const missingDefaultNode = {
     ...node,
@@ -1089,11 +1092,11 @@ test("a switch without a default body is rejected", () => {
   } as unknown as SwitchControl;
   const missingDefault: IrBlock = {
     ...block,
-    body: { nodes: [missingDefaultNode, finish] }
+    body: { nodes: [missingDefaultNode, terminal] }
   };
 
   throws(
-    () => validateIrBlock(missingDefault),
+    () => validateFunctionBlock(missingDefault),
     /nested bodies do not match its cases and default/
   );
 });
@@ -1105,7 +1108,7 @@ test("a loop with a carried cell and an aligned continue validates", () => {
   const update = values.binary("sub", loopInput, values.const(1));
 
   doesNotThrow(() =>
-    validateIrBlock(
+    validateFunctionBlock(
       entryBlock(values, [
         loopControl.create({
           carried: [{ seed, loopInput }],
@@ -1121,7 +1124,7 @@ test("a loop with a carried cell and an aligned continue validates", () => {
             ]
           }
         }),
-        finishDispatch0
+        dispatchReturn0
       ])
     )
   );
@@ -1134,20 +1137,20 @@ test("a cell read before its seed is rejected", () => {
   const cell = builder.cell(seed);
 
   builder.read(cell);
-  builder.finish({ kind: "dispatch", targetEip: seed });
+  builder.push(exitReturn(values));
   const body = builder.build();
   const seedNode = body.nodes[0];
   const readNode = body.nodes[1];
-  const finishNode = body.nodes[2];
+  const returnNode = body.nodes[2];
 
   ok(seedNode !== undefined);
   ok(readNode !== undefined);
-  ok(finishNode !== undefined);
+  ok(returnNode !== undefined);
 
-  (body.nodes as BodyNode[]).splice(0, 3, readNode, seedNode, finishNode);
+  (body.nodes as BodyNode[]).splice(0, 3, readNode, seedNode, returnNode);
 
   throws(
-    () => validateIrBlock({ values, body }),
+    () => validateFunctionBlock({ values, body }),
     /before its seed/
   );
 });
@@ -1163,10 +1166,10 @@ test("a cell cannot be seeded more than once", () => {
     value: seed,
     initialization: "seed"
   });
-  builder.finish({ kind: "dispatch", targetEip: seed });
+  builder.push(exitReturn(values));
 
   throws(
-    () => validateIrBlock({ values, body: builder.build() }),
+    () => validateFunctionBlock({ values, body: builder.build() }),
     /seeds the same cell more than once/
   );
 });
@@ -1178,13 +1181,13 @@ test("a cell access without any seed is rejected", () => {
   const cell = builder.cell(target);
 
   builder.read(cell);
-  builder.finish({ kind: "dispatch", targetEip: target });
+  builder.push(exitReturn(values));
   const body = builder.build();
 
   (body.nodes as BodyNode[]).splice(0, 1);
 
   throws(
-    () => validateIrBlock({ values, body }),
+    () => validateFunctionBlock({ values, body }),
     /cell with no seed/
   );
 });
@@ -1203,17 +1206,17 @@ test("a cell from another root is rejected", () => {
 
   target.cell(seed);
   target.push(foreignRead);
-  target.finish({ kind: "dispatch", targetEip: seed });
+  target.push(exitReturn(values));
 
   throws(
-    () => validateIrBlock({ values, body: target.build() }),
+    () => validateFunctionBlock({ values, body: target.build() }),
     /cell with no seed in this root/
   );
 });
 
 test("a cell declared in one sibling body cannot be used in another", () => {
   const values = new ValueTable();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const seed = values.const(7);
   const builder = new RegionBuilder(values);
   let cell!: CellRef;
@@ -1225,7 +1228,7 @@ test("a cell declared in one sibling body cannot be used in another", () => {
     },
     { elseBuild: () => {} }
   );
-  builder.finish({ kind: "dispatch", targetEip: seed });
+  builder.push(exitReturn(values));
   const body = builder.build();
   const branch = body.nodes[0];
 
@@ -1236,12 +1239,12 @@ test("a cell declared in one sibling body cannot be used in another", () => {
     cellReadNode(values.addNodeOutput(), cell)
   );
 
-  throws(() => validateIrBlock({ values, body }), /outside its declaring body or descendants/);
+  throws(() => validateFunctionBlock({ values, body }), /outside its declaring body or descendants/);
 });
 
 test("a child cell cannot escape to its parent body", () => {
   const values = new ValueTable();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const seed = values.const(7);
   const builder = new RegionBuilder(values);
   let cell!: CellRef;
@@ -1250,17 +1253,17 @@ test("a child cell cannot escape to its parent body", () => {
     cell = then.cell(seed);
   });
   builder.push(cellReadNode(values.addNodeOutput(), cell));
-  builder.finish({ kind: "dispatch", targetEip: seed });
+  builder.push(exitReturn(values));
 
   throws(
-    () => validateIrBlock({ values, body: builder.build() }),
+    () => validateFunctionBlock({ values, body: builder.build() }),
     /outside its declaring body or descendants/
   );
 });
 
 test("a cell declared outside a loop can be written in a nested loop arm", () => {
   const values = new ValueTable();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const seed = values.const(7);
   const update = values.const(6);
   const builder = new RegionBuilder(values);
@@ -1269,25 +1272,25 @@ test("a cell declared outside a loop can be written in a nested loop arm", () =>
   builder.loop([], (loop) => {
     loop.if(condition, (arm) => arm.write(cell, update));
   });
-  builder.finish({ kind: "dispatch", targetEip: seed });
+  builder.push(exitReturn(values));
 
-  doesNotThrow(() => validateIrBlock({ values, body: builder.build() }));
+  doesNotThrow(() => validateFunctionBlock({ values, body: builder.build() }));
 });
 
 test("a hand-assembled body declares cell scope by its seed node alone", () => {
-  // One regime: raw bodies validate under the same structural rule as
-  // builder-built ones — the seed write is the declaration.
+  // The seed write is the cell declaration for hand-assembled and
+  // builder-built function bodies alike.
   const values = new ValueTable();
   const seed = values.const(7);
   const cell = testCell();
 
   doesNotThrow(
-    () => validateIrBlock(entryBlock(values, [
+    () => validateFunctionBlock(entryBlock(values, [
       cellWrite.create(
         { cell, value: seed, initialization: "seed" }
       ),
       cellReadNode(values.addNodeOutput(), cell),
-      finishDispatch(seed)
+      dispatchReturn(seed)
     ]))
   );
 });
@@ -1302,17 +1305,17 @@ test("a hand-assembled nested body may use an ancestor cell", () => {
   };
 
   builder.push(ifControl.create({
-    condition: values.external(0),
+    condition: values.parameter(0, "i32"),
     thenBody: rawChild
   }));
-  builder.finish({ kind: "dispatch", targetEip: seed });
+  builder.push(exitReturn(values));
 
-  doesNotThrow(() => validateIrBlock({ values, body: builder.build() }));
+  doesNotThrow(() => validateFunctionBlock({ values, body: builder.build() }));
 });
 
 test("a loopContinue outside any loop body is rejected", () => {
   throws(
-    () => validateIrBlock(blockWith([
+    () => validateFunctionBlock(blockWith([
       loopContinueControl.create({ updates: [] })
     ])),
     /loopContinue outside any loop body/
@@ -1326,7 +1329,7 @@ test("loopContinue updates misaligned with the carried list are rejected", () =>
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(values, [
           loopControl.create({
             carried: [{ seed, loopInput }],
@@ -1334,7 +1337,7 @@ test("loopContinue updates misaligned with the carried list are rejected", () =>
               nodes: [loopContinueControl.create({ updates: [] })]
             }
           }),
-          finishDispatch0
+          dispatchReturn0
         ])
       ),
     /updates do not align/
@@ -1348,7 +1351,7 @@ test("a carried loop input validates", () => {
 
   doesNotThrow(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(values, [
           loopControl.create({
             carried: [{ seed, loopInput }],
@@ -1356,7 +1359,7 @@ test("a carried loop input validates", () => {
               nodes: [loopContinueControl.create({ updates: [loopInput] })]
             }
           }),
-          finishDispatch0
+          dispatchReturn0
         ])
       )
   );
@@ -1368,7 +1371,7 @@ test("a carried cell whose input is not a loopInput value is rejected", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(values, [
           loopControl.create({
             carried: [{ seed, loopInput: seed }],
@@ -1376,7 +1379,7 @@ test("a carried cell whose input is not a loopInput value is rejected", () => {
               nodes: [loopContinueControl.create({ updates: [seed] })]
             }
           }),
-          finishDispatch0
+          dispatchReturn0
         ])
       ),
     /is not a loopInput value/
@@ -1388,7 +1391,7 @@ test("used and unused node outputs without producers are rejected", () => {
 
   unusedValues.addNodeOutput();
   throws(
-    () => validateIrBlock(entryBlock(unusedValues, [finishExit(unusedValues)])),
+    () => validateFunctionBlock(entryBlock(unusedValues, [exitReturn(unusedValues)])),
     /node output \d+ has no producer/
   );
 
@@ -1397,10 +1400,10 @@ test("used and unused node outputs without producers are rejected", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(usedValues, [
           resourceWriteNode(usedValues, 0, used),
-          finishExit(usedValues)
+          exitReturn(usedValues)
         ])
       ),
     /node output \d+ has no producer/
@@ -1413,21 +1416,21 @@ test("producer outputs must name nodeOutput values", () => {
   const constant = constValues.const(1);
 
   throws(
-    () => validateIrBlock(entryBlock(constValues, [
+    () => validateFunctionBlock(entryBlock(constValues, [
       refinedResourceReadNode(constValues, constant),
-      finishExit(constValues)
+      exitReturn(constValues)
     ])),
     /producer output \d+ is not a nodeOutput value/
   );
 
   const compoundValues = new ValueTable();
   compoundValues.const(0);
-  const compound = compoundValues.binary("add", compoundValues.external(0), compoundValues.const(1));
+  const compound = compoundValues.binary("add", compoundValues.parameter(0, "i32"), compoundValues.const(1));
 
   throws(
-    () => validateIrBlock(entryBlock(compoundValues, [
+    () => validateFunctionBlock(entryBlock(compoundValues, [
       refinedResourceReadNode(compoundValues, compound),
-      finishExit(compoundValues)
+      exitReturn(compoundValues)
     ])),
     /producer output \d+ is not a nodeOutput value/
   );
@@ -1437,9 +1440,9 @@ test("producer outputs must name nodeOutput values", () => {
   const loopInput = loopValues.addLoopInput();
 
   throws(
-    () => validateIrBlock(entryBlock(loopValues, [
+    () => validateFunctionBlock(entryBlock(loopValues, [
       refinedResourceReadNode(loopValues, loopInput),
-      finishExit(loopValues)
+      exitReturn(loopValues)
     ])),
     /producer output \d+ is not a nodeOutput value/
   );
@@ -1452,11 +1455,11 @@ test("duplicate operation producers and operation-vs-switch producers are reject
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(opValues, [
           resourceReadNode(opValues, opOutput, 0),
           resourceReadNode(opValues, opOutput, 0),
-          finishExit(opValues)
+          exitReturn(opValues)
         ])
       ),
     /node output \d+ has more than one producer/
@@ -1469,7 +1472,7 @@ test("duplicate operation producers and operation-vs-switch producers are reject
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(mixedValues, [
           resourceReadNode(mixedValues, mixedOutput, 0),
           switchControl.create({
@@ -1478,7 +1481,7 @@ test("duplicate operation producers and operation-vs-switch producers are reject
             cases: [{ matches: [0], body: { nodes: [], result } }],
             defaultBody: { nodes: [], result }
           }),
-          finishExit(mixedValues)
+          exitReturn(mixedValues)
         ])
       ),
     /node output \d+ has more than one producer/
@@ -1492,11 +1495,11 @@ test("a same-body compound use before its producer is rejected", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(directValues, [
           resourceWriteNode(directValues, 0, directOutput),
           resourceReadNode(directValues, directOutput, 0),
-          finishExit(directValues)
+          exitReturn(directValues)
         ])
       ),
     /node output \d+.*does not dominate/
@@ -1505,15 +1508,15 @@ test("a same-body compound use before its producer is rejected", () => {
   const values = new ValueTable();
   values.const(0);
   const output = values.addNodeOutput();
-  const compound = values.binary("add", output, values.external(0));
+  const compound = values.binary("add", output, values.parameter(0, "i32"));
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(values, [
           resourceWriteNode(values, 0, compound),
           resourceReadNode(values, output, 0),
-          finishExit(values)
+          exitReturn(values)
         ])
       ),
     /node output \d+.*does not dominate/
@@ -1528,14 +1531,14 @@ test("a node output cannot be used from a sibling body", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(values, [
           ifControl.create({
             condition,
             thenBody: { nodes: [resourceReadNode(values, output, 0)] },
             elseBody: { nodes: [resourceWriteNode(values, 0, output)] }
           }),
-          finishExit(values)
+          exitReturn(values)
         ])
       ),
     /node output \d+.*does not dominate/
@@ -1549,11 +1552,11 @@ test("one Body object cannot be reused under multiple controls", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(values, [
           ifControl.create({ condition, thenBody: shared }),
           ifControl.create({ condition, thenBody: shared }),
-          finishExit(values)
+          exitReturn(values)
         ])
       ),
     /reuses a Body object that already has an owner/
@@ -1567,14 +1570,14 @@ test("a loop input is scoped to its owning loop body", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(values, [
           loopControl.create({
             carried: [{ seed, loopInput }],
             body: { nodes: [] }
           }),
           resourceWriteNode(values, 0, loopInput),
-          finishExit(values)
+          exitReturn(values)
         ])
       ),
     /loop input \d+ is used outside its owning loop body/
@@ -1588,7 +1591,7 @@ test("a loop input cannot be reused by a sibling loop", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(values, [
           loopControl.create({
             carried: [{ seed, loopInput }],
@@ -1598,7 +1601,7 @@ test("a loop input cannot be reused by a sibling loop", () => {
             carried: [{ seed, loopInput }],
             body: { nodes: [] }
           }),
-          finishExit(values)
+          exitReturn(values)
         ])
       ),
     /reuses loop input \d+ across carried cells or loops/
@@ -1612,7 +1615,7 @@ test("a loop input cannot be consumed inside a sibling loop body", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(values, [
           loopControl.create({
             carried: [{ seed, loopInput }],
@@ -1622,7 +1625,7 @@ test("a loop input cannot be consumed inside a sibling loop body", () => {
             carried: [],
             body: { nodes: [resourceWriteNode(values, 0, loopInput)] }
           }),
-          finishExit(values)
+          exitReturn(values)
         ])
       ),
     /loop input \d+ is used outside its owning loop body/
@@ -1636,14 +1639,14 @@ test("a loop-body node output cannot escape directly after the loop", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(values, [
           loopControl.create({
             carried: [],
             body: { nodes: [resourceReadNode(values, output, 0)] }
           }),
           resourceWriteNode(values, 0, output),
-          finishExit(values)
+          exitReturn(values)
         ])
       ),
     /node output \d+.*does not dominate/
@@ -1657,7 +1660,7 @@ test("a switch output cannot be its own selector or arm result", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(selectorValues, [
           switchControl.create({
             selector: selectorOutput,
@@ -1665,7 +1668,7 @@ test("a switch output cannot be its own selector or arm result", () => {
             cases: [{ matches: [0], body: { nodes: [], result: selectorResult } }],
             defaultBody: { nodes: [], result: selectorResult }
           }),
-          finishExit(selectorValues)
+          exitReturn(selectorValues)
         ])
       ),
     /switch operand \d+ created after its output/
@@ -1677,7 +1680,7 @@ test("a switch output cannot be its own selector or arm result", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(resultValues, [
           switchControl.create({
             selector: resultSelector,
@@ -1685,7 +1688,7 @@ test("a switch output cannot be its own selector or arm result", () => {
             cases: [{ matches: [0], body: { nodes: [], result: resultOutput } }],
             defaultBody: { nodes: [], result: resultSelector }
           }),
-          finishExit(resultValues)
+          exitReturn(resultValues)
         ])
       ),
     /switch result \d+ created after its output/
@@ -1699,7 +1702,7 @@ test("a valid switch output can be used after the switch", () => {
   const output = values.addNodeOutput();
 
   doesNotThrow(() =>
-    validateIrBlock(
+    validateFunctionBlock(
       entryBlock(values, [
         switchControl.create({
           selector,
@@ -1708,7 +1711,7 @@ test("a valid switch output can be used after the switch", () => {
           defaultBody: { nodes: [], result }
         }),
         resourceWriteNode(values, 0, output),
-        finishExit(values)
+        exitReturn(values)
       ])
     )
   );
@@ -1722,7 +1725,7 @@ test("an ancestor producer can feed nested if, switch-result, and loop-body uses
   const switchOutput = values.addNodeOutput();
 
   doesNotThrow(() =>
-    validateIrBlock(
+    validateFunctionBlock(
       entryBlock(values, [
         resourceReadNode(values, output, 0),
         ifControl.create({
@@ -1739,7 +1742,7 @@ test("an ancestor producer can feed nested if, switch-result, and loop-body uses
           carried: [],
           body: { nodes: [resourceWriteNode(values, 0, output)] }
         }),
-        finishExit(values)
+        exitReturn(values)
       ])
     )
   );
@@ -1754,7 +1757,7 @@ test("a body-local producer can feed its body result", () => {
   const switchOutput = values.addNodeOutput();
 
   doesNotThrow(() =>
-    validateIrBlock(
+    validateFunctionBlock(
       entryBlock(values, [
         switchControl.create({
           selector,
@@ -1770,7 +1773,7 @@ test("a body-local producer can feed its body result", () => {
           ],
           defaultBody: { nodes: [], result: fallback }
         }),
-        finishExit(values)
+        exitReturn(values)
       ])
     )
   );
@@ -1783,43 +1786,12 @@ test("producer operands must have lower value ids than their output", () => {
 
   throws(
     () =>
-      validateIrBlock(
+      validateFunctionBlock(
         entryBlock(values, [
           memoryReadOperation(output, address, 32),
-          finishExit(values)
+          exitReturn(values)
         ])
       ),
     /producer operand \d+ created after its output/
-  );
-});
-
-test("exported outputs are validated at the root body boundary", () => {
-  const validValues = new ValueTable();
-  validValues.const(0);
-  const validOutput = validValues.addNodeOutput();
-  const validBlock = entryBlock(validValues, [
-    resourceReadNode(validValues, validOutput, 0),
-    finishExit(validValues)
-  ]);
-
-  doesNotThrow(() => validateIrBlock(validBlock, { exportedOutputs: [validOutput] }));
-
-  const escapingValues = new ValueTable();
-  const condition = escapingValues.const(1);
-  escapingValues.const(0);
-  const escapingOutput = escapingValues.addNodeOutput();
-  const escapingBlock = entryBlock(escapingValues, [
-    ifControl.create({
-      condition,
-      thenBody: {
-        nodes: [resourceReadNode(escapingValues, escapingOutput, 0)]
-      }
-    }),
-    finishExit(escapingValues)
-  ]);
-
-  throws(
-    () => validateIrBlock(escapingBlock, { exportedOutputs: [escapingOutput] }),
-    /node output \d+.*does not dominate exported output/
   );
 });

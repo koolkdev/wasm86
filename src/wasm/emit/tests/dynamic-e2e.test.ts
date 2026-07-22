@@ -15,7 +15,6 @@ import {
 } from "#core/state/channels.js";
 import type { InstructionStateChannel } from "#core/instruction/state/channels.js";
 import type { SegmentStateField } from "#core/state/channels.js";
-import type { IrBlock } from "#ir/block.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -25,15 +24,18 @@ import { movSemantic } from "#core/semantics/mov.js";
 import { xchgSemantic } from "#core/semantics/xchg.js";
 import { assertLazyFlagState, readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
-import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
-import { RegionBuilder } from "#ir/region-builder.js";
+import {
+  completedTestFunction,
+  instantiateTestFunction,
+  testFunction,
+  testFunctionCompleted
+} from "./harness.js";
 import { operandRead, operandWrite } from "#ir/tests/storage-op-helpers.js";
 import { flatMemoryResolution } from "#memory/flat.js";
 import {
-  cpuStateAccess,
-  testInstructionConstruction
+  cpuStateAccess
 } from "#test/support/execution-model.js";
-import type { InstructionTerminals } from "#core/instruction/terminal.js";
+import { buildTestInstructions } from "./instruction-function.js";
 
 // One emitted handler body per op+width, with the register indices arriving
 // as wasm params at run time.
@@ -43,30 +45,27 @@ function readRegister(view: DataView, name: RegName): number {
 }
 
 function assertCompleted(exit: bigint): void {
-  strictEqual(exit, irBlockCompleted);
+  strictEqual(exit, testFunctionCompleted);
 }
 
-function buildValueInstructionBlock(
-  build: (instructions: InstructionBuilder, values: ValueTable) => void
-): IrBlock {
-  const values = new ValueTable();
-  const region = new RegionBuilder(values);
-  const terminals: InstructionTerminals = {
-    dispatch: (body, targetEip) => body.finish({ kind: "dispatch", targetEip }),
-    returnExit: (body, result) => body.finish({ kind: "exit", result })
-  };
-  const instructions = testInstructionConstruction.createBuilder(
-    region,
-    terminals
-  );
+function buildValueInstructionFunction(
+  parameterCount: number,
+  build: (
+    instructions: InstructionBuilder,
+    values: ValueTable,
+    parameter: (index: number) => ValueId
+  ) => void
+) {
+  return testFunction(parameterCount, (fn) => {
+    buildTestInstructions(fn, (instructions) => {
+      build(instructions, fn.values, (index) => {
+        const parameter = fn.parameters[index];
 
-  build(instructions, values);
-  const finalFallthrough = instructions.finish();
-
-  if (finalFallthrough !== undefined) {
-    region.finish({ kind: "dispatch", targetEip: finalFallthrough });
-  }
-  return { body: region.build(), values };
+        strictEqual(parameter !== undefined, true, `missing parameter ${index}`);
+        return parameter!;
+      });
+    });
+  });
 }
 
 function segmentChannel(reg: "es" | "fs" | "gs", field: SegmentStateField): InstructionStateChannel {
@@ -83,14 +82,14 @@ function segmentChannel(reg: "es" | "fs" | "gs", field: SegmentStateField): Inst
 }
 
 test("one add r/m32, r32 body serves several runtime register pairs", async () => {
-  const block = buildValueInstructionBlock((builder, values) => {
+  const fixture = buildValueInstructionFunction(2, (builder, _values, parameter) => {
     builder.add(
       aluSemantic("add", 32),
-      [regDynamicBinding(values.external(0)), regDynamicBinding(values.external(1))],
+      [regDynamicBinding(parameter(0)), regDynamicBinding(parameter(1))],
       loc(0x1000, 0x1002)
     );
   });
-  const { stateView, run } = await instantiateIrBlock(block, 2);
+  const { stateView, run } = await instantiateTestFunction(fixture);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 5, ecx: 7 });
   assertCompleted(run(0, 1));
@@ -113,14 +112,14 @@ test("one add r/m32, r32 body serves several runtime register pairs", async () =
 });
 
 test("dst == src reads the original value for the result and the flags", async () => {
-  const block = buildValueInstructionBlock((builder, values) => {
+  const fixture = buildValueInstructionFunction(2, (builder, _values, parameter) => {
     builder.add(
       aluSemantic("add", 32),
-      [regDynamicBinding(values.external(0)), regDynamicBinding(values.external(1))],
+      [regDynamicBinding(parameter(0)), regDynamicBinding(parameter(1))],
       loc(0x1000, 0x1002)
     );
   });
-  const { stateView, run } = await instantiateIrBlock(block, 2);
+  const { stateView, run } = await instantiateTestFunction(fixture);
 
   writeWasmCpuStateSnapshot(stateView, { ebx: 0x21 });
   assertCompleted(run(3, 3));
@@ -136,15 +135,15 @@ test("dst == src reads the original value for the result and the flags", async (
 });
 
 test("a static read before a dynamic write to the same register keeps the old value", async () => {
-  const block = buildValueInstructionBlock((builder, values) => {
+  const fixture = buildValueInstructionFunction(1, (builder, _values, parameter) => {
     builder.add(movSemantic(32), [regBinding("ecx"), regBinding("ebx")], loc(0x1000, 0x1002));
     builder.add(
       movSemantic(32),
-      [regDynamicBinding(values.external(0)), immBinding(0x99)],
+      [regDynamicBinding(parameter(0)), immBinding(0x99)],
       loc(0x1002, 0x1008)
     );
   });
-  const { stateView, run } = await instantiateIrBlock(block, 1);
+  const { stateView, run } = await instantiateTestFunction(fixture);
 
   writeWasmCpuStateSnapshot(stateView, { ebx: 0x42, ecx: 0 });
   assertCompleted(run(3));
@@ -153,14 +152,14 @@ test("a static read before a dynamic write to the same register keeps the old va
 });
 
 test("xchg r/mDyn, ebx swaps through the dynamic register access", async () => {
-  const block = buildValueInstructionBlock((builder, values) => {
+  const fixture = buildValueInstructionFunction(1, (builder, _values, parameter) => {
     builder.add(
       xchgSemantic(32),
-      [regDynamicBinding(values.external(0)), regBinding("ebx")],
+      [regDynamicBinding(parameter(0)), regBinding("ebx")],
       loc(0x1000, 0x1002)
     );
   });
-  const { stateView, run } = await instantiateIrBlock(block, 1);
+  const { stateView, run } = await instantiateTestFunction(fixture);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0x111, ebx: 0x222 });
   assertCompleted(run(0));
@@ -174,14 +173,14 @@ test("xchg r/mDyn, ebx swaps through the dynamic register access", async () => {
 });
 
 test("one add r/m8, r8 body serves low and high byte registers", async () => {
-  const block = buildValueInstructionBlock((builder, values) => {
+  const fixture = buildValueInstructionFunction(2, (builder, _values, parameter) => {
     builder.add(
       aluSemantic("add", 8),
-      [regDynamicBinding(values.external(0)), regDynamicBinding(values.external(1))],
+      [regDynamicBinding(parameter(0)), regDynamicBinding(parameter(1))],
       loc(0x1000, 0x1002)
     );
   });
-  const { stateView, run } = await instantiateIrBlock(block, 2);
+  const { stateView, run } = await instantiateTestFunction(fixture);
 
   // al += cl: only the low byte of eax changes.
   writeWasmCpuStateSnapshot(stateView, { eax: 0x11111105, ecx: 0x22222203 });
@@ -219,25 +218,22 @@ function modrmRegField(values: ValueTable, modrm: ValueId): ValueId {
 }
 
 test("a computed index extracts the registers from a modrm-style external", async () => {
-  const values = new ValueTable();
-  const state = cpuStateAccess.bind(new RegionBuilder(values));
-  const modrm = values.external(0);
-  const reg = modrmRegField(values, modrm);
-  const rm = values.binary("and", modrm, values.const(7));
-  const source = state.dynamicGpr(reg, 32);
-  const destination = state.dynamicGpr(rm, 32);
-  const loaded = values.addNodeOutput();
-  const block: IrBlock = {
-    body: {
-      nodes: [
-        operandRead(loaded, source),
-        operandWrite(destination, loaded)
-      ]
-    },
-    values
-  };
+  const fixture = completedTestFunction(1, (fn) => {
+    const state = cpuStateAccess.bind(fn.region);
+    const modrm = fn.parameters[0]!;
+    const reg = modrmRegField(fn.values, modrm);
+    const rm = fn.values.binary("and", modrm, fn.values.const(7));
+    const source = state.dynamicGpr(reg, 32);
+    const destination = state.dynamicGpr(rm, 32);
+    const loaded = fn.values.addNodeOutput();
 
-  const { stateView, run } = await instantiateIrBlock(block, 1);
+    fn.region.extend([
+      operandRead(loaded, source),
+      operandWrite(destination, loaded)
+    ]);
+  });
+
+  const { stateView, run } = await instantiateTestFunction(fixture);
 
   // mov rm, reg with modrm 0xd1: reg = edx, rm = ecx.
   writeWasmCpuStateSnapshot(stateView, { edx: 0xfeedface, ecx: 0 });
@@ -247,25 +243,22 @@ test("a computed index extracts the registers from a modrm-style external", asyn
 });
 
 test("a computed index drives byte access on both the read and the write path", async () => {
-  const values = new ValueTable();
-  const state = cpuStateAccess.bind(new RegionBuilder(values));
-  const modrm = values.external(0);
-  const reg = modrmRegField(values, modrm);
-  const rm = values.binary("and", modrm, values.const(7));
-  const source = state.dynamicGpr(reg, 8);
-  const destination = state.dynamicGpr(rm, 8);
-  const loaded = values.addNodeOutput(fitsUnsigned(8));
-  const block: IrBlock = {
-    body: {
-      nodes: [
-        operandRead(loaded, source),
-        operandWrite(destination, loaded)
-      ]
-    },
-    values
-  };
+  const fixture = completedTestFunction(1, (fn) => {
+    const state = cpuStateAccess.bind(fn.region);
+    const modrm = fn.parameters[0]!;
+    const reg = modrmRegField(fn.values, modrm);
+    const rm = fn.values.binary("and", modrm, fn.values.const(7));
+    const source = state.dynamicGpr(reg, 8);
+    const destination = state.dynamicGpr(rm, 8);
+    const loaded = fn.values.addNodeOutput(fitsUnsigned(8));
 
-  const { stateView, run } = await instantiateIrBlock(block, 1);
+    fn.region.extend([
+      operandRead(loaded, source),
+      operandWrite(destination, loaded)
+    ]);
+  });
+
+  const { stateView, run } = await instantiateTestFunction(fixture);
 
   // mov rm8, reg8 with modrm 0xe5: reg = ah, rm = ch — both high bytes, so
   // both byte-index decompositions exercise the +1 term.
@@ -276,14 +269,14 @@ test("a computed index drives byte access on both the read and the write path", 
 });
 
 test("a 16-bit dynamic access touches two bytes of the indexed word", async () => {
-  const block = buildValueInstructionBlock((builder, values) => {
+  const fixture = buildValueInstructionFunction(2, (builder, _values, parameter) => {
     builder.add(
       aluSemantic("add", 16),
-      [regDynamicBinding(values.external(0)), regDynamicBinding(values.external(1))],
+      [regDynamicBinding(parameter(0)), regDynamicBinding(parameter(1))],
       loc(0x1000, 0x1002)
     );
   });
-  const { stateView, run } = await instantiateIrBlock(block, 2);
+  const { stateView, run } = await instantiateTestFunction(fixture);
 
   // si += dx wraps the word; the upper halves stay untouched.
   writeWasmCpuStateSnapshot(stateView, { esi: 0xaaaa8001, edx: 0xbbbb8002 });
@@ -294,30 +287,28 @@ test("a 16-bit dynamic access touches two bytes of the indexed word", async () =
 });
 
 test("static segment ranges round-trip selectors and loaded hidden state", async () => {
-  const values = new ValueTable();
-  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const fields = ["selector", "base", "limit", "access"] as const;
-  const sourceOperands = fields.map((field) => state.segment("es", field));
-  const destinationOperands = fields.map((field) => state.segment("gs", field));
-  const inputs = fields.map((_, index) => values.external(index));
-  const loaded = fields.map((field) => values.addNodeOutput(field === "selector" ? fitsUnsigned(16) : undefined));
-  const block: IrBlock = {
-    values,
-    body: {
-      nodes: [
-        ...sourceOperands.map((operand, index) =>
-          operandWrite(operand, inputs[index]!)
-        ),
-        ...sourceOperands.map((operand, index) =>
-          operandRead(loaded[index]!, operand)
-        ),
-        ...destinationOperands.map((operand, index) =>
-          operandWrite(operand, loaded[index]!)
-        )
-      ]
-    }
-  };
-  const { stateView, run } = await instantiateIrBlock(block, inputs.length);
+  const fixture = completedTestFunction(fields.length, (fn) => {
+    const state = cpuStateAccess.bind(fn.region);
+    const sourceOperands = fields.map((field) => state.segment("es", field));
+    const destinationOperands = fields.map((field) => state.segment("gs", field));
+    const loaded = fields.map((field) =>
+      fn.values.addNodeOutput(field === "selector" ? fitsUnsigned(16) : undefined)
+    );
+
+    fn.region.extend([
+      ...sourceOperands.map((operand, index) =>
+        operandWrite(operand, fn.parameters[index]!)
+      ),
+      ...sourceOperands.map((operand, index) =>
+        operandRead(loaded[index]!, operand)
+      ),
+      ...destinationOperands.map((operand, index) =>
+        operandWrite(operand, loaded[index]!)
+      )
+    ]);
+  });
+  const { stateView, run } = await instantiateTestFunction(fixture);
   const expected = [0x2345, 0x89ab_cdef, 0xffff_ffff, 0x0000_00e0] as const;
 
   assertCompleted(run(...expected));
@@ -329,33 +320,31 @@ test("static segment ranges round-trip selectors and loaded hidden state", async
 });
 
 test("dynamic segment accesses use separate contiguous arrays for every loaded field", async () => {
-  const values = new ValueTable();
-  const state = cpuStateAccess.bind(new RegionBuilder(values));
   const fields = ["selector", "base", "limit", "access"] as const;
-  const targetIndex = values.external(0);
-  const inputs = fields.map((_, index) => values.external(index + 1));
-  const operands = fields.map((field) =>
-    state.dynamicSegment(targetIndex, field)
-  );
-  const destinationOperands = fields.map((field) => state.segment("fs", field));
-  const loaded = fields.map((field) => values.addNodeOutput(field === "selector" ? fitsUnsigned(16) : undefined));
-  const block: IrBlock = {
-    values,
-    body: {
-      nodes: [
-        ...operands.map((operand, index) =>
-          operandWrite(operand, inputs[index]!)
-        ),
-        ...operands.map((operand, index) =>
-          operandRead(loaded[index]!, operand)
-        ),
-        ...destinationOperands.map((operand, index) =>
-          operandWrite(operand, loaded[index]!)
-        )
-      ]
-    }
-  };
-  const { stateView, run } = await instantiateIrBlock(block, inputs.length + 1);
+  const fixture = completedTestFunction(fields.length + 1, (fn) => {
+    const state = cpuStateAccess.bind(fn.region);
+    const targetIndex = fn.parameters[0]!;
+    const operands = fields.map((field) =>
+      state.dynamicSegment(targetIndex, field)
+    );
+    const destinationOperands = fields.map((field) => state.segment("fs", field));
+    const loaded = fields.map((field) =>
+      fn.values.addNodeOutput(field === "selector" ? fitsUnsigned(16) : undefined)
+    );
+
+    fn.region.extend([
+      ...operands.map((operand, index) =>
+        operandWrite(operand, fn.parameters[index + 1]!)
+      ),
+      ...operands.map((operand, index) =>
+        operandRead(loaded[index]!, operand)
+      ),
+      ...destinationOperands.map((operand, index) =>
+        operandWrite(operand, loaded[index]!)
+      )
+    ]);
+  });
+  const { stateView, run } = await instantiateTestFunction(fixture);
   const expected = [0x4567, 0x1020_3040, 0xa0b0_c0d0, 0x0000_00a0] as const;
 
   // gs is the last segment-register record and catches an incorrect array
@@ -369,22 +358,17 @@ test("dynamic segment accesses use separate contiguous arrays for every loaded f
 });
 
 test("a dynamic memory check evaluates each semantic operand once", async () => {
-  const values = new ValueTable();
-  const address = values.external(0);
-  const byteLength = values.external(1);
-  const body = new RegionBuilder(values);
-  const state = cpuStateAccess.bind(body);
-  const fault = flatMemoryResolution(
-    values,
-    { start: address, byteLength },
-    "read"
-  ).fault.condition;
-  state.write(state.gprChannel(gprChannel("eax")), fault);
-  const block: IrBlock = {
-    values,
-    body: body.build()
-  };
-  const { stateView, run } = await instantiateIrBlock(block, 2);
+  const fixture = completedTestFunction(2, (fn) => {
+    const state = cpuStateAccess.bind(fn.region);
+    const fault = flatMemoryResolution(
+      fn.values,
+      { start: fn.parameters[0]!, byteLength: fn.parameters[1]! },
+      "read"
+    ).fault.condition;
+
+    state.write(state.gprChannel(gprChannel("eax")), fault);
+  });
+  const { stateView, run } = await instantiateTestFunction(fixture);
   const cases = [
     [0, 1, 0],
     [guestMemoryMinimumByteLength - 4, 4, 0],
@@ -394,34 +378,28 @@ test("a dynamic memory check evaluates each semantic operand once", async () => 
   ] as const;
 
   for (const [start, length, expectedFault] of cases) {
-    strictEqual(run(start, length), irBlockCompleted);
+    strictEqual(run(start, length), testFunctionCompleted);
     strictEqual(readRegister(stateView, "eax"), expectedFault);
   }
 });
 
 test("nested dynamic memory checks compose through the value graph", async () => {
-  const values = new ValueTable();
-  const innerAddress = values.external(0);
-  const innerByteLength = values.external(1);
-  const outerByteLength = values.external(2);
-  const body = new RegionBuilder(values);
-  const state = cpuStateAccess.bind(body);
-  const innerFault = flatMemoryResolution(
-    values,
-    { start: innerAddress, byteLength: innerByteLength },
-    "read"
-  ).fault.condition;
-  const outerFault = flatMemoryResolution(
-    values,
-    { start: innerFault, byteLength: outerByteLength },
-    "read"
-  ).fault.condition;
-  state.write(state.gprChannel(gprChannel("eax")), outerFault);
-  const block: IrBlock = {
-    values,
-    body: body.build()
-  };
-  const { stateView, run } = await instantiateIrBlock(block, 3);
+  const fixture = completedTestFunction(3, (fn) => {
+    const state = cpuStateAccess.bind(fn.region);
+    const innerFault = flatMemoryResolution(
+      fn.values,
+      { start: fn.parameters[0]!, byteLength: fn.parameters[1]! },
+      "read"
+    ).fault.condition;
+    const outerFault = flatMemoryResolution(
+      fn.values,
+      { start: innerFault, byteLength: fn.parameters[2]! },
+      "read"
+    ).fault.condition;
+
+    state.write(state.gprChannel(gprChannel("eax")), outerFault);
+  });
+  const { stateView, run } = await instantiateTestFunction(fixture);
 
   // The inner fault becomes address 1 for the outer full-memory access.
   // Composing the two checks through the value graph must preserve that fact.

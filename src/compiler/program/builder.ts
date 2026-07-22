@@ -7,7 +7,6 @@ import {
   type BuildFunction,
   FunctionDefinition
 } from "./functions.js";
-import type { LegacyFunctionDeclaration } from "./legacy-body.js";
 import {
   FunctionImport,
   type FunctionImportDeclaration
@@ -17,25 +16,20 @@ import type { FunctionType } from "./function-type.js";
 import type {
   FunctionDeclaration,
   FunctionExport,
-  InternalGlobal,
-  LegacyFunction,
   Program,
-  Signature,
   TableImport
 } from "./model.js";
-import type { FunctionRef, SignatureRef } from "./refs.js";
+import type { FunctionRef } from "./refs.js";
 import type { ProgramResources } from "./resources.js";
 import {
-  validateProgram,
+  validateLinkedProgram,
   validateProgramDeclarations
 } from "./validate.js";
 
 export type { Program, ProgramFunction } from "./model.js";
 
 export class ProgramBuilder {
-  readonly #signatures = new Declarations<Signature>();
   readonly #tables = new Declarations<TableImport>();
-  readonly #globals = new Declarations<InternalGlobal>();
   readonly #functions = new Declarations<FunctionDeclaration>();
   readonly #exports = new Declarations<FunctionExport>();
   readonly #owner = {};
@@ -47,22 +41,6 @@ export class ProgramBuilder {
     this.#resources = resources;
   }
 
-  // Explicit signatures exist only for raw legacyFunction bodies.
-  signature(declaration: Signature): SignatureRef {
-    this.#assertOpen();
-
-    assert(
-      this.#signatures.find((signature) => signature.type === declaration.type) === undefined,
-      "function type already has a program signature"
-    );
-
-    this.#signatures.add({
-      ref: declaration.ref,
-      type: declaration.type
-    });
-    return declaration.ref;
-  }
-
   importTable(declaration: TableImport): void {
     this.#assertOpen();
 
@@ -70,20 +48,6 @@ export class ProgramBuilder {
       ...declaration,
       limits: copyTableLimits(declaration.limits)
     });
-  }
-
-  global(declaration: InternalGlobal): void {
-    this.#assertOpen();
-
-    this.#globals.add({ ...declaration });
-  }
-
-  legacyFunction(declaration: LegacyFunctionDeclaration): FunctionRef {
-    this.#assertOpen();
-    const fn = normalizeLegacyFunction(declaration);
-
-    this.#functions.add(fn);
-    return fn.ref;
   }
 
   importFunction(declaration: FunctionImportDeclaration): FunctionImport {
@@ -132,9 +96,7 @@ export class ProgramBuilder {
       const declarations = {
         owner: this.#owner,
         resources: this.#resources,
-        signatures: this.#signatures.all(),
         tables: this.#tables.all(),
-        globals: this.#globals.all(),
         functions: this.#functions.all(),
         exports: this.#exports.all()
       };
@@ -145,7 +107,7 @@ export class ProgramBuilder {
       const program = linkProgram(declarations);
 
       if (buildDefinition.validation) {
-        validateProgram(program);
+        validateLinkedProgram(program);
       }
       this.#finished = true;
       return program;
@@ -158,37 +120,6 @@ export class ProgramBuilder {
     assert(!this.#finished, "cannot modify a finished program");
     assert(!this.#closing, "cannot modify a program while it is closing");
   }
-}
-
-function normalizeLegacyFunction(declaration: LegacyFunctionDeclaration): LegacyFunction {
-  const effects = declaration.effects ?? "world";
-  const callTargets = unique(
-    declaration.calls.filter((call): call is FunctionDefinition =>
-      call instanceof FunctionDefinition
-    )
-  );
-
-  return {
-    kind: "legacy",
-    ref: declaration.ref,
-    signature: declaration.signature,
-    calls: unique(declaration.calls.map((call) =>
-      call instanceof FunctionDefinition ? call.ref : call
-    )),
-    callTargets,
-    indirectTypes: [],
-    resources: [...declaration.resources],
-    globals: [...declaration.globals],
-    tables: [...declaration.tables],
-    irBlocks: declaration.irBlocks.map((entry) => ({ ...entry })),
-    effects,
-    eliminable: false,
-    build: declaration.build
-  };
-}
-
-function unique<T>(values: readonly T[]): readonly T[] {
-  return [...new Set(values)];
 }
 
 function copyTableLimits(limits: WasmTableLimits): WasmTableLimits {

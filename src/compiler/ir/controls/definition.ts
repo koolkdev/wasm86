@@ -23,8 +23,6 @@ export type ControlEmitTarget = BodyCompletionContext & InvocationEmitTarget &
     withLoopBody: (locals: readonly number[], emit: () => void) => void;
     currentLoopLocals: () => readonly number[];
     emitLoopBranch: () => void;
-    emitExit: (result: ValueId) => void;
-    emitDispatch: (targetEip: ValueId) => void;
     sealCompletedStructuredControl: () => void;
   }>;
 

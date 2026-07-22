@@ -18,8 +18,6 @@ export type FunctionClosure = Readonly<{
 export type CloseFunctionsOptions = Readonly<{
   owner: object;
   roots: readonly FunctionDefinition[];
-  declaredFunctions: readonly FunctionDefinition[];
-  rootPlacements: readonly BodyPlacement[];
   declareFunction(definition: FunctionDefinition): void;
   retainFunctionImport(imported: FunctionImport): void;
 }>;
@@ -65,11 +63,8 @@ export function closeFunctions(options: CloseFunctionsOptions): FunctionClosure 
     }
   };
 
-  for (const definition of [...options.roots, ...options.declaredFunctions]) {
+  for (const definition of options.roots) {
     enqueue(definition);
-  }
-  for (const placement of options.rootPlacements) {
-    inspectInvocations(placement.analysis);
   }
   while (next < pending.length) {
     const definition = pending[next];

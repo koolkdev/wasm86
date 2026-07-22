@@ -2,7 +2,10 @@ import { deepStrictEqual, doesNotThrow, ok, strictEqual, throws } from "node:ass
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
+import {
+  createInstructionFunction,
+  testInstructionDispatch
+} from "#test/support/instruction-function.js";
 import { subFlagSource } from "#core/flags/lazy/sources.js";
 import { immBinding, memBinding, regBinding, staticMemSegment } from "#core/instruction/bindings.js";
 import { flagStateFields } from "#core/flags/layout.js";
@@ -11,6 +14,7 @@ import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
 import type { IfControl, LoopControl } from "#compiler/ir/controls/index.js";
 import type { BodyNode, Body, IrBlock } from "#ir/block.js";
+import type { IrFunction } from "#ir/function.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { movSemantic } from "#core/semantics/mov.js";
@@ -24,7 +28,7 @@ import {
   repMovsSemantic,
   repStosSemantic
 } from "#core/semantics/strings.js";
-import { validateIrBlock } from "#ir/validate.js";
+import { validateIrFunction } from "#ir/validate.js";
 import {
   stateWrite,
   stateWriteValue,
@@ -52,8 +56,8 @@ function diOperand(): ReturnType<typeof memBinding> {
   return memBinding({ base: "edi", index: undefined, scale: 1, disp: 0 }, staticMemSegment("es"));
 }
 
-function repMovsBlock(): IrBlock {
-  const builder = createLegacyInstructionBlock();
+function repMovsBlock(): IrFunction {
+  const builder = createInstructionFunction();
 
   builder.add(repMovsSemantic(32), [siOperand(), diOperand()], loc(repEip, repNextEip));
   return builder.finish();
@@ -85,7 +89,6 @@ function collectLoops(nodes: readonly BodyNode[]): LoopControl[] {
           ...collectLoops(node.defaultBody.nodes)
         ];
       case "loopContinue":
-      case "finish":
       case "return":
         return [];
     }
@@ -317,7 +320,7 @@ function loopEnterIf(block: IrBlock): IfControl {
 // ran arm consumes; the zero-trip arm must commit it or memory keeps the
 // stale pre-loop value.
 test("a dirty-at-entry carried channel commits its seed on the zero-trip arm", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(movSemantic(32), [regBinding("ecx"), regBinding("ebx")], loc(repEip - 2, repEip));
   builder.add(repMovsSemantic(32), [siOperand(), diOperand()], loc(repEip, repNextEip));
@@ -367,7 +370,7 @@ test("the root count write folds the ecx delta over the block's read", () => {
   const rootAfterEntry = block.body.nodes.slice(block.body.nodes.indexOf(enterIf) + 1);
   const exitEcxRead = readFor(block, rootAfterEntry, gprChannel("ecx"));
   const countRead = readFor(block, rootAfterEntry, instructionCountField);
-  const finish = block.body.nodes.at(-1);
+  const completion = block.body.nodes.at(-1);
 
   deepStrictEqual(stateTraffic(enteredAfterLoop), []);
   ok(exitEcxRead !== undefined, "the count settle re-reads ecx after the loop");
@@ -376,8 +379,16 @@ test("the root count write folds the ecx delta over the block's read", () => {
   const count = countRead.outputs[0];
 
   ok(exitEcx !== undefined && count !== undefined, "post-loop reads have outputs");
-  ok(finish?.kind === "finish" && finish.finish.kind === "dispatch", "fallthrough dispatches");
-  strictEqual(v.constValue(finish.finish.targetEip), repNextEip);
+  ok(
+    completion?.kind === "return" &&
+      completion.source.kind === "invocation" &&
+      completion.source.invocation.target === testInstructionDispatch,
+    "fallthrough dispatches"
+  );
+  const targetEip = completion.source.invocation.inputs[0]?.value;
+
+  ok(targetEip !== undefined, "dispatch has a target EIP");
+  strictEqual(v.constValue(targetEip), repNextEip);
 
   const ecxSeed = carriedCellFor(block, loop, gprChannel("ecx"))!.seed;
   const delta = v.binary(
@@ -399,7 +410,7 @@ test("the root count write folds the ecx delta over the block's read", () => {
 });
 
 test("instructions after the loop rebase the count from state", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(repMovsSemantic(32), [siOperand(), diOperand()], loc(repEip, repNextEip));
   builder.add(movSemantic(32), [regBinding("ebx"), immBinding(7)], loc(repNextEip, repNextEip + 5));
@@ -419,7 +430,7 @@ test("instructions after the loop rebase the count from state", () => {
 });
 
 test("rep lods carries its accumulator instead of writing it through each iteration", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(repLodsSemantic(8), [siOperand()], loc(repEip, repNextEip));
 
@@ -443,7 +454,7 @@ test("rep lods carries its accumulator instead of writing it through each iterat
 });
 
 test("repe cmps carries the lazy flag cells and updates them per unit", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(repeCmpsSemantic(8), [siOperand(), diOperand()], loc(repEip, repNextEip));
 
@@ -536,7 +547,7 @@ test("derived carried channels follow body write order across rep forms", () => 
   ];
 
   for (const entry of cases) {
-    const builder = createLegacyInstructionBlock();
+    const builder = createInstructionFunction();
 
     builder.add(entry.template, entry.bindings, loc(repEip, repNextEip));
 
@@ -547,7 +558,7 @@ test("derived carried channels follow body write order across rep forms", () => 
 });
 
 test("loop analysis preserves captured outer value identities", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     (s, v) => {
@@ -572,11 +583,11 @@ test("loop analysis preserves captured outer value identities", () => {
   const block = builder.finish();
 
   assertCarriedChannels(block, findLoop(block), [gprChannel("ebx")]);
-  doesNotThrow(() => validateIrBlock(block));
+  doesNotThrow(() => validateIrFunction(block));
 });
 
 test("independent loop analysis and final bodies can access an enclosing-arm cell", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   doesNotThrow(() => {
     builder.add(
@@ -597,12 +608,12 @@ test("independent loop analysis and final bodies can access an enclosing-arm cel
       loc(repEip, repNextEip)
     );
 
-    validateIrBlock(builder.finish());
+    validateIrFunction(builder.finish());
   });
 });
 
 test("loop analysis does not force its control shape onto final construction", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     (s, v) => {
@@ -648,11 +659,11 @@ test("loop analysis does not force its control shape onto final construction", (
 
   strictEqual(constantStructuredArm, undefined, "final loop does not replay discovery control");
   ok(finalNestedArm !== undefined, "selected final arm still builds its nested control");
-  doesNotThrow(() => validateIrBlock(block));
+  doesNotThrow(() => validateIrFunction(block));
 });
 
 test("loop analysis conservatively includes writes from an unknown scratch arm", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     (s, v) => {
@@ -680,11 +691,11 @@ test("loop analysis conservatively includes writes from an unknown scratch arm",
     1,
     "only the loop back edge remains in final construction"
   );
-  doesNotThrow(() => validateIrBlock(block));
+  doesNotThrow(() => validateIrFunction(block));
 });
 
 test("a loop body register write is derived as a carried channel", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     (s, _v) => {
@@ -703,7 +714,7 @@ test("a loop body register write is derived as a carried channel", () => {
 });
 
 test("a loop body status-flag source write derives the lazy flag carries", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     (s, _v) => {
@@ -733,7 +744,7 @@ test("a loop body status-flag source write derives the lazy flag carries", () =>
 });
 
 test("overlapping loop body register writes assert during carry derivation", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   throws(
     () =>
@@ -753,7 +764,7 @@ test("overlapping loop body register writes assert during carry derivation", () 
 });
 
 test("a loop body advancing only semantic vars carries nothing", () => {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(
     (s, v) => {

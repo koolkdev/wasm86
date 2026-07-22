@@ -129,14 +129,12 @@ test("canonical leaves span scoped views while occurrence leaves stay unique", (
   const nested = child.childScope();
   const constant = root.const(-7);
   const constant64 = root.const64(-7n);
-  const external = root.external(3);
   const parameter = root.parameter(2, "i64");
   const unreachable = root.unreachable("i64");
 
   for (const view of [root, child, nested]) {
     strictEqual(view.const(-7), constant);
     strictEqual(view.const64(-7n), constant64);
-    strictEqual(view.external(3), external);
     strictEqual(view.parameter(2, "i64"), parameter);
     strictEqual(view.unreachable("i64"), unreachable);
   }
@@ -214,7 +212,6 @@ test("the root view can inspect values allocated by descendants", () => {
     body: new WasmFunctionBodyEncoder(),
     emitUse: (value) => emitted.push(value),
     emitNodeOutput: () => {},
-    emitExternal: () => {},
     emitParameter: () => {},
     emitLoopInput: () => {}
   });
@@ -225,13 +222,13 @@ test("the root view can inspect values allocated by descendants", () => {
 test("forking a child preserves its arena and selected scoped cache", () => {
   const root = new ValueTable();
   const input = root.addNodeOutput();
-  const operand = root.external(0);
+  const operand = root.parameter(0, "i32");
   const rootOnly = root.binary("xor", input, operand);
   const selected = root.childScope();
   const selectedSum = selected.binary("add", input, operand);
   const sibling = root.childScope();
   const siblingOnly = sibling.binary("sub", input, operand);
-  const siblingCanonical = sibling.external(9);
+  const siblingCanonical = sibling.parameter(1, "i32");
   const parentSize = root.size();
   const fork = selected.fork();
 
@@ -249,9 +246,13 @@ test("forking a child preserves its arena and selected scoped cache", () => {
     siblingOnly,
     "a child fork does not inherit a sibling's scoped cache"
   );
-  strictEqual(fork.external(0), operand, "the canonical cache is retained");
   strictEqual(
-    fork.external(9),
+    fork.parameter(0, "i32"),
+    operand,
+    "the canonical cache is retained"
+  );
+  strictEqual(
+    fork.parameter(1, "i32"),
     siblingCanonical,
     "the fork retains canonical identities first created by a sibling"
   );
@@ -299,7 +300,7 @@ test("unreachable values re-emit but retain their semantic identity", () => {
 test("building the same expression twice yields the same node id", () => {
   const table = new ValueTable();
   const a = table.addNodeOutput();
-  const b = table.external(0);
+  const b = table.parameter(0, "i32");
   const add = table.binary("add", a, b);
 
   strictEqual(table.binary("add", a, b), add);
@@ -311,7 +312,7 @@ test("building the same expression twice yields the same node id", () => {
 test("multiply expressions intern and fold as i32 low products", () => {
   const table = new ValueTable();
   const a = table.addNodeOutput();
-  const b = table.external(0);
+  const b = table.parameter(0, "i32");
   const product = table.binary("mul", a, b);
 
   strictEqual(table.binary("mul", a, b), product);
@@ -334,7 +335,7 @@ test("signed right shift is a distinct binary operator", () => {
 test("each compound kind deduplicates on its full key", () => {
   const table = new ValueTable();
   const a = table.addNodeOutput();
-  const b = table.external(0);
+  const b = table.parameter(0, "i32");
 
   const extend = table.extend(8, a, true);
 
@@ -364,7 +365,7 @@ test("each compound kind deduplicates on its full key", () => {
 test("i64 values deduplicate on their typed operation keys", () => {
   const table = new ValueTable();
   const a = table.addNodeOutput();
-  const b = table.external(0);
+  const b = table.parameter(0, "i32");
   const extendedA = table.extend64(32, a, true);
   const extendedB = table.extend64(32, b, true);
   const zeroExtendedA = table.extend64(32, a, false);
@@ -518,7 +519,7 @@ test("compares fold constants and same-value predicates", () => {
 test("compare lowers narrow widths by predicate class", () => {
   const table = new ValueTable();
   const a = table.addNodeOutput();
-  const b = table.external(0);
+  const b = table.parameter(0, "i32");
 
   strictEqual(
     table.compare(16, "lt_s", a, b),
@@ -543,7 +544,7 @@ test("select folds constant conditions and equal arms", () => {
   const table = new ValueTable();
   const condition = table.addNodeOutput();
   const value = table.addNodeOutput();
-  const fallback = table.external(0);
+  const fallback = table.parameter(0, "i32");
 
   strictEqual(table.select(table.const(1), value, fallback), value);
   strictEqual(table.select(table.const(-1), value, fallback), value);
@@ -559,14 +560,6 @@ test("node outputs are distinct leaves, never deduped", () => {
   notStrictEqual(first, second);
   strictEqual(table.valueType(first), "i32");
   strictEqual(table.valueType(second), "i32");
-});
-
-test("external leaves deduplicate by external id", () => {
-  const table = new ValueTable();
-
-  strictEqual(table.external(3), table.external(3));
-  notStrictEqual(table.external(3), table.external(4));
-  strictEqual(table.valueType(table.external(3)), "i32");
 });
 
 test("compound nodes reject unknown children", () => {
@@ -628,9 +621,18 @@ test("truncate64 folds matching signed and unsigned extensions", () => {
 
 test("compare results fit a single bit either way", () => {
   const table = new ValueTable();
-  const compare = table.compare(32, "eq", table.addNodeOutput(), table.external(0));
+  const compare = table.compare(
+    32,
+    "eq",
+    table.addNodeOutput(),
+    table.parameter(0, "i32")
+  );
   const wide = table.extend64(32, table.addNodeOutput(), true);
-  const product = table.binary64("mul", wide, table.extend64(32, table.external(1), true));
+  const product = table.binary64(
+    "mul",
+    wide,
+    table.extend64(32, table.parameter(1, "i32"), true)
+  );
   const i64Compare = table.compare64("ne", wide, product);
 
   strictEqual(table.truncate(8, compare), compare);
@@ -752,7 +754,6 @@ test("value inputs preserve repeated uses exactly", () => {
     body: new WasmFunctionBodyEncoder(),
     emitUse: (input) => emitted.push(input),
     emitNodeOutput: () => {},
-    emitExternal: () => {},
     emitParameter: () => {},
     emitLoopInput: () => {}
   });
@@ -761,7 +762,7 @@ test("value inputs preserve repeated uses exactly", () => {
 
 test("emission visits stored inputs once in their declared order", () => {
   const table = new ValueTable();
-  const condition = table.external(0);
+  const condition = table.parameter(0, "i32");
   const whenTrue = table.addNodeOutput();
   const whenFalse = table.addNodeOutput();
   const selected = table.select(condition, whenTrue, whenFalse);
@@ -771,7 +772,6 @@ test("emission visits stored inputs once in their declared order", () => {
     body: new WasmFunctionBodyEncoder(),
     emitUse: (value) => emitted.push(value),
     emitNodeOutput: () => {},
-    emitExternal: () => {},
     emitParameter: () => {},
     emitLoopInput: () => {}
   });
@@ -781,7 +781,7 @@ test("emission visits stored inputs once in their declared order", () => {
 
 test("select joins arm bounds", () => {
   const table = new ValueTable();
-  const condition = table.external(0);
+  const condition = table.parameter(0, "i32");
   const whenTrue = table.addNodeOutput(fitsUnsigned(1));
   const whenFalse = table.addNodeOutput(fitsUnsigned(8));
   const selected = table.select(condition, whenTrue, whenFalse);
@@ -833,7 +833,7 @@ test("division trap detection uses i32 and i64 constants", () => {
 test("every scalar operator constructs and realizes its supported value types", () => {
   const table = new ValueTable();
   const a = table.addNodeOutput();
-  const b = table.external(0);
+  const b = table.parameter(0, "i32");
   const a64 = table.extend64(32, a, true);
   const b64 = table.extend64(32, b, true);
   const body = new WasmFunctionBodyEncoder();
@@ -841,7 +841,6 @@ test("every scalar operator constructs and realizes its supported value types", 
     body,
     emitUse: () => {},
     emitNodeOutput: () => {},
-    emitExternal: () => {},
     emitParameter: () => {},
     emitLoopInput: () => {}
   };

@@ -19,7 +19,7 @@ test("variant building combines constants before dynamic fields", () => {
     variantSet("build.variant", [mixed])
   ]);
   const values = new ValueTable();
-  const dynamic = values.external(0);
+  const dynamic = values.parameter(0, "i32");
   const result = buildVariant(values, layout, {
     variant: mixed,
     payload: [

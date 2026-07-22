@@ -15,7 +15,6 @@ import {
   Invocation
 } from "#compiler/ir/invocation.js";
 import {
-  finishControl,
   ifControl,
   loopContinueControl,
   loopControl,
@@ -87,9 +86,6 @@ function fixture() {
     body: loopBody
   });
   const loopContinue = loopContinueControl.create({ updates: [update] });
-  const finish = finishControl.create({
-    finish: { kind: "dispatch", targetEip: result }
-  });
   const returnFromFunction = returnControl.create({
     source: { kind: "values", values: [result] }
   });
@@ -116,7 +112,6 @@ function fixture() {
       selection,
       loop,
       loopContinue,
-      finish,
       returnFromFunction
     }
   };
@@ -152,10 +147,6 @@ test("control owners construct complete final nodes", () => {
   ]);
   strictEqual(controls.loop.body, bodies.loopBody);
   deepStrictEqual(controls.loopContinue.updates, [values.update]);
-  deepStrictEqual(controls.finish.finish, {
-    kind: "dispatch",
-    targetEip: values.result
-  });
   deepStrictEqual(controls.returnFromFunction.source, {
     kind: "values",
     values: [values.result]
@@ -192,7 +183,6 @@ test("direct control facts describe operands, bodies, outputs, and effects", () 
     controls.selection,
     controls.loop,
     controls.loopContinue,
-    controls.finish,
     controls.returnFromFunction
   ];
 
@@ -202,7 +192,6 @@ test("direct control facts describe operands, bodies, outputs, and effects", () 
     [values.selector],
     [values.seed],
     [values.update],
-    [values.result],
     [values.result]
   ]);
   deepStrictEqual(controls.branch.nestedBodies, [
@@ -238,7 +227,6 @@ test("direct control facts describe operands, bodies, outputs, and effects", () 
     [
       controls.returnInvocation,
       controls.loopContinue,
-      controls.finish,
       controls.returnFromFunction
     ].flatMap((control) => control.nestedBodies),
     []
@@ -249,16 +237,14 @@ test("direct control facts describe operands, bodies, outputs, and effects", () 
     [values.switchOutput],
     [],
     [],
-    [],
     []
   ]);
   deepStrictEqual(
     ordered.map((control) => control.nestedBodies.length !== 0),
-    [false, true, true, true, false, false, false]
+    [false, true, true, true, false, false]
   );
   deepStrictEqual(ordered.map((control) => control.directEffects), [
     target.effects,
-    { reads: [], writes: [] },
     { reads: [], writes: [] },
     { reads: [], writes: [] },
     { reads: [], writes: [] },
@@ -284,7 +270,6 @@ test("direct completion methods use nested body completion", () => {
     controls.selection,
     controls.loop,
     controls.loopContinue,
-    controls.finish,
     controls.returnFromFunction
   ];
 
@@ -293,7 +278,6 @@ test("direct completion methods use nested body completion", () => {
     true,
     true,
     false,
-    true,
     true,
     true
   ]);
@@ -423,7 +407,6 @@ test("direct body mapping follows each control's owned structure", () => {
   for (const leaf of [
     controls.returnInvocation,
     controls.loopContinue,
-    controls.finish,
     controls.returnFromFunction
   ]) {
     deepStrictEqual(leaf.mapBodies(replace).operands, leaf.operands);
@@ -435,7 +418,6 @@ test("a return sourced by an invocation directly emits Wasm return_call", () => 
   const emitted = emitRawControl(controls.returnInvocation, target);
 
   deepStrictEqual(emitted.uses, [values.argument]);
-  deepStrictEqual(emitted.functionIndices, [7]);
   deepStrictEqual(emitted.opcodes, [
     wasmOpcode.i32Const,
     wasmOpcode.returnCall,
@@ -492,35 +474,26 @@ test("an indirect invocation return emits arguments, selector, and return_call_i
   const encoded = body.finish();
 
   deepStrictEqual(uses, [argument, elementIndex]);
-  deepStrictEqual(encoded.references.typeIndices, [5]);
-  deepStrictEqual(encoded.references.tableIndices, [6]);
   strictEqual(encoded.bytes.includes(wasmOpcode.returnCallIndirect), true);
 });
 
-test("return and finish controls directly emit their terminal behavior", () => {
+test("return controls directly emit their terminal behavior", () => {
   const { values, target, controls } = fixture();
   const returned = emitRawControl(controls.returnFromFunction, target);
 
   deepStrictEqual(returned.uses, [values.result]);
-  deepStrictEqual(returned.functionIndices, []);
   deepStrictEqual(returned.opcodes, [
     wasmOpcode.i32Const,
     wasmOpcode.return,
     wasmOpcode.end
   ]);
-
-  const finished = emitRawControl(controls.finish, target);
-
-  deepStrictEqual(finished.uses, []);
-  strictEqual(finished.dispatched, values.result);
-  deepStrictEqual(finished.opcodes, [wasmOpcode.end]);
 });
 
 test("RegionBuilder emits an ordinary CallOperation and owner-defined controls", () => {
   const values = new ValueTable();
   const target = fixture().target;
   const argument = values.const(1);
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const builder = new RegionBuilder(values, undefined, ["i32"]);
   const [callOutput] = builder.call(target, [argument]);
 
@@ -537,9 +510,6 @@ test("RegionBuilder emits an ordinary CallOperation and owner-defined controls",
   );
   builder.loop([], () => {});
   builder.loopContinue([]);
-  const finish = { kind: "dispatch", targetEip: argument } as const;
-
-  builder.finish(finish);
   builder.return([argument]);
 
   const nodes = builder.build().nodes;
@@ -551,12 +521,10 @@ test("RegionBuilder emits an ordinary CallOperation and owner-defined controls",
     "switch",
     "loop",
     "loopContinue",
-    "finish",
     "return"
   ]);
   deepStrictEqual(nodes.map((node) => node.category), [
     "operation",
-    "control",
     "control",
     "control",
     "control",
@@ -578,18 +546,11 @@ function emitRawControl(
   expectedTarget: FunctionDefinition
 ): Readonly<{
   uses: readonly ValueId[];
-  functionIndices: readonly number[];
-  typeIndices: readonly number[];
-  tableIndices: readonly number[];
   opcodes: readonly number[];
-  dispatched: ValueId | undefined;
 }> {
   const body = new WasmFunctionBodyEncoder();
   const uses: ValueId[] = [];
-  let dispatched: ValueId | undefined;
-  const target = rawControlTarget(body, expectedTarget, (value) => {
-    dispatched = value;
-  });
+  const target = rawControlTarget(body, expectedTarget);
 
   control.emit(target, {
     emitUse(value) {
@@ -601,18 +562,13 @@ function emitRawControl(
 
   return {
     uses,
-    functionIndices: encoded.references.functionIndices,
-    typeIndices: encoded.references.typeIndices,
-    tableIndices: encoded.references.tableIndices,
-    opcodes: wasmBodyOpcodes(encoded.bytes),
-    dispatched
+    opcodes: wasmBodyOpcodes(encoded.bytes)
   };
 }
 
 function rawControlTarget(
   body: WasmFunctionBodyEncoder,
-  expectedFunction?: FunctionDefinition,
-  dispatch: (value: ValueId) => void = unsupported
+  expectedFunction?: FunctionDefinition
 ): ControlEmitTarget {
   return {
     body,
@@ -634,8 +590,6 @@ function rawControlTarget(
     withLoopBody: unsupported,
     currentLoopLocals: unsupported,
     emitLoopBranch: unsupported,
-    emitExit: unsupported,
-    emitDispatch: dispatch,
     sealCompletedStructuredControl: unsupported
   };
 }

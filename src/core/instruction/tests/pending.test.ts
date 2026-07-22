@@ -143,7 +143,7 @@ test("sibling narrow GPR reads normalize independently", () => {
   const root = new RegionBuilder(values);
   const stateAccess = new StateAccess(cpuState);
   const gpr = new GprState(stateAccess);
-  const input = values.external(0);
+  const input = values.parameter(0, "i32");
 
   gpr.writeChannel(stateAccess.bind(root), gprChannel("al"), input);
 
@@ -183,7 +183,7 @@ test("sibling segment-selector reads normalize independently", () => {
   const stateAccess = new StateAccess(cpuState);
   const fields = new StateFieldTracker(stateAccess);
   const segments = new SegmentState(fields);
-  const selector = values.external(0);
+  const selector = values.parameter(0, "i32");
 
   fields.write(segmentSelectorChannel("fs"), selector);
 
@@ -644,7 +644,7 @@ test("a dynamic read flushes dirty GPR pendings and leaves them clean", () => {
   const { values, nodes, pending } = createHarness();
   const word = values.const(0x77);
   const flag = values.const(1);
-  const index = values.external(0);
+  const index = values.parameter(0, "i32");
 
   pending.write(gprChannel("eax"), word);
   pending.write(flagStateFields.concrete.ID, flag);
@@ -674,7 +674,7 @@ test("a dynamic write stores immediately and invalidates every GPR pending", () 
   const flag = values.const(1);
   const eip = values.const(0x1000);
   const stored = values.const(0x222);
-  const index = values.external(0);
+  const index = values.parameter(0, "i32");
 
   pending.write(gprChannel("eax"), word);
   pending.write(flagStateFields.concrete.DF, flag);
@@ -697,7 +697,7 @@ test("a dynamic write stores immediately and invalidates every GPR pending", () 
 
 test("a dynamic write invalidates cached GPR read leaves but not flag leaves", () => {
   const { values, pending } = createHarness();
-  const index = values.external(0);
+  const index = values.parameter(0, "i32");
   const eaxRead = pending.read(gprChannel("eax"));
   const zfRead = pending.read(flagStateFields.concrete.ID);
 
@@ -711,7 +711,7 @@ test("a dynamic write makes the fault boundary unrestorable", () => {
   const { values, pending } = createHarness();
 
   pending.beginInstruction();
-  pending.writeDynamicGpr(values.external(0), 32, values.const(1));
+  pending.writeDynamicGpr(values.parameter(0, "i32"), 32, values.const(1));
 
   throws(() => pending.flushesForPath("fault"), /unrestorable/);
 
@@ -725,7 +725,7 @@ test("a dynamic read flushing a channel first written this instruction makes the
 
   pending.beginInstruction();
   pending.write(gprChannel("ebx"), values.const(0x111));
-  pending.readDynamicGpr(values.external(0), 32);
+  pending.readDynamicGpr(values.parameter(0, "i32"), 32);
 
   throws(() => pending.flushesForPath("fault"), /unrestorable/);
 });
@@ -736,7 +736,7 @@ test("a dynamic read flushing a boundary pending keeps the fault boundary restor
 
   pending.write(gprChannel("ebx"), before);
   pending.beginInstruction();
-  pending.readDynamicGpr(values.external(0), 32);
+  pending.readDynamicGpr(values.parameter(0, "i32"), 32);
 
   deepStrictEqual(faultFlushEntries(pending), [
     edgeEntry(values, gprChannel("ebx"), before)
@@ -751,7 +751,7 @@ test("a destructive flush served by a cached read keeps the fault boundary resto
   const before = pending.read(gprChannel("esp"));
 
   pending.write(gprChannel("esp"), values.const(0x44));
-  pending.readDynamicGpr(values.external(0), 32);
+  pending.readDynamicGpr(values.parameter(0, "i32"), 32);
 
   // The cached read is the pre-instruction value — no store hit esp before
   // its first flush — so it joins the boundary instead of latching the
@@ -780,7 +780,7 @@ test("a signed cached read serves a destructive flush of its channel", () => {
 
 test("narrow dynamic reads carry their byte length, bounds, and sign marker", () => {
   const { values, nodes, pending } = createHarness();
-  const index = values.external(0);
+  const index = values.parameter(0, "i32");
   const unsigned = pending.readDynamicGpr(index, 8);
   const signed = pending.readDynamicGpr(index, 8, { signed: true });
 
@@ -796,7 +796,7 @@ test("narrow dynamic reads carry their byte length, bounds, and sign marker", ()
 
 test("a signed dynamic word read is the plain read", () => {
   const { values, nodes, pending } = createHarness();
-  const index = values.external(0);
+  const index = values.parameter(0, "i32");
   const read = pending.readDynamicGpr(index, 32, { signed: true });
 
   deepStrictEqual(nodes, [dynamicGprRead(values, read, index, 32)]);
@@ -806,7 +806,7 @@ test("a narrow dynamic write barriers word pendings all the same", () => {
   const { values, nodes, pending } = createHarness();
   const word = values.const(0x12345678);
   const byte = values.const(0x9a);
-  const index = values.external(0);
+  const index = values.parameter(0, "i32");
 
   pending.write(gprChannel("eax"), word);
   pending.writeDynamicGpr(index, 8, byte);

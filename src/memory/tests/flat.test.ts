@@ -69,7 +69,7 @@ test("flat byte reads validate their Memory binding", () => {
 
 test("a static-length flat access is one unsigned limit compare", () => {
   const values = new ValueTable();
-  const start = values.external(0);
+  const start = values.parameter(0, "i32");
   const byteLength = values.const(4);
   const range = { start, byteLength };
   const { access, fault } = flatMemoryResolution(values, range, "write");
@@ -92,8 +92,8 @@ test("a static-length flat access is one unsigned limit compare", () => {
 
 test("a dynamic-length flat access rejects zero with the complete nonwrapping predicate", () => {
   const values = new ValueTable();
-  const start = values.external(0);
-  const byteLength = values.external(1);
+  const start = values.parameter(0, "i32");
+  const byteLength = values.parameter(1, "i32");
   const { access, fault } = flatMemoryResolution(
     values,
     { start, byteLength },
@@ -177,7 +177,7 @@ test("flat operands derive address normalization and range facts together", () =
   );
   const { access: dynamic } = flatMemoryResolution(
     values,
-    { start: values.external(0), byteLength: values.const(8) },
+    { start: values.parameter(0, "i32"), byteLength: values.const(8) },
     "write"
   );
   const byteOffset = values.const(4);
@@ -225,7 +225,7 @@ test("flat operands derive address normalization and range facts together", () =
   strictEqual(slice.effect.range.slice?.byteOffset, 4);
   strictEqual(slice.effect.range.slice?.byteLength, 4);
 
-  const dynamicOffset = values.external(1);
+  const dynamicOffset = values.parameter(1, "i32");
   const whole = flatMemoryOperand(
     guestMemoryResource,
     values,

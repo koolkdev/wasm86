@@ -3,16 +3,13 @@ import { test } from "node:test";
 
 import { ifControl } from "#compiler/ir/controls/index.js";
 import { resourceRead } from "#compiler/ir/operations/resource.js";
-import { RegionBuilder } from "#ir/region-builder.js";
-import type { IrBlock } from "#ir/block.js";
-import { validateIrBlock } from "#ir/validate.js";
+import { FunctionBuilder } from "#ir/function.js";
+import { validateIrFunction } from "#ir/validate.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
-import {
-  compilerTestResourceEffect,
-  compilerTestValues
-} from "#ir/tests/storage-op-helpers.js";
+import { functionType } from "#compiler/program/function-type.js";
+import { compilerTestResourceEffect } from "#ir/tests/storage-op-helpers.js";
 
 function readArgs(
   values: ValueTable,
@@ -32,9 +29,12 @@ function readArgs(
 }
 
 test("ifValue joins its arm results into one output", () => {
-  const values = compilerTestValues();
-  const body = new RegionBuilder(values);
-  const condition = values.external(0);
+  const fn = new FunctionBuilder(functionType(["i32"], []));
+  const values = fn.values;
+  const body = fn.region;
+  const [condition] = fn.parameters;
+
+  ok(condition !== undefined);
   let thenResult!: ValueId;
   let elseResult!: ValueId;
   const output = body.ifValue(
@@ -46,7 +46,8 @@ test("ifValue joins its arm results into one output", () => {
     )),
     { hint: "unlikely" }
   );
-  const block = { values, body: body.build() };
+  fn.return([]);
+  const block = fn.finish();
   const control = block.body.nodes[0];
 
   ok(control?.kind === "if" && control.output !== undefined && control.elseBody !== undefined);
@@ -61,54 +62,58 @@ test("ifValue joins its arm results into one output", () => {
     unsignedBits: 32,
     signedBits: signExtended(16).signedBits
   });
-  doesNotThrow(() => validateIrBlock(block, { allowImplicitEntryFallthrough: true }));
+  doesNotThrow(() => validateIrFunction(block));
 });
 
 test("ifValue ignores an unreachable arm when joining bounds", () => {
-  const values = compilerTestValues();
-  const body = new RegionBuilder(values);
-  const output = body.ifValue(
-    values.external(0),
+  const fn = new FunctionBuilder(functionType(["i32"], []));
+  const [condition] = fn.parameters;
+
+  ok(condition !== undefined);
+  const output = fn.region.ifValue(
+    condition,
     (then) => then.values.const(0),
     (otherwise) => otherwise.values.unreachable()
   );
+  fn.return([]);
+  const built = fn.finish();
 
-  strictEqual(values.widthBounds(output).unsignedBits, 1);
-  strictEqual(values.widthBounds(output).signedBits, 1);
+  strictEqual(built.values.widthBounds(output).unsignedBits, 1);
+  strictEqual(built.values.widthBounds(output).signedBits, 1);
+  doesNotThrow(() => validateIrFunction(built));
 });
 
 test("validation rejects a control output narrower than an arm result", () => {
-  const values = compilerTestValues();
+  const fn = new FunctionBuilder(functionType([], []));
+  const values = fn.values;
   const condition = values.const(1);
-  const armResult = values.addNodeOutput();
   const fallback = values.const(0);
+  const armResult = values.addNodeOutput();
   const output = values.addNodeOutput(fitsUnsigned(8));
-  const block: IrBlock = {
-    values,
-    body: {
-      nodes: [ifControl.create({
-        condition,
-        output,
-        thenBody: {
-          nodes: [resourceRead.create(
-            readArgs(values, 0, 32),
-            () => armResult
-          )],
-          result: armResult
-        },
-        elseBody: { nodes: [], result: fallback }
-      })]
-    }
-  };
+  fn.region.push(ifControl.create({
+    condition,
+    output,
+    thenBody: {
+      nodes: [resourceRead.create(
+        readArgs(values, 0, 32),
+        () => armResult
+      )],
+      result: armResult
+    },
+    elseBody: { nodes: [], result: fallback }
+  }));
+  fn.return([]);
+  const block = fn.finish();
 
   throws(
-    () => validateIrBlock(block, { allowImplicitEntryFallthrough: true }),
+    () => validateIrFunction(block),
     /result bounds exceed its owner output bounds/
   );
 });
 
 test("a value-producing if requires an else body and arm results", () => {
-  const missingElseValues = new ValueTable();
+  const missingElseFn = new FunctionBuilder(functionType([], []));
+  const missingElseValues = missingElseFn.values;
   const condition = missingElseValues.const(1);
   const result = missingElseValues.const(7);
   const output = missingElseValues.addNodeOutput();
@@ -118,15 +123,16 @@ test("a value-producing if requires an else body and arm results", () => {
     thenBody: { nodes: [], result }
   });
 
+  missingElseFn.region.push(missingElse);
+  missingElseFn.return([]);
+
   throws(
-    () => validateIrBlock({
-      values: missingElseValues,
-      body: { nodes: [missingElse] }
-    }, { allowImplicitEntryFallthrough: true }),
+    () => validateIrFunction(missingElseFn.finish()),
     /value-producing if is missing its else body/
   );
 
-  const missingResultValues = new ValueTable();
+  const missingResultFn = new FunctionBuilder(functionType([], []));
+  const missingResultValues = missingResultFn.values;
   const missingResultCondition = missingResultValues.const(1);
   const missingResultOutput = missingResultValues.addNodeOutput();
   const missingResult = ifControl.create({
@@ -136,11 +142,11 @@ test("a value-producing if requires an else body and arm results", () => {
     elseBody: { nodes: [], result: missingResultCondition }
   });
 
+  missingResultFn.region.push(missingResult);
+  missingResultFn.return([]);
+
   throws(
-    () => validateIrBlock({
-      values: missingResultValues,
-      body: { nodes: [missingResult] }
-    }, { allowImplicitEntryFallthrough: true }),
+    () => validateIrFunction(missingResultFn.finish()),
     /thenBody must carry a result/
   );
 });

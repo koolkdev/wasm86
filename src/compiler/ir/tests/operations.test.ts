@@ -2,7 +2,10 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
+import {
+  wasmBodyMemoryAccesses,
+  wasmBodyOpcodes
+} from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   IndirectCallTarget,
@@ -255,7 +258,6 @@ test("ordinary calls are operations with allocator-owned outputs and direct emis
   deepStrictEqual(uses, [argument]);
   const encoded = body.finish();
 
-  deepStrictEqual(encoded.references.functionIndices, [7]);
   deepStrictEqual(wasmBodyOpcodes(encoded.bytes), [
     wasmOpcode.i32Const,
     wasmOpcode.call,
@@ -382,8 +384,6 @@ test("indirect invocations own their selector, effects, and emission", () => {
   deepStrictEqual(uses, [argument, elementIndex]);
   const encoded = body.finish();
 
-  deepStrictEqual(encoded.references.typeIndices, [8]);
-  deepStrictEqual(encoded.references.tableIndices, [9]);
   strictEqual(encoded.bytes.includes(wasmOpcode.callIndirect), true);
   throws(
     () => Invocation.create({
@@ -442,7 +442,10 @@ test("resource and cell emission call their definition-specific target services"
   cellWrite.create({ cell, value, initialization: "update" }).emit(target, values);
 
   deepStrictEqual(uses, [address, address, value, value]);
-  deepStrictEqual(body.finish().references.memoryIndices, [3]);
+  const memoryIndices = wasmBodyMemoryAccesses(body.finish().bytes)
+    .map((access) => access.memoryIndex);
+
+  deepStrictEqual([...new Set(memoryIndices)], [3]);
 });
 
 function operationTarget(

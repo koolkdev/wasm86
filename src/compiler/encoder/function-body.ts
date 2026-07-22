@@ -15,37 +15,25 @@ export type EncodedBranchHint = Readonly<{
   value: WasmBranchHint;
 }>;
 
-export type WasmFunctionReferences = Readonly<{
-  functionIndices: readonly number[];
-  typeIndices: readonly number[];
-  globalIndices: readonly number[];
-  tableIndices: readonly number[];
-  memoryIndices: readonly number[];
-}>;
-
 declare const encodedBodyBrand: unique symbol;
 
 export type EncodedWasmFunctionBody = Readonly<{
   [encodedBodyBrand]: true;
   bytes: Uint8Array<ArrayBuffer>;
   branchHints: readonly EncodedBranchHint[];
-  references: WasmFunctionReferences;
 }>;
 
 class EncodedFunctionBody implements EncodedWasmFunctionBody {
   declare readonly [encodedBodyBrand]: true;
   readonly #bytes: Uint8Array<ArrayBuffer>;
   readonly #branchHints: readonly EncodedBranchHint[];
-  readonly #references: WasmFunctionReferences;
 
   constructor(
     bytes: Uint8Array<ArrayBuffer>,
-    branchHints: readonly EncodedBranchHint[],
-    references: WasmFunctionReferences
+    branchHints: readonly EncodedBranchHint[]
   ) {
     this.#bytes = bytes.slice();
     this.#branchHints = branchHints.map((hint) => ({ ...hint }));
-    this.#references = copyReferences(references);
   }
 
   get bytes(): Uint8Array<ArrayBuffer> {
@@ -54,10 +42,6 @@ class EncodedFunctionBody implements EncodedWasmFunctionBody {
 
   get branchHints(): readonly EncodedBranchHint[] {
     return this.#branchHints.map((hint) => ({ ...hint }));
-  }
-
-  get references(): WasmFunctionReferences {
-    return copyReferences(this.#references);
   }
 }
 
@@ -70,11 +54,6 @@ export class WasmFunctionBodyEncoder {
   readonly #instructions = new ByteSink();
   readonly #locals: WasmValueType[] = [];
   readonly #branchHints: InstructionBranchHint[] = [];
-  readonly #functionIndices = new Set<number>();
-  readonly #typeIndices = new Set<number>();
-  readonly #globalIndices = new Set<number>();
-  readonly #tableIndices = new Set<number>();
-  readonly #memoryIndices = new Set<number>();
   readonly #paramCount: number;
   #finished = false;
 
@@ -115,14 +94,12 @@ export class WasmFunctionBodyEncoder {
   globalGet(index: number): this {
     this.#writeInstruction(wasmOpcode.globalGet);
     this.#instructions.writeU32(index);
-    this.#globalIndices.add(index);
     return this;
   }
 
   globalSet(index: number): this {
     this.#writeInstruction(wasmOpcode.globalSet);
     this.#instructions.writeU32(index);
-    this.#globalIndices.add(index);
     return this;
   }
 
@@ -215,7 +192,6 @@ export class WasmFunctionBodyEncoder {
   callFunction(functionIndex: number): this {
     this.#writeInstruction(wasmOpcode.call);
     this.#instructions.writeU32(functionIndex);
-    this.#functionIndices.add(functionIndex);
     return this;
   }
 
@@ -223,15 +199,12 @@ export class WasmFunctionBodyEncoder {
     this.#writeInstruction(wasmOpcode.callIndirect);
     this.#instructions.writeU32(typeIndex);
     this.#instructions.writeU32(tableIndex);
-    this.#typeIndices.add(typeIndex);
-    this.#tableIndices.add(tableIndex);
     return this;
   }
 
   returnCallFunction(functionIndex: number): this {
     this.#writeInstruction(wasmOpcode.returnCall);
     this.#instructions.writeU32(functionIndex);
-    this.#functionIndices.add(functionIndex);
     return this;
   }
 
@@ -239,8 +212,6 @@ export class WasmFunctionBodyEncoder {
     this.#writeInstruction(wasmOpcode.returnCallIndirect);
     this.#instructions.writeU32(typeIndex);
     this.#instructions.writeU32(tableIndex);
-    this.#typeIndices.add(typeIndex);
-    this.#tableIndices.add(tableIndex);
     return this;
   }
 
@@ -454,7 +425,6 @@ export class WasmFunctionBodyEncoder {
   memorySize(memoryIndex: number): this {
     this.#writeInstruction(wasmOpcode.memorySize);
     this.#instructions.writeU32(memoryIndex);
-    this.#memoryIndices.add(memoryIndex);
     return this;
   }
 
@@ -637,21 +607,13 @@ export class WasmFunctionBodyEncoder {
       this.#branchHints.map((hint) => ({
         offset: locals.byteLength + hint.instructionOffset,
         value: hint.value
-      })),
-      {
-        functionIndices: [...this.#functionIndices],
-        typeIndices: [...this.#typeIndices],
-        globalIndices: [...this.#globalIndices],
-        tableIndices: [...this.#tableIndices],
-        memoryIndices: [...this.#memoryIndices]
-      }
+      }))
     );
   }
 
   #writeMemoryInstruction(opcode: number, immediate: WasmMemoryImmediate): void {
     this.#writeInstruction(opcode);
     this.#instructions.writeBytes(encodeMemoryImmediate(immediate));
-    this.#memoryIndices.add(immediate.memoryIndex);
   }
 
   #writeInstruction(opcode: number): void {
@@ -701,13 +663,3 @@ type LocalGroup = Readonly<{
   type: WasmValueType;
   count: number;
 }>;
-
-function copyReferences(references: WasmFunctionReferences): WasmFunctionReferences {
-  return {
-    functionIndices: [...references.functionIndices],
-    typeIndices: [...references.typeIndices],
-    globalIndices: [...references.globalIndices],
-    tableIndices: [...references.tableIndices],
-    memoryIndices: [...references.memoryIndices]
-  };
-}

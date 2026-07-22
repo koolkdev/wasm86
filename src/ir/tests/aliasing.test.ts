@@ -20,7 +20,6 @@ import { functionType } from "#compiler/program/function-type.js";
 import { functionRef } from "#compiler/program/refs.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import {
-  finishControl,
   ifControl,
   returnControl
 } from "#compiler/ir/controls/index.js";
@@ -91,7 +90,7 @@ test("effects derive from generic operations and nested control", () => {
   });
 });
 
-test("control flow and finishes touch no data directly", () => {
+test("control flow and value returns touch no data directly", () => {
   const values = new ValueTable();
 
   deepStrictEqual(
@@ -103,14 +102,8 @@ test("control flow and finishes touch no data directly", () => {
     { reads: [], writes: [] }
   );
   deepStrictEqual(
-    effectsOf(finishControl.create({
-      finish: { kind: "exit", result: values.const64(0n) }
-    })),
-    { reads: [], writes: [] }
-  );
-  deepStrictEqual(
-    effectsOf(finishControl.create({
-      finish: { kind: "dispatch", targetEip: valueId(0) }
+    effectsOf(returnControl.create({
+      source: { kind: "values", values: [values.const64(0n)] }
     })),
     { reads: [], writes: [] }
   );

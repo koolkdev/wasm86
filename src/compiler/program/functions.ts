@@ -96,8 +96,4 @@ export class FunctionFamily<TKey> {
     this.#members.set(key, definition);
     return definition;
   }
-
-  members(keys: Iterable<TKey>): readonly FunctionDefinition[] {
-    return [...keys].map((key) => this.get(key));
-  }
 }

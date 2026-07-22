@@ -393,8 +393,8 @@ test("sibling status sources and direct conditions construct independently", () 
     cpuStatusFlagResolvers,
     instructionCountField
   );
-  const left = values.external(0);
-  const right = values.external(1);
+  const left = values.parameter(0, "i32");
+  const right = values.parameter(1, "i32");
   const build = (selected: RegionBuilder) => state.enterScope(() => {
     const access = state.bind(selected);
     const context = { region: selected, access };

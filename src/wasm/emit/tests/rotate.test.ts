@@ -2,7 +2,7 @@ import { deepStrictEqual, ok as assertOk, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
+import { createInstructionFunction } from "./instruction-function.js";
 import { immBinding, regBinding, type OperandBinding } from "#core/instruction/bindings.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
@@ -15,7 +15,7 @@ import {
 import { decodeBytes, ok as decoded } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import type { RegName } from "#core/types.js";
-import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import { testFunctionCompleted, instantiateTestFunction } from "./harness.js";
 
 const preservedFlags = { PF: 1, AF: 1, ZF: 1, SF: 1 } as const;
 const cfOfClear = { ...preservedFlags, CF: 0, OF: 0 } as const;
@@ -26,13 +26,13 @@ function readRegister(view: DataView, name: RegName): number {
 }
 
 function assertCompleted(exit: bigint): void {
-  strictEqual(exit, irBlockCompleted);
+  strictEqual(exit, testFunctionCompleted);
 }
 
 test("decoded ROL uses CL low byte and preserves non-rotate flags", async () => {
   const instruction = decoded(decodeBytes([0xd3, 0xc3]));
   const block = blockOf(instruction);
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, {
     ebx: 0x1234_5678,
@@ -54,7 +54,7 @@ test("decoded ROL uses CL low byte and preserves non-rotate flags", async () => 
 test("decoded ROR word keeps high destination bits untouched", async () => {
   const instruction = decoded(decodeBytes([0x66, 0xd1, 0xc8]));
   const block = blockOf(instruction);
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, {
     eax: 0xaaaa_0001,
@@ -75,7 +75,7 @@ test("decoded ROR word keeps high destination bits untouched", async () => {
 test("decoded RCL byte rotates through old carry", async () => {
   const instruction = decoded(decodeBytes([0xd0, 0xd3]));
   const block = blockOf(instruction);
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, {
     ebx: 0xaaaa_0000,
@@ -96,7 +96,7 @@ test("decoded RCL byte rotates through old carry", async () => {
 test("decoded RCR dword rotates through old carry", async () => {
   const instruction = decoded(decodeBytes([0xd1, 0xd8]));
   const block = blockOf(instruction);
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, {
     eax: 0,
@@ -115,7 +115,7 @@ test("decoded RCR dword rotates through old carry", async () => {
 });
 
 function blockOf(instruction: IsaDecodedInstruction) {
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));
   return builder.finish();

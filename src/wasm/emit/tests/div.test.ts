@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
+import { createInstructionFunction } from "./instruction-function.js";
 import {
   memBinding,
   regBinding,
@@ -13,7 +13,6 @@ import {
 import { defaultSegmentForBase } from "#core/segments.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
-import type { IrBlock } from "#ir/block.js";
 import { decodeBytes, ok as decoded, startAddress } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
 import type { MemOperand, RegName } from "#core/types.js";
@@ -29,7 +28,7 @@ import { wasmOpcode } from "#compiler/encoder/types.js";
 import { decodeExit } from "#cpu/exit.js";
 import { divideErrorStop, readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
-import { irBlockCompleted, irBlockBody, instantiateIrBlock } from "./harness.js";
+import { testFunctionCompleted, testFunctionBody, instantiateTestFunction } from "./harness.js";
 
 const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const;
 const guestByteLength = 0x10000;
@@ -41,12 +40,12 @@ function readRegister(view: DataView, name: RegName): number {
 test("decoded DIV r/m32 lowers through unsigned i64 division and writes EDX:EAX", async () => {
   const instruction = decoded(decodeBytes([0xf7, 0xf3]));
   const block = blockOf([instruction]);
-  const body = irBlockBody(block).bytes;
+  const body = testFunctionBody(block);
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64DivU), true);
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64RemU), true);
 
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, {
     eax: 0,
@@ -57,7 +56,7 @@ test("decoded DIV r/m32 lowers through unsigned i64 division and writes EDX:EAX"
     ...allFlagsSet
   });
 
-  strictEqual(run(), irBlockCompleted);
+  strictEqual(run(), testFunctionCompleted);
   strictEqual(readRegister(stateView, "eax"), 0x8000_0000);
   strictEqual(readRegister(stateView, "edx"), 0);
   strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
@@ -69,14 +68,14 @@ test("decoded DIV r/m32 lowers through unsigned i64 division and writes EDX:EAX"
 test("decoded IDIV r/m32 lowers through signed i64 division and keeps remainder sign", async () => {
   const instruction = decoded(decodeBytes([0xf7, 0xfb]));
   const block = blockOf([instruction]);
-  const body = irBlockBody(block).bytes;
+  const body = testFunctionBody(block);
 
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64DivS), true);
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64RemS), true);
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64Eq), true);
   strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64Ne), true);
 
-  const { stateView, run } = await instantiateIrBlock(block);
+  const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, {
     eax: 0xffff_fff9,
@@ -86,7 +85,7 @@ test("decoded IDIV r/m32 lowers through signed i64 division and keeps remainder 
     ...allFlagsSet
   });
 
-  strictEqual(run(), irBlockCompleted);
+  strictEqual(run(), testFunctionCompleted);
   strictEqual(readRegister(stateView, "eax"), 0xffff_fffd);
   strictEqual(readRegister(stateView, "edx"), 0xffff_ffff);
   strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
@@ -95,7 +94,7 @@ test("decoded IDIV r/m32 lowers through signed i64 division and keeps remainder 
 
 test("decoded IDIV r/m8 rounds an inexact boundary quotient toward zero", async () => {
   const instruction = decoded(decodeBytes([0xf6, 0xfb]));
-  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+  const { stateView, run } = await instantiateTestFunction(blockOf([instruction]));
 
   writeWasmCpuStateSnapshot(stateView, {
     eax: 0xaaaa_04fb,
@@ -104,7 +103,7 @@ test("decoded IDIV r/m8 rounds an inexact boundary quotient toward zero", async 
     ...allFlagsSet
   });
 
-  strictEqual(run(), irBlockCompleted);
+  strictEqual(run(), testFunctionCompleted);
   strictEqual(readRegister(stateView, "eax"), 0xaaaa_057f);
   strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
   deepStrictEqual(wasmCpuStatusFlagsOf(readWasmCpuStateSnapshot(stateView)), allFlagsSet);
@@ -112,7 +111,7 @@ test("decoded IDIV r/m8 rounds an inexact boundary quotient toward zero", async 
 
 test("decoded IDIV r/m32 fills the widest fitting quotient without a divide error", async () => {
   const instruction = decoded(decodeBytes([0xf7, 0xfb]));
-  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+  const { stateView, run } = await instantiateTestFunction(blockOf([instruction]));
 
   writeWasmCpuStateSnapshot(stateView, {
     eax: 0xffff_ffff,
@@ -122,7 +121,7 @@ test("decoded IDIV r/m32 fills the widest fitting quotient without a divide erro
     ...allFlagsSet
   });
 
-  strictEqual(run(), irBlockCompleted);
+  strictEqual(run(), testFunctionCompleted);
   strictEqual(readRegister(stateView, "eax"), 0x7fff_ffff);
   strictEqual(readRegister(stateView, "edx"), 1);
   strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), instruction.nextEip);
@@ -140,7 +139,7 @@ test("DIV divide error leaves block state atomic", async () => {
     DF: 1,
     ...allFlagsSet
   });
-  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+  const { stateView, run } = await instantiateTestFunction(blockOf([instruction]));
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
@@ -158,7 +157,7 @@ test("DIV quotient overflow exits before quotient, remainder, or flag writes", a
     instructionCount: 7,
     ...allFlagsSet
   });
-  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+  const { stateView, run } = await instantiateTestFunction(blockOf([instruction]));
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
@@ -176,7 +175,7 @@ test("IDIV signed quotient overflow exits before wasm signed division", async ()
     instructionCount: 7,
     ...allFlagsSet
   });
-  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+  const { stateView, run } = await instantiateTestFunction(blockOf([instruction]));
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
@@ -194,7 +193,7 @@ test("IDIV r/m16 INT32_MIN over -1 exits with divide error instead of a wasm tra
     instructionCount: 7,
     ...allFlagsSet
   });
-  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+  const { stateView, run } = await instantiateTestFunction(blockOf([instruction]));
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
@@ -212,7 +211,7 @@ test("IDIV r/m32 quotient overflow exits after the wasm division ran", async () 
     instructionCount: 7,
     ...allFlagsSet
   });
-  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+  const { stateView, run } = await instantiateTestFunction(blockOf([instruction]));
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
@@ -230,7 +229,7 @@ test("DIV memory source fault takes priority over divide error", async () => {
     instructionCount: 7,
     ...allFlagsSet
   });
-  const { stateView, run } = await instantiateIrBlock(blockOf([instruction]));
+  const { stateView, run } = await instantiateTestFunction(blockOf([instruction]));
 
   writeWasmCpuStateSnapshot(stateView, initialState);
 
@@ -238,8 +237,8 @@ test("DIV memory source fault takes priority over divide error", async () => {
   deepStrictEqual(readWasmCpuStateSnapshot(stateView), initialState);
 });
 
-function blockOf(instructions: readonly IsaDecodedInstruction[]): IrBlock {
-  const builder = createLegacyInstructionBlock();
+function blockOf(instructions: readonly IsaDecodedInstruction[]) {
+  const builder = createInstructionFunction();
 
   for (const instruction of instructions) {
     builder.add(instruction.spec.semantics, bindingsFor(instruction), loc(instruction.address, instruction.nextEip));

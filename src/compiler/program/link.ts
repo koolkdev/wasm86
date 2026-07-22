@@ -5,61 +5,43 @@ import type {
   DirectFunctionTarget,
   Invocation
 } from "#compiler/ir/invocation.js";
-import { placeBody, type BodyPlacement } from "#compiler/placement/place.js";
-import type { IrBlock } from "#ir/block.js";
 import { Declarations } from "./declarations.js";
 import { closeFunctions, type FunctionClosure } from "./function-closure.js";
 import type { FunctionType } from "./function-type.js";
 import { FunctionDefinition } from "./functions.js";
 import { FunctionImport } from "./imports.js";
 import type {
-  DefinedFunction,
   FunctionDeclaration,
   FunctionExport,
-  InternalGlobal,
-  LegacyFunction,
   Program,
   ProgramData,
   ProgramFunction,
-  Signature,
   TableImport
 } from "./model.js";
 import type { TableRef } from "./refs.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { MemoryImport, ProgramResources } from "./resources.js";
 import {
-  validateLinkedProgramFunctions,
   validateProgramFunctionDeclaration
 } from "./validate.js";
 
 export type LinkProgramOptions = Readonly<{
   owner: object;
   resources: ProgramResources;
-  signatures: readonly Signature[];
   tables: readonly TableImport[];
-  globals: readonly InternalGlobal[];
   functions: readonly FunctionDeclaration[];
   exports: readonly FunctionExport[];
 }>;
 
 export function linkProgram(options: LinkProgramOptions): Program {
   const declaredImports = options.functions.filter(isFunctionImport);
-  const declaredLegacy = options.functions.filter(isLegacyFunction);
   const roots = options.functions.filter(isFunctionDefinition);
-  const declarations = collectFunctionDeclarations(options, declaredLegacy);
+  const declarations = collectFunctionDeclarations(options);
 
-  const placements = new Map<IrBlock, BodyPlacement>();
-  const legacy = placeLegacyFunctions(declaredLegacy, placements);
   const liveImports = new Set<FunctionImport>();
   const closure = closeFunctions({
     owner: options.owner,
     roots,
-    declaredFunctions: declaredLegacy.flatMap((fn) =>
-      fn.callTargets.filter((target): target is FunctionDefinition =>
-        target instanceof FunctionDefinition
-      )
-    ),
-    rootPlacements: legacy.rootPlacements,
     declareFunction: (definition) => {
       declareFunction(options, declarations, definition);
     },
@@ -70,36 +52,20 @@ export function linkProgram(options: LinkProgramOptions): Program {
   const functionImports = declaredImports.filter((imported) =>
     liveImports.has(imported)
   );
-  const defined = linkDefinedFunctions(
-    closure,
-    placements
-  );
-  const functions: readonly ProgramFunction[] = [...legacy.functions, ...defined];
+  const functions = linkFunctions(closure);
   const functionTypes = collectProgramFunctionTypes(
-    defined,
-    functionImports,
-    legacy.functions,
-    options.signatures
+    functions,
+    functionImports
   );
   const memoryImports = collectMemoryImports(options.resources, functions);
 
-  if (buildDefinition.validation) {
-    validateLinkedProgramFunctions(
-      declarations.all(),
-      functionImports,
-      functions
-    );
-  }
   const program: ProgramData = {
     functionTypes,
-    signatures: options.signatures,
     memoryImports,
     functionImports,
     tables: options.tables,
-    globals: options.globals,
     functions,
-    exports: options.exports,
-    placements
+    exports: options.exports
   };
 
   return program as Program;
@@ -125,52 +91,6 @@ function collectMemoryImports(
     .filter((memory) => used.has(memory.ref));
 }
 
-type PlacedLegacyFunctions = Readonly<{
-  functions: readonly LegacyFunction[];
-  rootPlacements: readonly BodyPlacement[];
-}>;
-
-function placeLegacyFunctions(
-  declarations: readonly LegacyFunction[],
-  placements: Map<IrBlock, BodyPlacement>
-): PlacedLegacyFunctions {
-  const rootPlacements: BodyPlacement[] = [];
-  const functions = declarations.map((fn): LegacyFunction => {
-    const liveCalls: DirectFunctionTarget[] = [];
-    const liveIndirectTypes = [...fn.indirectTypes];
-    const liveTables = [...fn.tables];
-
-    for (const entry of fn.irBlocks) {
-      const placement = placeBody(entry.block, {
-        allowImplicitEntryFallthrough: entry.allowImplicitEntryFallthrough
-      });
-
-      placements.set(entry.block, placement);
-      rootPlacements.push(placement);
-      for (const site of placement.analysis.invocations()) {
-        if (placement.analysis.invocationMustExecute(site)) {
-          const references = site.invocation.target.references;
-
-          liveCalls.push(...references.functions);
-          liveIndirectTypes.push(...references.types);
-          liveTables.push(...references.tables);
-        }
-      }
-    }
-    const callTargets = unique([...fn.callTargets, ...liveCalls]);
-
-    return {
-      ...fn,
-      calls: unique([...fn.calls, ...callTargets.map((call) => call.ref)]),
-      callTargets,
-      indirectTypes: unique(liveIndirectTypes),
-      tables: unique(liveTables)
-    };
-  });
-
-  return { functions, rootPlacements };
-}
-
 function retainFunctionImport(
   options: LinkProgramOptions,
   declarations: Declarations<FunctionDeclaration>,
@@ -188,11 +108,10 @@ function retainFunctionImport(
   liveImports.add(imported);
 }
 
-function linkDefinedFunctions(
-  closure: FunctionClosure,
-  placements: Map<IrBlock, BodyPlacement>
-): readonly DefinedFunction[] {
-  return [...closure.functions].map(([definition, closed]): DefinedFunction => {
+function linkFunctions(
+  closure: FunctionClosure
+): readonly ProgramFunction[] {
+  return [...closure.functions].map(([definition, closed]): ProgramFunction => {
     const { body, placement } = closed;
     const invocations = liveInvocations(placement.analysis);
     const directTargets: DirectFunctionTarget[] = [];
@@ -208,9 +127,7 @@ function linkDefinedFunctions(
     }
     const resources = resourcesUsedBy(placement.analysis);
 
-    placements.set(body, placement);
     return {
-      kind: "function",
       ref: definition.ref,
       type: definition.type,
       effects: definition.effects,
@@ -225,56 +142,23 @@ function linkDefinedFunctions(
 }
 
 function collectProgramFunctionTypes(
-  definedFunctions: readonly DefinedFunction[],
-  functionImports: readonly FunctionImport[],
-  legacyFunctions: readonly LegacyFunction[],
-  signatures: readonly Signature[]
+  functions: readonly ProgramFunction[],
+  functionImports: readonly FunctionImport[]
 ): readonly FunctionType[] {
-  const usedSignatures = new Set(legacyFunctions.map((fn) => fn.signature));
-
-  for (const fn of legacyFunctions) {
-    assert(
-      signatures.some((signature) => signature.ref === fn.signature),
-      `unknown program signature ${fn.signature.id} declared by function ${fn.ref.id}`
-    );
-  }
-
   return unique([
-    ...definedFunctions.map((fn) => fn.type),
+    ...functions.map((fn) => fn.type),
     ...functionImports.map((fn) => fn.type),
-    ...legacyFunctions.flatMap((fn) => fn.indirectTypes),
-    ...definedFunctions.flatMap((fn) => fn.indirectTypes),
-    ...signatures
-      .filter((signature) => usedSignatures.has(signature.ref))
-      .map((signature) => signature.type)
+    ...functions.flatMap((fn) => fn.indirectTypes)
   ]);
 }
 
 function collectFunctionDeclarations(
-  options: LinkProgramOptions,
-  legacyFunctions: readonly LegacyFunction[]
+  options: LinkProgramOptions
 ): Declarations<FunctionDeclaration> {
   const declarations = new Declarations<FunctionDeclaration>();
 
   for (const declaration of options.functions) {
-    if (isFunctionDefinition(declaration)) {
-      declareFunction(options, declarations, declaration);
-    } else {
-      declarations.add(declaration);
-    }
-  }
-  for (const fn of legacyFunctions) {
-    for (const target of fn.callTargets) {
-      if (target instanceof FunctionDefinition) {
-        declareFunction(options, declarations, target);
-      } else {
-        assert(
-          target instanceof FunctionImport &&
-            declarations.get(target.ref) === target,
-          `unknown program function import ${target.ref.id}`
-        );
-      }
-    }
+    declarations.add(declaration);
   }
   return declarations;
 }
@@ -284,17 +168,17 @@ function declareFunction(
   declarations: Declarations<FunctionDeclaration>,
   definition: FunctionDefinition
 ): void {
+  const existing = declarations.get(definition.ref);
+
+  if (existing === definition) {
+    return;
+  }
   if (buildDefinition.validation) {
     validateProgramFunctionDeclaration(
       options,
       declarations.all(),
       definition
     );
-  }
-  const existing = declarations.get(definition.ref);
-
-  if (existing === definition) {
-    return;
   }
   declarations.add(definition);
 }
@@ -329,10 +213,6 @@ function isFunctionImport(
   declaration: FunctionDeclaration
 ): declaration is FunctionImport {
   return declaration instanceof FunctionImport;
-}
-
-function isLegacyFunction(declaration: FunctionDeclaration): declaration is LegacyFunction {
-  return !isFunctionDefinition(declaration) && !isFunctionImport(declaration);
 }
 
 function unique<T>(values: readonly T[]): readonly T[] {

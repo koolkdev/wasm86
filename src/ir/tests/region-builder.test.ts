@@ -9,7 +9,7 @@ import {
 import { test } from "node:test";
 
 import type { BodyNode } from "#ir/block.js";
-import { FunctionBuilder } from "#ir/function.js";
+import { buildFunction, FunctionBuilder } from "#ir/function.js";
 import {
   resourceRead,
   resourceWrite
@@ -18,8 +18,9 @@ import {
   resourceRef,
   type ResourceByteOperand
 } from "#compiler/ir/resource.js";
-import { RegionBuilder, buildIrBlock, type BodyNodeSink } from "#ir/region-builder.js";
-import { validateIrBlock, validateIrFunction } from "#ir/validate.js";
+import { RegionBuilder, type BodyNodeSink } from "#ir/region-builder.js";
+import { validateIrFunction } from "#ir/validate.js";
+import { valueId } from "#compiler/ir/values/id.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -60,6 +61,32 @@ function testCallTarget(id: string): FunctionDefinition {
     owner: undefined,
     build: () => {}
   });
+}
+
+function voidFunction(values: ValueTable, builder: RegionBuilder) {
+  builder.return([]);
+  const parameters = Array.from(
+    { length: values.size() },
+    (_, raw) => valueId(raw)
+  ).filter((value) => values.node(value).kind === "parameter")
+    .sort((a, b) => {
+      const first = values.node(a);
+      const second = values.node(b);
+
+      return first.kind === "parameter" && second.kind === "parameter"
+        ? first.index - second.index
+        : 0;
+    });
+
+  return {
+    type: functionType(
+      parameters.map((parameter) => values.valueType(parameter)),
+      []
+    ),
+    parameters,
+    values,
+    body: builder.build()
+  };
 }
 
 test("operation derives the output and its bounds from the definition", () => {
@@ -219,13 +246,12 @@ test("cell APIs seed typed cells and preserve lexical access in child bodies", (
   const cell = builder.cell(seed);
   let read!: ValueId;
 
-  builder.if(values.external(0), (child) => {
+  builder.if(values.parameter(0, "i32"), (child) => {
     child.write(cell, child.values.const64(8n));
     read = child.read(cell);
   });
-  builder.finish({ kind: "dispatch", targetEip: values.const(0) });
 
-  const block = { values, body: builder.build() };
+  const block = voidFunction(values, builder);
   const seedOperation = block.body.nodes[0];
   const branch = block.body.nodes[1];
 
@@ -236,7 +262,7 @@ test("cell APIs seed typed cells and preserve lexical access in child bodies", (
   ok(branch?.kind === "if");
   strictEqual(branch.thenBody.nodes[0]?.kind, "cell.write");
   strictEqual(branch.thenBody.nodes[1]?.kind, "cell.read");
-  doesNotThrow(() => validateIrBlock(block));
+  doesNotThrow(() => validateIrFunction(block));
 });
 
 test("validation rejects writes whose value type differs from the cell", () => {
@@ -245,10 +271,9 @@ test("validation rejects writes whose value type differs from the cell", () => {
   const cell = builder.cell(values.const(1));
 
   builder.write(cell, values.const64(2n));
-  builder.finish({ kind: "dispatch", targetEip: values.const(0) });
 
   throws(
-    () => validateIrBlock({ values, body: builder.build() }),
+    () => validateIrFunction(voidFunction(values, builder)),
     /operand .* must be i32, got i64/
   );
 });
@@ -265,10 +290,9 @@ test("validation rejects a cell access transplanted away from its seed", () => {
 
   // Moving only the read leaves its declaring seed behind in another tree.
   target.push(sourceNodes[1]!);
-  target.finish({ kind: "dispatch", targetEip: values.const(0) });
 
   throws(
-    () => validateIrBlock({ values, body: target.build() }),
+    () => validateIrFunction(voidFunction(values, target)),
     /uses a cell with no seed in this root/
   );
 });
@@ -285,9 +309,8 @@ test("a transplanted seed carries its cell's scope with it", () => {
   const target = new RegionBuilder(values);
 
   target.extend(source.build().nodes);
-  target.finish({ kind: "dispatch", targetEip: values.const(0) });
 
-  doesNotThrow(() => validateIrBlock({ values, body: target.build() }));
+  doesNotThrow(() => validateIrFunction(voidFunction(values, target)));
 });
 
 test("effect, push, and extend append nodes without outputs", () => {
@@ -338,8 +361,8 @@ test("custom node sinks can divert emitted top-level nodes", () => {
 
 test("if builds hinted then and else bodies against child builders", () => {
   const values = new ValueTable();
-  const builder = new RegionBuilder(values);
-  const condition = values.external(0);
+  const builder = new RegionBuilder(values, undefined, ["i64"]);
+  const condition = values.parameter(0, "i32");
   const exitResult = values.const64(0n);
 
   builder.if(
@@ -350,7 +373,7 @@ test("if builds hinted then and else bodies against child builders", () => {
     ),
     {
       hint: "unlikely",
-      elseBuild: (other) => other.finish({ kind: "exit", result: exitResult })
+      elseBuild: (other) => other.return([exitResult])
     }
   );
   const [control] = builder.build().nodes;
@@ -359,27 +382,30 @@ test("if builds hinted then and else bodies against child builders", () => {
   strictEqual(control.condition, condition);
   strictEqual(control.hint, "unlikely");
   strictEqual(control.thenBody.nodes[0]?.kind, "resource.write");
-  const [finish] = control.elseBody?.nodes ?? [];
+  const [returned] = control.elseBody?.nodes ?? [];
 
-  ok(finish?.kind === "finish");
-  deepStrictEqual(finish.finish, { kind: "exit", result: exitResult });
+  ok(returned?.kind === "return");
+  deepStrictEqual(returned.source, {
+    kind: "values",
+    values: [exitResult]
+  });
 });
 
 test("control bodies isolate siblings while retaining ancestor recipes", () => {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
   const input = values.addNodeOutput();
-  const operand = values.external(0);
+  const operand = values.parameter(0, "i32");
   let thenValue!: ValueId;
   let nestedValue!: ValueId;
   let elseValue!: ValueId;
 
   builder.if(
-    values.external(1),
+    values.parameter(1, "i32"),
     (then) => {
       thenValue = then.values.binary("add", input, operand);
       strictEqual(then.values.binary("add", input, operand), thenValue);
-      then.if(values.external(2), (nested) => {
+      then.if(values.parameter(2, "i32"), (nested) => {
         nestedValue = nested.values.binary("add", input, operand);
       });
     },
@@ -442,7 +468,7 @@ test("function snapshots retain values created in control children", () => {
 test("switch builds every arm before allocating the shared output", () => {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
-  const selector = values.external(0);
+  const selector = values.parameter(0, "i32");
   const args = [values.const(0), values.const(1), values.const(2), values.const(3)] as const;
   const target = testCallTarget("test.region-builder.switch-call-target");
   let armResult!: ValueId;
@@ -483,7 +509,7 @@ test("switch derives its output bounds from reachable arms", () => {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
   const output = builder.switch(
-    values.external(0),
+    values.parameter(0, "i32"),
     [{ match: 0, build: (arm) => arm.values.unreachable() }],
     (arm) => arm.values.const(0)
   );
@@ -494,7 +520,7 @@ test("switch derives its output bounds from reachable arms", () => {
 test("control-only switch shares one body across all matches in an arm", () => {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
-  const selector = values.external(0);
+  const selector = values.parameter(0, "i32");
   let armBuilds = 0;
 
   builder.switchControl(
@@ -544,34 +570,44 @@ test("control-only switch rejects an arm without matches before building bodies"
 });
 
 test("loop bodies take the back edge through loopContinue and validate", () => {
-  const block = buildIrBlock((b) => {
-    const input = b.values.addLoopInput();
+  const fn = buildFunction(functionType([], ["i64"]), (fn) => {
+    const input = fn.values.addLoopInput();
 
-    b.loop([{ seed: b.values.const(3), loopInput: input }], (body) => {
+    fn.region.loop([{ seed: fn.values.const(3), loopInput: input }], (body) => {
       const next = body.values.binary("sub", input, body.values.const(1));
 
       body.if(body.values.compare(32, "ne", next, body.values.const(0)), (taken) => taken.loopContinue([next]));
     });
-    b.finish({ kind: "exit", result: b.values.const64(0n) });
+    fn.return([fn.values.const64(0n)]);
   });
 
-  doesNotThrow(() => validateIrBlock(block));
+  doesNotThrow(() => validateIrFunction(fn));
 });
 
-test("buildIrBlock forwards a returned value as the root body result", () => {
+test("buildFunction returns a callback-produced value", () => {
   let eip!: ValueId;
-  const block = buildIrBlock(
-    (b) => (eip = b.operation(resourceRead, readArgs(b.values)))
-  );
+  const fn = buildFunction(functionType([], ["i32"]), (fn) => {
+    eip = fn.region.operation(resourceRead, readArgs(fn.values));
+    fn.return([eip]);
+  });
+  const returned = fn.body.nodes.at(-1);
 
-  strictEqual(block.body.result, eip);
+  ok(returned?.kind === "return");
+  deepStrictEqual(returned.source, { kind: "values", values: [eip] });
+  strictEqual(fn.body.result, undefined);
+  doesNotThrow(() => validateIrFunction(fn));
 });
 
-test("buildIrBlock leaves the root result unset for void callbacks", () => {
-  const block = buildIrBlock((b) => {
-    b.operation(resourceWrite, writeArgs(b.values, b.values.const(0)));
+test("buildFunction supports a void callback", () => {
+  const fn = buildFunction(functionType([], []), (fn) => {
+    fn.region.operation(
+      resourceWrite,
+      writeArgs(fn.values, fn.values.const(0))
+    );
+    fn.return([]);
   });
 
-  strictEqual(block.body.result, undefined);
-  doesNotThrow(() => validateIrBlock(block, { allowImplicitEntryFallthrough: true }));
+  strictEqual(fn.body.result, undefined);
+  strictEqual(fn.body.nodes.at(-1)?.kind, "return");
+  doesNotThrow(() => validateIrFunction(fn));
 });

@@ -3,7 +3,7 @@ import { assert } from "#common/assert.js";
 type Ref = Readonly<{ kind: string; id: string }>;
 type Declaration = Readonly<{ ref: Ref }>;
 
-export class Declarations<T extends Declaration> implements Iterable<T> {
+export class Declarations<T extends Declaration> {
   readonly #ordered: T[] = [];
   readonly #byRef = new Map<T["ref"], T>();
 
@@ -15,23 +15,11 @@ export class Declarations<T extends Declaration> implements Iterable<T> {
     this.#byRef.set(ref, declaration);
   }
 
-  has(ref: T["ref"]): boolean {
-    return this.#byRef.has(ref);
-  }
-
   get(ref: T["ref"]): T | undefined {
     return this.#byRef.get(ref);
   }
 
-  find(predicate: (declaration: T) => boolean): T | undefined {
-    return this.#ordered.find(predicate);
-  }
-
   all(): readonly T[] {
     return [...this.#ordered];
-  }
-
-  [Symbol.iterator](): Iterator<T> {
-    return this.#ordered[Symbol.iterator]();
   }
 }

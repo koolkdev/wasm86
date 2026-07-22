@@ -2,15 +2,18 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import {
-  finishControl,
   ifControl,
   loopContinueControl,
   loopControl,
+  returnControl,
   switchControl
 } from "#compiler/ir/controls/index.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
-import { placeBody } from "#compiler/placement/place.js";
-import type { Body, IrBlock } from "#ir/block.js";
+import { valueId } from "#compiler/ir/values/id.js";
+import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
+import { placeFunction } from "#compiler/placement/place.js";
+import { functionType } from "#compiler/program/function-type.js";
+import { bodyCompletes, type Body, type BodyNode, type IrBlock } from "#ir/block.js";
+import type { IrFunction } from "#ir/function.js";
 import { RegionBuilder } from "#ir/region-builder.js";
 import {
   compilerTestValues,
@@ -19,16 +22,50 @@ import {
   resourceWriteNode
 } from "#ir/tests/storage-op-helpers.js";
 
-function place(block: IrBlock, exportedOutputs: readonly ValueId[] = []) {
-  return placeBody(block, {
-    exportedOutputs,
-    allowImplicitEntryFallthrough: true
-  });
+function functionBlock(
+  block: IrBlock,
+  results: readonly ValueType[] = [],
+  returned: readonly ValueId[] = []
+): IrFunction {
+  if (!bodyCompletes(block.body)) {
+    (block.body.nodes as BodyNode[]).push(returnControl.create({
+      source: { kind: "values", values: returned }
+    }));
+  }
+  const parameters = Array.from(
+    { length: block.values.size() },
+    (_, raw) => valueId(raw)
+  ).filter((value) => block.values.node(value).kind === "parameter")
+    .sort((a, b) => {
+      const first = block.values.node(a);
+      const second = block.values.node(b);
+
+      return first.kind === "parameter" && second.kind === "parameter"
+        ? first.index - second.index
+        : 0;
+    });
+
+  return {
+    ...block,
+    type: functionType(
+      parameters.map((parameter) => block.values.valueType(parameter)),
+      results
+    ),
+    parameters
+  };
+}
+
+function place(block: IrBlock, returned?: ValueId) {
+  return placeFunction(functionBlock(
+    block,
+    returned === undefined ? [] : [block.values.valueType(returned)],
+    returned === undefined ? [] : [returned]
+  ));
 }
 
 test("a producer used only in a selected body realizes at that use", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const output = values.addNodeOutput();
   const thenBody: Body = {
     nodes: [resourceWriteNode(values, 1, output)]
@@ -60,8 +97,8 @@ test("a producer used only in a selected body realizes at that use", () => {
 
 test("a recipe used only in a selected body stays at its use", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
-  const result = values.binary("add", values.external(1), values.const(1));
+  const condition = values.parameter(0, "i32");
+  const result = values.binary("add", values.parameter(1, "i32"), values.const(1));
   const thenBody: Body = {
     nodes: [resourceWriteNode(values, 0, result)]
   };
@@ -85,8 +122,8 @@ test("a recipe used only in a selected body stays at its use", () => {
 test("identical recipes authored by sibling if arms stay at their selected uses", () => {
   const values = compilerTestValues();
   const builder = new RegionBuilder(values);
-  const condition = values.external(0);
-  const input = values.external(1);
+  const condition = values.parameter(0, "i32");
+  const input = values.parameter(1, "i32");
   const increment = values.const(1);
   let thenResult: ValueId | undefined;
   let elseResult: ValueId | undefined;
@@ -135,7 +172,7 @@ test("identical recipes authored by sibling if arms stay at their selected uses"
 
 test("a recipe shared with parent flow anchors at the common dominator", () => {
   const values = compilerTestValues();
-  const shared = values.binary("add", values.external(0), values.const(1));
+  const shared = values.binary("add", values.parameter(0, "i32"), values.const(1));
   const thenBody: Body = {
     nodes: [resourceWriteNode(values, 0, shared)]
   };
@@ -156,30 +193,37 @@ test("a recipe shared with parent flow anchors at the common dominator", () => {
   deepStrictEqual(plan.localTypes, ["i32"]);
 });
 
-test("an exit result is placed at its selected finish", () => {
+test("a return result is placed at its selected return", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
-  const payload = values.external(1);
+  const condition = values.parameter(0, "i32");
+  const payload = values.parameter(1, "i32");
   const result = values.binary64(
     "or",
     values.extend64(32, payload, false),
     values.const64(0x1200n)
   );
   const thenBody: Body = {
-    nodes: [finishControl.create({ finish: { kind: "exit", result } })]
+    nodes: [returnControl.create({
+      source: { kind: "values", values: [result] }
+    })]
+  };
+  const elseBody: Body = {
+    nodes: [returnControl.create({
+      source: { kind: "values", values: [values.const64(0n)] }
+    })]
   };
   const block: IrBlock = {
     values,
     body: {
-      nodes: [ifControl.create({ condition, thenBody })]
+      nodes: [ifControl.create({ condition, thenBody, elseBody })]
     }
   };
-  const { analysis, plan } = place(block);
-  const finishSite = analysis.siteOf(thenBody, 0);
+  const { analysis, plan } = placeFunction(functionBlock(block, ["i64"]));
+  const returnSite = analysis.siteOf(thenBody, 0);
 
   deepStrictEqual(plan.values[result], {
     kind: "atUse",
-    anchor: finishSite,
+    anchor: returnSite,
     local: undefined
   });
   deepStrictEqual(plan.localTypes, []);
@@ -187,7 +231,7 @@ test("an exit result is placed at its selected finish", () => {
 
 test("an aliasing write captures a producer at its authored site", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const output = values.addNodeOutput();
   const thenBody: Body = {
     nodes: [
@@ -217,8 +261,8 @@ test("an aliasing write captures a producer at its authored site", () => {
 
 test("operation-local repetition does not create a placement local", () => {
   const values = compilerTestValues();
-  const address = values.external(0);
-  const base = values.external(1);
+  const address = values.parameter(0, "i32");
+  const base = values.parameter(1, "i32");
   const increment = values.const(1);
   const byteLength = values.binary("add", base, increment);
   const write = memoryWriteOperation(address, byteLength, 32);
@@ -265,7 +309,7 @@ test("an outer producer used by a loop is captured in the preheader", () => {
 
 test("a loop-invariant recipe captures at the loop entry", () => {
   const values = compilerTestValues();
-  const invariant = values.binary("add", values.external(0), values.const(1));
+  const invariant = values.binary("add", values.parameter(0, "i32"), values.const(1));
   const loopBody: Body = {
     nodes: [
       resourceWriteNode(values, 0, invariant),
@@ -347,7 +391,7 @@ test("a recipe over a loop-local output remains inside the loop", () => {
 
 test("a recipe over a loop-local control output remains inside the loop", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const whenTrue = values.const(1);
   const whenFalse = values.const(2);
   const selected = values.addNodeOutput();
@@ -384,8 +428,8 @@ test("a transitively trapping recipe remains inside the loop", () => {
   const values = compilerTestValues();
   const quotient = values.binary(
     "div_u",
-    values.external(0),
-    values.external(1)
+    values.parameter(0, "i32"),
+    values.parameter(1, "i32")
   );
   const adjusted = values.binary("add", quotient, values.const(1));
   const loopBody: Body = {
@@ -412,8 +456,8 @@ test("a transitively trapping recipe remains inside the loop", () => {
 
 test("an invariant recipe in a selected loop body stays selected", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
-  const invariant = values.binary("add", values.external(1), values.const(1));
+  const condition = values.parameter(0, "i32");
+  const invariant = values.binary("add", values.parameter(1, "i32"), values.const(1));
   const thenBody: Body = {
     nodes: [resourceWriteNode(values, 0, invariant)]
   };
@@ -441,11 +485,11 @@ test("an invariant recipe in a selected loop body stays selected", () => {
 
 test("an invariant shared by both loop arms captures at the loop entry", () => {
   const values = compilerTestValues();
-  const invariant = values.binary("add", values.external(1), values.const(1));
+  const invariant = values.binary("add", values.parameter(1, "i32"), values.const(1));
   const loopBody: Body = {
     nodes: [
       ifControl.create({
-        condition: values.external(0),
+        condition: values.parameter(0, "i32"),
         thenBody: {
           nodes: [resourceWriteNode(values, 0, invariant)]
         },
@@ -511,7 +555,7 @@ test("an outer-loop recipe captures at an inner loop entry", () => {
 
 test("an invariant recipe crosses nested loop entries", () => {
   const values = compilerTestValues();
-  const invariant = values.binary("add", values.external(0), values.const(1));
+  const invariant = values.binary("add", values.parameter(0, "i32"), values.const(1));
   const innerBody: Body = {
     nodes: [
       resourceWriteNode(values, 0, invariant),
@@ -570,8 +614,8 @@ test("an if can capture a contextually safe value after its condition", () => {
   const values = compilerTestValues();
   const quotient = values.binary(
     "div_u",
-    values.external(0),
-    values.external(1)
+    values.parameter(0, "i32"),
+    values.parameter(1, "i32")
   );
   const adjusted = values.binary("add", quotient, values.const(1));
   const thenBody: Body = {
@@ -641,11 +685,11 @@ test("an earlier captured trap frontier makes a later pre-evaluation safe", () =
   const values = compilerTestValues();
   const quotient = values.binary(
     "div_u",
-    values.external(0),
-    values.external(1)
+    values.parameter(0, "i32"),
+    values.parameter(1, "i32")
   );
   const adjusted = values.binary("add", quotient, values.const(1));
-  const condition = values.external(2);
+  const condition = values.parameter(2, "i32");
   const thenBody: Body = {
     nodes: [resourceWriteNode(values, 0, adjusted)]
   };
@@ -679,11 +723,11 @@ test("an earlier captured trap frontier makes a later pre-evaluation safe", () =
 
 test("an unrelated trap shared by only some switch arms has no deadline", () => {
   const values = compilerTestValues();
-  const selector = values.external(0);
+  const selector = values.parameter(0, "i32");
   const quotient = values.binary(
     "div_u",
-    values.external(1),
-    values.external(2)
+    values.parameter(1, "i32"),
+    values.parameter(2, "i32")
   );
   const fallback = values.const(7);
   const output = values.addNodeOutput();
@@ -735,7 +779,7 @@ test("a loop input carries its local without an evaluation anchor", () => {
 
 test("control outputs and selected results share one planned slot", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const whenTrue = values.const(1);
   const whenFalse = values.const(2);
   const output = values.addNodeOutput();
@@ -765,7 +809,7 @@ test("control outputs and selected results share one planned slot", () => {
 
 test("a live join counts an unreachable arm only at its body end", () => {
   const values = compilerTestValues();
-  const condition = values.external(0);
+  const condition = values.parameter(0, "i32");
   const unreachable = values.unreachable();
   const fallback = values.const(7);
   const output = values.addNodeOutput();
@@ -782,7 +826,7 @@ test("a live join counts an unreachable arm only at its body end", () => {
       })]
     }
   };
-  const { analysis, plan } = place(block, [output]);
+  const { analysis, plan } = place(block, output);
 
   strictEqual(analysis.useCount(unreachable), 1);
   strictEqual(plan.values[unreachable], undefined);

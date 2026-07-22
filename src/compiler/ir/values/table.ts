@@ -19,7 +19,6 @@ import {
   nodeOutputValue,
   constant64Value,
   constantValue,
-  externalValue,
   loopInputValue,
   parameterValue,
   unreachableValue
@@ -30,7 +29,6 @@ import { extendValue } from "./extend.js";
 import { truncateValue } from "./truncate.js";
 import { valueId } from "./id.js";
 import {
-  type ExternalValueId,
   type ValueId,
   type ValueInput,
   type ValueType,
@@ -45,7 +43,6 @@ type AnyValueDefinition =
   | typeof constant64Value
   | typeof constantValue
   | typeof extendValue
-  | typeof externalValue
   | typeof loopInputValue
   | typeof parameterValue
   | typeof selectValue
@@ -277,10 +274,6 @@ export class ValueTable implements ValueBuilder {
 
   unreachable(type: ValueType = "i32"): ValueId {
     return this.#create(unreachableValue, { type });
-  }
-
-  external(external: ExternalValueId): ValueId {
-    return this.#create(externalValue, { external });
   }
 
   parameter(index: number, type: ValueType): ValueId {

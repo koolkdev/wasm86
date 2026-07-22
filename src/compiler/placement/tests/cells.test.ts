@@ -8,15 +8,19 @@ import { test } from "node:test";
 
 import {
   ifControl,
-  loopControl
+  loopControl,
+  returnControl
 } from "#compiler/ir/controls/index.js";
 import { CellRef } from "#compiler/refs/cell.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
+import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { placeBody } from "#compiler/placement/place.js";
+import { placeFunction } from "#compiler/placement/place.js";
 import { validatePlacement } from "#compiler/placement/validate.js";
+import { functionType } from "#compiler/program/function-type.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
-import type { Body, IrBlock } from "#ir/block.js";
+import type { Body, BodyNode, IrBlock } from "#ir/block.js";
+import type { IrFunction } from "#ir/function.js";
 import {
   compilerTestValues,
   resourceReadNode,
@@ -38,11 +42,35 @@ function read(
   return cellRead.create({ cell }, () => output);
 }
 
-function place(block: IrBlock, exports: readonly ValueId[] = []) {
-  return placeBody(block, {
-    exportedOutputs: exports,
-    allowImplicitEntryFallthrough: true
-  });
+function functionBlock(block: IrBlock): IrFunction {
+  (block.body.nodes as BodyNode[]).push(returnControl.create({
+    source: { kind: "values", values: [] }
+  }));
+  const parameters = Array.from(
+    { length: block.values.size() },
+    (_, raw) => valueId(raw)
+  ).filter((value) => block.values.node(value).kind === "parameter")
+    .sort((a, b) => {
+      const first = block.values.node(a);
+      const second = block.values.node(b);
+
+      return first.kind === "parameter" && second.kind === "parameter"
+        ? first.index - second.index
+        : 0;
+    });
+
+  return {
+    ...block,
+    type: functionType(
+      parameters.map((parameter) => block.values.valueType(parameter)),
+      []
+    ),
+    parameters
+  };
+}
+
+function place(block: IrBlock) {
+  return placeFunction(functionBlock(block));
 }
 
 test("a referenced cell receives one typed local", () => {
@@ -127,7 +155,7 @@ test("nested branch and loop accesses share the declaring cell's local", () => {
     body: {
       nodes: [
         write(cell, values.const(1), "seed"),
-        ifControl.create({ condition: values.external(0), thenBody })
+        ifControl.create({ condition: values.parameter(0, "i32"), thenBody })
       ]
     }
   };

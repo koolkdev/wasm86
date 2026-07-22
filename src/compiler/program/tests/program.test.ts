@@ -4,7 +4,10 @@ import { test } from "node:test";
 import { assert } from "#common/assert.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { WasmModuleEncoder } from "#compiler/encoder/module.js";
-import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
+import {
+  wasmBodyOpcodes,
+  wasmFunctionTypeCount
+} from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
 import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
 import { compileProgram } from "#compiler/program/compile.js";
@@ -14,13 +17,11 @@ import { FunctionFamily, type FunctionDefinition } from "#compiler/program/funct
 import {
   functionExportRef,
   functionRef,
-  globalRef,
-  signatureRef,
   tableRef
 } from "#compiler/program/refs.js";
 import { createProgramResources } from "#compiler/program/resources.js";
 import {
-  validateProgram
+  validateLinkedProgram
 } from "#compiler/program/validate.js";
 import {
   DynamicByteOriginRef,
@@ -30,7 +31,6 @@ import {
   type ResourceEffect,
   type ResourceRef
 } from "#compiler/ir/resource.js";
-import { buildIrBlock } from "#ir/region-builder.js";
 import type { FunctionBuilder } from "#ir/function.js";
 import {
   resourceRead,
@@ -51,9 +51,7 @@ const memoryDefinitions = [
   ["test.resource-operation-first-dummy", "firstDummy", 1],
   ["test.resource-operation-second-dummy", "secondDummy", 1],
   ["test.resource-operation-target", "target", 2],
-  ["test.dead-read-resource", "deadRead", 1],
-  ["test.undeclared-legacy-resource", "undeclaredLegacy", 1],
-  ["test.memory", "memory", 1]
+  ["test.dead-read-resource", "deadRead", 1]
 ] as const;
 const testMemories = new Map<string, ResourceRef>();
 const programResources = createProgramResources(
@@ -140,53 +138,39 @@ function readFunctionEffect(
   });
 }
 
-test("forward function declarations close before their factories build and execute", async () => {
+test("forward function definitions close before their factories build and execute", async () => {
   const program = createTestProgram();
-  const signature = signatureRef("test.i32");
-  const caller = functionRef("test.caller");
-  const callee = functionRef("test.callee");
   let buildCount = 0;
+  let callee!: FunctionDefinition;
 
-  program.signature({ ref: signature, type: i32Type });
-  program.legacyFunction({
-    ref: caller,
-    signature,
-    calls: [callee],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: (context) => {
-      buildCount += 1;
-      const calleeIndex = context.functions.get(callee);
+  const caller = program.defineFunction({
+    ref: functionRef("test.caller"),
+    type: i32Type,
+    effects: noEffects
+  }, (fn) => {
+    buildCount += 1;
+    const result = fn.region.call(callee, [])[0];
 
-      assert(calleeIndex !== undefined, "missing forward callee binding");
-      return new WasmFunctionBodyEncoder().callFunction(calleeIndex).finish();
-    }
+    assert(result !== undefined, "missing forward callee result");
+    fn.return([result]);
   });
-  program.legacyFunction({
-    ref: callee,
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => {
-      buildCount += 1;
-      return new WasmFunctionBodyEncoder().i32Const(42).finish();
-    }
+  callee = program.defineFunction({
+    ref: functionRef("test.callee"),
+    type: i32Type,
+    effects: noEffects
+  }, (fn) => {
+    buildCount += 1;
+    fn.return([fn.values.const(42)]);
   });
   program.exportFunction({
     ref: functionExportRef("test.entry"),
     name: "entry",
-    target: caller
+    target: caller.ref
   });
 
   const closed = program.finish();
 
-  validateProgram(closed);
-  strictEqual(buildCount, 0);
+  strictEqual(buildCount, 2);
   const bytes = compileBytes(closed);
   strictEqual(buildCount, 2);
   const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
@@ -198,7 +182,7 @@ test("forward function declarations close before their factories build and execu
   strictEqual(entry(), 42);
 });
 
-test("symbolic roots close and encode from their function type without signatures", async () => {
+test("symbolic roots close and encode from their function type", async () => {
   const program = createTestProgram();
   const type = functionType([], ["i32"]);
   const calleeRef = functionRef("test.typed-callee");
@@ -231,12 +215,9 @@ test("symbolic roots close and encode from their function type without signature
 
   const closed = program.finish();
 
-  deepStrictEqual(closed.signatures, []);
   deepStrictEqual(closed.functionTypes, [type]);
   strictEqual(closed.functionTypes[0], type);
   strictEqual(closed.functions.length, 2);
-  ok(closed.functions.every((fn) => fn.kind === "function"));
-  ok(closed.functions.every((fn) => !("signature" in fn)));
   const bytes = compileBytes(closed);
   const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
   const entry = instance.exports.entry;
@@ -266,28 +247,28 @@ test("program validation enforces the finished program's exact function type lis
   const extraType = functionType(["i32"], []);
 
   throws(
-    () => validateProgram({
+    () => validateLinkedProgram({
       ...closed,
       functionTypes: [secondType]
     } as Program),
     /type is missing from the program function types/
   );
   throws(
-    () => validateProgram({
+    () => validateLinkedProgram({
       ...closed,
       functionTypes: [...closed.functionTypes, extraType]
     } as Program),
     /unrequired function type/
   );
   throws(
-    () => validateProgram({
+    () => validateLinkedProgram({
       ...closed,
       functionTypes: [...closed.functionTypes, firstType]
     } as Program),
     /duplicate function type/
   );
   throws(
-    () => validateProgram({
+    () => validateLinkedProgram({
       ...closed,
       functionTypes: [secondType, firstType]
     } as Program),
@@ -333,7 +314,7 @@ test("defined resource operations import only their reachable resource", async (
   const closed = program.finish();
   const fn = closed.functions.find((candidate) => candidate.ref === definition.ref);
 
-  if (fn === undefined || fn.kind !== "function") {
+  if (fn === undefined) {
     throw new Error("missing resource operation function");
   }
   deepStrictEqual(fn.resources, [resource]);
@@ -409,46 +390,23 @@ test("program validation rejects malformed declared resource effects", () => {
         : { reads: [], writes: [effect] }
     }, (fn) => fn.return([]));
 
-    throws(() => validateProgram(program.finish()), expected);
+    throws(() => program.finish(), expected);
   }
 });
 
-test("program validation checks retained function and legacy effect shapes", () => {
-  {
-    const program = createTestProgram();
-    const type = functionType(["f32" as "i32"], []);
+test("program validation checks retained function type shapes", () => {
+  const program = createTestProgram();
+  const type = functionType(["f32" as "i32"], []);
 
-    program.defineFunction({
-      ref: functionRef("test.invalid-function-type"),
-      type,
-      effects: noEffects
-    }, (fn) => fn.return([]));
-    throws(
-      () => validateProgram(program.finish()),
-      /unknown function value type: f32/
-    );
-  }
-  {
-    const program = createTestProgram();
-    const signature = signatureRef("test.invalid-legacy-effects-signature");
-
-    program.signature({ ref: signature, type: voidType });
-    program.legacyFunction({
-      ref: functionRef("test.invalid-legacy-effects-function"),
-      signature,
-      calls: [],
-      resources: [],
-      globals: [],
-      tables: [],
-      irBlocks: [],
-      effects: "sometimes" as "none",
-      build: () => new WasmFunctionBodyEncoder().finish()
-    });
-    throws(
-      () => validateProgram(program.finish()),
-      /unknown legacy function effects: sometimes/
-    );
-  }
+  program.defineFunction({
+    ref: functionRef("test.invalid-function-type"),
+    type,
+    effects: noEffects
+  }, (fn) => fn.return([]));
+  throws(
+    () => program.finish(),
+    /unknown function value type: f32/
+  );
 });
 
 test("program closure omits dead resource reads", () => {
@@ -477,7 +435,7 @@ test("program closure omits dead resource reads", () => {
 
   const fn = program.finish().functions.find((candidate) => candidate.ref === definition.ref);
 
-  if (fn === undefined || fn.kind !== "function") {
+  if (fn === undefined) {
     throw new Error("missing dead resource function");
   }
   deepStrictEqual(fn.resources, []);
@@ -504,7 +462,7 @@ test("program validation rejects unknown effects and undeclared live resource us
     });
 
     throws(
-      () => validateProgram(program.finish()),
+      () => program.finish(),
       /unknown program resource test\.unknown-symbolic-resource used by function test\.unknown-symbolic-resource-function/
     );
   }
@@ -524,40 +482,8 @@ test("program validation rejects unknown effects and undeclared live resource us
     }, (fn) => fn.return([fn.values.const(1)]));
 
     throws(
-      () => validateProgram(program.finish()),
+      () => program.finish(),
       /unknown program resource test\.unknown-resource-effect declared by function test\.unknown-resource-effect-function/
-    );
-  }
-  {
-    const program = createTestProgram();
-    const signature = signatureRef("test.undeclared-legacy-resource-signature");
-    const resource = testMemory("test.undeclared-legacy-resource");
-    const range: ByteRange = {
-      basis: { kind: "resource" },
-      slice: { byteOffset: 0, byteLength: 1 }
-    };
-    const ir = buildIrBlock((body) => {
-      body.operation(resourceWrite, {
-        destination: byteOperand(resource, range, body.values.const(0), 0, 8),
-        value: body.values.const(1)
-      });
-    });
-
-    program.signature({ ref: signature, type: voidType });
-    program.legacyFunction({
-      ref: functionRef("test.undeclared-legacy-resource-function"),
-      signature,
-      calls: [],
-      resources: [],
-      globals: [],
-      tables: [],
-      irBlocks: [{ block: ir, allowImplicitEntryFallthrough: true }],
-      build: () => new WasmFunctionBodyEncoder().finish()
-    });
-
-    throws(
-      () => validateProgram(program.finish()),
-      /undeclared program resource.*used by legacy function/
     );
   }
 });
@@ -609,7 +535,7 @@ test("an effectful function call stays single and conditional inside its selecte
   const closed = program.finish();
   const callerDefinition = closed.functions.find((fn) => fn.ref === caller.ref);
 
-  if (callerDefinition === undefined || callerDefinition.kind !== "function") {
+  if (callerDefinition === undefined) {
     throw new Error("missing conditional caller");
   }
   deepStrictEqual(callerDefinition.effects, effects);
@@ -710,7 +636,7 @@ test("function declarations keep resource bindings direct while effects are tran
   });
 
   const closed = program.finish();
-  const functions = closed.functions.filter((fn) => fn.kind === "function");
+  const functions = closed.functions;
 
   deepStrictEqual(functions.find((fn) => fn.ref === leaf.ref)?.effects, effects);
   deepStrictEqual(functions.find((fn) => fn.ref === middle.ref)?.effects, effects);
@@ -721,7 +647,6 @@ test("function declarations keep resource bindings direct while effects are tran
   );
   deepStrictEqual(functions.find((fn) => fn.ref === middle.ref)?.resources, []);
   deepStrictEqual(functions.find((fn) => fn.ref === root.ref)?.resources, []);
-  validateProgram(closed);
 });
 
 test("function effect declarations must cover their bodies", () => {
@@ -741,7 +666,7 @@ test("function effect declarations must cover their bodies", () => {
     fn.return([]);
   });
 
-  throws(() => validateProgram(program.finish()), /undeclared write effect/);
+  throws(() => program.finish(), /undeclared write effect/);
 });
 
 test("callers must cover the effects declared by their call targets", () => {
@@ -779,7 +704,7 @@ test("callers must cover the effects declared by their call targets", () => {
   });
 
   throws(
-    () => validateProgram(program.finish()),
+    () => program.finish(),
     /call-effect-caller.*undeclared write effect/
   );
 });
@@ -805,7 +730,7 @@ test("resource effect declarations preserve their range basis and extent", () =>
       fn.return([]);
     });
 
-    throws(() => validateProgram(program.finish()), /undeclared write effect/);
+    throws(() => program.finish(), /undeclared write effect/);
   }
   {
     const program = createTestProgram();
@@ -832,7 +757,7 @@ test("resource effect declarations preserve their range basis and extent", () =>
       fn.return([selector]);
     });
 
-    throws(() => validateProgram(program.finish()), /undeclared read effect/);
+    throws(() => program.finish(), /undeclared read effect/);
   }
 });
 
@@ -865,85 +790,58 @@ test("calls enforce their declared function contracts", () => {
 });
 
 test("functions must terminate with a return matching their result contract", () => {
-  const program = createTestProgram();
-  const type = functionType([], ["i32"]);
-  const fn = functionRef("test.missing-return");
+  const missingReturn = createTestProgram();
 
-  program.defineFunction({ ref: fn, type, effects: noEffects }, () => {});
+  missingReturn.defineFunction({
+    ref: functionRef("test.missing-return"),
+    type: i32Type,
+    effects: noEffects
+  }, () => {});
 
-  throws(() => program.finish(), /root body does not complete/);
+  throws(() => missingReturn.finish(), /root body does not complete/);
+
+  const missingResult = createTestProgram();
+
+  missingResult.defineFunction({
+    ref: functionRef("test.missing-result"),
+    type: i32Type,
+    effects: noEffects
+  }, (fn) => fn.return([]));
+
+  throws(() => missingResult.finish(), /returns 0 values, expected 1/);
+
+  const wrongResultType = createTestProgram();
+
+  wrongResultType.defineFunction({
+    ref: functionRef("test.wrong-result-type"),
+    type: i32Type,
+    effects: noEffects
+  }, (fn) => fn.return([fn.values.const64(1n)]));
+
+  throws(() => wrongResultType.finish(), /result 0 must be i32, got i64/);
+
+  const unexpectedResult = createTestProgram();
+
+  unexpectedResult.defineFunction({
+    ref: functionRef("test.unexpected-result"),
+    type: voidType,
+    effects: noEffects
+  }, (fn) => fn.return([fn.values.const(1)]));
+
+  throws(() => unexpectedResult.finish(), /returns 1 values, expected 0/);
 });
 
-test("legacy factories default to conservative behavior and never become eliminable", () => {
+test("successful closure rejects every later topology mutation", () => {
   const program = createTestProgram();
-  const signature = signatureRef("test.signature");
-  program.signature({ ref: signature, type: voidType });
-  program.legacyFunction({
+  const fn = program.defineFunction({
     ref: functionRef("test.function"),
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => new WasmFunctionBodyEncoder().finish()
-  });
-  program.legacyFunction({
-    ref: functionRef("test.reviewed"),
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    effects: "none",
-    build: () => new WasmFunctionBodyEncoder().finish()
-  });
-  const [defaults, reviewed] = program.finish().functions;
+    type: voidType,
+    effects: noEffects
+  }, (body) => body.return([]));
 
-  if (defaults === undefined || reviewed === undefined) {
-    throw new Error("missing normalized legacy functions");
-  }
-
-  strictEqual(defaults.kind, "legacy");
-  strictEqual(reviewed.kind, "legacy");
-  strictEqual(defaults.effects, "world");
-  strictEqual(defaults.eliminable, false);
-  strictEqual(reviewed.effects, "none");
-  strictEqual(reviewed.eliminable, false);
-});
-
-test("successful closure rejects every later topology mutation including one from a body factory", () => {
-  const program = createTestProgram();
-  const signature = signatureRef("test.signature");
-  const fn = functionRef("test.function");
-
-  program.signature({ ref: signature, type: voidType });
-  program.legacyFunction({
-    ref: fn,
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => {
-      program.global({
-        ref: globalRef("test.body-late-global"),
-        type: wasmValueType.i32,
-        mutable: true,
-        initialValue: 0
-      });
-      return new WasmFunctionBodyEncoder().finish();
-    }
-  });
-  const closed = program.finish();
+  program.finish();
 
   throws(() => program.finish(), /finished program/);
-  throws(
-    () => program.signature({ ref: signatureRef("test.late-signature"), type: voidType }),
-    /finished program/
-  );
   throws(
     () => program.importTable({
       ref: tableRef("test.late-table"),
@@ -954,36 +852,21 @@ test("successful closure rejects every later topology mutation including one fro
     /finished program/
   );
   throws(
-    () => program.global({
-      ref: globalRef("test.late-global"),
-      type: wasmValueType.i32,
-      mutable: true,
-      initialValue: 0
-    }),
-    /finished program/
-  );
-  throws(
-    () => program.legacyFunction({
+    () => program.defineFunction({
       ref: functionRef("test.late-function"),
-      signature,
-      calls: [],
-      resources: [],
-      globals: [],
-      tables: [],
-      irBlocks: [],
-      build: () => new WasmFunctionBodyEncoder().finish()
-    }),
+      type: voidType,
+      effects: noEffects
+    }, (body) => body.return([])),
     /finished program/
   );
   throws(
     () => program.exportFunction({
       ref: functionExportRef("test.late-export"),
       name: "late",
-      target: fn
+      target: fn.ref
     }),
     /finished program/
   );
-  throws(() => compileBytes(closed), /finished program/);
 });
 
 test("function factories cannot mutate program topology while it is closing", () => {
@@ -1025,7 +908,7 @@ test("closed functions do not retain their mutable factory builders", () => {
   const closed = program.finish();
   const fn = closed.functions.find((candidate) => candidate.ref === definition.ref);
 
-  if (fn === undefined || fn.kind !== "function") {
+  if (fn === undefined) {
     throw new Error("missing snapshotted function");
   }
   const valueCount = fn.body.values.size();
@@ -1037,58 +920,7 @@ test("closed functions do not retain their mutable factory builders", () => {
   compileBytes(closed);
 });
 
-test("declaration construction and closure reject invalid program declarations", () => {
-  {
-    const program = createTestProgram();
-
-    program.signature({ ref: signatureRef("same-type-signature-a"), type: voidType });
-    throws(
-      () => program.signature({ ref: signatureRef("same-type-signature-b"), type: voidType }),
-      /function type already has a program signature/
-    );
-  }
-  {
-    const program = createTestProgram();
-    const signature = signatureRef("unused-signature");
-
-    program.signature({ ref: signature, type: voidType });
-    throws(
-      () => program.finish(),
-      /program signature unused-signature is not used by a legacy function/
-    );
-  }
-  {
-    const program = createTestProgram();
-    const type = functionType([], []);
-    const signature = signatureRef("symbolic-only-signature");
-
-    program.signature({ ref: signature, type });
-    program.defineFunction({
-      ref: functionRef("symbolic-signature-lookalike-user"),
-      type,
-      effects: noEffects
-    }, (fn) => fn.return([]));
-    throws(
-      () => program.finish(),
-      /program signature symbolic-only-signature is not used by a legacy function/
-    );
-  }
-});
-
 test("program validation rejects duplicate stable declaration identities", () => {
-  {
-    const program = createTestProgram();
-
-    program.signature({
-      ref: signatureRef("same-signature"),
-      type: functionType([], [])
-    });
-    program.signature({
-      ref: signatureRef("same-signature"),
-      type: functionType([], [])
-    });
-    throws(() => validateProgram(program.finish()), /duplicate program signature identity/);
-  }
   {
     const program = createTestProgram();
 
@@ -1104,86 +936,32 @@ test("program validation rejects duplicate stable declaration identities", () =>
       name: "second",
       limits: { minElements: 1 }
     });
-    throws(() => validateProgram(program.finish()), /duplicate program table identity/);
+    throws(() => program.finish(), /duplicate program table identity/);
   }
   {
     const program = createTestProgram();
 
-    program.global({
-      ref: globalRef("same-global"),
-      type: wasmValueType.i32,
-      mutable: true,
-      initialValue: 0
-    });
-    program.global({
-      ref: globalRef("same-global"),
-      type: wasmValueType.i32,
-      mutable: true,
-      initialValue: 1
-    });
-    throws(() => validateProgram(program.finish()), /duplicate program global identity/);
-  }
-  {
-    const program = createTestProgram();
-    const signature = signatureRef("same-function-signature");
-
-    program.signature({ ref: signature, type: voidType });
     for (let index = 0; index < 2; index += 1) {
-      program.legacyFunction({
+      program.defineFunction({
         ref: functionRef("same-function"),
-        signature,
-        calls: [],
-        resources: [],
-        globals: [],
-        tables: [],
-        irBlocks: [],
-        build: () => new WasmFunctionBodyEncoder().finish()
-      });
+        type: voidType,
+        effects: noEffects
+      }, (fn) => fn.return([]));
     }
-    throws(() => validateProgram(program.finish()), /duplicate program function identity/);
+    throws(() => program.finish(), /duplicate program function identity/);
   }
   {
     const program = createTestProgram();
-    const signature = signatureRef("mixed-function-signature");
-
-    program.signature({ ref: signature, type: voidType });
-    program.legacyFunction({
-      ref: functionRef("mixed-function"),
-      signature,
-      calls: [],
-      resources: [],
-      globals: [],
-      tables: [],
-      irBlocks: [],
-      build: () => new WasmFunctionBodyEncoder().finish()
-    });
-    program.defineFunction({
-      ref: functionRef("mixed-function"),
+    const fn = program.defineFunction({
+      ref: functionRef("same-export-function"),
       type: voidType,
       effects: noEffects
-    }, (fn) => fn.return([]));
-    throws(() => validateProgram(program.finish()), /duplicate program function identity/);
-  }
-  {
-    const program = createTestProgram();
-    const signature = signatureRef("same-export-signature");
-    const fn = functionRef("same-export-function");
+    }, (body) => body.return([]));
 
-    program.signature({ ref: signature, type: voidType });
-    program.legacyFunction({
-      ref: fn,
-      signature,
-      calls: [],
-      resources: [],
-      globals: [],
-      tables: [],
-      irBlocks: [],
-      build: () => new WasmFunctionBodyEncoder().finish()
-    });
-    program.exportFunction({ ref: functionExportRef("same-export"), name: "first", target: fn });
-    program.exportFunction({ ref: functionExportRef("same-export"), name: "second", target: fn });
+    program.exportFunction({ ref: functionExportRef("same-export"), name: "first", target: fn.ref });
+    program.exportFunction({ ref: functionExportRef("same-export"), name: "second", target: fn.ref });
     throws(
-      () => validateProgram(program.finish()),
+      () => program.finish(),
       /duplicate program function-export identity/
     );
   }
@@ -1192,66 +970,42 @@ test("program validation rejects duplicate stable declaration identities", () =>
 test("program validation rejects duplicate and empty export names", () => {
   {
     const program = createTestProgram();
-    const signature = signatureRef("duplicate-export-name-signature");
-    const fn = functionRef("duplicate-export-name-function");
+    const fn = program.defineFunction({
+      ref: functionRef("duplicate-export-name-function"),
+      type: voidType,
+      effects: noEffects
+    }, (body) => body.return([]));
 
-    program.signature({ ref: signature, type: voidType });
-    program.legacyFunction({
-      ref: fn,
-      signature,
-      calls: [],
-      resources: [],
-      globals: [],
-      tables: [],
-      irBlocks: [],
-      build: () => new WasmFunctionBodyEncoder().finish()
-    });
-    program.exportFunction({ ref: functionExportRef("first-export"), name: "entry", target: fn });
-    program.exportFunction({ ref: functionExportRef("second-export"), name: "entry", target: fn });
+    program.exportFunction({ ref: functionExportRef("first-export"), name: "entry", target: fn.ref });
+    program.exportFunction({ ref: functionExportRef("second-export"), name: "entry", target: fn.ref });
     throws(() => program.finish(), /duplicate program export name/);
   }
   {
     const program = createTestProgram();
-    const signature = signatureRef("empty-export-name-signature");
-    const fn = functionRef("empty-export-name-function");
+    const fn = program.defineFunction({
+      ref: functionRef("empty-export-name-function"),
+      type: voidType,
+      effects: noEffects
+    }, (body) => body.return([]));
 
-    program.signature({ ref: signature, type: voidType });
-    program.legacyFunction({
-      ref: fn,
-      signature,
-      calls: [],
-      resources: [],
-      globals: [],
-      tables: [],
-      irBlocks: [],
-      build: () => new WasmFunctionBodyEncoder().finish()
-    });
-    program.exportFunction({ ref: functionExportRef("empty-export"), name: "", target: fn });
-    throws(() => validateProgram(program.finish()), /empty program function export name/);
+    program.exportFunction({ ref: functionExportRef("empty-export"), name: "", target: fn.ref });
+    throws(() => program.finish(), /empty program function export name/);
   }
 });
 
 test("finished programs snapshot export declarations", () => {
   const program = createTestProgram();
-  const signature = signatureRef("test.signature");
-  const fn = functionRef("test.function");
+  const fn = program.defineFunction({
+    ref: functionRef("test.function"),
+    type: voidType,
+    effects: noEffects
+  }, (body) => body.return([]));
   const exported = {
     ref: functionExportRef("test.export"),
     name: "before",
-    target: fn
+    target: fn.ref
   };
 
-  program.signature({ ref: signature, type: voidType });
-  program.legacyFunction({
-    ref: fn,
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => new WasmFunctionBodyEncoder().finish()
-  });
   program.exportFunction(exported);
   const finished = program.finish();
 
@@ -1259,377 +1013,48 @@ test("finished programs snapshot export declarations", () => {
   strictEqual(finished.exports[0]?.name, "before");
 });
 
-test("program validation resolves references by identity", () => {
+test("program validation resolves export targets by identity", () => {
   const program = createTestProgram();
-  const signature = signatureRef("test.signature");
-  const declared = functionRef("test.declared");
-  const sameIdLookalike = functionRef("test.declared");
-  let built = false;
-  let typedBuilt = false;
-
-  program.signature({ ref: signature, type: voidType });
-  program.defineFunction({
-    ref: functionRef("test.unrelated-typed-function"),
+  const declared = program.defineFunction({
+    ref: functionRef("test.declared"),
     type: voidType,
     effects: noEffects
-  }, (fn) => {
-    typedBuilt = true;
-    fn.return([]);
-  });
-  program.legacyFunction({
-    ref: declared,
-    signature,
-    calls: [sameIdLookalike],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => {
-      built = true;
-      return new WasmFunctionBodyEncoder().finish();
-    }
-  });
+  }, (fn) => fn.return([]));
 
-  throws(
-    () => validateProgram(program.finish()),
-    /unknown program function test\.declared called by function test\.declared/
-  );
-  strictEqual(built, false);
-  strictEqual(typedBuilt, false);
-});
-
-test("program validation rejects unknown resources, tables, globals, signatures, and exports", () => {
-  const signature = signatureRef("test.signature");
-
-  {
-    const program = createTestProgram();
-    const fn = functionRef("test.resource-user");
-
-    program.signature({ ref: signature, type: voidType });
-    program.legacyFunction({
-      ref: fn,
-      signature,
-      calls: [],
-      resources: [resourceRef("test.unknown-resource")],
-      globals: [],
-      tables: [],
-      irBlocks: [],
-      build: () => new WasmFunctionBodyEncoder().finish()
-    });
-    throws(
-      () => validateProgram(program.finish()),
-      /unknown program resource test\.unknown-resource used by function test\.resource-user/
-    );
-  }
-  {
-    const program = createTestProgram();
-    const fn = functionRef("test.table-user");
-
-    program.signature({ ref: signature, type: voidType });
-    program.legacyFunction({
-      ref: fn,
-      signature,
-      calls: [],
-      resources: [],
-      globals: [],
-      tables: [tableRef("test.unknown-table")],
-      irBlocks: [],
-      build: () => new WasmFunctionBodyEncoder().finish()
-    });
-    throws(() => validateProgram(program.finish()), /unknown program table/);
-  }
-  {
-    const program = createTestProgram();
-    const fn = functionRef("test.global-user");
-    const unknownGlobal = globalRef("test.unknown-global");
-
-    program.signature({ ref: signature, type: voidType });
-    program.legacyFunction({
-      ref: fn,
-      signature,
-      calls: [],
-      resources: [],
-      globals: [unknownGlobal],
-      tables: [],
-      irBlocks: [],
-      build: () => new WasmFunctionBodyEncoder().finish()
-    });
-    throws(() => validateProgram(program.finish()), /unknown program global/);
-  }
-  {
-    const program = createTestProgram();
-    const unknownSignature = signatureRef("test.unknown-signature");
-
-    program.legacyFunction({
-      ref: functionRef("test.unknown-signature-user"),
-      signature: unknownSignature,
-      calls: [],
-      resources: [],
-      globals: [],
-      tables: [],
-      irBlocks: [],
-      build: () => new WasmFunctionBodyEncoder().finish()
-    });
-    throws(() => validateProgram(program.finish()), /unknown program signature/);
-  }
-  {
-    const program = createTestProgram();
-
-    program.exportFunction({
-      ref: functionExportRef("test.export"),
-      name: "entry",
-      target: functionRef("test.unknown-function")
-    });
-    throws(() => validateProgram(program.finish()), /unknown program function/);
-  }
-});
-
-test("recorded direct calls must be declared by that legacy function", () => {
-  const program = createTestProgram();
-  const signature = signatureRef("test.signature");
-  const other = functionRef("test.other");
-  const subject = functionRef("test.subject");
-
-  program.signature({ ref: signature, type: voidType });
-  program.legacyFunction({
-    ref: other,
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => new WasmFunctionBodyEncoder().finish()
-  });
-  program.legacyFunction({
-    ref: subject,
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => new WasmFunctionBodyEncoder().callFunction(0).finish()
-  });
-
-  throws(
-    () => compileBytes(program.finish()),
-    /undeclared Wasm function index 0/
-  );
-});
-
-test("recorded memory indexes must come from that legacy function's resources", () => {
-  const program = createTestProgram();
-  const signature = signatureRef("test.signature");
-  const memory = testMemory("test.memory");
-  const owner = functionRef("test.memory-owner");
-  const fn = functionRef("test.function");
-
-  program.signature({ ref: signature, type: voidType });
-  program.legacyFunction({
-    ref: owner,
-    signature,
-    calls: [],
-    resources: [memory],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => new WasmFunctionBodyEncoder().finish()
-  });
-  program.legacyFunction({
-    ref: fn,
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => new WasmFunctionBodyEncoder().memorySize(0).drop().finish()
-  });
-
-  throws(
-    () => compileBytes(program.finish()),
-    /undeclared Wasm memory index 0/
-  );
-});
-
-test("recorded table indexes must come from that legacy function's tables", () => {
-  const program = createTestProgram();
-  const signature = signatureRef("test.signature");
-  const table = tableRef("test.table");
-  const fn = functionRef("test.function");
-
-  program.signature({ ref: signature, type: voidType });
-  program.importTable({ ref: table, moduleName: "test", name: "table", limits: { minElements: 1 } });
-  program.legacyFunction({
-    ref: fn,
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => new WasmFunctionBodyEncoder().i32Const(0).callIndirect(0, 0).finish()
-  });
-
-  throws(
-    () => compileBytes(program.finish()),
-    /undeclared Wasm table index 0/
-  );
-});
-
-test("recorded type indexes must come from the function's declared signature", () => {
-  const program = createTestProgram();
-  const signature = signatureRef("test.signature");
-  const unrelatedSignature = signatureRef("test.unrelated-signature");
-  const table = tableRef("test.table");
-  const fn = functionRef("test.function");
-
-  program.signature({ ref: signature, type: voidType });
-  program.signature({ ref: unrelatedSignature, type: i32Type });
-  program.importTable({ ref: table, moduleName: "test", name: "table", limits: { minElements: 1 } });
-  program.legacyFunction({
-    ref: functionRef("test.unrelated-function"),
-    signature: unrelatedSignature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => new WasmFunctionBodyEncoder().i32Const(0).finish()
-  });
-  program.legacyFunction({
-    ref: fn,
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [table],
-    irBlocks: [],
-    build: () => new WasmFunctionBodyEncoder().i32Const(0).callIndirect(1, 0).finish()
-  });
-
-  throws(
-    () => compileBytes(program.finish()),
-    /undeclared Wasm type index 1/
-  );
-});
-
-test("typed internal globals resolve through declared legacy bindings and execute", async () => {
-  const program = createTestProgram();
-  const counterSignature = signatureRef("test.counter-signature");
-  const counter = globalRef("test.counter");
-  const increment = functionRef("test.increment");
-
-  program.signature({ ref: counterSignature, type: i32Type });
-  program.global({
-    ref: counter,
-    type: wasmValueType.i32,
-    mutable: true,
-    initialValue: 40
-  });
-  program.legacyFunction({
-    ref: increment,
-    signature: counterSignature,
-    calls: [],
-    resources: [],
-    globals: [counter],
-    tables: [],
-    irBlocks: [],
-    build: (context) => {
-      const counterIndex = context.globals.get(counter);
-
-      assert(counterIndex !== undefined, "missing counter global binding");
-      return new WasmFunctionBodyEncoder()
-        .globalGet(counterIndex)
-        .i32Const(1)
-        .i32Add()
-        .globalSet(counterIndex)
-        .globalGet(counterIndex)
-        .finish();
-    }
-  });
   program.exportFunction({
-    ref: functionExportRef("test.increment-export"),
-    name: "increment",
-    target: increment
-  });
-
-  const closed = program.finish();
-
-  const bytes = compileBytes(closed);
-  const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
-  const incrementExport = instance.exports.increment;
-
-  if (typeof incrementExport !== "function") {
-    throw new Error("missing compiled global test exports");
-  }
-  strictEqual(incrementExport(), 41);
-  strictEqual(incrementExport(), 42);
-});
-
-test("recorded global indexes must come from that legacy function's globals", () => {
-  const program = createTestProgram();
-  const signature = signatureRef("test.signature");
-  const programGlobal = globalRef("test.global");
-  const fn = functionRef("test.function");
-
-  program.signature({ ref: signature, type: voidType });
-  program.global({
-    ref: programGlobal,
-    type: wasmValueType.i32,
-    mutable: true,
-    initialValue: 0
-  });
-  program.legacyFunction({
-    ref: fn,
-    signature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => new WasmFunctionBodyEncoder().globalGet(0).drop().finish()
+    ref: functionExportRef("test.identity-export"),
+    name: "entry",
+    target: functionRef(declared.ref.id)
   });
 
   throws(
-    () => compileBytes(program.finish()),
-    /undeclared Wasm global index 0/
+    () => program.finish(),
+    /unknown program function test\.declared exported/
   );
 });
 
 test("program closure rejects functions owned by another program", () => {
-  {
-    const owner = createTestProgram();
-    const consumer = createTestProgram();
-    const ownedType = functionType([], []);
-    const consumerSignature = signatureRef("test.consumer-signature");
-    const ownedRef = functionRef("test.owned-function");
-    const root = functionRef("test.cross-program-root");
+  const owner = createTestProgram();
+  const consumer = createTestProgram();
+  const type = functionType([], ["i32"]);
+  const owned = owner.defineFunction({
+    ref: functionRef("test.owned-function"),
+    type,
+    effects: noEffects
+  }, (fn) => fn.return([fn.values.const(1)]));
 
-    const owned = owner.defineFunction({
-      ref: ownedRef,
-      type: ownedType,
-      effects: noEffects
-    }, (fn) => fn.return([]));
-    const ir = buildIrBlock((body) => {
-      body.call(owned, []);
-    });
+  consumer.defineFunction({
+    ref: functionRef("test.cross-program-root"),
+    type,
+    effects: noEffects
+  }, (fn) => {
+    const result = fn.region.call(owned, [])[0];
 
-    consumer.signature({ ref: consumerSignature, type: voidType });
-    consumer.legacyFunction({
-      ref: root,
-      signature: consumerSignature,
-      calls: [],
-      resources: [],
-      globals: [],
-      tables: [],
-      irBlocks: [{ block: ir, allowImplicitEntryFallthrough: true }],
-      build: () => new WasmFunctionBodyEncoder().finish()
-    });
+    assert(result !== undefined, "missing cross-program result");
+    fn.return([result]);
+  });
 
-    throws(() => consumer.finish(), /belongs to another program/);
-  }
+  throws(() => consumer.finish(), /belongs to another program/);
 });
 
 test("program closure retains live and transitive family types but omits a dead type", () => {
@@ -1690,7 +1115,6 @@ test("program closure retains live and transitive family types but omits a dead 
 
   const closed = program.finish();
 
-  deepStrictEqual(closed.signatures, []);
   deepStrictEqual(
     closed.functions.map((fn) => fn.ref),
     [root.ref, live.ref, transitive.ref]
@@ -1704,7 +1128,7 @@ test("program closure retains live and transitive family types but omits a dead 
   strictEqual(closed.functionTypes.includes(deadType), false);
   const liveFunction = closed.functions.find((fn) => fn.ref === live.ref);
 
-  ok(liveFunction?.kind === "function", "missing live family member");
+  ok(liveFunction !== undefined, "missing live family member");
   ok(closed.functions.some((fn) => fn.ref === transitive.ref), "missing transitive family member");
   deepStrictEqual(liveFunction.effects, noEffects);
   compileBytes(closed);
@@ -1712,13 +1136,11 @@ test("program closure retains live and transitive family types but omits a dead 
 
 test("generated and declared functions share one identity namespace", () => {
   const program = createTestProgram();
-  const generatedType = functionType([], ["i64"]);
-  const generatedSignature = signatureRef("test.generated-collision-signature");
-  const rootSignature = signatureRef("test.generated-collision-root-signature");
+  const type = functionType([], ["i64"]);
   const collisionId = "test.generated-collision";
   let generatedBuilt = false;
   const family = new FunctionFamily<number>({
-    type: generatedType,
+    type,
     effects: () => noEffects,
     id: () => collisionId,
     build: (_key, fn) => {
@@ -1727,40 +1149,25 @@ test("generated and declared functions share one identity namespace", () => {
     }
   });
   const generated = family.get(0);
-  const rootBlock = buildIrBlock((body) => {
-    const result = body.call(generated, [])[0];
 
-    if (result === undefined) {
-      throw new Error("missing generated collision result");
-    }
-    body.finish({ kind: "exit", result });
-  });
-
-  program.signature({ ref: generatedSignature, type: generatedType });
-  program.signature({ ref: rootSignature, type: voidType });
-  program.legacyFunction({
+  program.defineFunction({
     ref: functionRef(collisionId),
-    signature: generatedSignature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: () => new WasmFunctionBodyEncoder().i64Const(0n).finish()
-  });
-  program.legacyFunction({
+    type,
+    effects: noEffects
+  }, (fn) => fn.return([fn.values.const64(1n)]));
+  program.defineFunction({
     ref: functionRef("test.generated-collision-root"),
-    signature: rootSignature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [{ block: rootBlock, allowImplicitEntryFallthrough: false }],
-    build: () => new WasmFunctionBodyEncoder().finish()
+    type,
+    effects: noEffects
+  }, (fn) => {
+    const result = fn.region.call(generated, [])[0];
+
+    assert(result !== undefined, "missing generated collision result");
+    fn.return([result]);
   });
 
   throws(
-    () => validateProgram(program.finish()),
+    () => program.finish(),
     /duplicate program function identity/
   );
   strictEqual(generatedBuilt, false);
@@ -1770,46 +1177,22 @@ test("distinct semantic function contracts coalesce to one physical Wasm type", 
   const program = createTestProgram();
   const firstType = functionType([], ["i32"]);
   const secondType = functionType([], ["i32"]);
-  const firstSignature = signatureRef("test.first-physical-signature");
-  const secondSignature = signatureRef("test.second-physical-signature");
-  let firstTypeIndex: number | undefined;
-  let secondTypeIndex: number | undefined;
 
-  program.signature({ ref: firstSignature, type: firstType });
-  program.signature({ ref: secondSignature, type: secondType });
-  program.legacyFunction({
+  program.defineFunction({
     ref: functionRef("test.first-physical-function"),
-    signature: firstSignature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: (context) => {
-      firstTypeIndex = context.signatureIndex;
-      return new WasmFunctionBodyEncoder().i32Const(1).finish();
-    }
-  });
-  program.legacyFunction({
+    type: firstType,
+    effects: noEffects
+  }, (fn) => fn.return([fn.values.const(1)]));
+  program.defineFunction({
     ref: functionRef("test.second-physical-function"),
-    signature: secondSignature,
-    calls: [],
-    resources: [],
-    globals: [],
-    tables: [],
-    irBlocks: [],
-    build: (context) => {
-      secondTypeIndex = context.signatureIndex;
-      return new WasmFunctionBodyEncoder().i32Const(2).finish();
-    }
-  });
+    type: secondType,
+    effects: noEffects
+  }, (fn) => fn.return([fn.values.const(2)]));
 
   const closed = program.finish();
 
   deepStrictEqual(closed.functionTypes, [firstType, secondType]);
   strictEqual(closed.functionTypes[0], firstType);
   strictEqual(closed.functionTypes[1], secondType);
-  compileBytes(closed);
-  strictEqual(firstTypeIndex, 0);
-  strictEqual(secondTypeIndex, 0);
+  strictEqual(wasmFunctionTypeCount(compileBytes(closed)), 1);
 });

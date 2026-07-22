@@ -157,7 +157,7 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
   const closed = program.finish();
   const callerFunction = closed.functions.find((fn) => fn.ref === caller.ref);
 
-  if (callerFunction === undefined || callerFunction.kind !== "function") {
+  if (callerFunction === undefined) {
     throw new Error("missing returnCall caller");
   }
   deepStrictEqual(callerFunction.directTargets, [target]);

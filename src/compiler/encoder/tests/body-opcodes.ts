@@ -60,6 +60,25 @@ export function wasmDefinedFunctionCount(moduleBytes: Uint8Array<ArrayBuffer>): 
   throw new Error("missing Wasm function section");
 }
 
+export function wasmFunctionTypeCount(moduleBytes: Uint8Array<ArrayBuffer>): number {
+  let offset = 8;
+
+  while (offset < moduleBytes.length) {
+    const sectionId = requiredByte(moduleBytes, offset);
+    const sectionSize = readU32Leb128(moduleBytes, offset + 1);
+    const sectionStart = sectionSize.nextOffset;
+    const sectionEnd = sectionStart + sectionSize.value;
+
+    if (sectionId === wasmSectionId.type) {
+      return readU32Leb128(moduleBytes, sectionStart).value;
+    }
+
+    offset = sectionEnd;
+  }
+
+  throw new Error("missing Wasm type section");
+}
+
 export function wasmCodeFunctionCount(moduleBytes: Uint8Array<ArrayBuffer>): number {
   let offset = 8;
 

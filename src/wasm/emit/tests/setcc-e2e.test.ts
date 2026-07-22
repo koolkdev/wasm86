@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createLegacyInstructionBlock } from "#test/support/legacy-instruction-block.js";
+import { createInstructionFunction } from "./instruction-function.js";
 import { immBinding, regBinding } from "#core/instruction/bindings.js";
 import { gprChannel } from "#core/state/channels.js";
 import { CONDITIONS, type FlagBoolExpr } from "#core/flags/conditions.js";
@@ -13,7 +13,7 @@ import type { SemanticTemplate } from "#core/semantics/builder.js";
 import { cmpSemantic } from "#core/semantics/cmp.js";
 import { setccSemantic } from "#core/semantics/setcc.js";
 import { readWasmCpuStateChannel, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
-import { irBlockCompleted, instantiateIrBlock } from "./harness.js";
+import { testFunctionCompleted, instantiateTestFunction } from "./harness.js";
 
 // cmp + setcc consumes source-derived cmp conditions, and standalone setcc
 // rebuilds the condition through status-flag resolver calls.
@@ -58,10 +58,10 @@ test("a condition after a flag-writing branch uses the captured pending lazy rec
     s.if(s.read(s.reg("ecx"), { width: 32 }), (then) => then.writeFlag("ZF", v.const(1)));
     s.write(s.reg("eax"), v.select(s.condition("B"), v.const(1), v.const(0)), { width: 32 });
   };
-  const builder = createLegacyInstructionBlock();
+  const builder = createInstructionFunction();
 
   builder.add(joinedLazyCondition, [], loc(0x1000, 0x1001));
-  const { stateView, run } = await instantiateIrBlock(builder.finish());
+  const { stateView, run } = await instantiateTestFunction(builder.finish());
 
   writeWasmCpuStateSnapshot(stateView, {
     ebx: 3,
@@ -69,24 +69,24 @@ test("a condition after a flag-writing branch uses the captured pending lazy rec
     lazyFlagsA: 10,
     lazyFlagsB: 1
   });
-  strictEqual(run(), irBlockCompleted);
+  strictEqual(run(), testFunctionCompleted);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 1);
 });
 
 for (const [cc, predicate] of comparePredicates) {
   test(`cmp ebx, imm + set${cc.toLowerCase()} al matches the predicate`, async () => {
     for (const [left, right] of operandPairs) {
-      const builder = createLegacyInstructionBlock();
+      const builder = createInstructionFunction();
 
       builder.add(cmpSemantic(32), [regBinding("ebx"), immBinding(right)], loc(0x1000, 0x1006));
       builder.add(setccSemantic(cc), [regBinding("al")], loc(0x1006, 0x1009));
 
       const block = builder.finish();
-      const { stateView, run } = await instantiateIrBlock(block);
+      const { stateView, run } = await instantiateTestFunction(block);
       const label = `set${cc.toLowerCase()} with ${left}, ${right}`;
 
       writeWasmCpuStateSnapshot(stateView, { ebx: left, eax: 0xdeadbeaa });
-      strictEqual(run(), irBlockCompleted, label);
+      strictEqual(run(), testFunctionCompleted, label);
 
       // setcc writes the low byte only; the rest of eax is untouched.
       const expected = 0xdeadbe00 + (predicate(left, right) ? 1 : 0);
@@ -114,11 +114,11 @@ function evaluateCondition(expr: FlagBoolExpr, flags: ReadonlySet<X86StatusFlag>
 for (const cc of Object.keys(CONDITIONS) as ConditionCode[]) {
   test(`standalone set${cc.toLowerCase()} al evaluates every flag combination`, async () => {
     const condition = CONDITIONS[cc];
-    const builder = createLegacyInstructionBlock();
+    const builder = createInstructionFunction();
 
     builder.add(setccSemantic(cc), [regBinding("al")], loc(0x1000, 0x1003));
 
-    const { stateView, run } = await instantiateIrBlock(builder.finish());
+    const { stateView, run } = await instantiateTestFunction(builder.finish());
 
     for (let combo = 0; combo < 1 << condition.reads.length; combo += 1) {
       const flags = new Set(condition.reads.filter((_, index) => (combo >> index) & 1));
@@ -126,7 +126,7 @@ for (const cc of Object.keys(CONDITIONS) as ConditionCode[]) {
       const label = `set${cc.toLowerCase()} with ${[...flags].join("+") || "no flags"}`;
 
       writeWasmCpuStateSnapshot(stateView, { eax: 0x55aa55aa, ...flagFields });
-      strictEqual(run(), irBlockCompleted, label);
+      strictEqual(run(), testFunctionCompleted, label);
 
       const expected = 0x55aa5500 + (evaluateCondition(condition.expr, flags) ? 1 : 0);
 
