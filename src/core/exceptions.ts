@@ -45,6 +45,24 @@ export function pageFault<T>(linearAddress: T, errorCode: T): PageFault<T> {
   return { kind: "PF", linearAddress, errorCode };
 }
 
+export function mapCpuException<TSource, TTarget>(
+  exception: CpuException<TSource>,
+  mapValue: (value: TSource) => TTarget
+): CpuException<TTarget> {
+  switch (exception.kind) {
+    case "DE":
+    case "UD":
+      return exception;
+    case "GP":
+      return generalProtection(mapValue(exception.errorCode));
+    case "PF":
+      return pageFault(
+        mapValue(exception.linearAddress),
+        mapValue(exception.errorCode)
+      );
+  }
+}
+
 export function pageFaultErrorCode(access: PageFaultAccess): number {
   switch (access) {
     case "read":

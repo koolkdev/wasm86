@@ -64,12 +64,27 @@ export function buildJitProgram(
   assert(sourceBlocks.length > 0, "cannot build an empty JIT program");
   const blocks = prepareJitBlocks(sourceBlocks);
   const links = snapshotLinkLayout(linkLayout);
+  const blockFunctions = createBlockFunctions(blocks);
+  const externalTargetEips = uniqueU32(
+    blocks
+      .flatMap((block) => block.linkTargets)
+      .filter((targetEip) => !blockFunctions.has(targetEip))
+  );
   const tableTargetEips = links === undefined ? [] : [...links.keys()];
   const program = createJitProgram(model, tableTargetEips);
+  const stubFunctions = declareLinkStubs(
+    program,
+    links === undefined ? externalTargetEips : tableTargetEips,
+    links !== undefined
+  );
 
-  declareLinkStubs(program, tableTargetEips);
-  const blockFunctions = createBlockFunctions(blocks);
-  const linksByTargetEip = declareLinks(blocks, blockFunctions, program.linkTable, links);
+  const linksByTargetEip = declareLinks(
+    blocks,
+    blockFunctions,
+    stubFunctions,
+    program.linkTable,
+    links
+  );
 
   declareBlocks(program, blocks, blockFunctions, linksByTargetEip, links);
   return program.builder.finish();
@@ -145,10 +160,17 @@ function createJitProgram(
   };
 }
 
-function declareLinkStubs(program: JitProgram, targetEips: readonly number[]): void {
+function declareLinkStubs(
+  program: JitProgram,
+  targetEips: readonly number[],
+  exportFallbacks: boolean
+): ReadonlyMap<number, FunctionRef> {
+  const stubs = new Map<number, FunctionRef>();
+
   for (const targetEip of targetEips) {
     const stub = functionRef(`jit.stub.${hex(targetEip)}`);
 
+    stubs.set(targetEip, stub);
     program.builder.legacyFunction({
       ref: stub,
       signature: program.blockSignature,
@@ -162,12 +184,15 @@ function declareLinkStubs(program: JitProgram, targetEips: readonly number[]): v
         .i64Const(encodeTransfer({ kind: "linkStub", targetEip }))
         .finish()
     });
-    program.builder.exportFunction({
-      ref: functionExportRef(`jit.stub-export.${hex(targetEip)}`),
-      name: jitModuleLinkFallbackExportName(targetEip),
-      target: stub
-    });
+    if (exportFallbacks) {
+      program.builder.exportFunction({
+        ref: functionExportRef(`jit.stub-export.${hex(targetEip)}`),
+        name: jitModuleLinkFallbackExportName(targetEip),
+        target: stub
+      });
+    }
   }
+  return stubs;
 }
 
 function createBlockFunctions(blocks: readonly JitProgramBlock[]): ReadonlyMap<number, FunctionRef> {
@@ -180,18 +205,20 @@ function createBlockFunctions(blocks: readonly JitProgramBlock[]): ReadonlyMap<n
 function declareLinks(
   blocks: readonly JitProgramBlock[],
   blockFunctions: ReadonlyMap<number, FunctionRef>,
+  stubFunctions: ReadonlyMap<number, FunctionRef>,
   table: TableRef | undefined,
   linkLayout: JitLinkLayout | undefined
 ): ReadonlyMap<number, JitLink> {
   return new Map(uniqueU32(blocks.flatMap((block) => block.linkTargets)).map((targetEip) => [
     targetEip,
-    declareLink(targetEip, blockFunctions, table, linkLayout)
+    declareLink(targetEip, blockFunctions, stubFunctions, table, linkLayout)
   ]));
 }
 
 function declareLink(
   targetEip: number,
   blockFunctions: ReadonlyMap<number, FunctionRef>,
+  stubFunctions: ReadonlyMap<number, FunctionRef>,
   table: TableRef | undefined,
   linkLayout: JitLinkLayout | undefined
 ): JitLink {
@@ -201,7 +228,14 @@ function declareLink(
     return { targetEip, target: { kind: "function", function: internalFunction } };
   }
 
-  assert(table !== undefined && linkLayout !== undefined, `unknown JIT link target: 0x${hex(targetEip)}`);
+  if (linkLayout === undefined) {
+    const stub = stubFunctions.get(targetEip);
+
+    assert(stub !== undefined, `missing JIT fallback stub for 0x${hex(targetEip)}`);
+    return { targetEip, target: { kind: "function", function: stub } };
+  }
+
+  assert(table !== undefined, `unknown JIT link target: 0x${hex(targetEip)}`);
   assert(linkLayout.has(targetEip), `unknown JIT link table target: 0x${hex(targetEip)}`);
   return { targetEip, target: { kind: "table", table } };
 }

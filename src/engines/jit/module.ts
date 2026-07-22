@@ -1,7 +1,4 @@
-import {
-  compileProgram,
-  type CompiledProgram
-} from "#compiler/program/compile.js";
+import { compileProgram } from "#compiler/program/compile.js";
 import type { ExecutionModel } from "#execution/model.js";
 import { u32 } from "#core/numeric.js";
 import type { IrBlock } from "#ir/block.js";
@@ -44,15 +41,7 @@ export function encodeJitModule(
   blocks: readonly JitBlock[],
   options: JitModuleOptions = {}
 ): Uint8Array<ArrayBuffer> {
-  return compileJitProgram(model, blocks, options).bytes;
-}
-
-export function compileJitProgram(
-  model: ExecutionModel,
-  blocks: readonly JitBlock[],
-  options: JitModuleOptions = {}
-): CompiledProgram {
   return compileProgram(
     buildJitProgram(model, blocks, options.linkLayout)
-  );
+  ).bytes;
 }

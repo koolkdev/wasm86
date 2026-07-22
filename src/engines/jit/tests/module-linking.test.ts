@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { decodeJitBlock } from "#engines/jit/decode-block.js";
+import { compileJitFromMemory } from "#engines/jit/compile.js";
 import {
   assertLazyFlagState,
   readWasmCpuStateSnapshot,
@@ -9,7 +9,10 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
-import { compileActionWasmBlockHandle, type WasmBlockHandle } from "#engines/jit/block-handle.js";
+import {
+  instantiateJitArtifact,
+  type JitArtifactHandle
+} from "#test/support/jit-artifact.js";
 import { writeBackingBytes } from "#memory/bytes.js";
 import { testExecutionModel } from "#test/support/execution-model.js";
 
@@ -170,7 +173,10 @@ function createLinkingFixture(blocks: readonly TestBlock[]): Readonly<{
   };
 }
 
-function compileBlock(fixture: ReturnType<typeof createLinkingFixture>, eip: number): WasmBlockHandle {
+function compileBlock(
+  fixture: ReturnType<typeof createLinkingFixture>,
+  eip: number
+): JitArtifactHandle {
   const source = fixture.blocks.find((testBlock) => testBlock.eip === eip);
 
   ok(source, `expected source bytes at 0x${eip.toString(16)}`);
@@ -185,15 +191,14 @@ function compileBlock(fixture: ReturnType<typeof createLinkingFixture>, eip: num
     firstFailingAddress === undefined,
     `source bytes exceed guest memory at 0x${firstFailingAddress?.toString(16)}`
   );
-  const decoded = decodeJitBlock(
-    testExecutionModel.guestMemory.createReader(
-      fixture.memories.guestMemory
-    ),
-    eip,
-    { maxInstructions: 1024 }
-  );
+  const artifact = compileJitFromMemory({
+    memory: fixture.memories.guestMemory,
+    start: eip,
+    policy: { instructionLimit: 1024 },
+    model: testExecutionModel
+  });
 
-  return compileActionWasmBlockHandle(testExecutionModel, [decoded], {
+  return instantiateJitArtifact(testExecutionModel, artifact, {
     cpuStateMemory: fixture.memories.cpuStateMemory,
     guestMemory: fixture.memories.guestMemory
   });

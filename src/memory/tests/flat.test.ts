@@ -7,7 +7,11 @@ import {
 import { test } from "node:test";
 
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { guestMemoryMinimumByteLength } from "#memory/constants.js";
+import {
+  guestMemoryMinimumByteLength,
+  guestMemoryMinimumPages
+} from "#memory/constants.js";
+import { writeBackingBytes } from "#memory/bytes.js";
 import {
   flatMemoryResolution,
   flatMemoryOperand
@@ -16,7 +20,52 @@ import {
   PageFaultErrorCode,
   pageFault
 } from "#core/exceptions.js";
-import { guestMemoryResource } from "#test/support/execution-model.js";
+import {
+  guestMemoryResource,
+  testExecutionModel
+} from "#test/support/execution-model.js";
+
+test("flat byte reads use the flat backing boundary and requested fault intent", () => {
+  const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
+  const finalAddress = guestMemoryMinimumByteLength - 1;
+  const reader = testExecutionModel.guestMemory.createReader(memory);
+
+  writeBackingBytes(memory, finalAddress, [0xa5]);
+
+  deepStrictEqual(
+    reader.readByte(finalAddress, "instructionFetch"),
+    { kind: "value", value: 0xa5 }
+  );
+  deepStrictEqual(
+    reader.readByte(
+      guestMemoryMinimumByteLength,
+      "instructionFetch"
+    ),
+    {
+      kind: "exception",
+      exception: pageFault(
+        guestMemoryMinimumByteLength,
+        PageFaultErrorCode.INSTRUCTION_FETCH
+      )
+    }
+  );
+  deepStrictEqual(
+    reader.readByte(guestMemoryMinimumByteLength, "read"),
+    {
+      kind: "exception",
+      exception: pageFault(guestMemoryMinimumByteLength, 0)
+    }
+  );
+});
+
+test("flat byte reads validate their Memory binding", () => {
+  throws(
+    () => testExecutionModel.guestMemory.createReader(
+      new WebAssembly.Memory({ initial: 0 })
+    ),
+    /guest memory is shorter than the flat address-space binding/
+  );
+});
 
 test("a static-length flat access is one unsigned limit compare", () => {
   const values = new ValueTable();

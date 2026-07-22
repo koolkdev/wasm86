@@ -8,7 +8,15 @@ import {
   pageFault
 } from "#core/exceptions.js";
 import { decodeJitBlock } from "#engines/jit/decode-block.js";
-import type { GuestMemoryReader } from "#memory/access.js";
+import {
+  defaultJitBlockPolicy,
+  jitSnapshotRequestByteLength,
+  type JitBlockPolicy
+} from "#engines/jit/policy.js";
+import {
+  snapshotInstructionBytes,
+  type InstructionByteSnapshot
+} from "#engines/jit/instruction-snapshot.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import { testExecutionModel } from "#test/support/execution-model.js";
 import { jitMemoryWithBytes } from "./decode-helpers.js";
@@ -23,7 +31,10 @@ test("decodeJitBlock decodes until an unconditional control instruction", () => 
     [[0xcd, 0x2e], "int.imm8"],
     [[0xcc], "int3.near"]
   ] as const) {
-    const block = decodeJitBlock(memory([0x90, ...bytes, 0x90]), startAddress);
+    const block = decodeJitBlock(
+      memory([0x90, ...bytes, 0x90]),
+      defaultJitBlockPolicy
+    );
 
     deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["xchg.eax_r32", id]);
     strictEqual(block.terminator.kind, "control", id);
@@ -50,8 +61,7 @@ test("decodeJitBlock keeps conditional control inside fallthrough blocks", () =>
   ] as const) {
     const block = decodeJitBlock(
       memory([0x90, ...bytes, 0x90]),
-      startAddress,
-      { maxInstructions: 3 }
+      { instructionLimit: 3 }
     );
 
     deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), [
@@ -69,8 +79,7 @@ test("decodeJitBlock keeps conditional control inside fallthrough blocks", () =>
 test("decodeJitBlock returns fallthrough when its instruction limit ends the block", () => {
   const block = decodeJitBlock(
     memory([0x90, 0x90, 0xcd, 0x2e]),
-    startAddress,
-    { maxInstructions: 2 }
+    { instructionLimit: 2 }
   );
 
   deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), [
@@ -81,7 +90,7 @@ test("decodeJitBlock returns fallthrough when its instruction limit ends the blo
 });
 
 test("decodeJitBlock carries a first-instruction invalid-opcode terminal", () => {
-  const block = decodeJitBlock(memory([0x62]), startAddress);
+  const block = decodeJitBlock(memory([0x62]), defaultJitBlockPolicy);
 
   deepStrictEqual(block.instructions, []);
   deepStrictEqual(block.terminator, {
@@ -93,7 +102,10 @@ test("decodeJitBlock carries a first-instruction invalid-opcode terminal", () =>
 });
 
 test("decodeJitBlock places invalid opcode after a decoded instruction prefix", () => {
-  const block = decodeJitBlock(memory([0x90, 0x62, 0x90]), startAddress);
+  const block = decodeJitBlock(
+    memory([0x90, 0x62, 0x90]),
+    defaultJitBlockPolicy
+  );
 
   deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["xchg.eax_r32"]);
   deepStrictEqual(block.terminator, {
@@ -106,8 +118,8 @@ test("decodeJitBlock places invalid opcode after a decoded instruction prefix", 
 
 test("decodeJitBlock carries an instruction-fetch page fault", () => {
   const block = decodeJitBlock(
-    memory([]),
-    guestMemoryMinimumByteLength
+    memory([], guestMemoryMinimumByteLength),
+    defaultJitBlockPolicy
   );
 
   deepStrictEqual(block.instructions, []);
@@ -126,7 +138,7 @@ test("decodeJitBlock places a fetch page fault after decoded instructions", () =
   const instructionStart = guestMemoryMinimumByteLength - 2;
   const block = decodeJitBlock(
     memory([0x90, 0xb8], instructionStart),
-    instructionStart
+    defaultJitBlockPolicy
   );
 
   deepStrictEqual(block.instructions.map((instruction) => instruction.spec.id), ["xchg.eax_r32"]);
@@ -144,7 +156,10 @@ test("decodeJitBlock places a fetch page fault after decoded instructions", () =
 test("decodeJitBlock gives the instruction limit priority over a fetch fault", () => {
   const bytes = new Array<number>(15).fill(0x66);
   const instructionStart = guestMemoryMinimumByteLength - bytes.length;
-  const block = decodeJitBlock(memory(bytes, instructionStart), instructionStart);
+  const block = decodeJitBlock(
+    memory(bytes, instructionStart),
+    defaultJitBlockPolicy
+  );
 
   deepStrictEqual(block.instructions, []);
   deepStrictEqual(block.terminator, {
@@ -155,27 +170,20 @@ test("decodeJitBlock gives the instruction limit priority over a fetch fault", (
   });
 });
 
-test("decodeJitBlock reads through its guest-memory reader as instruction fetch", () => {
-  const reads: Array<Readonly<{ address: number; intent: string }>> = [];
-  const block = decodeJitBlock({
-    readByte: (address, intent) => {
-      reads.push({ address, intent });
-      return { kind: "value", value: 0xcc };
-    }
-  }, startAddress);
-
-  deepStrictEqual(reads, [{
-    address: startAddress,
-    intent: "instructionFetch"
-  }]);
-  strictEqual(block.terminator.kind, "control");
-});
-
 function memory(
   values: readonly number[],
-  address = startAddress
-): GuestMemoryReader {
-  return testExecutionModel.guestMemory.createReader(
+  address = startAddress,
+  policy: JitBlockPolicy = defaultJitBlockPolicy
+): InstructionByteSnapshot {
+  const reader = testExecutionModel.guestMemory.createReader(
     jitMemoryWithBytes(values, address)
+  );
+
+  return snapshotInstructionBytes(
+    reader,
+    {
+      linearStart: address,
+      byteLength: jitSnapshotRequestByteLength(policy)
+    }
   );
 }

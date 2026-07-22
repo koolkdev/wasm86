@@ -14,11 +14,15 @@ import {
   pageFault,
   pageFaultErrorCode
 } from "#core/exceptions.js";
+import { readBackingByte } from "./bytes.js";
 import { guestMemoryMinimumByteLength } from "./constants.js";
 import type {
+  GuestMemoryByteRead,
+  GuestMemoryReader,
   LinearRange,
   MemoryAccess,
   MemoryAccessIntent,
+  MemoryReadIntent,
   MemoryResolution
 } from "./access.js";
 
@@ -29,6 +33,45 @@ type ConstantValues = Readonly<{
 }>;
 
 const addressSpaceByteLength = 0x1_0000_0000;
+
+export function createFlatGuestMemoryReader(
+  memory: WebAssembly.Memory
+): GuestMemoryReader {
+  validateFlatMemoryBinding(memory);
+  return {
+    readByte: (address, intent) => readFlatMemoryByte(memory, address, intent)
+  };
+}
+
+function readFlatMemoryByte(
+  memory: WebAssembly.Memory,
+  address: number,
+  intent: MemoryReadIntent
+): GuestMemoryByteRead {
+  if (!Number.isInteger(address) || address < 0 || address > 0xffff_ffff) {
+    throw new RangeError(`flat memory address must be u32, got ${address}`);
+  }
+
+  if (address >= guestMemoryMinimumByteLength) {
+    return {
+      kind: "exception",
+      exception: pageFault(address, pageFaultErrorCode(intent))
+    };
+  }
+
+  const value = readBackingByte(memory, address);
+
+  assert(value !== undefined, `checked flat memory byte is absent at ${address}`);
+  return { kind: "value", value };
+}
+
+function validateFlatMemoryBinding(memory: WebAssembly.Memory): void {
+  if (memory.buffer.byteLength < guestMemoryMinimumByteLength) {
+    throw new RangeError(
+      "guest memory is shorter than the flat address-space binding"
+    );
+  }
+}
 
 export function flatMemoryResolution<TIntent extends MemoryAccessIntent>(
   values: FlatMemoryValues,

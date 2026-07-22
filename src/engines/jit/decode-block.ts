@@ -5,7 +5,8 @@ import type {
   IsaDecodeReader
 } from "#core/decoder/types.js";
 import { u32 } from "#core/numeric.js";
-import type { GuestMemoryReader } from "#memory/access.js";
+import type { InstructionByteSnapshot } from "./instruction-snapshot.js";
+import type { JitBlockPolicy } from "./policy.js";
 
 export type JitDecodedBlock = Readonly<{
   startEip: number;
@@ -18,29 +19,26 @@ export type JitBlockTerminator =
   | Readonly<{ kind: "control"; instruction: IsaDecodedInstruction }>
   | IsaDecodeExceptionResult;
 
-export type DecodeJitBlockOptions = Readonly<{
-  maxInstructions?: number;
-}>;
-
-const defaultMaxInstructions = 64;
-
 export function decodeJitBlock(
-  memoryReader: GuestMemoryReader,
-  startEip: number,
-  options: DecodeJitBlockOptions = {}
+  snapshot: InstructionByteSnapshot,
+  policy: JitBlockPolicy
 ): JitDecodedBlock {
+  const startEip = snapshot.linearStart;
   const instructions: IsaDecodedInstruction[] = [];
-  const maxInstructions = options.maxInstructions ?? defaultMaxInstructions;
   const reader: IsaDecodeReader = {
-    readU8: (address) => memoryReader.readByte(address, "instructionFetch")
+    readU8: (address) => snapshot.readByte(address)
   };
   let eip = u32(startEip);
 
-  for (let count = 0; count < maxInstructions; count += 1) {
+  for (let count = 0; count < policy.instructionLimit; count += 1) {
     const decoded = decodeIsaInstructionFromReader(reader, eip);
 
     if (decoded.kind === "cpuException") {
-      return { startEip, instructions, terminator: decoded };
+      return {
+        startEip,
+        instructions,
+        terminator: decoded
+      };
     }
 
     instructions.push(decoded.instruction);
