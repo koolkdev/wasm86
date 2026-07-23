@@ -21,6 +21,7 @@ import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/ir/refs.js";
 import { VariableRef } from "#compiler/ir/variable.js";
 import type { Region } from "#compiler/ir/region.js";
+import { describeNode } from "#compiler/ir/node.js";
 
 test("if control definitions expose their condition, outputs, and nested bodies", () => {
   const values = new ValueTable();
@@ -72,7 +73,12 @@ test("loops expose carried values and their loop-scoped body", () => {
     role: "body",
     scope: { kind: "loop", inputs: [loopInput] }
   }]);
-  deepStrictEqual(body.nodes[0]?.operands, [update]);
+  const continuation = body.nodes[0];
+
+  strictEqual(continuation?.kind, "loopContinue");
+  if (continuation !== undefined) {
+    deepStrictEqual(describeNode(continuation).operands, [update]);
+  }
 });
 
 test("control-only switches share one body across all matches", () => {

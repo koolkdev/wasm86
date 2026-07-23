@@ -100,14 +100,14 @@ test("state reads and writes normalize to resource operations", () => {
     throw new Error("missing state resource write");
   }
 
-  strictEqual(read.kind, "resource.read");
-  deepStrictEqual(read.outputs, [flagValue]);
-  strictEqual(read.signed, undefined);
-  strictEqual(read.results[0]?.type, "i32");
-  deepStrictEqual(read.results[0]?.bounds, { unsignedBits: 1, signedBits: 2 });
-  strictEqual(read.inputs[0]?.value, flag.address.base);
-  strictEqual(write.kind, "resource.write");
-  strictEqual(write.effect.resource, cpuState.resource);
+  strictEqual(read.output, flagValue);
+  deepStrictEqual(read.source, flag);
+  deepStrictEqual(read.mode, {
+    kind: "unsigned",
+    bounds: { unsignedBits: 1, signedBits: 2 }
+  });
+  strictEqual(write.destination, count);
+  strictEqual(write.destination.effect.resource, cpuState.resource);
 });
 
 test("execution-state access rejects an operand from another resource", () => {

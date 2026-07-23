@@ -11,18 +11,9 @@ export type Region = Readonly<{
   result?: ValueId;
 }>;
 
-// A control completes its owner when every selectable path escapes. A
-// result-bearing body instead falls through to its control's join.
-export function nodeCompletes(node: RegionNode): boolean {
-  return node.completes({ regionCompletes });
-}
-
 export function regionCompletes(body: Region): boolean {
-  return regionFinal(body) !== undefined;
-}
-
-export function regionFinal(body: Region): RegionNode | undefined {
   const last = body.nodes[body.nodes.length - 1];
 
-  return last !== undefined && nodeCompletes(last) ? last : undefined;
+  return last?.category === "control" &&
+    last.completes({ regionCompletes });
 }

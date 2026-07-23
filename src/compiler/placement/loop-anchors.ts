@@ -1,6 +1,7 @@
 import { assert } from "#common/assert.js";
 import { valueDependsOn } from "#compiler/analysis/dependencies.js";
 import type { FunctionAnalysis, SiteId } from "#compiler/analysis/model.js";
+import { describeNode } from "#compiler/ir/node.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { FunctionGraph } from "#compiler/ir/function.js";
 import type { Region } from "#compiler/ir/region.js";
@@ -27,14 +28,16 @@ export class LoopAnchors {
     };
     const visit = (body: Region, loops: readonly LoopBoundary[]): void => {
       for (const [index, node] of body.nodes.entries()) {
-        for (const output of node.outputs) {
+        const description = describeNode(node);
+
+        for (const output of description.outputs) {
           addScoped(output, loops);
         }
         if (node.category === "operation") {
           continue;
         }
 
-        for (const nested of node.nestedBodies) {
+        for (const nested of description.nestedBodies) {
           if (nested.scope.kind !== "loop") {
             visit(nested.body, loops);
             continue;

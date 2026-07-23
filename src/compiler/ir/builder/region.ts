@@ -19,8 +19,12 @@ import {
 } from "#compiler/ir/controls/index.js";
 import type { Region, RegionNode } from "../region.js";
 import {
+  describeNode
+} from "#compiler/ir/node.js";
+import {
   type Operation,
-  type OperationFactory,
+  type OperationDefinition,
+  type OperationProduction,
   type OperationResult
 } from "#compiler/ir/operations/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -104,30 +108,35 @@ export class RegionBuilder {
 
   operation<
     CreateArgs,
-    Entry extends Operation & { readonly results: readonly [OperationResult] }
+    Entry extends Operation
   >(
-    factory: OperationFactory<CreateArgs, Entry>,
+    definition: OperationDefinition<
+      CreateArgs,
+      Entry,
+      readonly [OperationProduction]
+    >,
     args: CreateArgs
   ): ValueId;
   operation<
     CreateArgs,
-    Entry extends Operation & { readonly results: readonly [] }
+    Entry extends Operation
   >(
-    factory: OperationFactory<CreateArgs, Entry>,
+    definition: OperationDefinition<CreateArgs, Entry, readonly []>,
     args: CreateArgs
   ): void;
   operation<
     CreateArgs,
-    Entry extends Operation
+    Entry extends Operation,
+    Productions extends readonly OperationProduction[]
   >(
-    factory: OperationFactory<CreateArgs, Entry>,
+    definition: OperationDefinition<CreateArgs, Entry, Productions>,
     args: CreateArgs
   ): void | ValueId {
-    const operation = factory.create(
+    const operation = definition.create(
       args,
       (result) => this.#allocateOperationOutput(result)
     );
-    const outputs = operation.outputs;
+    const outputs = describeNode(operation).outputs;
 
     this.#emit(operation);
 
@@ -135,7 +144,10 @@ export class RegionBuilder {
       return;
     }
 
-    assert(outputs.length === 1, `${factory.kind} has unsupported multiple results`);
+    assert(
+      outputs.length === 1,
+      `${definition.kind} has unsupported multiple results`
+    );
     return outputs[0];
   }
 
@@ -159,7 +171,7 @@ export class RegionBuilder {
     );
 
     this.#emit(operation);
-    return operation.outputs;
+    return describeNode(operation).outputs;
   }
 
   returnCall(target: CallTarget, args: readonly ValueId[]): void {

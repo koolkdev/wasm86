@@ -140,7 +140,7 @@ test("pending values hit directly while disjoint reads load once", () => {
   const ebxReads = readsFor(values, nodes(), gprChannel("ebx"));
 
   strictEqual(ebxReads.length, 1);
-  strictEqual(ebxReads[0]!.outputs[0], firstEbx);
+  strictEqual(ebxReads[0]!.output, firstEbx);
 });
 
 test("writing an input value back cancels a pending store", () => {
@@ -185,7 +185,7 @@ test("overlapping aliases flush before a differently sized read", () => {
       `${entry.written.reg} must commit before reading ${entry.read.reg}`
     );
     strictEqual(
-      readsFor(values, nodes(), entry.read)[0]?.outputs[0],
+      readsFor(values, nodes(), entry.read)[0]?.output,
       reloaded
     );
   }
@@ -224,7 +224,7 @@ test("disjoint byte aliases coexist until a covering read", () => {
 
   strictEqual(writesFor(values, nodes(), gprChannel("al")).length, 1);
   strictEqual(writesFor(values, nodes(), gprChannel("ah")).length, 1);
-  strictEqual(readsFor(values, nodes(), gprChannel("ax"))[0]?.outputs[0], ax);
+  strictEqual(readsFor(values, nodes(), gprChannel("ax"))[0]?.output, ax);
   strictEqual(pending.read(flagStateFields.concrete.ID), flag);
 });
 
@@ -261,7 +261,10 @@ test("signed and unsigned narrow loads are cached separately", () => {
   const reads = readsFor(values, nodes(), gprChannel("al"));
 
   strictEqual(reads.length, 2);
-  strictEqual(reads.filter((read) => read.signed === true).length, 1);
+  strictEqual(
+    reads.filter((read) => read.mode?.kind === "signed").length,
+    1
+  );
   strictEqual(values.truncate(8, unsigned), unsigned);
   strictEqual(values.extend(8, signed, true), signed);
 });
@@ -321,10 +324,10 @@ test("dynamic segment selector and base reads stay distinct", () => {
   const reads = nodes().filter(isStateRead);
 
   strictEqual(reads.length, 2);
-  strictEqual(reads[0]!.outputs[0], selector);
-  strictEqual(reads[1]!.outputs[0], base);
-  strictEqual(reads[0]!.width, 16);
-  strictEqual(reads[1]!.width, 32);
+  strictEqual(reads[0]!.output, selector);
+  strictEqual(reads[1]!.output, base);
+  strictEqual(reads[0]!.source.width, 16);
+  strictEqual(reads[1]!.source.width, 32);
   strictEqual(values.truncate(16, selector), selector);
 });
 
@@ -463,7 +466,7 @@ test("dynamic writes invalidate GPR state without disturbing other channels", ()
   const dynamicWrites = nodes().filter(isStateWrite);
 
   strictEqual(dynamicWrites.length, 1);
-  strictEqual(dynamicWrites[0]!.width, 8);
+  strictEqual(dynamicWrites[0]!.destination.width, 8);
   strictEqual(stateWriteValue(dynamicWrites[0]!), stored);
   notStrictEqual(pending.read(gprChannel("eax")), oldRead);
   strictEqual(pending.read(flagStateFields.concrete.ID), flag);

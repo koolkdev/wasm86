@@ -159,7 +159,7 @@ test("input flags resolve once without becoming dirty state", () => {
 
   strictEqual(calls.length, 1);
   strictEqual(resolvedStatusFlag(calls[0]!), "ZF");
-  strictEqual(calls[0]!.outputs[0], first);
+  strictEqual(calls[0]!.output, first);
   strictEqual(pending.flushesForPath("completed").length, 0);
 });
 
@@ -193,7 +193,7 @@ test("resolving reset lazy fields preserves their fault rollback values", () => 
 
     strictEqual(reads.length, 1, `${field.id} is captured`);
     strictEqual(restores.length, 1, `${field.id} is restored`);
-    strictEqual(stateWriteValue(restores[0]!), reads[0]!.outputs[0]);
+    strictEqual(stateWriteValue(restores[0]!), reads[0]!.output);
   }
 
   strictEqual(resolverCalls(nodes()).length, 1);
@@ -366,7 +366,7 @@ test("non-compare input conditions use their typed resolver directly", () => {
 
   strictEqual(calls.length, 1);
   strictEqual(resolvedStatusFlag(calls[0]!), "SF");
-  strictEqual(calls[0]!.outputs[0], condition);
+  strictEqual(calls[0]!.output, condition);
   strictEqual(nodes().some((node) => node.kind === "switch"), false);
 });
 

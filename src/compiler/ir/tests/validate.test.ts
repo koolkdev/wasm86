@@ -506,7 +506,7 @@ test("unsigned read refinements must be valid and mechanically possible", () => 
       validateFunctionBlock(
         blockWithResourceOperation(wideValues, tooWide)
       ),
-    /bounds exceed/
+    /refinement exceeds/
   );
 
   const malformedValues = new ValueTable();
@@ -1074,22 +1074,5 @@ test("a body-local producer can feed its body result", () => {
         exitReturn(values)
       ])
     )
-  );
-});
-
-test("operation operands are allocated before their output", () => {
-  const values = new ValueTable();
-  const output = values.addNodeOutput();
-  const address = values.const(0x2000);
-
-  throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [
-          memoryReadOperation(output, address, 32),
-          exitReturn(values)
-        ])
-      ),
-    /created after its output/
   );
 });

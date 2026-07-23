@@ -8,6 +8,7 @@ import type { InstructionStateChannel } from "../state/channels.js";
 import { gprChannel } from "#core/state/channels.js";
 import type { LoopControl } from "#compiler/ir/controls/index.js";
 import type { FunctionGraph } from "#compiler/ir/function.js";
+import { describeNode } from "#compiler/ir/node.js";
 import type { RegionNode } from "#compiler/ir/region.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
 import {
@@ -27,7 +28,9 @@ function loopsIn(nodes: readonly RegionNode[]): LoopControl[] {
     if (node.kind === "loop") {
       return [node, ...loopsIn(node.body.nodes)];
     }
-    return node.nestedBodies.flatMap((nested) => loopsIn(nested.body.nodes));
+    return describeNode(node).nestedBodies.flatMap((nested) =>
+      loopsIn(nested.body.nodes)
+    );
   });
 }
 

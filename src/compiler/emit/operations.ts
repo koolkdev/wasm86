@@ -2,6 +2,7 @@ import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import type { WasmMemoryImmediate } from "#compiler/encoder/memory.js";
 import type { CallTarget } from "#compiler/ir/invocation.js";
+import { describeNode } from "#compiler/ir/node.js";
 import type {
   Operation,
   ResourceReadOperation,
@@ -17,7 +18,7 @@ export function emitOperation(
   values: ValueEmitter,
   operation: Operation
 ): void {
-  for (const input of operation.inputs) {
+  for (const input of describeNode(operation).inputs) {
     values.emitUse(input.value);
   }
 
@@ -51,20 +52,21 @@ function emitResourceRead(
   bindings: ModuleBindings,
   operation: ResourceReadOperation
 ): void {
+  const { source } = operation;
   const immediate = resourceImmediate(
-    bindings.resourceIndex(operation.effect.resource),
-    operation.width,
-    operation.displacement
+    bindings.resourceIndex(source.effect.resource),
+    source.width,
+    source.address.displacement
   );
 
-  switch (operation.width) {
+  switch (source.width) {
     case 8:
-      operation.signed
+      operation.mode?.kind === "signed"
         ? body.write(wasmInstruction.i32.load8S, immediate)
         : body.write(wasmInstruction.i32.load8U, immediate);
       return;
     case 16:
-      operation.signed
+      operation.mode?.kind === "signed"
         ? body.write(wasmInstruction.i32.load16S, immediate)
         : body.write(wasmInstruction.i32.load16U, immediate);
       return;
@@ -79,13 +81,14 @@ function emitResourceWrite(
   bindings: ModuleBindings,
   operation: ResourceWriteOperation
 ): void {
+  const { destination } = operation;
   const immediate = resourceImmediate(
-    bindings.resourceIndex(operation.effect.resource),
-    operation.width,
-    operation.displacement
+    bindings.resourceIndex(destination.effect.resource),
+    destination.width,
+    destination.address.displacement
   );
 
-  switch (operation.width) {
+  switch (destination.width) {
     case 8:
       body.write(wasmInstruction.i32.store8, immediate);
       return;

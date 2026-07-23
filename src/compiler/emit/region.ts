@@ -1,6 +1,7 @@
 import type { IrFunction } from "#compiler/ir/function.js";
+import { describeNode } from "#compiler/ir/node.js";
 import {
-  regionFinal,
+  regionCompletes,
   type Region,
   type RegionNode
 } from "#compiler/ir/region.js";
@@ -61,12 +62,14 @@ export function emitFunctionRegions(
 
     // Live producer outputs realize the operation through their value anchor.
     // Required operations with no live result execute at their structural site.
+    const { outputs } = describeNode(node);
+
     if (
-      !node.outputs.some((output) => analysis.isLive(output)) &&
+      !outputs.some((output) => analysis.isLive(output)) &&
       analysis.operationMustExecute(node)
     ) {
       emitOperation(body, bindings, valueEmitter, node);
-      for (const _output of node.outputs) {
+      for (const _output of outputs) {
         body.write(wasmInstruction.parametric.drop);
       }
     }
@@ -77,7 +80,7 @@ export function emitFunctionRegions(
       emitAtSite(region, nodeIndex, () => emitNode(node));
     }
 
-    if (region.result !== undefined || regionFinal(region) === undefined) {
+    if (region.result !== undefined || !regionCompletes(region)) {
       emitAtSite(region, region.nodes.length, () => {
         const result = region.result;
 

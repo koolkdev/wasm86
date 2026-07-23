@@ -4,6 +4,7 @@ import type { Control, ReturnControl } from "#compiler/ir/controls/index.js";
 import type {
   Operation
 } from "#compiler/ir/operations/index.js";
+import { describeNode } from "#compiler/ir/node.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { Region, RegionNode } from "#compiler/ir/region.js";
@@ -147,9 +148,11 @@ class FunctionAnalyzer implements FunctionAnalysis {
 
   operationMustExecute(operation: Operation): boolean {
     assert(this.#operationSet.has(operation), "operation is not part of this analysis");
+    const description = describeNode(operation);
+
     // An operation must execute when an output is used or it writes.
-    return operation.outputs.some((output) => this.#useCounts[output] !== 0) ||
-      operation.directEffects.writes.length !== 0;
+    return description.outputs.some((output) => this.#useCounts[output] !== 0) ||
+      description.effects.writes.length !== 0;
   }
 
   invocationMustExecute(site: InvocationSite): boolean {
@@ -212,16 +215,18 @@ class FunctionAnalyzer implements FunctionAnalysis {
       return this.#walkOperation(node, site, demand);
     }
 
-    this.#roots.push(...node.operands.map(demand));
+    const description = describeNode(node);
+
+    this.#roots.push(...description.operands.map(demand));
     if (node.kind === "return" && node.source.kind === "invocation") {
       this.#recordReturnInvocation(node, site);
     }
-    const nested = node.nestedBodies;
+    const nested = description.nestedBodies;
     const regions = nested.map((entry) => entry.body);
     const walked = nested.map((entry) =>
       this.#walkNestedRegion(entry.body, site, entry.scope.kind === "loop")
     );
-    const outputs = node.outputs;
+    const outputs = description.outputs;
 
     assert(outputs.length <= 1, `${node.kind} control has multiple join outputs`);
     if (outputs.length === 1) {
@@ -229,7 +234,7 @@ class FunctionAnalyzer implements FunctionAnalysis {
     }
 
     return mergeWrites([
-      node.directEffects.writes,
+      description.effects.writes,
       ...walked.map((result) => result.writes)
     ]);
   }
@@ -250,9 +255,10 @@ class FunctionAnalyzer implements FunctionAnalysis {
       this.#invocations.push(invocationSite);
       this.#operationByInvocationSite.set(invocationSite, operation);
     }
-    const inputs = operation.operands;
-    const outputs = operation.outputs;
-    const effects = operation.directEffects;
+    const description = describeNode(operation);
+    const inputs = description.operands;
+    const outputs = description.outputs;
+    const effects = description.effects;
 
     if (outputs.length === 0 && effects.writes.length !== 0) {
       this.#roots.push(...inputs.map(demand));
@@ -330,12 +336,13 @@ class FunctionAnalyzer implements FunctionAnalysis {
     let added = false;
 
     for (const { operation, site } of this.#operations) {
-      const outputs = operation.outputs;
+      const description = describeNode(operation);
+      const outputs = description.outputs;
 
       if (outputs.length === 0) {
         continue;
       }
-      const effects = operation.directEffects;
+      const effects = description.effects;
 
       if (effects.writes.length === 0) {
         continue;
@@ -343,7 +350,7 @@ class FunctionAnalyzer implements FunctionAnalysis {
       if (outputs.some((output) => this.#useCounts[output] !== 0)) {
         continue;
       }
-      for (const input of operation.operands) {
+      for (const input of description.operands) {
         this.#roots.push({ value: input, consumedAt: site });
         added = true;
       }

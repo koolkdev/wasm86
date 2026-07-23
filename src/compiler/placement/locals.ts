@@ -1,5 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { FunctionAnalysis, SiteId } from "#compiler/analysis/model.js";
+import { describeNode } from "#compiler/ir/node.js";
 import type { VariableRef } from "#compiler/ir/variable.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
@@ -55,7 +56,9 @@ export function planLocals(
       continue;
     }
 
-    for (const nested of site.node.nestedBodies) {
+    const description = describeNode(site.node);
+
+    for (const nested of description.nestedBodies) {
       if (nested.scope.kind !== "loop") {
         continue;
       }

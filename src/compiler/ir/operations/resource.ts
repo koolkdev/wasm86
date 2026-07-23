@@ -1,20 +1,14 @@
 import { assert } from "#common/assert.js";
 import {
   type ResourceByteOperand,
-  type ResourceEffect,
   type ResourceReadMode
 } from "#compiler/ir/resource.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
-import type {
-  IntegerWidth,
-  ValueId,
-  ValueInput,
-  WidthBounds
-} from "#compiler/ir/values/types.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import {
-  OperationBase,
-  type OperationFactory,
-  type OperationOutputAllocator,
+  type OperationDefinition,
+  type OperationNodeBase,
+  type OperationProduction,
   type OperationResult
 } from "./definition.js";
 
@@ -23,114 +17,84 @@ type ResourceReadCreateArgs = Readonly<{
   mode?: ResourceReadMode;
 }>;
 
-export class ResourceReadOperation extends OperationBase {
-  static readonly kind = "resource.read";
-  readonly kind = ResourceReadOperation.kind;
-  readonly effect: ResourceEffect;
-  readonly displacement: number;
-  readonly width: IntegerWidth;
-  readonly signed?: true;
-  declare readonly inputs: readonly [ValueInput];
-  declare readonly results: readonly [OperationResult];
+export type ResourceReadOperation = OperationNodeBase & Readonly<{
+  kind: "resource.read";
+  source: ResourceByteOperand;
+  mode?: ResourceReadMode;
+  output: ValueId;
+}>;
 
-  private constructor(
-    op: ResourceReadCreateArgs,
-    allocateOutput: OperationOutputAllocator
-  ) {
-    const mode = op.mode;
-
+export const resourceRead: OperationDefinition<
+  ResourceReadCreateArgs,
+  ResourceReadOperation,
+  readonly [OperationProduction]
+> = {
+  kind: "resource.read",
+  create: ({ source, mode }, allocateOutput) => {
     assert(
       mode === undefined || mode.kind === "signed" || mode.kind === "unsigned",
       "unknown resource read mode"
     );
     assert(
-      mode?.kind !== "signed" || op.source.width !== 32,
+      mode?.kind !== "signed" || source.width !== 32,
       "a 32-bit resource read has no signed extension"
     );
-    const signed = mode?.kind === "signed";
-    const bounds = mode?.kind === "unsigned" ? mode.bounds : undefined;
-    const effect = op.source.effect;
-    const displacement = op.source.address.displacement;
-    const width = op.source.width;
-    const inputs: readonly [ValueInput] = [
-      { value: op.source.address.base, type: "i32" }
-    ];
-    const result = readResult(width, signed, bounds);
-    const results: readonly [OperationResult] = [result];
-    const outputs: readonly [ValueId] = [allocateOutput(result)];
+    const result = readResult(source.width, mode);
+    const node = {
+      category: "operation" as const,
+      kind: "resource.read" as const,
+      source,
+      output: allocateOutput(result)
+    };
 
-    super({
-      inputs,
-      results,
-      outputs,
-      directEffects: { reads: [effect], writes: [] },
-      referencedResources: [effect.resource]
-    });
-    this.effect = effect;
-    this.displacement = displacement;
-    this.width = width;
-    if (signed) {
-      this.signed = true;
-    }
+    return mode === undefined ? node : { ...node, mode };
+  },
+  describe: (operation) => {
+    const { source } = operation;
+    const result = readResult(source.width, operation.mode);
+
+    return {
+      inputs: [{ value: source.address.base, type: "i32" }],
+      productions: [{ result, output: operation.output }],
+      effects: { reads: [source.effect], writes: [] },
+      referencedResources: [source.effect.resource]
+    };
   }
-
-  static create(
-    op: ResourceReadCreateArgs,
-    allocateOutput: OperationOutputAllocator
-  ): ResourceReadOperation {
-    return new ResourceReadOperation(op, allocateOutput);
-  }
-}
-
-export const resourceRead = ResourceReadOperation satisfies OperationFactory<
-  ResourceReadCreateArgs,
-  ResourceReadOperation
->;
+};
 
 export type ResourceWriteArgs = Readonly<{
   destination: ResourceByteOperand;
   value: ValueId;
 }>;
 
-export class ResourceWriteOperation extends OperationBase {
-  static readonly kind = "resource.write";
-  readonly kind = ResourceWriteOperation.kind;
-  readonly effect: ResourceEffect;
-  readonly displacement: number;
-  readonly width: IntegerWidth;
-  declare readonly inputs: readonly [ValueInput, ValueInput];
-  declare readonly results: readonly [];
+export type ResourceWriteOperation = OperationNodeBase & Readonly<{
+  kind: "resource.write";
+  destination: ResourceByteOperand;
+  value: ValueId;
+}>;
 
-  private constructor(op: ResourceWriteArgs) {
-    const effect = op.destination.effect;
-    const displacement = op.destination.address.displacement;
-    const width = op.destination.width;
-    const inputs: readonly [ValueInput, ValueInput] = [
-      { value: op.destination.address.base, type: "i32" },
-      { value: op.value, type: "i32" }
-    ];
-
-    super({
-      inputs,
-      results: [],
-      outputs: [],
-      directEffects: { reads: [], writes: [effect] },
-      referencedResources: [effect.resource]
-    });
-    this.effect = effect;
-    this.displacement = displacement;
-    this.width = width;
-  }
-
-  static create(op: ResourceWriteArgs): ResourceWriteOperation {
-    return new ResourceWriteOperation(op);
-  }
-}
-
-export const resourceWrite = ResourceWriteOperation satisfies OperationFactory<
+export const resourceWrite: OperationDefinition<
   ResourceWriteArgs,
-  ResourceWriteOperation
->;
+  ResourceWriteOperation,
+  readonly []
+> = {
+  kind: "resource.write",
+  create: ({ destination, value }) => ({
+    category: "operation",
+    kind: "resource.write",
+    destination,
+    value
+  }),
+  describe: (operation) => ({
+    inputs: [
+      { value: operation.destination.address.base, type: "i32" },
+      { value: operation.value, type: "i32" }
+    ],
+    productions: [],
+    effects: { reads: [], writes: [operation.destination.effect] },
+    referencedResources: [operation.destination.effect.resource]
+  })
+};
 
 export type ResourceOperation =
   | ResourceReadOperation
@@ -139,15 +103,17 @@ export type ResourceOperation =
 const i32Result: OperationResult = { type: "i32" };
 
 function readResult(
-  width: IntegerWidth,
-  signed: boolean,
-  refinement: WidthBounds | undefined
+  width: ResourceByteOperand["width"],
+  mode: ResourceReadMode | undefined
 ): OperationResult {
-  if (refinement !== undefined) {
-    return { type: "i32", bounds: refinement };
+  if (mode?.kind === "unsigned" && mode.bounds !== undefined) {
+    return { type: "i32", bounds: mode.bounds };
   }
   if (width === 32) {
     return i32Result;
   }
-  return { type: "i32", bounds: signed ? signExtended(width) : fitsUnsigned(width) };
+  return {
+    type: "i32",
+    bounds: mode?.kind === "signed" ? signExtended(width) : fitsUnsigned(width)
+  };
 }

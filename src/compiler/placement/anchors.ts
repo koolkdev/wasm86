@@ -5,6 +5,7 @@ import type {
   ValueDemand
 } from "#compiler/analysis/model.js";
 import type { StorageAccess } from "#compiler/ir/effects.js";
+import { describeNode } from "#compiler/ir/node.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -196,6 +197,7 @@ class AnchorPlanner {
     producerSite: SiteId,
     demands: readonly ValueDemand[]
   ): SiteId {
+    const description = describeNode(operation);
     let anchor = this.analysis.dominatingSite(
       demands.map((demand) => demand.consumedAt)
     );
@@ -204,8 +206,8 @@ class AnchorPlanner {
 
     if (
       !this.#isAfterProducer(producerSite, anchor) ||
-      operation.directEffects.writes.length !== 0 ||
-      operation.operands.some((input) => !this.block.values.isNonTrapping(input)) ||
+      description.effects.writes.length !== 0 ||
+      description.operands.some((input) => !this.block.values.isNonTrapping(input)) ||
       this.#crossesAliasingWrite(operation, producerSite, anchor)
     ) {
       return producerSite;
@@ -250,7 +252,8 @@ class AnchorPlanner {
     producerSiteId: SiteId,
     anchorId: SiteId
   ): boolean {
-    const reads = operation.directEffects.reads;
+    const description = describeNode(operation);
+    const reads = description.effects.reads;
 
     if (reads.length === 0) {
       return false;

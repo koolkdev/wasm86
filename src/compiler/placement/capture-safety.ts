@@ -1,5 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { FunctionAnalysis, SiteId } from "#compiler/analysis/model.js";
+import { describeNode } from "#compiler/ir/node.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { FunctionGraph } from "#compiler/ir/function.js";
 
@@ -19,10 +20,12 @@ export function canCaptureAtDeadline(
   const record = analysis.sites()[site];
 
   assert(record !== undefined, `unknown capture site ${site}`);
-  if (
-    record.kind !== "node" ||
-    record.node.nestedBodies.length === 0
-  ) {
+  if (record.kind !== "node") {
+    return canEvaluateWithoutTrap(block, value, isAvailableAtCapture);
+  }
+  const description = describeNode(record.node);
+
+  if (description.nestedBodies.length === 0) {
     return canEvaluateWithoutTrap(block, value, isAvailableAtCapture);
   }
 
@@ -73,7 +76,7 @@ export function canCaptureAtDeadline(
     }
   };
 
-  for (const operand of record.node.operands) {
+  for (const operand of description.operands) {
     visitDirectUse(operand);
   }
 

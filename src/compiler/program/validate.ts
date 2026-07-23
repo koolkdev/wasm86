@@ -4,6 +4,7 @@ import type {
   StorageAccess,
   StorageEffects
 } from "#compiler/ir/effects.js";
+import { describeNode } from "#compiler/ir/node.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
 import { covers } from "#compiler/ir/effects.js";
@@ -443,7 +444,7 @@ function resourcesUsedBy(analysis: FunctionAnalysis): readonly ResourceRef[] {
     if (!analysis.operationMustExecute(operation)) {
       continue;
     }
-    resources.push(...operation.referencedResources);
+    resources.push(...describeNode(operation).referencedResources);
   }
   return unique(resources);
 }
@@ -474,8 +475,10 @@ function inferEffects(analysis: FunctionAnalysis): StorageEffects {
     ) {
       continue;
     }
-    addExternalEffects(node.directEffects.reads, reads);
-    addExternalEffects(node.directEffects.writes, writes);
+    const { effects } = describeNode(node);
+
+    addExternalEffects(effects.reads, reads);
+    addExternalEffects(effects.writes, writes);
   }
   return { reads: [...reads], writes: [...writes] };
 }

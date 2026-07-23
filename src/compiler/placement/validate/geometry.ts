@@ -1,5 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { FunctionAnalysis, Producer, RegionSite, SiteId } from "#compiler/analysis/model.js";
+import { describeNode } from "#compiler/ir/node.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { mayAlias } from "#compiler/ir/effects.js";
@@ -75,6 +76,8 @@ function validateProducer(
 
   assert(authored.kind === "node", `producer ${producer.output} has no node site`);
   assert(path !== undefined, `producer ${producer.output} leaves its definition scope`);
+  const description = describeNode(producer.operation);
+
   if (authored.region === anchor.region) {
     assert(
       anchor.nodeIndex >= authored.nodeIndex,
@@ -97,7 +100,7 @@ function validateProducer(
   }
   if (anchor.id !== authored.id) {
     assert(
-      producer.operation.directEffects.writes.length === 0,
+      description.effects.writes.length === 0,
       `producer ${producer.output} moves an effectful realization`
     );
     assert(
@@ -106,7 +109,7 @@ function validateProducer(
     );
   }
 
-  const reads = producer.operation.directEffects.reads;
+  const reads = description.effects.reads;
   let region = authored.region;
   let start = authored.nodeIndex + 1;
   const stableThrough = (end: number): void => {

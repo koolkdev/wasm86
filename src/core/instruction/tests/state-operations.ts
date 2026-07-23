@@ -31,7 +31,7 @@ export function readsStateChannel(
   channel: InstructionStateChannel
 ): node is StateReadOperation {
   return isStateRead(node) && effectsEqual(
-    node.effect,
+    node.source.effect,
     stateEffect(values, channel)
   );
 }
@@ -42,7 +42,7 @@ export function writesStateChannel(
   channel: InstructionStateChannel
 ): node is StateWriteOperation {
   return isStateWrite(node) && effectsEqual(
-    node.effect,
+    node.destination.effect,
     stateEffect(values, channel)
   );
 }
@@ -51,21 +51,20 @@ export function isStateRead(
   node: RegionNode
 ): node is StateReadOperation {
   return node.kind === "resource.read" &&
-    node.effect.resource === cpuState.resource &&
-    node.outputs.length === 1;
+    node.source.effect.resource === cpuState.resource;
 }
 
 export function isStateWrite(
   node: RegionNode
 ): node is StateWriteOperation {
   return node.kind === "resource.write" &&
-    node.effect.resource === cpuState.resource;
+    node.destination.effect.resource === cpuState.resource;
 }
 
 export function stateWriteValue(
   operation: StateWriteOperation
 ): ValueId {
-  return operation.inputs[1].value;
+  return operation.value;
 }
 
 function accessFor(values: ValueTable): BoundStateAccess {

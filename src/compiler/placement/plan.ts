@@ -1,5 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { FunctionAnalysis } from "#compiler/analysis/model.js";
+import { describeNode } from "#compiler/ir/node.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { FunctionGraph } from "#compiler/ir/function.js";
 import { planValueAnchors } from "./anchors.js";
@@ -34,7 +35,9 @@ export function planPlacement(
       continue;
     }
 
-    for (const nested of site.node.nestedBodies) {
+    const description = describeNode(site.node);
+
+    for (const nested of description.nestedBodies) {
       if (nested.scope.kind !== "loop") {
         continue;
       }

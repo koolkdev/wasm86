@@ -46,7 +46,9 @@ export function buildFunction(
 }
 
 function snapshotRegion(region: Region): Region {
-  const nodes = region.nodes.map((node) => node.mapBodies(snapshotRegion));
+  const nodes = region.nodes.map((node) =>
+    node.category === "operation" ? node : node.mapBodies(snapshotRegion)
+  );
 
   return region.result === undefined
     ? { nodes }

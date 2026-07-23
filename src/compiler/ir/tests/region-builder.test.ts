@@ -100,8 +100,8 @@ test("operation derives the output and its bounds from the definition", () => {
   const [operation] = builder.build().nodes;
 
   ok(operation?.kind === "resource.read");
-  strictEqual(operation.effect, source.effect);
-  deepStrictEqual(operation.outputs, [read]);
+  strictEqual(operation.source, source);
+  strictEqual(operation.output, read);
   deepStrictEqual(values.widthBounds(read), {
     unsignedBits: 8,
     signedBits: 9
@@ -141,8 +141,11 @@ test("resource read modes reach operation construction", () => {
 
   ok(signedOperation?.kind === "resource.read");
   ok(boundedOperation?.kind === "resource.read");
-  strictEqual(signedOperation.signed, true);
-  strictEqual(boundedOperation.signed, undefined);
+  deepStrictEqual(signedOperation.mode, { kind: "signed" });
+  deepStrictEqual(boundedOperation.mode, {
+    kind: "unsigned",
+    bounds: fitsUnsigned(1)
+  });
   deepStrictEqual(values.widthBounds(signed), {
     unsignedBits: 32,
     signedBits: 8
@@ -165,8 +168,11 @@ test("call validates typed arguments and allocates its declared result", () => {
 
   ok(call?.kind === "call");
   strictEqual(call.invocation.target, target);
-  deepStrictEqual(call.inputs, args.map((value) => ({ value, type: "i32" as const })));
-  deepStrictEqual(call.outputs, [output]);
+  deepStrictEqual(
+    call.invocation.inputs,
+    args.map((value) => ({ value, type: "i32" as const }))
+  );
+  strictEqual(call.output, output);
   throws(() => builder.call(target, args.slice(1)), /expects 4 arguments, got 3/);
   throws(
     () => builder.call(target, [args[0]!, args[1]!, args[2]!, values.const64(3n)]),
@@ -211,10 +217,9 @@ test("call and returnCall share indirect target normalization", () => {
   strictEqual(callInvocation.target, target);
   strictEqual(returnInvocation.target, target);
   deepStrictEqual(target.elementIndex, { value: elementIndex, type: "i32" });
-  deepStrictEqual(call.operands, [argument, elementIndex]);
   deepStrictEqual(returnInvocation.inputs, callInvocation.inputs);
   deepStrictEqual(returned.operands, [argument, elementIndex]);
-  deepStrictEqual(call.outputs, [output]);
+  strictEqual(call.output, output);
   throws(
     () => builder.indirectTarget({
       table,
@@ -343,7 +348,10 @@ test("custom node sinks can divert emitted top-level nodes", () => {
 
   builder.operation(resourceWrite, writeArgs(values, values.const(4)));
 
-  deepStrictEqual(sink.diverted[0]?.outputs, [read]);
+  const diverted = sink.diverted[0];
+
+  ok(diverted?.kind === "resource.read");
+  strictEqual(diverted.output, read);
   strictEqual(builder.build().nodes[0]?.kind, "resource.write");
 });
 
@@ -443,7 +451,7 @@ test("switch preserves arm results and derives one shared output", () => {
 
   ok(call?.kind === "call");
   strictEqual(call.invocation.target, target);
-  deepStrictEqual(call.outputs, [armResult]);
+  strictEqual(call.output, armResult);
   deepStrictEqual(control.defaultBody, { nodes: [], result: defaultResult });
 });
 

@@ -4,6 +4,7 @@ import type {
   RegionSite,
   SiteId
 } from "#compiler/analysis/model.js";
+import { describeNode } from "#compiler/ir/node.js";
 import type { VariableRef } from "#compiler/ir/variable.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
@@ -236,5 +237,6 @@ export function wasmTypeForValue(type: ValueType): WasmValueType {
 }
 
 function capturesAfterOperands(site: RegionSite): boolean {
-  return site.kind === "node" && site.node.nestedBodies.length !== 0;
+  return site.kind === "node" &&
+    describeNode(site.node).nestedBodies.length !== 0;
 }

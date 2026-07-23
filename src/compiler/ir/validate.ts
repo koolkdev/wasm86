@@ -1,8 +1,5 @@
 import { assert } from "#common/assert.js";
-import type {
-  StorageAccess,
-  StorageEffects
-} from "#compiler/ir/effects.js";
+import type { StorageEffects } from "#compiler/ir/effects.js";
 import {
   maxSwitchMatch,
   type Control,
@@ -32,7 +29,10 @@ import {
   type RegionNode
 } from "./region.js";
 import type { FunctionGraph, IrFunction } from "./function.js";
-import type { NestedRegion } from "./node.js";
+import {
+  describeNode,
+  type NestedRegion
+} from "./node.js";
 import { validateDeclaredStorageEffects } from "./validate/effects.js";
 import { validateResourceOperation } from "./validate/resource.js";
 
@@ -133,43 +133,12 @@ class IrValidator {
   }
 
   #validateOperationDeclaration(operation: Operation, path: string): void {
-    assert(Array.isArray(operation.inputs), `${path} inputs must be an array`);
-    assert(Array.isArray(operation.results), `${path} results must be an array`);
+    const { outputs, results } = describeNode(operation);
 
-    const operands = operation.operands;
-    const outputs = operation.outputs;
-
-    assert(Array.isArray(operands), `${path} operands must be an array`);
-    assert(Array.isArray(outputs), `${path} outputs must be an array`);
-    assert(
-      Array.isArray(operation.referencedResources),
-      `${path} referenced resources must be an array`
-    );
-    assert(
-      Array.isArray(operation.nestedBodies) && operation.nestedBodies.length === 0,
-      `${path} operation must not have nested bodies`
-    );
-    assert(
-      operands.length === operation.inputs.length,
-      `${path} declares ${operands.length} operands for ${operation.inputs.length} inputs`
-    );
-    for (const [index, input] of operation.inputs.entries()) {
-      assert(
-        operands[index] === input.value,
-        `${path} operand ${index} does not match its declared input`
-      );
-    }
-    assert(
-      outputs.length === operation.results.length,
-      `${path} declares ${outputs.length} outputs for ${operation.results.length} results`
-    );
-    validateDeclaredStorageEffects(operation.directEffects, path);
-
-    for (const [index, result] of operation.results.entries()) {
+    for (const [index, result] of results.entries()) {
       const output = outputs[index];
 
       assert(output !== undefined, `${path} has no output ${index}`);
-      validateOperationResult(result, `${path} result ${index}`);
       assert(
         this.#block.values.valueType(output) === result.type,
         `${path} output ${index} must be ${result.type}`
@@ -190,8 +159,6 @@ class IrValidator {
         validateResourceOperation(operation, path);
         return;
     }
-
-    operation satisfies never;
   }
 
   #validateCallDeclaration(call: CallOperation, path: string): void {
@@ -204,38 +171,9 @@ class IrValidator {
       resultTypes.length <= 1,
       `${path} target has ${resultTypes.length} results; multiple call results are not supported yet`
     );
-
-    assertSameInputs(
-      call.inputs,
-      invocation.inputs,
-      `${path} inputs do not match its invocation`
-    );
     assert(
-      call.results.length === resultTypes.length,
-      `${path} declares ${call.results.length} results for ${resultTypes.length} target results`
-    );
-    for (const [index, result] of call.results.entries()) {
-      const expected = resultTypes[index];
-
-      assert(expected !== undefined, `${path} target has no result ${index}`);
-      assert(
-        result.type === expected,
-        `${path} result ${index} declares ${result.type}, expected ${expected}`
-      );
-      if (result.type === "i32") {
-        assert(
-          result.bounds === undefined,
-          `${path} call result ${index} must not invent width bounds`
-        );
-      }
-    }
-    assert(
-      call.directEffects === invocation.target.effects,
-      `${path} effects do not match its invocation`
-    );
-    assert(
-      call.referencedResources.length === 0,
-      `${path} call must not require caller resource bindings`
+      (call.output === undefined ? 0 : 1) === resultTypes.length,
+      `${path} output does not align with its target results`
     );
   }
 
@@ -309,10 +247,10 @@ class IrValidator {
     operation: Operation,
     site: RegionNodeSite
   ): void {
-    const outputs = operation.outputs;
+    const { inputs, outputs } = describeNode(operation);
 
     for (const output of outputs) {
-      for (const input of operation.inputs) {
+      for (const input of inputs) {
         assert(
           input.value < output,
           `producer operand ${input.value} created after its output ${output}`
@@ -441,7 +379,10 @@ class IrValidator {
 
       this.#validateNode(node, site, context);
 
-      if (node.completes({ regionCompletes })) {
+      if (
+        node.category === "control" &&
+        node.completes({ regionCompletes })
+      ) {
         assert(
           nodeIndex === body.nodes.length - 1,
           `${context.path} has nodes after its terminal ${node.kind} control`
@@ -530,7 +471,7 @@ class IrValidator {
     operation: Operation,
     site: RegionNodeSite
   ): void {
-    for (const input of operation.inputs) {
+    for (const input of describeNode(operation).inputs) {
       const actualType = this.#block.values.valueType(input.value);
 
       assert(
@@ -623,12 +564,12 @@ class IrValidator {
     site: RegionNodeSite,
     context: RegionValidationContext
   ): void {
-    const outputs = node.outputs;
+    const { nestedBodies, outputs } = describeNode(node);
 
     assert(outputs.length <= 1, `${site.path} has multiple nested-body outputs`);
     const ownerOutput = outputs[0];
 
-    for (const nested of node.nestedBodies) {
+    for (const nested of nestedBodies) {
       if (nested.scope.kind === "loop") {
         this.#validateRegion(nested.body, {
           path: `${site.path}.${nested.role}`,
@@ -822,93 +763,17 @@ class IrValidator {
 
 }
 
-function validateOperationResult(result: OperationResult, path: string): void {
-  assert(result !== null && typeof result === "object", `${path} must be an object`);
-
-  switch (result.type) {
-    case "i32":
-      if (result.bounds !== undefined) {
-        validateWidthBounds(result.bounds, path);
-      }
-      return;
-    case "i64":
-      assert(!Object.hasOwn(result, "bounds"), `${path} i64 result must not declare width bounds`);
-      return;
-  }
-}
-
 function validateVariableOperation(
   operation: VariableReadOperation | VariableWriteOperation,
   path: string
 ): void {
-  assert(
-    operation.referencedResources.length === 0,
-    `${path} variable operation must not require resource bindings`
-  );
-
-  switch (operation.kind) {
-    case "variable.read": {
-      const result = operation.results[0];
-
-      assert(operation.inputs.length === 0, `${path} must not have inputs`);
-      assert(
-        operation.results.length === 1 && result !== undefined,
-        `${path} must have exactly one result`
-      );
-      assert(
-        result.type === operation.variable.type,
-        `${path} result type must match its variable`
-      );
-      assert(
-        result.type !== "i32" || result.bounds === undefined,
-        `${path} result must not refine its variable value bounds`
-      );
-      assert(
-        operation.directEffects.reads.length === 1 &&
-          isVariableAccess(
-            operation.directEffects.reads[0],
-            operation.variable
-          ) &&
-          operation.directEffects.writes.length === 0,
-        `${path} effects must read its exact variable and write nothing`
-      );
-      return;
-    }
-    case "variable.write": {
-      const input = operation.inputs[0];
-
+  if (operation.kind === "variable.write") {
       assert(
         operation.initialization === "seed" ||
           operation.initialization === "update",
         `${path} has an invalid variable-write initialization`
       );
-      assert(
-        operation.inputs.length === 1 &&
-          input !== undefined &&
-          input.value === operation.value &&
-          input.type === operation.variable.type,
-        `${path} must have exactly its variable-typed value input`
-      );
-      assert(operation.results.length === 0, `${path} must not have results`);
-      assert(
-        operation.directEffects.reads.length === 0 &&
-          operation.directEffects.writes.length === 1 &&
-          isVariableAccess(
-            operation.directEffects.writes[0],
-            operation.variable
-          ),
-        `${path} effects must write its exact variable and read nothing`
-      );
-      return;
-    }
   }
-}
-
-function isVariableAccess(
-  access: StorageAccess | undefined,
-  variable: VariableRef
-): boolean {
-  return access?.space === "variable" && access.variable === variable;
 }
 
 function validateIfControlShape(
@@ -1217,19 +1082,6 @@ function assertOutputBounds(
   assert(
     boundsEqual(actualBounds, expectedBounds),
     `${operationKind} operation output ${output} has the wrong bounds: expected ${formatBounds(expectedBounds)}, got ${formatBounds(actualBounds)}`
-  );
-}
-
-function validateWidthBounds(bounds: WidthBounds, path: string): void {
-  assert(
-    Number.isInteger(bounds.unsignedBits) &&
-      bounds.unsignedBits >= 0 &&
-      bounds.unsignedBits <= 32 &&
-      Number.isInteger(bounds.signedBits) &&
-      bounds.signedBits >= 0 &&
-      bounds.signedBits <= 32 &&
-      bounds.signedBits <= bounds.unsignedBits + 1,
-    `${path} bounds are malformed`
   );
 }
 

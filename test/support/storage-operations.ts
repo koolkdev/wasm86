@@ -31,7 +31,7 @@ type OperationOf<Kind extends Operation["kind"]> = Extract<Operation, { kind: Ki
 export type MemoryReadOperation = OperationOf<"resource.read">;
 export type MemoryWriteOperation = OperationOf<"resource.write">;
 export type StatusFlagCallOperation = CallOperation & Readonly<{
-  outputs: readonly [ValueId];
+  output: ValueId;
 }>;
 
 const compilerTestResource = resourceRef("test.compiler-storage");
@@ -194,18 +194,17 @@ export function memoryWriteOperation(
 
 export function isMemoryRead(node: RegionNode): node is MemoryReadOperation {
   return node.kind === "resource.read" &&
-    node.effect.resource === guestMemoryResource &&
-    node.outputs.length === 1;
+    node.source.effect.resource === guestMemoryResource;
 }
 
 export function isMemoryWrite(node: RegionNode): node is MemoryWriteOperation {
   return node.kind === "resource.write" &&
-    node.effect.resource === guestMemoryResource;
+    node.destination.effect.resource === guestMemoryResource;
 }
 
 export function isStatusFlagCall(node: RegionNode): node is StatusFlagCallOperation {
   return node.kind === "call" &&
-    node.outputs.length === 1 &&
+    node.output !== undefined &&
     statusFlagForTarget(node.invocation.target) !== undefined;
 }
 

@@ -24,8 +24,9 @@ import { ValueTable } from "#compiler/ir/values/table.js";
 import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef, tableRef } from "#compiler/ir/refs.js";
+import { describeNode } from "#compiler/ir/node.js";
 
-test("resource operation definitions expose byte ranges, operands, and direct effects", () => {
+test("resource definitions describe their graph and resource interface", () => {
   const values = new ValueTable();
   const resource = resourceRef("test.resource");
   const origin = new DynamicByteOriginRef();
@@ -51,21 +52,40 @@ test("resource operation definitions expose byte ranges, operands, and direct ef
     value: stored
   });
 
-  strictEqual(read.effect.resource, resource);
-  strictEqual(read.effect.range, range);
-  strictEqual(read.displacement, 6);
-  deepStrictEqual(read.operands, [address]);
-  deepStrictEqual(read.directEffects, {
-    reads: [read.effect],
-    writes: []
+  strictEqual(read.source, source);
+  deepStrictEqual(read.mode, { kind: "signed" });
+  strictEqual(write.destination, source);
+  strictEqual(write.value, stored);
+  deepStrictEqual(describeNode(read), {
+    inputs: [{ value: address, type: "i32" }],
+    operands: [address],
+    results: [{
+      type: "i32",
+      bounds: { unsignedBits: 32, signedBits: 16 }
+    }],
+    outputs: [read.output],
+    nestedBodies: [],
+    effects: {
+      reads: [source.effect],
+      writes: []
+    },
+    referencedResources: [resource]
   });
-  deepStrictEqual(write.operands, [address, stored]);
-  deepStrictEqual(write.directEffects, {
-    reads: [],
-    writes: [write.effect]
+  deepStrictEqual(describeNode(write), {
+    inputs: [
+      { value: address, type: "i32" },
+      { value: stored, type: "i32" }
+    ],
+    operands: [address, stored],
+    results: [],
+    outputs: [],
+    nestedBodies: [],
+    effects: {
+      reads: [],
+      writes: [source.effect]
+    },
+    referencedResources: [resource]
   });
-  deepStrictEqual(read.referencedResources, [resource]);
-  deepStrictEqual(write.referencedResources, [resource]);
 });
 
 test("resource read modes define their result bounds", () => {
@@ -118,7 +138,7 @@ test("resource read modes define their result bounds", () => {
   );
 });
 
-test("variable operations retain variable type, initialization, and effects", () => {
+test("variable definitions describe typed accesses", () => {
   const values = new ValueTable();
   const variable = new VariableRef("i32");
   const wide = new VariableRef("i64");
@@ -137,18 +157,21 @@ test("variable operations retain variable type, initialization, and effects", ()
     initialization: "update"
   });
 
-  deepStrictEqual(read.results, [{ type: "i32" }]);
-  deepStrictEqual(wideRead.results, [{ type: "i64" }]);
-  deepStrictEqual(read.directEffects, {
+  deepStrictEqual(describeNode(read).results, [{ type: "i32" }]);
+  deepStrictEqual(describeNode(wideRead).results, [{ type: "i64" }]);
+  deepStrictEqual(describeNode(read).effects, {
     reads: [{ space: "variable", variable }],
     writes: []
   });
-  deepStrictEqual(write.directEffects, {
+  deepStrictEqual(describeNode(write).effects, {
     reads: [],
     writes: [{ space: "variable", variable }]
   });
   strictEqual(write.initialization, "seed");
-  deepStrictEqual(wideWrite.inputs, [{ value: wideStored, type: "i64" }]);
+  deepStrictEqual(describeNode(wideWrite).inputs, [{
+    value: wideStored,
+    type: "i64"
+  }]);
 });
 
 test("ordinary calls validate arguments and carry target effects", () => {
@@ -165,9 +188,9 @@ test("ordinary calls validate arguments and carry target effects", () => {
   );
 
   strictEqual(operation.invocation, invocation);
-  deepStrictEqual(operation.operands, [argument]);
-  deepStrictEqual(operation.directEffects, target.effects);
-  strictEqual(operation.outputs.length, 1);
+  deepStrictEqual(describeNode(operation).operands, [argument]);
+  strictEqual(describeNode(operation).effects, target.effects);
+  strictEqual(operation.output, describeNode(operation).outputs[0]);
   throws(
     () => Invocation.create({ target, arguments: [] }),
     /expects 1 arguments, got 0/
@@ -216,7 +239,7 @@ test("indirect invocations include the table selector in their inputs", () => {
     { value: argument, type: "i64" },
     { value: elementIndex, type: "i32" }
   ]);
-  deepStrictEqual(operation.operands, [argument, elementIndex]);
+  deepStrictEqual(describeNode(operation).operands, [argument, elementIndex]);
   strictEqual(target.table, table);
   strictEqual(target.effects, effects);
   throws(

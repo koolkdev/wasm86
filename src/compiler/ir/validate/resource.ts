@@ -2,62 +2,52 @@ import { assert } from "#common/assert.js";
 import {
   DynamicByteOriginRef,
   type ByteRange,
-  type ResourceEffect
+  type ResourceEffect,
+  type ResourceReadMode
 } from "#compiler/ir/resource.js";
 import type { ResourceOperation } from "#compiler/ir/operations/resource.js";
-import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { WidthBounds } from "#compiler/ir/values/types.js";
 
 const resourceByteLength = 0x1_0000_0000;
 
-// Validate the retained node rather than trusting its factory arguments.
-// Analysis consumes `effects`, while realization consumes the operation's
-// resource/configuration fields, so their agreement is an IR invariant.
 export function validateResourceOperation(
   operation: ResourceOperation,
   path: string
 ): void {
   const label = `${path} ${operation.kind}`;
+  const operand = operation.kind === "resource.read"
+    ? operation.source
+    : operation.destination;
+  const { effect, width } = operand;
+  const displacement = operand.address.displacement;
 
   assert(
-    operation.width === 8 || operation.width === 16 || operation.width === 32,
-    `${label} width must be 8, 16, or 32, got ${String(operation.width)}`
+    width === 8 || width === 16 || width === 32,
+    `${label} width must be 8, 16, or 32, got ${String(width)}`
   );
   assert(
-    Number.isInteger(operation.displacement) &&
-      operation.displacement >= 0 &&
-      operation.displacement <= 0xffff_ffff,
-    `${label} address displacement must be an unsigned 32-bit integer, got ${operation.displacement}`
+    Number.isInteger(displacement) &&
+      displacement >= 0 &&
+      displacement <= 0xffff_ffff,
+    `${label} address displacement must be an unsigned 32-bit integer, got ${displacement}`
   );
-  validateResourceEffect(operation.effect, label);
-  assert(
-    operation.referencedResources.length === 1 &&
-      operation.referencedResources[0] === operation.effect.resource,
-    `${label} must reference its exact resource binding`
-  );
+  validateResourceEffect(effect, label);
 
-  if (operation.effect.range.slice !== undefined) {
-    const transferByteLength = operation.width / 8;
+  if (effect.range.slice !== undefined) {
+    const transferByteLength = width / 8;
 
     assert(
-      operation.effect.range.slice.byteLength >= transferByteLength,
-      `${label} range byte length ${operation.effect.range.slice.byteLength} must contain its ${operation.width}-bit transfer`
+      effect.range.slice.byteLength >= transferByteLength,
+      `${label} range byte length ${effect.range.slice.byteLength} must contain its ${width}-bit transfer`
     );
   }
 
-  assert(Array.isArray(operation.inputs), `${label} inputs must be an array`);
-  assert(
-    Array.isArray(operation.directEffects.reads) &&
-      Array.isArray(operation.directEffects.writes),
-    `${label} effects must contain read and write arrays`
-  );
-
   switch (operation.kind) {
     case "resource.read":
-      validateResourceRead(operation, label);
+      validateReadMode(operation.mode, operation.source.width, label);
       return;
     case "resource.write":
-      validateResourceWrite(operation, label);
       return;
   }
 }
@@ -76,102 +66,42 @@ export function validateResourceEffect(effect: ResourceEffect, label: string): v
   validateByteRange(effect.range, label);
 }
 
-function validateResourceRead(
-  operation: Extract<ResourceOperation, { kind: "resource.read" }>,
-  label: string
-): void {
-  const signed = operation.signed;
-  const result = operation.results[0];
-
-  assert(
-    signed === undefined || signed === true,
-    `${label} signedness must be absent or true`
-  );
-  assert(
-    signed !== true || operation.width !== 32,
-    `${label} signedness is valid only for a narrow read`
-  );
-  assert(
-    operation.inputs.length === 1 &&
-      operation.inputs.every((input) => input.type === "i32"),
-    `${label} must have exactly one i32 address input`
-  );
-  assert(
-    operation.results.length === 1 &&
-      result !== undefined &&
-      result.type === "i32",
-    `${label} must have an i32 result`
-  );
-  assertReadBounds(
-    result.bounds,
-    operation.width,
-    signed === true,
-    label
-  );
-  assert(
-    operation.directEffects.reads.length === 1 &&
-      operation.directEffects.reads[0] === operation.effect &&
-      operation.directEffects.writes.length === 0,
-    `${label} effects must read its exact resource effect and write nothing`
-  );
-}
-
-function validateResourceWrite(
-  operation: Extract<ResourceOperation, { kind: "resource.write" }>,
-  label: string
-): void {
-  assert(
-    operation.inputs.length === 2 &&
-      operation.inputs.every((input) => input.type === "i32"),
-    `${label} must have exactly one i32 address and one i32 value input`
-  );
-  assert(operation.results.length === 0, `${label} must not have results`);
-  assert(
-    operation.directEffects.reads.length === 0 &&
-      operation.directEffects.writes.length === 1 &&
-      operation.directEffects.writes[0] === operation.effect,
-    `${label} effects must write its exact resource effect and read nothing`
-  );
-}
-
-function assertReadBounds(
-  actual: WidthBounds | undefined,
+function validateReadMode(
+  mode: ResourceReadMode | undefined,
   width: 8 | 16 | 32,
-  signed: boolean,
   label: string
 ): void {
+  assert(
+    mode === undefined ||
+      (mode !== null &&
+        typeof mode === "object" &&
+        (mode.kind === "signed" || mode.kind === "unsigned")),
+    `${label} has an invalid read mode`
+  );
+
+  if (mode?.kind === "signed") {
+    assert(
+      width !== 32,
+      `${label} signed mode is valid only for a narrow read`
+    );
+    return;
+  }
+
+  const refinement = mode?.bounds;
+
+  if (refinement === undefined) {
+    return;
+  }
+
+  assertValidBounds(refinement, label);
   const mechanical = width === 32
-    ? undefined
-    : signed
-      ? signExtended(width)
-      : fitsUnsigned(width);
-
-  if (signed) {
-    assert(
-      actual !== undefined &&
-        mechanical !== undefined &&
-        actual.unsignedBits === mechanical.unsignedBits &&
-        actual.signedBits === mechanical.signedBits,
-      `${label} signed result bounds must match its mechanical load bounds`
-    );
-    return;
-  }
-
-  if (actual === undefined) {
-    assert(
-      mechanical === undefined,
-      `${label} result is missing its mechanical load bounds`
-    );
-    return;
-  }
-
-  assertValidBounds(actual, label);
-  const containing = mechanical ?? { unsignedBits: 32, signedBits: 32 };
+    ? { unsignedBits: 32, signedBits: 32 }
+    : fitsUnsigned(width);
 
   assert(
-    actual.unsignedBits <= containing.unsignedBits &&
-      actual.signedBits <= containing.signedBits,
-    `${label} result bounds exceed its mechanical load bounds`
+    refinement.unsignedBits <= mechanical.unsignedBits &&
+      refinement.signedBits <= mechanical.signedBits,
+    `${label} refinement exceeds its mechanical load bounds`
   );
 }
 

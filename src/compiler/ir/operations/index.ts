@@ -1,29 +1,33 @@
-import type { CallOperation } from "./call.js";
-import type {
-  VariableReadOperation,
-  VariableWriteOperation
-} from "./variables.js";
-import type {
-  ResourceReadOperation,
-  ResourceWriteOperation
+import {
+  callOperation
+} from "./call.js";
+import {
+  resourceRead,
+  resourceWrite
 } from "./resource.js";
+import {
+  variableRead,
+  variableWrite
+} from "./variables.js";
 
-export { callOperation } from "./call.js";
-export { variableRead, variableWrite } from "./variables.js";
-export { resourceRead, resourceWrite } from "./resource.js";
+export {
+  callOperation,
+  resourceRead,
+  resourceWrite,
+  variableRead,
+  variableWrite
+};
 
 export type {
   CallOperation,
   CallOperationArgs
 } from "./call.js";
 export type {
-  VariableReadOperation,
-  VariableWriteInitialization,
-  VariableWriteOperation
-} from "./variables.js";
-export type {
-  OperationBase,
-  OperationFactory,
+  DerivedOperationDescription,
+  OperationDefinition,
+  OperationNodeBase,
+  OperationOutputAllocator,
+  OperationProduction,
   OperationResult
 } from "./definition.js";
 export type {
@@ -32,10 +36,20 @@ export type {
   ResourceWriteArgs,
   ResourceWriteOperation
 } from "./resource.js";
+export type {
+  VariableReadOperation,
+  VariableWriteInitialization,
+  VariableWriteOperation
+} from "./variables.js";
 
-export type Operation =
-  | CallOperation
-  | VariableReadOperation
-  | VariableWriteOperation
-  | ResourceReadOperation
-  | ResourceWriteOperation;
+const operationDefinitions = [
+  callOperation,
+  variableRead,
+  variableWrite,
+  resourceRead,
+  resourceWrite
+] as const;
+
+type AnyOperationDefinition = (typeof operationDefinitions)[number];
+
+export type Operation = ReturnType<AnyOperationDefinition["create"]>;

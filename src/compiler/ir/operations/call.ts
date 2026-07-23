@@ -1,54 +1,62 @@
 import { assert } from "#common/assert.js";
 import { Invocation } from "#compiler/ir/invocation.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   operationResult,
-  OperationBase,
-  type OperationFactory,
-  type OperationOutputAllocator,
-  type OperationResult
+  type OperationDefinition,
+  type OperationNodeBase,
+  type OperationProduction
 } from "./definition.js";
 
 export type CallOperationArgs = Readonly<{
   invocation: Invocation;
 }>;
 
-export class CallOperation extends OperationBase {
-  static readonly kind = "call";
-  readonly kind = CallOperation.kind;
+export type CallOperation = OperationNodeBase & Readonly<{
+  kind: "call";
+  invocation: Invocation;
+  output?: ValueId;
+}>;
 
-  private constructor(
-    readonly invocation: Invocation,
-    allocateOutput: OperationOutputAllocator
-  ) {
-    const { type, effects } = invocation.target;
+export const callOperation: OperationDefinition<
+  CallOperationArgs,
+  CallOperation,
+  readonly OperationProduction[]
+> = {
+  kind: "call",
+  create: ({ invocation }, allocateOutput) => {
+    const results = invocation.target.type.results;
 
     assert(
-      type.results.length <= 1,
-      `call has ${type.results.length} results; multiple call results are not supported yet`
+      results.length <= 1,
+      `call has ${results.length} results; multiple call results are not supported yet`
     );
 
-    const results: readonly OperationResult[] = type.results.map(
-      operationResult
-    );
-    const outputs = results.map(allocateOutput);
+    const result = results[0];
+    if (result === undefined) {
+      return { category: "operation", kind: "call", invocation };
+    }
 
-    super({
-      inputs: invocation.inputs,
-      results,
-      outputs,
-      directEffects: effects
-    });
+    return {
+      category: "operation",
+      kind: "call",
+      invocation,
+      output: allocateOutput(operationResult(result))
+    };
+  },
+  describe: (operation) => {
+    const resultType = operation.invocation.target.type.results[0];
+    const productions = resultType === undefined || operation.output === undefined
+      ? []
+      : [{
+          result: operationResult(resultType),
+          output: operation.output
+        }];
+
+    return {
+      inputs: operation.invocation.inputs,
+      productions,
+      effects: operation.invocation.target.effects
+    };
   }
-
-  static create(
-    { invocation }: CallOperationArgs,
-    allocateOutput: OperationOutputAllocator
-  ): CallOperation {
-    return new CallOperation(invocation, allocateOutput);
-  }
-}
-
-export const callOperation = CallOperation satisfies OperationFactory<
-  CallOperationArgs,
-  CallOperation
->;
+};

@@ -4,6 +4,7 @@ import type {
   SiteId,
   ValueDemand
 } from "#compiler/analysis/model.js";
+import { describeNode } from "#compiler/ir/node.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { FunctionGraph } from "#compiler/ir/function.js";
@@ -187,7 +188,9 @@ function collectLoopInputs(analysis: FunctionAnalysis): Set<ValueId> {
       continue;
     }
 
-    for (const nested of site.node.nestedBodies) {
+    const description = describeNode(site.node);
+
+    for (const nested of description.nestedBodies) {
       if (nested.scope.kind === "loop") {
         for (const input of nested.scope.inputs) {
           result.add(input);

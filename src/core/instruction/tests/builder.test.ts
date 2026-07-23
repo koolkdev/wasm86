@@ -28,6 +28,7 @@ import { instructionCountField } from "#cpu/instruction-count.js";
 import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { FunctionGraph } from "#compiler/ir/function.js";
 import type { IfControl } from "#compiler/ir/controls/index.js";
+import { describeNode } from "#compiler/ir/node.js";
 import type { Region, RegionNode } from "#compiler/ir/region.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -55,7 +56,9 @@ function regionsIn(region: Region): Region[] {
   return [
     region,
     ...region.nodes.flatMap((node) =>
-      node.nestedBodies.flatMap((nested) => regionsIn(nested.body))
+      describeNode(node).nestedBodies.flatMap((nested) =>
+        regionsIn(nested.body)
+      )
     )
   ];
 }
@@ -229,7 +232,7 @@ test("an overlapping byte write is committed before a wider register read", () =
   );
   strictEqual(eaxReads.length, 1);
   strictEqual(ecxWrites.length, 1);
-  strictEqual(stateWriteValue(ecxWrites[0]!), eaxReads[0]!.outputs[0]);
+  strictEqual(stateWriteValue(ecxWrites[0]!), eaxReads[0]!.output);
 });
 
 test("a value captured before a dynamic branch remains valid in both arms", () => {
@@ -259,7 +262,7 @@ test("a value captured before a dynamic branch remains valid in both arms", () =
   ok(branch.elseBody !== undefined, "ifElse should have an else arm");
   strictEqual(eaxReads.length, 1);
 
-  const captured = eaxReads[0]!.outputs[0];
+  const captured = eaxReads[0]!.output;
   const thenWrites = stateWritesFor(
     block,
     branch.thenBody.nodes,
@@ -320,7 +323,7 @@ test("continuing branch writes are joined before later instructions read them", 
   strictEqual(resultWrites.length, 1);
   strictEqual(
     stateWriteValue(resultWrites[0]!),
-    joinedReads[0]!.outputs[0]
+    joinedReads[0]!.output
   );
 });
 

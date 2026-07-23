@@ -113,7 +113,10 @@ test("region geometry relates nested bodies to their owning controls", () => {
     branchSite
   );
 
-  deepStrictEqual(analysis.writesAt(analysis.siteOf(body, 0)), nestedWrite.directEffects.writes);
+  deepStrictEqual(
+    analysis.writesAt(analysis.siteOf(body, 0)),
+    [compilerTestResourceEffect(1)]
+  );
   deepStrictEqual(analysis.writesAt(analysis.regionEndSite(thenBody)), []);
   deepStrictEqual(analysis.operations(), [
     { operation: nestedWrite, site: analysis.siteOf(thenBody, 0) }

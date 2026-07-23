@@ -159,7 +159,7 @@ function loopInvariantResourceRead(operation: Operation): ResourceEffect | undef
     return undefined;
   }
 
-  return operation.effect;
+  return operation.source.effect;
 }
 
 // The loop body's semantic surface: the host's operations behind the scope's

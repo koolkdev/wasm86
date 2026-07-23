@@ -4,6 +4,7 @@ import type { FunctionAnalysis } from "#compiler/analysis/model.js";
 import { buildFunction } from "#compiler/ir/builder/function.js";
 import type { IrFunction } from "#compiler/ir/function.js";
 import type { Invocation } from "#compiler/ir/invocation.js";
+import { describeNode } from "#compiler/ir/node.js";
 import {
   placeFunction,
   type FunctionPlacement
@@ -279,7 +280,7 @@ function resourcesUsedBy(analysis: FunctionAnalysis): readonly ResourceRef[] {
     if (!analysis.operationMustExecute(operation)) {
       continue;
     }
-    resources.push(...operation.referencedResources);
+    resources.push(...describeNode(operation).referencedResources);
   }
   return unique(resources);
 }
