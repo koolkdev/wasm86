@@ -10,7 +10,7 @@ import type { WasmValueType } from "./types.js";
 const maximumWasmIndex = 0xffff_ffff;
 const wasmIndexSpaceSize = 0x1_0000_0000;
 
-export type EncodedBranchHint = Readonly<{
+type EncodedBranchHint = Readonly<{
   offset: number;
   value: 0 | 1;
 }>;
@@ -52,7 +52,7 @@ export function encodeWasmFunctionBody(
 
   const body = new ByteSink();
 
-  body.writeBytes(localDeclarations(localTypes));
+  writeLocalDeclarations(body, localTypes);
 
   const { writer, branchHints } = createWasmInstructionWriter(body);
 
@@ -71,10 +71,10 @@ export function encodeWasmFunctionBody(
   };
 }
 
-function localDeclarations(
+function writeLocalDeclarations(
+  body: ByteSink,
   locals: readonly WasmValueType[]
-): Uint8Array<ArrayBuffer> {
-  const body = new ByteSink();
+): void {
   const groups = localGroups(locals);
 
   body.writeVecLength(groups.length);
@@ -83,8 +83,6 @@ function localDeclarations(
     body.writeU32(group.count);
     body.writeByte(group.type);
   }
-
-  return body.toBytes();
 }
 
 function localGroups(locals: readonly WasmValueType[]): readonly LocalGroup[] {

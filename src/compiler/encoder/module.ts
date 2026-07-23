@@ -1,16 +1,13 @@
 import { buildDefinition } from "#build";
 import { ByteSink } from "./byte-sink.js";
-import {
-  type EncodedBranchHint,
-  type EncodedWasmFunctionBody
-} from "./function-body.js";
-import { encodeI32Leb128, encodeI64Leb128 } from "./leb128.js";
+import type { EncodedWasmFunctionBody } from "./function-body.js";
+import { wasmInstruction } from "./instructions.js";
+import { createWasmInstructionWriter } from "./instruction-writer.js";
 import type { WasmMemoryLimits } from "./memory.js";
 import {
   wasmExternalKind,
   wasmFunctionTypePrefix,
   wasmMagic,
-  wasmOpcode,
   wasmSectionId,
   wasmValueType,
   wasmVersion,
@@ -265,21 +262,24 @@ function writeResizableLimits(section: ByteSink, minimum: number, maximum: numbe
 }
 
 function writeGlobalInit(section: ByteSink, global: WasmGlobalDefinition): void {
+  const { writer } = createWasmInstructionWriter(section);
+
   switch (global.type) {
     case wasmValueType.i32:
-      section.writeByte(wasmOpcode.i32Const);
-      section.writeBytes(encodeI32Leb128(global.initialValue));
+      writer.write(wasmInstruction.i32.const, global.initialValue);
       break;
     case wasmValueType.i64:
-      section.writeByte(wasmOpcode.i64Const);
-      section.writeBytes(encodeI64Leb128(global.initialValue));
+      writer.write(wasmInstruction.i64.const, global.initialValue);
       break;
   }
 
-  section.writeByte(wasmOpcode.end);
+  writer.write(wasmInstruction.control.end);
 }
 
-function writeBranchHints(section: ByteSink, hints: readonly EncodedBranchHint[]): void {
+function writeBranchHints(
+  section: ByteSink,
+  hints: EncodedWasmFunctionBody["branchHints"]
+): void {
   section.writeVecLength(hints.length);
 
   for (const hint of hints) {

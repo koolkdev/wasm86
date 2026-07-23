@@ -1,11 +1,9 @@
 import type { ByteSink } from "./byte-sink.js";
 import { encodeI32Leb128, encodeI64Leb128 } from "./leb128.js";
 import { encodeMemoryImmediate, type WasmMemoryImmediate } from "./memory.js";
-import {
-  wasmBlockType,
-  wasmOpcode,
-  type WasmValueType
-} from "./types.js";
+import type { WasmValueType } from "./types.js";
+
+const emptyBlockType = 0x40;
 
 export type WasmBranchHint = "unlikely" | "likely";
 
@@ -14,7 +12,7 @@ export type WasmIfInstructionOptions = Readonly<{
   result?: WasmValueType | undefined;
 }>;
 
-export type WasmInstruction<
+export type WasmInstructionDescriptor<
   Args extends readonly unknown[]
 > = Readonly<{
   opcode: number;
@@ -26,19 +24,21 @@ function instruction<Args extends readonly unknown[]>(
   opcode: number,
   encodeImmediate: (body: ByteSink, ...args: Args) => void,
   branchHint?: (...args: Args) => WasmBranchHint | undefined
-): WasmInstruction<Args> {
+): WasmInstructionDescriptor<Args> {
   return branchHint === undefined
     ? { opcode, encodeImmediate }
     : { opcode, encodeImmediate, branchHint };
 }
 
-function plainInstruction(opcode: number): WasmInstruction<readonly []> {
+function plainInstruction(
+  opcode: number
+): WasmInstructionDescriptor<readonly []> {
   return instruction(opcode, () => {});
 }
 
 function u32Instruction(
   opcode: number
-): WasmInstruction<readonly [value: number]> {
+): WasmInstructionDescriptor<readonly [value: number]> {
   return instruction(opcode, (body, value) => {
     body.writeU32(value);
   });
@@ -46,29 +46,29 @@ function u32Instruction(
 
 function memoryInstruction(
   opcode: number
-): WasmInstruction<readonly [immediate: WasmMemoryImmediate]> {
+): WasmInstructionDescriptor<readonly [immediate: WasmMemoryImmediate]> {
   return instruction(opcode, (body, immediate) => {
     body.writeBytes(encodeMemoryImmediate(immediate));
   });
 }
 
 const blockInstruction = instruction<readonly [result?: WasmValueType]>(
-  wasmOpcode.block,
+  0x02,
   (body, result) => {
-    body.writeByte(result ?? wasmBlockType.empty);
+    body.writeByte(result ?? emptyBlockType);
   }
 );
 
-const loopInstruction = instruction(wasmOpcode.loop, (body) => {
-  body.writeByte(wasmBlockType.empty);
+const loopInstruction = instruction(0x03, (body) => {
+  body.writeByte(emptyBlockType);
 });
 
 const ifInstruction = instruction<
   readonly [options?: WasmIfInstructionOptions]
 >(
-  wasmOpcode.if,
+  0x04,
   (body, options = {}) => {
-    body.writeByte(options.result ?? wasmBlockType.empty);
+    body.writeByte(options.result ?? emptyBlockType);
   },
   (options = {}) => options.hint
 );
@@ -76,7 +76,7 @@ const ifInstruction = instruction<
 const brIfInstruction = instruction<
   readonly [labelDepth: number, hint?: WasmBranchHint]
 >(
-  wasmOpcode.brIf,
+  0x0d,
   (body, labelDepth) => {
     body.writeU32(labelDepth);
   },
@@ -85,7 +85,7 @@ const brIfInstruction = instruction<
 
 const brTableInstruction = instruction<
   readonly [labelDepths: readonly number[], defaultLabelDepth: number]
->(wasmOpcode.brTable, (body, labelDepths, defaultLabelDepth) => {
+>(0x0e, (body, labelDepths, defaultLabelDepth) => {
   body.writeVecLength(labelDepths.length);
 
   for (const labelDepth of labelDepths) {
@@ -97,27 +97,27 @@ const brTableInstruction = instruction<
 
 const callIndirectInstruction = instruction<
   readonly [typeIndex: number, tableIndex: number]
->(wasmOpcode.callIndirect, (body, typeIndex, tableIndex) => {
+>(0x11, (body, typeIndex, tableIndex) => {
   body.writeU32(typeIndex);
   body.writeU32(tableIndex);
 });
 
 const returnCallIndirectInstruction = instruction<
   readonly [typeIndex: number, tableIndex: number]
->(wasmOpcode.returnCallIndirect, (body, typeIndex, tableIndex) => {
+>(0x13, (body, typeIndex, tableIndex) => {
   body.writeU32(typeIndex);
   body.writeU32(tableIndex);
 });
 
 const i32ConstInstruction = instruction<readonly [value: number]>(
-  wasmOpcode.i32Const,
+  0x41,
   (body, value) => {
     body.writeBytes(encodeI32Leb128(value));
   }
 );
 
 const i64ConstInstruction = instruction<readonly [value: bigint]>(
-  wasmOpcode.i64Const,
+  0x42,
   (body, value) => {
     body.writeBytes(encodeI64Leb128(value));
   }
@@ -128,113 +128,113 @@ export const wasmInstruction = {
     block: blockInstruction,
     loop: loopInstruction,
     if: ifInstruction,
-    else: plainInstruction(wasmOpcode.else),
-    br: u32Instruction(wasmOpcode.br),
+    else: plainInstruction(0x05),
+    br: u32Instruction(0x0c),
     brIf: brIfInstruction,
     brTable: brTableInstruction,
-    return: plainInstruction(wasmOpcode.return),
-    unreachable: plainInstruction(wasmOpcode.unreachable),
-    end: plainInstruction(wasmOpcode.end)
+    return: plainInstruction(0x0f),
+    unreachable: plainInstruction(0x00),
+    end: plainInstruction(0x0b)
   },
   parametric: {
-    select: plainInstruction(wasmOpcode.select),
-    drop: plainInstruction(wasmOpcode.drop)
+    select: plainInstruction(0x1b),
+    drop: plainInstruction(0x1a)
   },
   local: {
-    get: u32Instruction(wasmOpcode.localGet),
-    set: u32Instruction(wasmOpcode.localSet),
-    tee: u32Instruction(wasmOpcode.localTee)
+    get: u32Instruction(0x20),
+    set: u32Instruction(0x21),
+    tee: u32Instruction(0x22)
   },
   global: {
-    get: u32Instruction(wasmOpcode.globalGet),
-    set: u32Instruction(wasmOpcode.globalSet)
+    get: u32Instruction(0x23),
+    set: u32Instruction(0x24)
   },
   call: {
-    direct: u32Instruction(wasmOpcode.call),
+    direct: u32Instruction(0x10),
     indirect: callIndirectInstruction
   },
   returnCall: {
-    direct: u32Instruction(wasmOpcode.returnCall),
+    direct: u32Instruction(0x12),
     indirect: returnCallIndirectInstruction
   },
   memory: {
-    size: u32Instruction(wasmOpcode.memorySize)
+    size: u32Instruction(0x3f)
   },
   i32: {
     const: i32ConstInstruction,
-    eqz: plainInstruction(wasmOpcode.i32Eqz),
-    eq: plainInstruction(wasmOpcode.i32Eq),
-    ne: plainInstruction(wasmOpcode.i32Ne),
-    lt_s: plainInstruction(wasmOpcode.i32LtS),
-    lt_u: plainInstruction(wasmOpcode.i32LtU),
-    gt_s: plainInstruction(wasmOpcode.i32GtS),
-    gt_u: plainInstruction(wasmOpcode.i32GtU),
-    le_s: plainInstruction(wasmOpcode.i32LeS),
-    le_u: plainInstruction(wasmOpcode.i32LeU),
-    ge_s: plainInstruction(wasmOpcode.i32GeS),
-    ge_u: plainInstruction(wasmOpcode.i32GeU),
-    clz: plainInstruction(wasmOpcode.i32Clz),
-    ctz: plainInstruction(wasmOpcode.i32Ctz),
-    popcnt: plainInstruction(wasmOpcode.i32Popcnt),
-    add: plainInstruction(wasmOpcode.i32Add),
-    sub: plainInstruction(wasmOpcode.i32Sub),
-    mul: plainInstruction(wasmOpcode.i32Mul),
-    div_s: plainInstruction(wasmOpcode.i32DivS),
-    div_u: plainInstruction(wasmOpcode.i32DivU),
-    rem_s: plainInstruction(wasmOpcode.i32RemS),
-    rem_u: plainInstruction(wasmOpcode.i32RemU),
-    and: plainInstruction(wasmOpcode.i32And),
-    or: plainInstruction(wasmOpcode.i32Or),
-    xor: plainInstruction(wasmOpcode.i32Xor),
-    shl: plainInstruction(wasmOpcode.i32Shl),
-    shr_s: plainInstruction(wasmOpcode.i32ShrS),
-    shr_u: plainInstruction(wasmOpcode.i32ShrU),
-    rotl: plainInstruction(wasmOpcode.i32Rotl),
-    rotr: plainInstruction(wasmOpcode.i32Rotr),
-    extend8S: plainInstruction(wasmOpcode.i32Extend8S),
-    extend16S: plainInstruction(wasmOpcode.i32Extend16S),
-    load: memoryInstruction(wasmOpcode.i32Load),
-    load8S: memoryInstruction(wasmOpcode.i32Load8S),
-    load8U: memoryInstruction(wasmOpcode.i32Load8U),
-    load16S: memoryInstruction(wasmOpcode.i32Load16S),
-    load16U: memoryInstruction(wasmOpcode.i32Load16U),
-    store: memoryInstruction(wasmOpcode.i32Store),
-    store8: memoryInstruction(wasmOpcode.i32Store8),
-    store16: memoryInstruction(wasmOpcode.i32Store16),
-    wrapI64: plainInstruction(wasmOpcode.i32WrapI64)
+    eqz: plainInstruction(0x45),
+    eq: plainInstruction(0x46),
+    ne: plainInstruction(0x47),
+    lt_s: plainInstruction(0x48),
+    lt_u: plainInstruction(0x49),
+    gt_s: plainInstruction(0x4a),
+    gt_u: plainInstruction(0x4b),
+    le_s: plainInstruction(0x4c),
+    le_u: plainInstruction(0x4d),
+    ge_s: plainInstruction(0x4e),
+    ge_u: plainInstruction(0x4f),
+    clz: plainInstruction(0x67),
+    ctz: plainInstruction(0x68),
+    popcnt: plainInstruction(0x69),
+    add: plainInstruction(0x6a),
+    sub: plainInstruction(0x6b),
+    mul: plainInstruction(0x6c),
+    div_s: plainInstruction(0x6d),
+    div_u: plainInstruction(0x6e),
+    rem_s: plainInstruction(0x6f),
+    rem_u: plainInstruction(0x70),
+    and: plainInstruction(0x71),
+    or: plainInstruction(0x72),
+    xor: plainInstruction(0x73),
+    shl: plainInstruction(0x74),
+    shr_s: plainInstruction(0x75),
+    shr_u: plainInstruction(0x76),
+    rotl: plainInstruction(0x77),
+    rotr: plainInstruction(0x78),
+    extend8S: plainInstruction(0xc0),
+    extend16S: plainInstruction(0xc1),
+    load: memoryInstruction(0x28),
+    load8S: memoryInstruction(0x2c),
+    load8U: memoryInstruction(0x2d),
+    load16S: memoryInstruction(0x2e),
+    load16U: memoryInstruction(0x2f),
+    store: memoryInstruction(0x36),
+    store8: memoryInstruction(0x3a),
+    store16: memoryInstruction(0x3b),
+    wrapI64: plainInstruction(0xa7)
   },
   i64: {
     const: i64ConstInstruction,
-    eqz: plainInstruction(wasmOpcode.i64Eqz),
-    eq: plainInstruction(wasmOpcode.i64Eq),
-    ne: plainInstruction(wasmOpcode.i64Ne),
-    lt_s: plainInstruction(wasmOpcode.i64LtS),
-    lt_u: plainInstruction(wasmOpcode.i64LtU),
-    gt_s: plainInstruction(wasmOpcode.i64GtS),
-    gt_u: plainInstruction(wasmOpcode.i64GtU),
-    le_s: plainInstruction(wasmOpcode.i64LeS),
-    le_u: plainInstruction(wasmOpcode.i64LeU),
-    ge_s: plainInstruction(wasmOpcode.i64GeS),
-    ge_u: plainInstruction(wasmOpcode.i64GeU),
-    clz: plainInstruction(wasmOpcode.i64Clz),
-    ctz: plainInstruction(wasmOpcode.i64Ctz),
-    popcnt: plainInstruction(wasmOpcode.i64Popcnt),
-    add: plainInstruction(wasmOpcode.i64Add),
-    sub: plainInstruction(wasmOpcode.i64Sub),
-    mul: plainInstruction(wasmOpcode.i64Mul),
-    div_s: plainInstruction(wasmOpcode.i64DivS),
-    div_u: plainInstruction(wasmOpcode.i64DivU),
-    rem_s: plainInstruction(wasmOpcode.i64RemS),
-    rem_u: plainInstruction(wasmOpcode.i64RemU),
-    and: plainInstruction(wasmOpcode.i64And),
-    or: plainInstruction(wasmOpcode.i64Or),
-    xor: plainInstruction(wasmOpcode.i64Xor),
-    shl: plainInstruction(wasmOpcode.i64Shl),
-    shr_s: plainInstruction(wasmOpcode.i64ShrS),
-    shr_u: plainInstruction(wasmOpcode.i64ShrU),
-    rotl: plainInstruction(wasmOpcode.i64Rotl),
-    rotr: plainInstruction(wasmOpcode.i64Rotr),
-    extendI32S: plainInstruction(wasmOpcode.i64ExtendI32S),
-    extendI32U: plainInstruction(wasmOpcode.i64ExtendI32U)
+    eqz: plainInstruction(0x50),
+    eq: plainInstruction(0x51),
+    ne: plainInstruction(0x52),
+    lt_s: plainInstruction(0x53),
+    lt_u: plainInstruction(0x54),
+    gt_s: plainInstruction(0x55),
+    gt_u: plainInstruction(0x56),
+    le_s: plainInstruction(0x57),
+    le_u: plainInstruction(0x58),
+    ge_s: plainInstruction(0x59),
+    ge_u: plainInstruction(0x5a),
+    clz: plainInstruction(0x79),
+    ctz: plainInstruction(0x7a),
+    popcnt: plainInstruction(0x7b),
+    add: plainInstruction(0x7c),
+    sub: plainInstruction(0x7d),
+    mul: plainInstruction(0x7e),
+    div_s: plainInstruction(0x7f),
+    div_u: plainInstruction(0x80),
+    rem_s: plainInstruction(0x81),
+    rem_u: plainInstruction(0x82),
+    and: plainInstruction(0x83),
+    or: plainInstruction(0x84),
+    xor: plainInstruction(0x85),
+    shl: plainInstruction(0x86),
+    shr_s: plainInstruction(0x87),
+    shr_u: plainInstruction(0x88),
+    rotl: plainInstruction(0x89),
+    rotr: plainInstruction(0x8a),
+    extendI32S: plainInstruction(0xac),
+    extendI32U: plainInstruction(0xad)
   }
 } as const;
