@@ -6,7 +6,7 @@ import { resourceRead } from "#compiler/ir/operations/resource.js";
 import { FunctionBuilder } from "#compiler/ir/builder/function.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import { functionType } from "#compiler/ir/function.js";
 import { compilerTestResourceEffect } from "#test/support/storage-operations.js";
@@ -56,11 +56,9 @@ test("ifValue joins its arm results into one output", () => {
   strictEqual(control.thenBody.result, thenResult);
   strictEqual(control.elseBody.result, elseResult);
   strictEqual(control.outputs[0], output);
-  ok(thenResult < output);
-  ok(elseResult < output);
   deepStrictEqual(values.widthBounds(output), {
     unsignedBits: 32,
-    signedBits: signExtended(16).signedBits
+    signedBits: 16
   });
   doesNotThrow(() => validateIrFunction(block));
 });

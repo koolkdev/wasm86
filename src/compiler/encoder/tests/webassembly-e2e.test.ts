@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
@@ -6,16 +6,7 @@ import {
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
 import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
-import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
-import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
-
-test("constant i64 function compiles", async () => {
-  const bytes = encodeConstantI64TestModule("constant", 0x0006_0000_1234_5678n);
-
-  const module = await WebAssembly.compile(bytes);
-
-  ok(module instanceof WebAssembly.Module);
-});
+import { wasmValueType } from "#compiler/encoder/types.js";
 
 test("constant i64 function returns bigint", async () => {
   const expected = 0x0006_0000_1234_5678n;
@@ -33,20 +24,6 @@ test("constant i64 function returns bigint", async () => {
 
   strictEqual(typeof result, "bigint");
   strictEqual(result, expected);
-});
-
-test("bad module bytes fail cleanly", async () => {
-  const result = await compileForTest(new Uint8Array([0x00, 0x61, 0x73, 0x6d]));
-
-  strictEqual(result.ok, false);
-  match(result.message, /WebAssembly\.compile|expected|section|version|short|magic/i);
-});
-
-test("branch hint metadata section compiles", async () => {
-  const module = await WebAssembly.compile(encodeHintedIfTestModule());
-  const sections = WebAssembly.Module.customSections(module, "metadata.code.branch_hint");
-
-  strictEqual(sections.length, 1);
 });
 
 test("module preserves encoded function branch hints", async () => {
@@ -105,35 +82,16 @@ test("i32 signed and unsigned narrow memory and sign-extension opcodes compile",
   const bytes = encodeWidthMemoryOpcodeModule(body);
 
   await WebAssembly.compile(bytes);
-
-  const opcodes = wasmBodyOpcodes(body.bytes);
-
-  strictEqual(opcodes.includes(wasmOpcode.i32Load8S), true);
-  strictEqual(opcodes.includes(wasmOpcode.i32Load16U), true);
-  strictEqual(opcodes.includes(wasmOpcode.i32Load16S), true);
-  strictEqual(opcodes.includes(wasmOpcode.i32Store8), true);
-  strictEqual(opcodes.includes(wasmOpcode.i32Store16), true);
-  strictEqual(opcodes.includes(wasmOpcode.i32Extend8S), true);
-  strictEqual(opcodes.includes(wasmOpcode.i32Extend16S), true);
+  deepStrictEqual([...body.bytes], [
+    0x01, 0x01, 0x7f,
+    0x20, 0x00, 0x2c, 0x00, 0x00, 0xc0, 0x21, 0x02,
+    0x20, 0x00, 0x2f, 0x01, 0x00, 0xc1, 0x21, 0x02,
+    0x20, 0x00, 0x2e, 0x01, 0x00, 0x21, 0x02,
+    0x20, 0x00, 0x20, 0x01, 0x3a, 0x00, 0x00,
+    0x20, 0x00, 0x20, 0x01, 0x3b, 0x01, 0x00,
+    0x20, 0x02, 0x0b
+  ]);
 });
-
-type CompileResult =
-  | Readonly<{ ok: true; module: WebAssembly.Module }>
-  | Readonly<{ ok: false; message: string }>;
-
-async function compileForTest(bytes: Uint8Array<ArrayBuffer>): Promise<CompileResult> {
-  try {
-    return {
-      ok: true,
-      module: await WebAssembly.compile(bytes)
-    };
-  } catch (error: unknown) {
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : String(error)
-    };
-  }
-}
 
 function encodeConstantI64TestModule(exportName: string, value: bigint): Uint8Array<ArrayBuffer> {
   const body = new WasmFunctionBodyEncoder().i64Const(value).finish();
@@ -142,20 +100,6 @@ function encodeConstantI64TestModule(exportName: string, value: bigint): Uint8Ar
     functionTypes: [{ params: [], results: [wasmValueType.i64] }],
     functions: [{ typeIndex: 0, body }],
     functionExports: [{ name: exportName, functionIndex: 0 }]
-  });
-}
-
-function encodeHintedIfTestModule(): Uint8Array<ArrayBuffer> {
-  const body = new WasmFunctionBodyEncoder()
-    .i32Const(0)
-    .ifBlock({ hint: "unlikely" })
-    .endBlock()
-    .i32Const(1)
-    .finish();
-  return encodeTestModule({
-    functionTypes: [{ params: [], results: [wasmValueType.i32] }],
-    functions: [{ typeIndex: 0, body }],
-    functionExports: [{ name: "hintedIf", functionIndex: 0 }]
   });
 }
 

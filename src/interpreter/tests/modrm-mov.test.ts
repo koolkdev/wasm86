@@ -11,7 +11,6 @@ import {
   writeGuestBytes
 } from "./harness.js";
 import { startAddress } from "#test/support/addresses.js";
-import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 
 test("interpreter binds MOV 8B ModRM.reg as the destination", async () => {
   const interpreter = await instantiateInterpreter();
@@ -64,6 +63,13 @@ test("a truncated ModRM raises instruction-fetch #PF without changing architectu
 
   const exit = interpreter.runFor(1);
 
-  deepStrictEqual(exit, fetchPageFaultStop(eip + 1));
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: {
+      kind: "PF",
+      linearAddress: eip + 1,
+      errorCode: 16
+    }
+  });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

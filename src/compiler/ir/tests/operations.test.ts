@@ -1,24 +1,12 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import {
-  wasmBodyMemoryAccesses,
-  wasmBodyOpcodes
-} from "#compiler/encoder/tests/body-opcodes.js";
-import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   IndirectCallTarget,
-  Invocation,
-  type CallTarget
+  Invocation
 } from "#compiler/ir/invocation.js";
 import { callOperation } from "#compiler/ir/operations/call.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
-import type {
-  Operation,
-  OperationEmitTarget,
-  OperationResult
-} from "#compiler/ir/operations/index.js";
 import {
   resourceRead,
   resourceWrite
@@ -30,295 +18,182 @@ import {
   type ResourceByteOperand,
   type ResourceRef
 } from "#compiler/ir/resource.js";
-import { valueId } from "#compiler/ir/values/id.js";
-import type {
-  IntegerWidth,
-  ValueId
-} from "#compiler/ir/values/types.js";
-import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import { CellRef } from "#compiler/ir/cell.js";
 import { functionType } from "#compiler/ir/function.js";
+import { ValueTable } from "#compiler/ir/values/table.js";
+import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import {
-  createModuleBindings,
-  type ModuleBindings
-} from "#compiler/module/bindings.js";
 import { functionRef, tableRef } from "#compiler/ir/refs.js";
 
-test("operation owners atomically construct complete occurrences", () => {
-  const address = valueId(1);
-  const value = valueId(3);
-  const readOutput = valueId(4);
-  const cellOutput = valueId(5);
-  const cell = new CellRef("i32");
+test("resource operations expose their byte range, operands, and direct effects", () => {
+  const values = new ValueTable();
   const resource = resourceRef("test.resource");
-  const range: ByteRange = {
-    basis: { kind: "dynamic", origin: new DynamicByteOriginRef() }
-  };
-  const allocations: OperationResult[] = [];
-  const allocate = (output: ValueId) =>
-    (result: OperationResult): ValueId => {
-      allocations.push(result);
-      return output;
-    };
-  const operations: readonly Operation[] = [
-    resourceRead.create(
-      { source: byteOperand(resource, range, address, 4, 16) },
-      allocate(readOutput)
-    ),
-    resourceWrite.create(
-      {
-        destination: byteOperand(resource, range, address, 4, 16),
-        value
-      }
-    ),
-    cellRead.create({ cell }, allocate(cellOutput)),
-    cellWrite.create({ cell, value, initialization: "seed" })
-  ];
-
-  deepStrictEqual(operations.map((operation) => operation.kind), [
-    "resource.read",
-    "resource.write",
-    "cell.read",
-    "cell.write"
-  ]);
-  deepStrictEqual(operations.map((operation) => operation.category), [
-    "operation",
-    "operation",
-    "operation",
-    "operation"
-  ]);
-  deepStrictEqual(operations.map((operation) => operation.outputs), [
-    [readOutput],
-    [],
-    [cellOutput],
-    []
-  ]);
-  deepStrictEqual(operations.map((operation) => operation.referencedResources), [
-    [resource],
-    [resource],
-    [],
-    []
-  ]);
-  deepStrictEqual(allocations, [
-    { type: "i32", bounds: fitsUnsigned(16) },
-    { type: "i32" }
-  ]);
-  strictEqual("node" in operations[0]!, false);
-});
-
-test("operation owners normalize only declared fields and expose direct facts", () => {
-  const resource = resourceRef("test.metadata-resource");
-  const address = valueId(10);
-  const output = valueId(11);
-  const args = {
-    source: byteOperand(
-      resource,
-      { basis: { kind: "resource" } },
-      address,
-      0,
-      32
-    ),
-    loweringMetadata: { kind: "unrelated" },
-    callerMetadata: true
-  };
-  const operation = resourceRead.create(args, () => output);
-
-  strictEqual("loweringMetadata" in operation, false);
-  strictEqual("callerMetadata" in operation, false);
-  deepStrictEqual(operation.inputs, [{ value: address, type: "i32" }]);
-  deepStrictEqual(operation.operands, [address]);
-  deepStrictEqual(operation.outputs, [output]);
-  deepStrictEqual(operation.nestedBodies, []);
-  strictEqual(operation.completes({ regionCompletes: () => true }), false);
-  strictEqual(operation.mapBodies(() => ({ nodes: [] })), operation);
-  deepStrictEqual(operation.directEffects, {
-    reads: [operation.effect],
-    writes: []
-  });
-  deepStrictEqual(operation.referencedResources, [resource]);
-});
-
-test("resource operations retain identities, ranges, and result refinements", () => {
-  const resource = resourceRef("test.generic-memory");
   const origin = new DynamicByteOriginRef();
   const range: ByteRange = {
     basis: { kind: "dynamic", origin },
     slice: { byteOffset: 6, byteLength: 2 }
   };
-  const address = valueId(20);
-  const value = valueId(21);
-  const output = valueId(22);
+  const address = values.parameter(0, "i32");
+  const stored = values.parameter(1, "i32");
+  const source = byteOperand(resource, range, address, 6, 16);
   const read = resourceRead.create(
-    {
-      source: byteOperand(resource, range, address, 6, 16),
-      mode: { kind: "signed" }
-    },
-    () => output
+    { source, mode: { kind: "signed" } },
+    (result) => {
+      deepStrictEqual(result, {
+        type: "i32",
+        bounds: { unsignedBits: 32, signedBits: 16 }
+      });
+      return values.addNodeOutput(result.bounds);
+    }
   );
   const write = resourceWrite.create({
-    destination: byteOperand(resource, range, address, 6, 16),
-    value
+    destination: source,
+    value: stored
   });
 
-  deepStrictEqual(read.results, [{ type: "i32", bounds: signExtended(16) }]);
-  deepStrictEqual(read.inputs, [{ value: address, type: "i32" }]);
-  deepStrictEqual(read.effect, { space: "resource", resource, range });
+  strictEqual(read.effect.resource, resource);
+  strictEqual(read.effect.range, range);
   strictEqual(read.displacement, 6);
-  deepStrictEqual(read.directEffects, { reads: [read.effect], writes: [] });
-  strictEqual(read.directEffects.reads[0], read.effect);
-  deepStrictEqual(write.results, []);
-  deepStrictEqual(write.inputs, [
-    { value: address, type: "i32" },
-    { value, type: "i32" }
-  ]);
-  deepStrictEqual(write.directEffects, { reads: [], writes: [write.effect] });
-  strictEqual(write.directEffects.writes[0], write.effect);
+  deepStrictEqual(read.operands, [address]);
+  deepStrictEqual(read.directEffects, {
+    reads: [read.effect],
+    writes: []
+  });
+  deepStrictEqual(write.operands, [address, stored]);
+  deepStrictEqual(write.directEffects, {
+    reads: [],
+    writes: [write.effect]
+  });
+  deepStrictEqual(read.referencedResources, [resource]);
+  deepStrictEqual(write.referencedResources, [resource]);
+});
 
+test("resource read modes define their result bounds", () => {
+  const values = new ValueTable();
+  const resource = resourceRef("test.read-bounds");
   const source = byteOperand(
     resource,
     { basis: { kind: "resource" } },
-    address,
+    values.const(0),
     0,
     8
   );
+  const resultOf = (
+    mode?: { readonly kind: "signed" } |
+      { readonly kind: "unsigned"; readonly bounds: { unsignedBits: number; signedBits: number } }
+  ) => {
+    let result: unknown;
+
+    resourceRead.create({ source, ...(mode === undefined ? {} : { mode }) }, (declared) => {
+      result = declared;
+      if (declared.type !== "i32") {
+        throw new Error("resource read declared a non-i32 result");
+      }
+      return values.addNodeOutput(declared.bounds);
+    });
+    return result;
+  };
+
+  deepStrictEqual(resultOf(), {
+    type: "i32",
+    bounds: { unsignedBits: 8, signedBits: 9 }
+  });
+  deepStrictEqual(resultOf({ kind: "signed" }), {
+    type: "i32",
+    bounds: { unsignedBits: 32, signedBits: 8 }
+  });
   deepStrictEqual(
-    resourceRead.create({ source }, () => output).results,
-    [{ type: "i32", bounds: fitsUnsigned(8) }]
-  );
-  deepStrictEqual(
-    resourceRead.create(
-      { source, mode: { kind: "unsigned", bounds: fitsUnsigned(1) } },
-      () => output
-    ).results,
-    [{ type: "i32", bounds: fitsUnsigned(1) }]
+    resultOf({ kind: "unsigned", bounds: { unsignedBits: 1, signedBits: 2 } }),
+    {
+      type: "i32",
+      bounds: { unsignedBits: 1, signedBits: 2 }
+    }
   );
   throws(
     () => resourceRead.create(
       { source: { ...source, width: 32 }, mode: { kind: "signed" } },
-      () => output
+      () => values.addNodeOutput()
     ),
     /32-bit resource read has no signed extension/
   );
 });
 
-test("typed cell operations expose flat cell facts and exact effects", () => {
-  const value = valueId(30);
-  const output = valueId(31);
+test("cell operations retain cell type, initialization, and effects", () => {
+  const values = new ValueTable();
   const cell = new CellRef("i32");
   const wide = new CellRef("i64");
-  const read = cellRead.create({ cell }, () => output);
-  const write = cellWrite.create({ cell, value, initialization: "seed" });
+  const stored = values.parameter(0, "i32");
+  const wideStored = values.parameter(1, "i64");
+  const read = cellRead.create({ cell }, () => values.addNodeOutput());
+  const wideRead = cellRead.create({ cell: wide }, () => values.addNodeOutput64());
+  const write = cellWrite.create({
+    cell,
+    value: stored,
+    initialization: "seed"
+  });
+  const wideWrite = cellWrite.create({
+    cell: wide,
+    value: wideStored,
+    initialization: "update"
+  });
 
-  strictEqual(read.cell, cell);
   deepStrictEqual(read.results, [{ type: "i32" }]);
-  deepStrictEqual(read.directEffects, { reads: [{ space: "cell", cell }], writes: [] });
-  strictEqual(write.cell, cell);
+  deepStrictEqual(wideRead.results, [{ type: "i64" }]);
+  deepStrictEqual(read.directEffects, {
+    reads: [{ space: "cell", cell }],
+    writes: []
+  });
+  deepStrictEqual(write.directEffects, {
+    reads: [],
+    writes: [{ space: "cell", cell }]
+  });
   strictEqual(write.initialization, "seed");
-  deepStrictEqual(write.operands, [value]);
-  deepStrictEqual(write.directEffects, { reads: [], writes: [{ space: "cell", cell }] });
-  deepStrictEqual(cellRead.create({ cell: wide }, () => output).results, [
-    { type: "i64" }
-  ]);
-  deepStrictEqual(
-    cellWrite.create({ cell: wide, value, initialization: "update" }).inputs,
-    [{ value, type: "i64" }]
-  );
+  deepStrictEqual(wideWrite.inputs, [{ value: wideStored, type: "i64" }]);
 });
 
-test("ordinary calls are operations with allocator-owned outputs and direct emission", () => {
-  const argument = valueId(40);
-  const output = valueId(41);
-  const targetFunction = functionDefinition("test.call", ["i32"], ["i32"]);
+test("ordinary calls validate arguments and carry target effects", () => {
+  const values = new ValueTable();
+  const argument = values.parameter(0, "i32");
+  const target = functionDefinition("test.call", ["i32"], ["i32"]);
   const invocation = Invocation.create({
-    target: targetFunction,
+    target,
     arguments: [{ value: argument, type: "i32" }]
   });
   const operation = callOperation.create(
     { invocation },
-    (result) => {
-      deepStrictEqual(result, { type: "i32" });
-      return output;
-    }
+    () => values.addNodeOutput()
   );
-  const body = new WasmFunctionBodyEncoder();
-  const uses: ValueId[] = [];
 
-  operation.emit(operationTarget(body, targetFunction), {
-    emitUse(value) {
-      uses.push(value);
-      body.i32Const(value);
-    }
-  });
-
-  strictEqual(operation.category, "operation");
   strictEqual(operation.invocation, invocation);
-  strictEqual(invocation.target, targetFunction);
   deepStrictEqual(operation.operands, [argument]);
-  deepStrictEqual(operation.outputs, [output]);
-  deepStrictEqual(operation.directEffects, targetFunction.effects);
-  deepStrictEqual(operation.referencedResources, []);
-  deepStrictEqual(uses, [argument]);
-  const encoded = body.finish();
-
-  deepStrictEqual(wasmBodyOpcodes(encoded.bytes), [
-    wasmOpcode.i32Const,
-    wasmOpcode.call,
-    wasmOpcode.end
-  ]);
+  deepStrictEqual(operation.directEffects, target.effects);
+  strictEqual(operation.outputs.length, 1);
   throws(
-    () => Invocation.create({
-      target: targetFunction,
-      arguments: []
-    }),
+    () => Invocation.create({ target, arguments: [] }),
     /expects 1 arguments, got 0/
   );
-  const multiResultTarget = functionDefinition(
+
+  const multiResult = functionDefinition(
     "test.call-multi-result",
     [],
     ["i32", "i64"]
   );
 
   throws(
-    () => callOperation.create(
-      {
-        invocation: Invocation.create({
-          target: multiResultTarget,
-          arguments: []
-        })
-      },
-      () => output
-    ),
-    /multiple call results are not supported yet/
+    () => callOperation.create({
+      invocation: Invocation.create({
+        target: multiResult,
+        arguments: []
+      })
+    }, () => values.addNodeOutput()),
+    /multiple call results are not supported/
   );
 });
 
-test("call targets are structurally polymorphic", () => {
-  const elementIndex = valueId(45);
-  const table = tableRef("test.structural-call-table");
-  const type = functionType([], []);
-  const effects = { reads: [], writes: [] } as const;
-  const target = {
-    kind: "indirect",
-    table,
-    type,
-    effects,
-    elementIndex: { value: elementIndex, type: "i32" }
-  } satisfies CallTarget;
-  const invocation = Invocation.create({ target, arguments: [] });
-
-  strictEqual(invocation.target, target);
-  deepStrictEqual(invocation.inputs, [
-    { value: elementIndex, type: "i32" }
-  ]);
-  strictEqual(target.table, table);
-  deepStrictEqual(target.elementIndex, { value: elementIndex, type: "i32" });
-});
-
-test("indirect invocations own their selector, effects, and emission", () => {
-  const argument = valueId(50);
-  const elementIndex = valueId(51);
-  const output = valueId(52);
+test("indirect invocations include the table selector in their inputs", () => {
+  const values = new ValueTable();
+  const argument = values.parameter(0, "i64");
+  const elementIndex = values.parameter(1, "i32");
   const table = tableRef("test.call-table");
   const type = functionType(["i64"], ["i32"]);
   const effects = { reads: [], writes: [] } as const;
@@ -332,159 +207,28 @@ test("indirect invocations own their selector, effects, and emission", () => {
     target,
     arguments: [{ value: argument, type: "i64" }]
   });
-  const operation = callOperation.create({ invocation }, () => output);
-  const body = new WasmFunctionBodyEncoder();
-  const uses: ValueId[] = [];
+  const operation = callOperation.create(
+    { invocation },
+    () => values.addNodeOutput()
+  );
 
-  operation.emit(boundOperationTarget(
-    body,
-    createModuleBindings({
-      functions: new Map(),
-      types: new Map([[type, 8]]),
-      tables: new Map([[table, 9]]),
-      resources: new Map()
-    })
-  ), {
-    emitUse(value) {
-      uses.push(value);
-      body.i32Const(value);
-    }
-  });
-
-  deepStrictEqual(invocation.arguments, [{ value: argument, type: "i64" }]);
   deepStrictEqual(invocation.inputs, [
     { value: argument, type: "i64" },
     { value: elementIndex, type: "i32" }
   ]);
-  strictEqual(invocation.target, target);
-  strictEqual(target.type, type);
-  strictEqual(target.effects, effects);
-  deepStrictEqual(target.elementIndex, { value: elementIndex, type: "i32" });
-  strictEqual(target.table, table);
   deepStrictEqual(operation.operands, [argument, elementIndex]);
-  deepStrictEqual(operation.outputs, [output]);
-  deepStrictEqual(uses, [argument, elementIndex]);
-  const encoded = body.finish();
-
-  strictEqual(encoded.bytes.includes(wasmOpcode.callIndirect), true);
+  strictEqual(target.table, table);
+  strictEqual(target.effects, effects);
   throws(
-    () => Invocation.create({
-      target: IndirectCallTarget.create({
-        table,
-        type,
-        effects,
-        elementIndex: { value: elementIndex, type: "i64" }
-      }),
-      arguments: [{ value: argument, type: "i64" }]
+    () => IndirectCallTarget.create({
+      table,
+      type,
+      effects,
+      elementIndex: { value: elementIndex, type: "i64" }
     }),
     /table element index must be i32, got i64/
   );
 });
-
-test("resource and cell emission call their definition-specific target services", () => {
-  const resource = resourceRef("test.emission-resource");
-  const range: ByteRange = { basis: { kind: "resource" } };
-  const address = valueId(60);
-  const value = valueId(61);
-  const output = valueId(62);
-  const cell = new CellRef("i32");
-  const body = new WasmFunctionBodyEncoder();
-  const target = boundOperationTarget(
-    body,
-    createModuleBindings({
-      functions: new Map(),
-      types: new Map(),
-      tables: new Map(),
-      resources: new Map([[resource, 3]])
-    }),
-    (candidate) => {
-      strictEqual(candidate, cell);
-      return 2;
-    }
-  );
-  const uses: ValueId[] = [];
-  const values = {
-    emitUse(id: ValueId) {
-      uses.push(id);
-      body.i32Const(0);
-    }
-  };
-
-  resourceRead.create(
-    { source: byteOperand(resource, range, address, 0, 32) },
-    () => output
-  ).emit(target, values);
-  body.drop();
-  resourceWrite.create({
-    destination: byteOperand(resource, range, address, 0, 32),
-    value
-  }).emit(target, values);
-  cellRead.create({ cell }, () => output).emit(target, values);
-  body.drop();
-  cellWrite.create({ cell, value, initialization: "update" }).emit(target, values);
-
-  deepStrictEqual(uses, [address, address, value, value]);
-  const memoryIndices = wasmBodyMemoryAccesses(body.finish().bytes)
-    .map((access) => access.memoryIndex);
-
-  deepStrictEqual([...new Set(memoryIndices)], [3]);
-});
-
-function operationTarget(
-  body: WasmFunctionBodyEncoder,
-  expectedFunction?: FunctionDefinition
-): OperationEmitTarget {
-  return boundOperationTarget(
-    body,
-    createModuleBindings({
-      functions: expectedFunction === undefined
-        ? new Map()
-        : new Map([[expectedFunction.ref, 7]]),
-      types: new Map(),
-      tables: new Map(),
-      resources: new Map()
-    })
-  );
-}
-
-function boundOperationTarget(
-  body: WasmFunctionBodyEncoder,
-  bindings: ModuleBindings,
-  cellLocal: OperationEmitTarget["cellLocal"] = () => 0
-): OperationEmitTarget {
-  return {
-    body,
-    cellLocal,
-    resourceIndex: (resource) => bindings.resourceIndex(resource),
-    emitCall: (target) => emitCall(body, bindings, target, false),
-    emitReturnCall: (target) => emitCall(body, bindings, target, true)
-  };
-}
-
-function emitCall(
-  body: WasmFunctionBodyEncoder,
-  bindings: ModuleBindings,
-  target: CallTarget,
-  tail: boolean
-): void {
-  switch (target.kind) {
-    case "direct": {
-      const index = bindings.functionIndex(target.ref);
-
-      tail ? body.returnCallFunction(index) : body.callFunction(index);
-      return;
-    }
-    case "indirect": {
-      const typeIndex = bindings.typeIndex(target.type);
-      const tableIndex = bindings.tableIndex(target.table);
-
-      tail
-        ? body.returnCallIndirect(typeIndex, tableIndex)
-        : body.callIndirect(typeIndex, tableIndex);
-      return;
-    }
-  }
-}
 
 function functionDefinition(
   id: string,

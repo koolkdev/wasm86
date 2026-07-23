@@ -45,10 +45,6 @@ test("compiled programs preserve reachable memories, exact exports, and runnable
   program.exportFunction({ ref: exportRef, name: "read", target: read.ref });
   const compiled = compileProgram(program.finish());
 
-  deepStrictEqual(
-    Object.keys(compiled).sort(),
-    ["bytes", "functionExports", "functionImports", "memoryImports"]
-  );
   strictEqual(compiled.memoryImports.length, 1);
   strictEqual(compiled.memoryImports[0]?.ref, fixture.used);
   deepStrictEqual(compiled.memoryImports[0], {

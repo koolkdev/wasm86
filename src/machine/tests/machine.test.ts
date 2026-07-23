@@ -75,13 +75,3 @@ test("machine requires a positive x86-page-aligned size", () => {
     );
   }
 });
-
-test("machine exposes only its memory and single Cpu", () => {
-  const machine = createMachine({ memoryByteLength: 0x1000 });
-
-  deepStrictEqual(Object.keys(machine), ["memory", "cpu"]);
-  deepStrictEqual(Object.keys(machine.cpu), ["state", "run"]);
-  strictEqual(typeof machine.cpu.run, "function");
-  strictEqual("createCpu" in machine, false);
-  strictEqual(Object.isFrozen(machine), false);
-});

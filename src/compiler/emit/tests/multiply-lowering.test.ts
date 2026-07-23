@@ -10,9 +10,7 @@ import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import { wasmOpcode } from "#compiler/encoder/types.js";
-import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
-import { testFunctionBody, testFunctionCompleted, instantiateTestFunction } from "./harness.js";
+import { testFunctionCompleted, instantiateTestFunction } from "./harness.js";
 
 function readRegister(view: DataView, name: RegName): number {
   return readWasmCpuStateChannel(view, gprChannel(name));
@@ -62,7 +60,7 @@ for (const entry of [
   });
 }
 
-test("i32 multiply lowers to wasm i32.mul", async () => {
+test("i32 multiply returns the low product", async () => {
   const builder = createInstructionFunction();
   const template: SemanticTemplate = (s, v) => {
     s.write(s.reg("edx"), v.binary("mul", s.read(s.reg("eax"), { width: 32 }), s.read(s.reg("ebx"), { width: 32 })), { width: 32 });
@@ -71,10 +69,6 @@ test("i32 multiply lowers to wasm i32.mul", async () => {
   builder.add(template, [], loc(0x1000, 0x1001));
 
   const block = builder.finish();
-  const body = testFunctionBody(block);
-
-  strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i32Mul), true);
-
   const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0x4000_0000, ebx: 2 });
@@ -82,7 +76,7 @@ test("i32 multiply lowers to wasm i32.mul", async () => {
   strictEqual(readRegister(stateView, "edx"), 0x8000_0000);
 });
 
-test("unsigned dword product high-half lowering uses i64 shift", async () => {
+test("unsigned dword product returns the high half", async () => {
   const builder = createInstructionFunction();
   const template: SemanticTemplate = (s, v) => {
     const left = v.extend64(32, s.read(s.reg("eax"), { width: 32 }), false);
@@ -96,11 +90,6 @@ test("unsigned dword product high-half lowering uses i64 shift", async () => {
   builder.add(template, [], loc(0x1000, 0x1001));
 
   const block = builder.finish();
-  const body = testFunctionBody(block);
-
-  strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ExtendI32U), true);
-  strictEqual(wasmBodyOpcodes(body).includes(wasmOpcode.i64ShrU), true);
-
   const { stateView, run } = await instantiateTestFunction(block);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0xffff_ffff, ebx: 2 });

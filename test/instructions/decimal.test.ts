@@ -1,6 +1,5 @@
 import { test } from "node:test";
 
-import { divideError } from "#core/exceptions.js";
 import {
   assertInstructionCase,
   type InstructionCase
@@ -215,7 +214,10 @@ test("AAM base zero raises divide error without changing architectural state", a
     name: "AAM base-zero divide error",
     bytes: [0xd4, 0x00],
     initialState: { eax: 0xaaaa_1234, ...allFlagsSet, ...nonStatusFlags },
-    expectedCompletion: { kind: "cpuException", exception: divideError() },
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: { kind: "DE" }
+    },
     expectedEip: startAddress,
     instructionCount: 0
   });

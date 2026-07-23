@@ -1,6 +1,7 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
+import { assert } from "#common/assert.js";
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
 import { createInstructionFunction } from "./instruction-function.js";
 import {
@@ -14,27 +15,33 @@ import {
 import { defaultSegmentForBase } from "#core/segments.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
-import { decodeBytes, ok as decodeOk } from "#core/decoder/tests/helpers.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
-import { x86StatusFlags } from "#core/flags/definitions.js";
+import {
+  x86StatusFlags,
+  type X86StatusFlag
+} from "#core/flags/definitions.js";
 import { decodeExit } from "#cpu/exit.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { reg32, type MemOperand, type Reg32 } from "#core/types.js";
-import {
-  assertPageFaultException,
-  readPageFaultStop,
-  writePageFaultStop,
-  type CpuExceptionStop
-} from "#cpu/tests/stop-fixtures.js";
+import { assertPageFaultException } from "#test/support/cpu-exception-assertions.js";
 import {
   readWasmCpuFlagByte,
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
+import { decodeBytes } from "#test/support/isa-decode.js";
 import { testFunctionCompleted, instantiateTestFunction } from "./harness.js";
-import type { AluFlags } from "./reference.js";
 
-const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisfies AluFlags;
+type StatusFlags = Readonly<Record<X86StatusFlag, 0 | 1>>;
+
+const allFlagsSet = {
+  CF: 1,
+  PF: 1,
+  AF: 1,
+  ZF: 1,
+  SF: 1,
+  OF: 1
+} as const satisfies StatusFlags;
 
 // Memory cases with explicit state, guest bytes, and fault expectations.
 
@@ -42,7 +49,10 @@ const allFlagsSet = { CF: 1, PF: 1, AF: 1, ZF: 1, SF: 1, OF: 1 } as const satisf
 const guestByteLength = 0x10000;
 
 test("mov r32, [ebx+disp] loads the guest cell", async () => {
-  const instruction = decodeOk(decodeBytes([0x8b, 0x43, 0x04]));
+  const decoded = decodeBytes([0x8b, 0x43, 0x04]);
+
+  assert(decoded.kind === "instruction", "mov load did not decode");
+  const instruction = decoded.instruction;
   const initial: Partial<WasmCpuStateSnapshot> = { ebx: 0x20, eip: instruction.address, ...allFlagsSet };
   const { stateView, guestView, run } = await instantiateTestFunction(blockOf([instruction]));
 
@@ -58,7 +68,10 @@ test("mov r32, [ebx+disp] loads the guest cell", async () => {
 });
 
 test("mov [ebx+disp], r32 stores the guest cell", async () => {
-  const instruction = decodeOk(decodeBytes([0x89, 0x43, 0x04]));
+  const decoded = decodeBytes([0x89, 0x43, 0x04]);
+
+  assert(decoded.kind === "instruction", "mov store did not decode");
+  const instruction = decoded.instruction;
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0xcafe_1234,
     ebx: 0x20,
@@ -158,7 +171,11 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), readPageFaultStop(guestByteLength), "read fault");
+  assertFaultExit(
+    run(),
+    { linearAddress: guestByteLength, errorCode: 0 },
+    "read fault"
+  );
   assertState(
     stateView,
     {
@@ -172,7 +189,10 @@ test("a read fault reports the faulting eip and keeps earlier instructions' stat
 });
 
 test("a direct-offset read fault reports the offset and leaves state unchanged", async () => {
-  const instruction = decodeOk(decodeBytes([0xa1, 0xfe, 0xff, 0x00, 0x00]));
+  const decoded = decodeBytes([0xa1, 0xfe, 0xff, 0x00, 0x00]);
+
+  assert(decoded.kind === "instruction", "direct-offset read did not decode");
+  const instruction = decoded.instruction;
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0x1234_5678,
     eip: instruction.address,
@@ -182,7 +202,11 @@ test("a direct-offset read fault reports the offset and leaves state unchanged",
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), readPageFaultStop(guestByteLength - 2), "moffs read fault");
+  assertFaultExit(
+    run(),
+    { linearAddress: guestByteLength - 2, errorCode: 0 },
+    "moffs read fault"
+  );
   assertState(
     stateView,
     { regs: { eax: 0x1234_5678 }, eip: instruction.address, flags: allFlagsSet },
@@ -192,7 +216,10 @@ test("a direct-offset read fault reports the offset and leaves state unchanged",
 
 test("a write fault leaves guest memory untouched", async () => {
   // mov [ebx], eax with the range crossing the guest end.
-  const instruction = decodeOk(decodeBytes([0x89, 0x03]));
+  const decoded = decodeBytes([0x89, 0x03]);
+
+  assert(decoded.kind === "instruction", "faulting write did not decode");
+  const instruction = decoded.instruction;
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0xdead_beef,
     ebx: guestByteLength - 2,
@@ -203,7 +230,11 @@ test("a write fault leaves guest memory untouched", async () => {
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), writePageFaultStop(guestByteLength - 2), "write fault");
+  assertFaultExit(
+    run(),
+    { linearAddress: guestByteLength - 2, errorCode: 2 },
+    "write fault"
+  );
   strictEqual(guestView.getUint32(guestByteLength - 4, true), 0);
   assertState(
     stateView,
@@ -213,7 +244,10 @@ test("a write fault leaves guest memory untouched", async () => {
 });
 
 test("a direct-offset write fault reports the offset and leaves state unchanged", async () => {
-  const instruction = decodeOk(decodeBytes([0xa3, 0xfe, 0xff, 0x00, 0x00]));
+  const decoded = decodeBytes([0xa3, 0xfe, 0xff, 0x00, 0x00]);
+
+  assert(decoded.kind === "instruction", "direct-offset write did not decode");
+  const instruction = decoded.instruction;
   const initial: Partial<WasmCpuStateSnapshot> = {
     eax: 0xdead_beef,
     eip: instruction.address,
@@ -223,7 +257,11 @@ test("a direct-offset write fault reports the offset and leaves state unchanged"
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), writePageFaultStop(guestByteLength - 2), "moffs write fault");
+  assertFaultExit(
+    run(),
+    { linearAddress: guestByteLength - 2, errorCode: 2 },
+    "moffs write fault"
+  );
   strictEqual(guestView.getUint32(guestByteLength - 4, true), 0);
   assertState(
     stateView,
@@ -234,7 +272,10 @@ test("a direct-offset write fault reports the offset and leaves state unchanged"
 
 test("a narrow access faults with its byte length", async () => {
   // movzx eax, byte [ebx] one past the guest.
-  const instruction = decodeOk(decodeBytes([0x0f, 0xb6, 0x03]));
+  const decoded = decodeBytes([0x0f, 0xb6, 0x03]);
+
+  assert(decoded.kind === "instruction", "narrow read did not decode");
+  const instruction = decoded.instruction;
   const initial: Partial<WasmCpuStateSnapshot> = {
     ebx: guestByteLength,
     eip: instruction.address,
@@ -244,7 +285,11 @@ test("a narrow access faults with its byte length", async () => {
 
   writeWasmCpuStateSnapshot(stateView, initial);
 
-  assertFaultExit(run(), readPageFaultStop(guestByteLength), "byte fault");
+  assertFaultExit(
+    run(),
+    { linearAddress: guestByteLength, errorCode: 0 },
+    "byte fault"
+  );
   assertState(
     stateView,
     { regs: { ebx: guestByteLength }, eip: instruction.address, flags: allFlagsSet },
@@ -267,8 +312,12 @@ function decodeSequence(byteLists: readonly (readonly number[])[]): readonly Isa
   let address: number | undefined;
 
   for (const bytes of byteLists) {
-    const instruction = address === undefined ? decodeOk(decodeBytes(bytes)) : decodeOk(decodeBytes(bytes, address));
+    const decoded = address === undefined
+      ? decodeBytes(bytes)
+      : decodeBytes(bytes, address);
 
+    assert(decoded.kind === "instruction", "memory fixture did not decode");
+    const instruction = decoded.instruction;
     instructions.push(instruction);
     address = instruction.nextEip;
   }
@@ -305,7 +354,11 @@ function effectiveAddressTermsOf(operand: MemOperand): EffectiveAddressTerms {
   };
 }
 
-function assertFaultExit(exit: bigint, expected: CpuExceptionStop, label: string): void {
+function assertFaultExit(
+  exit: bigint,
+  expected: Readonly<{ linearAddress: number; errorCode: number }>,
+  label: string
+): void {
   const decoded = decodeExit(exit);
 
   strictEqual(decoded.kind, "cpuException", `${label} kind`);
@@ -313,16 +366,26 @@ function assertFaultExit(exit: bigint, expected: CpuExceptionStop, label: string
     return;
   }
 
-  strictEqual(decoded.exception.kind, expected.exception.kind, `${label} exception`);
   assertPageFaultException(decoded.exception, `${label} decoded page fault`);
-  assertPageFaultException(expected.exception, `${label} expected page fault`);
-  strictEqual(decoded.exception.linearAddress, expected.exception.linearAddress, `${label} linear address`);
-  strictEqual(decoded.exception.errorCode, expected.exception.errorCode, `${label} error code`);
+  strictEqual(
+    decoded.exception.linearAddress,
+    expected.linearAddress,
+    `${label} linear address`
+  );
+  strictEqual(
+    decoded.exception.errorCode,
+    expected.errorCode,
+    `${label} error code`
+  );
 }
 
 function assertState(
   stateView: DataView,
-  expected: Readonly<{ regs: Partial<Record<Reg32, number>>; eip: number; flags: AluFlags }>,
+  expected: Readonly<{
+    regs: Partial<Record<Reg32, number>>;
+    eip: number;
+    flags: StatusFlags;
+  }>,
   label: string
 ): void {
   for (const name of reg32) {

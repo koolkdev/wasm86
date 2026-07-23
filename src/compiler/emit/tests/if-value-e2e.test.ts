@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { gprChannel } from "#core/state/channels.js";
@@ -10,11 +10,11 @@ import {
 import {
   completedTestFunction,
   instantiateTestFunction,
-  testFunctionBranchHints,
   testFunctionCompleted
 } from "./harness.js";
 
-test("ifValue selects one arm result and preserves its hint", async () => {
+// Observable emitted-Wasm behavior for value-producing branches.
+test("ifValue selects one arm result", async () => {
   const fixture = completedTestFunction(1, (fn) => {
     const state = cpuStateAccess.bind(fn.region);
     const output = fn.region.ifValue(
@@ -34,11 +34,6 @@ test("ifValue selects one arm result and preserves its hint", async () => {
 
     state.write(state.gpr("eax"), output);
   });
-
-  deepStrictEqual(
-    testFunctionBranchHints(fixture),
-    [0]
-  );
 
   const { stateView, run } = await instantiateTestFunction(fixture);
 

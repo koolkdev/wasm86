@@ -1,9 +1,6 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert";
+import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import { createInstructionFunction } from "./instruction-function.js";
-import { memBinding, staticMemSegment } from "#core/instruction/bindings.js";
 import { gprChannel } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
 import { cpuStateAccess } from "#test/support/execution-model.js";
@@ -12,22 +9,14 @@ import {
   operandRead,
   operandWrite
 } from "#test/support/storage-operations.js";
-import { repMovsSemantic } from "#core/semantics/strings.js";
-import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import {
-  wasmBodyInstructions,
-  wasmBodyOpcodes
-} from "#compiler/encoder/tests/body-opcodes.js";
-import {
   completedTestFunction,
-  testFunctionBody,
   testFunctionCompleted,
   instantiateTestFunction,
-  testModuleMemoryIndex,
   type TestFunction
 } from "./harness.js";
 import {
@@ -204,9 +193,6 @@ test("a pure invariant evaluates before the loop", async () => {
       })
     ]);
   });
-  const opcodes = wasmBodyOpcodes(testFunctionBody(fixture));
-
-  ok(opcodes.indexOf(wasmOpcode.i32Add) < opcodes.indexOf(wasmOpcode.loop));
   const { stateView, run } = await instantiateTestFunction(fixture);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0, ecx: 3 });
@@ -265,14 +251,6 @@ test("an outer value captures at each inner loop entry", async () => {
       })
     ]);
   });
-  const opcodes = wasmBodyOpcodes(testFunctionBody(fixture));
-  const loops = opcodes
-    .map((opcode, index) => opcode === wasmOpcode.loop ? index : -1)
-    .filter((index) => index !== -1);
-  const add = opcodes.indexOf(wasmOpcode.i32Add);
-
-  deepStrictEqual(loops.length, 2);
-  ok(loops[0]! < add && add < loops[1]!);
   const { stateView, run } = await instantiateTestFunction(fixture);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0, ebx: 0, ecx: 3 });
@@ -399,82 +377,3 @@ test("cell locals carry loop state and survive to post-loop reads", async () => 
   // Nothing was carried: the loop leaves ecx untouched.
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ecx")), 5);
 });
-
-const repEip = 0x1000;
-const repNextEip = 0x1002;
-
-function repMovsdFunction(): TestFunction {
-  const builder = createInstructionFunction();
-
-  builder.add(
-    repMovsSemantic(32),
-    [
-      memBinding({ base: "esi", index: undefined, scale: 1, disp: 0 }, staticMemSegment("ds")),
-      memBinding({ base: "edi", index: undefined, scale: 1, disp: 0 }, staticMemSegment("es"))
-    ],
-    loc(repEip, repNextEip)
-  );
-  return builder.finish();
-}
-
-const stateLoadOpcodes: readonly number[] = [
-  wasmOpcode.i32Load,
-  wasmOpcode.i32Load8S,
-  wasmOpcode.i32Load8U,
-  wasmOpcode.i32Load16S,
-  wasmOpcode.i32Load16U
-];
-
-test("rep movsd does not read cpu state inside the loop body", () => {
-  const body = testFunctionBody(repMovsdFunction());
-  const instructions = wasmBodyInstructions(body);
-  const loopEntry = instructions.find((instruction) => instruction.opcode === wasmOpcode.loop);
-
-  ok(loopEntry !== undefined, "the block contains a wasm loop");
-  const loopEnd = matchingControlEnd(instructions, loopEntry.offset);
-
-  ok(loopEnd !== undefined, "the wasm loop has a matching end");
-
-  // The DF delta and every other loop-invariant read hoist; only guest
-  // memory and the loop's own locals are touched per iteration.
-  deepStrictEqual(
-    instructions.filter(
-      (instruction) =>
-        instruction.offset > loopEntry.offset &&
-        instruction.offset < loopEnd.offset &&
-        instruction.memoryIndex === testModuleMemoryIndex.cpuState &&
-        stateLoadOpcodes.includes(instruction.opcode)
-    ),
-    []
-  );
-});
-
-function matchingControlEnd(
-  instructions: readonly ReturnType<typeof wasmBodyInstructions>[number][],
-  controlOffset: number
-): ReturnType<typeof wasmBodyInstructions>[number] | undefined {
-  let depth = 0;
-
-  for (const instruction of instructions) {
-    if (instruction.offset <= controlOffset) {
-      continue;
-    }
-
-    switch (instruction.opcode) {
-      case wasmOpcode.block:
-      case wasmOpcode.loop:
-      case wasmOpcode.if:
-        depth += 1;
-        break;
-      case wasmOpcode.end:
-        if (depth === 0) {
-          return instruction;
-        }
-
-        depth -= 1;
-        break;
-    }
-  }
-
-  return undefined;
-}

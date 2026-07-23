@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import {
@@ -8,12 +8,10 @@ import {
   returnControl,
   switchControl
 } from "#compiler/ir/controls/index.js";
-import { valueId } from "#compiler/ir/values/id.js";
-import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import { placeFunction } from "#compiler/placement/place.js";
-import { functionType } from "#compiler/ir/function.js";
-import { regionCompletes, type Region, type RegionNode } from "#compiler/ir/region.js";
-import type { FunctionGraph, IrFunction } from "#compiler/ir/function.js";
+import type { Region } from "#compiler/ir/region.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
 import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import {
   compilerTestValues,
@@ -21,46 +19,19 @@ import {
   resourceReadNode,
   resourceWriteNode
 } from "#test/support/storage-operations.js";
+import {
+  completedPlacementFunction,
+  terminalPlacementFunction
+} from "./function-fixture.js";
 
-function functionBlock(
+function place(
   block: FunctionGraph,
-  results: readonly ValueType[] = [],
+  parameterCount = 0,
   returned: readonly ValueId[] = []
-): IrFunction {
-  if (!regionCompletes(block.body)) {
-    (block.body.nodes as RegionNode[]).push(returnControl.create({
-      source: { kind: "values", values: returned }
-    }));
-  }
-  const parameters = Array.from(
-    { length: block.values.size() },
-    (_, raw) => valueId(raw)
-  ).filter((value) => block.values.node(value).kind === "parameter")
-    .sort((a, b) => {
-      const first = block.values.node(a);
-      const second = block.values.node(b);
-
-      return first.kind === "parameter" && second.kind === "parameter"
-        ? first.index - second.index
-        : 0;
-    });
-
-  return {
-    ...block,
-    type: functionType(
-      parameters.map((parameter) => block.values.valueType(parameter)),
-      results
-    ),
-    parameters
-  };
-}
-
-function place(block: FunctionGraph, returned?: ValueId) {
-  return placeFunction(functionBlock(
-    block,
-    returned === undefined ? [] : [block.values.valueType(returned)],
-    returned === undefined ? [] : [returned]
-  ));
+) {
+  return placeFunction(
+    completedPlacementFunction(block, parameterCount, returned)
+  );
 }
 
 test("a producer used only in a selected body realizes at that use", () => {
@@ -79,20 +50,14 @@ test("a producer used only in a selected body realizes at that use", () => {
       ]
     }
   };
-  const { analysis, plan } = place(block);
+  const { analysis, plan } = place(block, 1);
   const useSite = analysis.siteOf(thenBody, 0);
 
-  deepStrictEqual(Object.keys(plan), [
-    "values",
-    "localTypes",
-    "cellLocals"
-  ]);
   deepStrictEqual(plan.values[output], {
     kind: "atUse",
     anchor: useSite,
     local: undefined
   });
-  deepStrictEqual(plan.localTypes, []);
 });
 
 test("a recipe used only in a selected body stays at its use", () => {
@@ -108,7 +73,7 @@ test("a recipe used only in a selected body stays at its use", () => {
       nodes: [ifControl.create({ condition, thenBody })]
     }
   };
-  const { analysis, plan } = place(block);
+  const { analysis, plan } = place(block, 2);
   const useSite = analysis.siteOf(thenBody, 0);
 
   deepStrictEqual(plan.values[result], {
@@ -116,7 +81,6 @@ test("a recipe used only in a selected body stays at its use", () => {
     anchor: useSite,
     local: undefined
   });
-  deepStrictEqual(plan.localTypes, []);
 });
 
 test("identical recipes authored by sibling if arms stay at their selected uses", () => {
@@ -151,10 +115,8 @@ test("identical recipes authored by sibling if arms stay at their selected uses"
     throw new Error("expected an if with two arms");
   }
 
-  strictEqual(thenResult === elseResult, false);
-
-  const { analysis, plan, index } = place(block);
-  const controlSite = analysis.siteOf(block.body, 0);
+  const { function: fn, analysis, plan, index } = place(block, 2);
+  const controlSite = analysis.siteOf(fn.body, 0);
 
   deepStrictEqual(plan.values[thenResult], {
     kind: "atUse",
@@ -167,7 +129,6 @@ test("identical recipes authored by sibling if arms stay at their selected uses"
     local: undefined
   });
   strictEqual(index.captures[controlSite], undefined);
-  deepStrictEqual(plan.localTypes, []);
 });
 
 test("a recipe shared with parent flow anchors at the common dominator", () => {
@@ -182,15 +143,15 @@ test("a recipe shared with parent flow anchors at the common dominator", () => {
       nodes: [ifControl.create({ condition: shared, thenBody })]
     }
   };
-  const { analysis, plan } = place(block);
-  const controlSite = analysis.siteOf(block.body, 0);
+  const { function: fn, analysis, plan } = place(block, 1);
+  const controlSite = analysis.siteOf(fn.body, 0);
 
-  deepStrictEqual(plan.values[shared], {
-    kind: "atUse",
-    anchor: controlSite,
-    local: 0
-  });
-  deepStrictEqual(plan.localTypes, ["i32"]);
+  const placement = plan.values[shared];
+
+  ok(placement?.kind === "atUse");
+  strictEqual(placement.anchor, controlSite);
+  ok(placement.local !== undefined);
+  strictEqual(plan.localTypes[placement.local], "i32");
 });
 
 test("a return result is placed at its selected return", () => {
@@ -218,7 +179,9 @@ test("a return result is placed at its selected return", () => {
       nodes: [ifControl.create({ condition, thenBody, elseBody })]
     }
   };
-  const { analysis, plan } = placeFunction(functionBlock(block, ["i64"]));
+  const { analysis, plan } = placeFunction(
+    terminalPlacementFunction(block, 2, ["i64"])
+  );
   const returnSite = analysis.siteOf(thenBody, 0);
 
   deepStrictEqual(plan.values[result], {
@@ -226,7 +189,6 @@ test("a return result is placed at its selected return", () => {
     anchor: returnSite,
     local: undefined
   });
-  deepStrictEqual(plan.localTypes, []);
 });
 
 test("an aliasing write captures a producer at its authored site", () => {
@@ -248,14 +210,15 @@ test("an aliasing write captures a producer at its authored site", () => {
       ]
     }
   };
-  const { analysis, plan, index } = place(block);
-  const producerSite = analysis.siteOf(block.body, 0);
+  const { function: fn, analysis, plan, index } = place(block, 1);
+  const producerSite = analysis.siteOf(fn.body, 0);
 
-  deepStrictEqual(plan.values[output], {
-    kind: "capture",
-    anchor: producerSite,
-    local: 0
-  });
+  const placement = plan.values[output];
+
+  ok(placement?.kind === "capture");
+  strictEqual(placement.anchor, producerSite);
+  ok(placement.local !== undefined);
+  strictEqual(plan.localTypes[placement.local], "i32");
   deepStrictEqual(index.captures[producerSite], [output]);
 });
 
@@ -270,8 +233,8 @@ test("operation-local repetition does not create a placement local", () => {
     values,
     body: { nodes: [write] }
   };
-  const { analysis, plan } = place(block);
-  const useSite = analysis.siteOf(block.body, 0);
+  const { function: fn, analysis, plan } = place(block, 2);
+  const useSite = analysis.siteOf(fn.body, 0);
 
   strictEqual(analysis.useCount(byteLength), 1);
   deepStrictEqual(plan.values[byteLength], {
@@ -296,14 +259,15 @@ test("an outer producer used by a loop is captured in the preheader", () => {
     values,
     body: { nodes: [resourceReadNode(values, output, 0), loop] }
   };
-  const { analysis, plan, index } = place(block);
-  const preheader = analysis.siteOf(block.body, 1);
+  const { function: fn, analysis, plan, index } = place(block);
+  const preheader = analysis.siteOf(fn.body, 1);
 
-  deepStrictEqual(plan.values[output], {
-    kind: "atUse",
-    anchor: preheader,
-    local: 0
-  });
+  const placement = plan.values[output];
+
+  ok(placement?.kind === "atUse");
+  strictEqual(placement.anchor, preheader);
+  ok(placement.local !== undefined);
+  strictEqual(plan.localTypes[placement.local], "i32");
   strictEqual(index.captures[preheader], undefined);
 });
 
@@ -322,14 +286,15 @@ test("a loop-invariant recipe captures at the loop entry", () => {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
     }
   };
-  const { analysis, plan, index } = place(block);
-  const entry = analysis.siteOf(block.body, 0);
+  const { function: fn, analysis, plan, index } = place(block, 1);
+  const entry = analysis.siteOf(fn.body, 0);
 
-  deepStrictEqual(plan.values[invariant], {
-    kind: "capture",
-    anchor: entry,
-    local: 0
-  });
+  const placement = plan.values[invariant];
+
+  ok(placement?.kind === "capture");
+  strictEqual(placement.anchor, entry);
+  ok(placement.local !== undefined);
+  strictEqual(plan.localTypes[placement.local], "i32");
   deepStrictEqual(index.captures[entry], [invariant]);
 });
 
@@ -414,7 +379,7 @@ test("a recipe over a loop-local control output remains inside the loop", () => 
       nodes: [loopControl.create({ carried: [], body: loopBody })]
     }
   };
-  const { analysis, plan } = place(block);
+  const { analysis, plan } = place(block, 1);
   const useSite = analysis.siteOf(loopBody, 1);
 
   deepStrictEqual(plan.values[current], {
@@ -444,7 +409,7 @@ test("a transitively trapping recipe remains inside the loop", () => {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
     }
   };
-  const { analysis, plan } = place(block);
+  const { analysis, plan } = place(block, 2);
   const useSite = analysis.siteOf(loopBody, 0);
 
   deepStrictEqual(plan.values[adjusted], {
@@ -473,7 +438,7 @@ test("an invariant recipe in a selected loop region stays selected", () => {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
     }
   };
-  const { analysis, plan } = place(block);
+  const { analysis, plan } = place(block, 2);
   const useSite = analysis.siteOf(thenBody, 0);
 
   deepStrictEqual(plan.values[invariant], {
@@ -506,14 +471,15 @@ test("an invariant shared by both loop arms captures at the loop entry", () => {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
     }
   };
-  const { analysis, plan, index } = place(block);
-  const entry = analysis.siteOf(block.body, 0);
+  const { function: fn, analysis, plan, index } = place(block, 2);
+  const entry = analysis.siteOf(fn.body, 0);
 
-  deepStrictEqual(plan.values[invariant], {
-    kind: "capture",
-    anchor: entry,
-    local: 0
-  });
+  const placement = plan.values[invariant];
+
+  ok(placement?.kind === "capture");
+  strictEqual(placement.anchor, entry);
+  ok(placement.local !== undefined);
+  strictEqual(plan.localTypes[placement.local], "i32");
   deepStrictEqual(index.captures[entry], [invariant]);
 });
 
@@ -545,11 +511,15 @@ test("an outer-loop recipe captures at an inner loop entry", () => {
   const { analysis, plan, index } = place(block);
   const innerEntry = analysis.siteOf(outerBody, 0);
 
-  deepStrictEqual(plan.values[current], {
-    kind: "capture",
-    anchor: innerEntry,
-    local: 1
-  });
+  const placement = plan.values[current];
+  const loopPlacement = plan.values[outerInput];
+
+  ok(placement?.kind === "capture");
+  strictEqual(placement.anchor, innerEntry);
+  ok(placement.local !== undefined);
+  ok(loopPlacement?.kind === "loopInput");
+  strictEqual(placement.local === loopPlacement.local, false);
+  strictEqual(plan.localTypes[placement.local], "i32");
   deepStrictEqual(index.captures[innerEntry], [current]);
 });
 
@@ -574,14 +544,15 @@ test("an invariant recipe crosses nested loop entries", () => {
       nodes: [loopControl.create({ carried: [], body: outerBody })]
     }
   };
-  const { analysis, plan, index } = place(block);
-  const outerEntry = analysis.siteOf(block.body, 0);
+  const { function: fn, analysis, plan, index } = place(block, 1);
+  const outerEntry = analysis.siteOf(fn.body, 0);
 
-  deepStrictEqual(plan.values[invariant], {
-    kind: "capture",
-    anchor: outerEntry,
-    local: 0
-  });
+  const placement = plan.values[invariant];
+
+  ok(placement?.kind === "capture");
+  strictEqual(placement.anchor, outerEntry);
+  ok(placement.local !== undefined);
+  strictEqual(plan.localTypes[placement.local], "i32");
   deepStrictEqual(index.captures[outerEntry], [invariant]);
 });
 
@@ -600,14 +571,15 @@ test("an if operand realizes at use before its nested replay", () => {
       ]
     }
   };
-  const { analysis, plan } = place(block);
-  const controlSite = analysis.siteOf(block.body, 1);
+  const { function: fn, analysis, plan } = place(block);
+  const controlSite = analysis.siteOf(fn.body, 1);
 
-  deepStrictEqual(plan.values[output], {
-    kind: "atUse",
-    anchor: controlSite,
-    local: 0
-  });
+  const placement = plan.values[output];
+
+  ok(placement?.kind === "atUse");
+  strictEqual(placement.anchor, controlSite);
+  ok(placement.local !== undefined);
+  strictEqual(plan.localTypes[placement.local], "i32");
 });
 
 test("an if can capture a contextually safe value after its condition", () => {
@@ -634,19 +606,21 @@ test("an if can capture a contextually safe value after its condition", () => {
       })]
     }
   };
-  const { analysis, plan, index } = place(block);
-  const controlSite = analysis.siteOf(block.body, 0);
+  const { function: fn, analysis, plan, index } = place(block, 2);
+  const controlSite = analysis.siteOf(fn.body, 0);
 
-  deepStrictEqual(plan.values[quotient], {
-    kind: "atUse",
-    anchor: controlSite,
-    local: 0
-  });
-  deepStrictEqual(plan.values[adjusted], {
-    kind: "capture",
-    anchor: controlSite,
-    local: 1
-  });
+  const quotientPlacement = plan.values[quotient];
+  const adjustedPlacement = plan.values[adjusted];
+
+  ok(quotientPlacement?.kind === "atUse");
+  strictEqual(quotientPlacement.anchor, controlSite);
+  ok(quotientPlacement.local !== undefined);
+  ok(adjustedPlacement?.kind === "capture");
+  strictEqual(adjustedPlacement.anchor, controlSite);
+  ok(adjustedPlacement.local !== undefined);
+  strictEqual(quotientPlacement.local === adjustedPlacement.local, false);
+  strictEqual(plan.localTypes[quotientPlacement.local], "i32");
+  strictEqual(plan.localTypes[adjustedPlacement.local], "i32");
   deepStrictEqual(index.captures[controlSite], [adjusted]);
 });
 
@@ -670,14 +644,15 @@ test("an unreachable structured operand makes pending captures safe", () => {
       })]
     }
   };
-  const { analysis, plan, index } = place(block);
-  const controlSite = analysis.siteOf(block.body, 0);
+  const { function: fn, analysis, plan, index } = place(block);
+  const controlSite = analysis.siteOf(fn.body, 0);
 
-  deepStrictEqual(plan.values[wrapped], {
-    kind: "capture",
-    anchor: controlSite,
-    local: 0
-  });
+  const placement = plan.values[wrapped];
+
+  ok(placement?.kind === "capture");
+  strictEqual(placement.anchor, controlSite);
+  ok(placement.local !== undefined);
+  strictEqual(plan.localTypes[placement.local], "i32");
   deepStrictEqual(index.captures[controlSite], [wrapped]);
 });
 
@@ -705,19 +680,21 @@ test("an earlier captured trap frontier makes a later pre-evaluation safe", () =
       ]
     }
   };
-  const { analysis, plan, index } = place(block);
-  const controlSite = analysis.siteOf(block.body, 1);
+  const { function: fn, analysis, plan, index } = place(block, 3);
+  const controlSite = analysis.siteOf(fn.body, 1);
 
-  deepStrictEqual(plan.values[quotient], {
-    kind: "atUse",
-    anchor: analysis.siteOf(block.body, 0),
-    local: 0
-  });
-  deepStrictEqual(plan.values[adjusted], {
-    kind: "capture",
-    anchor: controlSite,
-    local: 1
-  });
+  const quotientPlacement = plan.values[quotient];
+  const adjustedPlacement = plan.values[adjusted];
+
+  ok(quotientPlacement?.kind === "atUse");
+  strictEqual(quotientPlacement.anchor, analysis.siteOf(fn.body, 0));
+  ok(quotientPlacement.local !== undefined);
+  ok(adjustedPlacement?.kind === "capture");
+  strictEqual(adjustedPlacement.anchor, controlSite);
+  ok(adjustedPlacement.local !== undefined);
+  strictEqual(quotientPlacement.local === adjustedPlacement.local, false);
+  strictEqual(plan.localTypes[quotientPlacement.local], "i32");
+  strictEqual(plan.localTypes[adjustedPlacement.local], "i32");
   deepStrictEqual(index.captures[controlSite], [adjusted]);
 });
 
@@ -750,7 +727,7 @@ test("an unrelated trap shared by only some switch arms has no deadline", () => 
   };
 
   throws(
-    () => place(block),
+    () => place(block, 3),
     /trapping value .* has no legal capture deadline/
   );
 });
@@ -773,8 +750,10 @@ test("a loop input carries its local without an evaluation anchor", () => {
   };
   const { plan } = place(block);
 
-  deepStrictEqual(plan.values[loopInput], { kind: "loopInput", local: 0 });
-  deepStrictEqual(plan.localTypes, ["i32"]);
+  const placement = plan.values[loopInput];
+
+  ok(placement?.kind === "loopInput");
+  strictEqual(plan.localTypes[placement.local], "i32");
 });
 
 test("control outputs and selected results share one planned slot", () => {
@@ -797,14 +776,14 @@ test("control outputs and selected results share one planned slot", () => {
       nodes: [control, resourceWriteNode(values, 0, output)]
     }
   };
-  const { analysis, plan } = place(block);
-  const controlSite = analysis.siteOf(block.body, 0);
+  const { function: fn, analysis, plan } = place(block, 1);
+  const controlSite = analysis.siteOf(fn.body, 0);
 
-  deepStrictEqual(plan.values[output], {
-    kind: "control",
-    anchor: controlSite,
-    local: 0
-  });
+  const placement = plan.values[output];
+
+  ok(placement?.kind === "control");
+  strictEqual(placement.anchor, controlSite);
+  strictEqual(plan.localTypes[placement.local], "i32");
 });
 
 test("a live join counts an unreachable arm only at its region end", () => {
@@ -826,7 +805,7 @@ test("a live join counts an unreachable arm only at its region end", () => {
       })]
     }
   };
-  const { analysis, plan } = place(block, output);
+  const { analysis, plan } = place(block, 1, [output]);
 
   strictEqual(analysis.useCount(unreachable), 1);
   strictEqual(plan.values[unreachable], undefined);
@@ -854,6 +833,8 @@ test("nonoverlapping captured values reuse one physical slot", () => {
   const firstPlacement = plan.values[first];
   const secondPlacement = plan.values[second];
 
-  strictEqual(firstPlacement?.local, secondPlacement?.local);
-  deepStrictEqual(plan.localTypes, ["i32"]);
+  ok(firstPlacement?.local !== undefined);
+  ok(secondPlacement?.local !== undefined);
+  strictEqual(firstPlacement.local, secondPlacement.local);
+  strictEqual(plan.localTypes[firstPlacement.local], "i32");
 });

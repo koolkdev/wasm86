@@ -1,9 +1,11 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { decodeBytes, ok } from "#core/decoder/tests/helpers.js";
-import { formatIsaInstruction, formatIsaOperand } from "#core/format.js";
+import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
 import type { IsaDecodedInstruction } from "#core/decoder/types.js";
+import { formatIsaInstruction, formatIsaOperand } from "#core/format.js";
+
+const startAddress = 0x1000;
 
 test("formats register and immediate operands through instruction format metadata", () => {
   const decoded = decode([0xbb, 0x78, 0x56, 0x34, 0x12]);
@@ -65,7 +67,24 @@ test("formats unsigned and sign-extended immediates as semantic values", () => {
 });
 
 function decode(values: readonly number[]): IsaDecodedInstruction {
-  const result = decodeBytes(values);
+  const result = decodeIsaInstructionFromReader(
+    {
+      readU8(address) {
+        const value = values[address - startAddress];
 
-  return ok(result);
+        if (value === undefined) {
+          throw new Error(`unexpected read at 0x${address.toString(16)}`);
+        }
+
+        return { kind: "value", value };
+      }
+    },
+    startAddress
+  );
+
+  if (result.kind !== "instruction") {
+    throw new Error(`unexpected decode failure: ${result.exception.kind}`);
+  }
+
+  return result.instruction;
 }

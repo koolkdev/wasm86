@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
@@ -15,13 +15,7 @@ const guestMemoryName = "guest";
 const cpuStatePtr = 32;
 const forwardedResult = 0x1234_5678_9abc_def0n;
 
-test("writer_emits_two_internal_functions", async () => {
-  const module = await WebAssembly.compile(encodeTwoFunctionModule());
-
-  ok(module instanceof WebAssembly.Module);
-});
-
-test("exported_entry_calls_internal_function", async () => {
+test("an exported entry calls an internal function", async () => {
   const instance = await instantiateTwoFunctionModule();
   const entry = exportedFunction(instance, entryExportName);
   const result = entry(cpuStatePtr);
@@ -33,7 +27,7 @@ test("exported_entry_calls_internal_function", async () => {
   strictEqual(result, forwardedResult);
 });
 
-test("cpu_state_memory_import_still_memory_0", () => {
+test("CPU state remains memory import 0", () => {
   const imports = WebAssembly.Module.imports(new WebAssembly.Module(encodeTwoFunctionModule()));
 
   deepStrictEqual(imports[0], {
@@ -43,7 +37,7 @@ test("cpu_state_memory_import_still_memory_0", () => {
   });
 });
 
-test("guest_memory_import_still_memory_1", () => {
+test("guest memory remains memory import 1", () => {
   const imports = WebAssembly.Module.imports(new WebAssembly.Module(encodeTwoFunctionModule()));
 
   deepStrictEqual(imports[1], {

@@ -1,6 +1,5 @@
 import { test } from "node:test";
 
-import { divideError, pageFault } from "#core/exceptions.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   assertInstructionCase,
@@ -166,7 +165,7 @@ test("faulting IMUL source publishes neither destination nor flags", async () =>
     initialState: { eax: 7, ebx: address, ...allFlagsSet, ...nonStatusFlags },
     expectedCompletion: {
       kind: "cpuException",
-      exception: pageFault(address, 0)
+      exception: { kind: "PF", linearAddress: address, errorCode: 0 }
     },
     expectedEip: startAddress,
     instructionCount: 0,
@@ -412,7 +411,10 @@ for (const entry of divideErrorCases) {
   test(entry.name, async () => {
     await assertInstructionCase({
       ...entry,
-      expectedCompletion: { kind: "cpuException", exception: divideError() },
+      expectedCompletion: {
+        kind: "cpuException",
+        exception: { kind: "DE" }
+      },
       expectedEip: startAddress,
       instructionCount: 0
     });
@@ -429,7 +431,7 @@ test("DIV memory source fault takes priority over divide error", async () => {
     initialState: { eax: 0, ebx: address, edx: 1, ...allFlagsSet, ...nonStatusFlags },
     expectedCompletion: {
       kind: "cpuException",
-      exception: pageFault(address, 0)
+      exception: { kind: "PF", linearAddress: address, errorCode: 0 }
     },
     expectedEip: startAddress,
     instructionCount: 0,

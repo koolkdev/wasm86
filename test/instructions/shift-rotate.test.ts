@@ -1,6 +1,5 @@
 import { test } from "node:test";
 
-import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   assertInstructionCase,
@@ -343,7 +342,7 @@ test("faulting rotate memory destination publishes neither state nor bytes", asy
     },
     expectedCompletion: {
       kind: "cpuException",
-      exception: pageFault(address, PageFaultErrorCode.WRITE)
+      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
     },
     expectedEip: startAddress,
     instructionCount: 0,

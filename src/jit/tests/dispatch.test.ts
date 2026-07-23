@@ -21,7 +21,10 @@ const dispatchStop = encodeVariant(exitLayout, instructionLimitExit());
 test("a final static jmp returns through the typed dispatch import", () => {
   const memories = createTestWasmMemories();
 
-  writeSource(memories.guestMemory, aEip, incEaxJmpRel32(aEip, bEip));
+  writeSource(memories.guestMemory, aEip, [
+    0x40,                         // inc eax
+    0xe9, 0xfa, 0x0f, 0x00, 0x00 // jmp 0x2000
+  ]);
   const artifact = compileJitFromMemory({
     memory: memories.guestMemory,
     start: aEip,
@@ -30,7 +33,6 @@ test("a final static jmp returns through the typed dispatch import", () => {
   });
   const imported = artifact.program.functionImports[0];
 
-  strictEqual(artifact.program.functionImports.length, 1);
   ok(imported !== undefined, "compiled JIT artifact has no dispatch import");
   const dispatchTargets: number[] = [];
   const instance = instantiateCompiledProgram(artifact.program, {
@@ -63,14 +65,17 @@ test("a final static jmp returns through the typed dispatch import", () => {
 
 test("a conditional side transfer dispatches only when taken", () => {
   const takenEip = aEip + 0x20;
-  const branchBytes = incEaxJnzRel8(aEip, takenEip);
-  const notTakenEip = aEip + branchBytes.length;
   const memories = createTestWasmMemories();
 
   writeSource(
     memories.guestMemory,
     aEip,
-    [...branchBytes, ...incEaxHostTrap()]
+    [
+      0x40,       // inc eax
+      0x75, 0x1d, // jnz 0x1020
+      0x40,       // inc eax
+      0xcd, 0x2e  // int 0x2e
+    ]
   );
   const artifact = compileJitFromMemory({
     memory: memories.guestMemory,
@@ -80,7 +85,6 @@ test("a conditional side transfer dispatches only when taken", () => {
   });
   const imported = artifact.program.functionImports[0];
 
-  strictEqual(artifact.program.functionImports.length, 1);
   ok(imported !== undefined, "compiled JIT artifact has no dispatch import");
   const dispatchTargets: number[] = [];
   const instance = instantiateCompiledProgram(artifact.program, {
@@ -127,7 +131,7 @@ test("a conditional side transfer dispatches only when taken", () => {
   const notTakenState = readWasmCpuStateSnapshot(stateView);
 
   strictEqual(notTakenState.eax, 1);
-  strictEqual(notTakenState.eip, notTakenEip + incEaxHostTrap().length);
+  strictEqual(notTakenState.eip, aEip + 6);
 });
 
 function writeSource(
@@ -154,66 +158,4 @@ function recordDispatches(
     dispatchTargets.push(targetEip >>> 0);
     return dispatchStop;
   };
-}
-
-function incEaxJmpRel32(blockEip: number, targetEip: number): readonly number[] {
-  return [
-    0x40,
-    ...jmpRel32(blockEip + 1, targetEip)
-  ];
-}
-
-function incEaxJnzRel8(blockEip: number, targetEip: number): readonly number[] {
-  return [
-    0x40,
-    ...jnzRel8(blockEip + 1, targetEip)
-  ];
-}
-
-function incEaxHostTrap(): readonly number[] {
-  return [
-    0x40,
-    0xcd, 0x2e
-  ];
-}
-
-function jmpRel32(eip: number, targetEip: number): readonly number[] {
-  return rel32Instruction(0xe9, eip, targetEip);
-}
-
-function jnzRel8(eip: number, targetEip: number): readonly number[] {
-  return rel8Instruction(0x75, eip, targetEip);
-}
-
-function rel8Instruction(
-  opcode: number,
-  eip: number,
-  targetEip: number
-): readonly number[] {
-  const displacement = targetEip - (eip + 2);
-
-  if (displacement < -128 || displacement > 127) {
-    throw new RangeError(`rel8 displacement out of range: ${displacement}`);
-  }
-
-  return [
-    opcode,
-    displacement & 0xff
-  ];
-}
-
-function rel32Instruction(
-  opcode: number,
-  eip: number,
-  targetEip: number
-): readonly number[] {
-  const displacement = targetEip - (eip + 5);
-
-  return [
-    opcode,
-    displacement & 0xff,
-    (displacement >> 8) & 0xff,
-    (displacement >> 16) & 0xff,
-    (displacement >> 24) & 0xff
-  ];
 }

@@ -7,7 +7,6 @@ import {
   guestMemoryMinimumByteLength,
   guestMemoryMinimumPages
 } from "#memory/constants.js";
-import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import {
   snapshotInstructionBytes,
   type InstructionByteSnapshot,
@@ -41,10 +40,6 @@ test("flat instruction snapshots return their maximal prefix and one boundary fa
     memory,
     { linearStart, byteLength: 8 }
   );
-  const exception = pageFault(
-    guestMemoryMinimumByteLength,
-    PageFaultErrorCode.INSTRUCTION_FETCH
-  );
 
   deepStrictEqual(snapshot.readByte(linearStart + 1), {
     kind: "value",
@@ -52,7 +47,11 @@ test("flat instruction snapshots return their maximal prefix and one boundary fa
   });
   deepStrictEqual(snapshot.readByte(guestMemoryMinimumByteLength), {
     kind: "exception",
-    exception
+    exception: {
+      kind: "PF",
+      linearAddress: guestMemoryMinimumByteLength,
+      errorCode: 16
+    }
   });
 });
 
@@ -65,10 +64,11 @@ test("an inaccessible instruction snapshot start produces an empty snapshot", ()
 
   deepStrictEqual(snapshot.readByte(guestMemoryMinimumByteLength), {
     kind: "exception",
-    exception: pageFault(
-      guestMemoryMinimumByteLength,
-      PageFaultErrorCode.INSTRUCTION_FETCH
-    )
+    exception: {
+      kind: "PF",
+      linearAddress: guestMemoryMinimumByteLength,
+      errorCode: 16
+    }
   });
 });
 
@@ -102,10 +102,11 @@ test("flat snapshot authority keeps its boundary after backing growth", () => {
 
   deepStrictEqual(snapshot.readByte(guestMemoryMinimumByteLength), {
     kind: "exception",
-    exception: pageFault(
-      guestMemoryMinimumByteLength,
-      PageFaultErrorCode.INSTRUCTION_FETCH
-    )
+    exception: {
+      kind: "PF",
+      linearAddress: guestMemoryMinimumByteLength,
+      errorCode: 16
+    }
   });
 });
 

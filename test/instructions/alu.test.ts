@@ -1,11 +1,7 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
-import {
-  runCompiledInstructions,
-  type CompiledInstructionCompletion
-} from "#test/harness/compiled-instruction.js";
+import { runCompiledInstructions } from "#test/harness/compiled-instruction.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
   createWasmCpuArchitecturalStateSnapshot,
@@ -488,7 +484,10 @@ test("logic and TEST apply the project's undefined AF policy as zero", async () 
       initialState
     });
 
-    deepStrictEqual(result.completion, completion(startAddress + entry.bytes.length), entry.op);
+    deepStrictEqual(result.completion, {
+      kind: "completed",
+      targetEip: startAddress + entry.bytes.length
+    }, entry.op);
     deepStrictEqual(result.state, {
       ...initialState,
       eax: entry.expectedEax,
@@ -534,7 +533,10 @@ test("INC and DEC preserve clear and set incoming CF", async () => {
       initialState
     });
 
-    deepStrictEqual(result.completion, completion(startAddress + 1), entry.name);
+    deepStrictEqual(result.completion, {
+      kind: "completed",
+      targetEip: startAddress + 1
+    }, entry.name);
     deepStrictEqual(result.state, {
       ...initialState,
       ecx: entry.expectedResult,
@@ -623,7 +625,10 @@ for (const entry of unaryCases) {
     });
     const result = await runCompiledInstructions({ bytes: entry.bytes, initialState });
 
-    deepStrictEqual(result.completion, completion(startAddress + entry.bytes.length), entry.name);
+    deepStrictEqual(result.completion, {
+      kind: "completed",
+      targetEip: startAddress + entry.bytes.length
+    }, entry.name);
     deepStrictEqual(result.state, {
       ...initialState,
       eax: entry.expectedEax,
@@ -653,7 +658,10 @@ test("register and memory binary forms read and write the selected owner", async
     memoryRanges: [{ address, byteLength: 4 }]
   });
 
-  deepStrictEqual(read.completion, completion(startAddress + readBytes.length));
+  deepStrictEqual(read.completion, {
+    kind: "completed",
+    targetEip: startAddress + readBytes.length
+  });
   deepStrictEqual(read.state, {
     ...readInitial,
     eax: 0x8000_0000,
@@ -661,7 +669,11 @@ test("register and memory binary forms read and write the selected owner", async
     eip: startAddress + readBytes.length,
     instructionCount: 8
   });
-  deepStrictEqual(read.memory, [memory(address, dwordBytes(1))]);
+  deepStrictEqual(read.memory, [{
+    address,
+    byteLength: 4,
+    bytes: dwordBytes(1)
+  }]);
 
   const writeInitial = createWasmCpuArchitecturalStateSnapshot({
     eax: 1,
@@ -679,14 +691,21 @@ test("register and memory binary forms read and write the selected owner", async
     memoryRanges: [{ address, byteLength: 4 }]
   });
 
-  deepStrictEqual(write.completion, completion(startAddress + writeBytes.length));
+  deepStrictEqual(write.completion, {
+    kind: "completed",
+    targetEip: startAddress + writeBytes.length
+  });
   deepStrictEqual(write.state, {
     ...writeInitial,
     ...flags("CF", "PF", "AF", "ZF"),
     eip: startAddress + writeBytes.length,
     instructionCount: 8
   });
-  deepStrictEqual(write.memory, [memory(address, dwordBytes(0))]);
+  deepStrictEqual(write.memory, [{
+    address,
+    byteLength: 4,
+    bytes: dwordBytes(0)
+  }]);
 });
 
 test("CMP and TEST memory sources publish flags without a destination or memory write", async () => {
@@ -723,14 +742,21 @@ test("CMP and TEST memory sources publish flags without a destination or memory 
       memoryRanges: [{ address, byteLength: 4 }]
     });
 
-    deepStrictEqual(result.completion, completion(startAddress + entry.bytes.length), entry.op);
+    deepStrictEqual(result.completion, {
+      kind: "completed",
+      targetEip: startAddress + entry.bytes.length
+    }, entry.op);
     deepStrictEqual(result.state, {
       ...initialState,
       ...entry.expectedFlags,
       eip: startAddress + entry.bytes.length,
       instructionCount: 8
     }, entry.op);
-    deepStrictEqual(result.memory, [memory(address, dwordBytes(entry.memoryValue))], entry.op);
+    deepStrictEqual(result.memory, [{
+      address,
+      byteLength: 4,
+      bytes: dwordBytes(entry.memoryValue)
+    }], entry.op);
   }
 });
 
@@ -751,9 +777,20 @@ test("faulting ALU source reads publish neither destination nor flag writes", as
     memoryRanges: [{ address: faultAddress, byteLength: initialBytes.length }]
   });
 
-  deepStrictEqual(result.completion, pageFaultStop(faultAddress, 0));
+  deepStrictEqual(result.completion, {
+    kind: "cpuException",
+    exception: {
+      kind: "PF",
+      linearAddress: faultAddress,
+      errorCode: 0
+    }
+  });
   deepStrictEqual(result.state, initialState);
-  deepStrictEqual(result.memory, [memory(faultAddress, initialBytes)]);
+  deepStrictEqual(result.memory, [{
+    address: faultAddress,
+    byteLength: 3,
+    bytes: initialBytes
+  }]);
 });
 
 test("faulting ALU read-modify-writes publish neither flags nor guest bytes", async () => {
@@ -778,9 +815,20 @@ test("faulting ALU read-modify-writes publish neither flags nor guest bytes", as
     memoryRanges: [{ address: faultAddress, byteLength: initialBytes.length }]
   });
 
-  deepStrictEqual(result.completion, pageFaultStop(faultAddress, PageFaultErrorCode.WRITE));
+  deepStrictEqual(result.completion, {
+    kind: "cpuException",
+    exception: {
+      kind: "PF",
+      linearAddress: faultAddress,
+      errorCode: 2
+    }
+  });
   deepStrictEqual(result.state, initialState);
-  deepStrictEqual(result.memory, [memory(faultAddress, initialBytes)]);
+  deepStrictEqual(result.memory, [{
+    address: faultAddress,
+    byteLength: 3,
+    bytes: initialBytes
+  }]);
 });
 
 async function assertRegisterAluCase(entry: RegisterAluCase): Promise<void> {
@@ -795,7 +843,10 @@ async function assertRegisterAluCase(entry: RegisterAluCase): Promise<void> {
   });
   const result = await runCompiledInstructions({ bytes: entry.bytes, initialState });
 
-  deepStrictEqual(result.completion, completion(startAddress + entry.bytes.length), entry.name);
+  deepStrictEqual(result.completion, {
+    kind: "completed",
+    targetEip: startAddress + entry.bytes.length
+  }, entry.name);
   deepStrictEqual(result.state, {
     ...initialState,
     eax: entry.expectedEax,
@@ -815,18 +866,6 @@ function flags(...set: readonly WasmCpuStatusFlag[]): AluFlags {
     SF: set.includes("SF") ? 1 : 0,
     OF: set.includes("OF") ? 1 : 0
   };
-}
-
-function completion(targetEip: number): CompiledInstructionCompletion {
-  return { kind: "completed", targetEip };
-}
-
-function pageFaultStop(address: number, errorCode: number): CompiledInstructionCompletion {
-  return { kind: "cpuException", exception: pageFault(address, errorCode) };
-}
-
-function memory(address: number, bytes: readonly number[]) {
-  return { address, byteLength: bytes.length, bytes };
 }
 
 function dwordBytes(value: number): readonly number[] {

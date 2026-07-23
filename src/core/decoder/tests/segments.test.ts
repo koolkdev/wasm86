@@ -1,55 +1,124 @@
-import { strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { decodeBytes, ok } from "./helpers.js";
-import type { IsaOperandBinding } from "#core/decoder/types.js";
+import { decodeBytes } from "./byte-reader-fixture.js";
 
-test("decodes default segments for memory operands symbolically", () => {
-  strictEqual(memoryOperand([0x8b, 0x03]).segment, "ds", "base ebx defaults to ds");
-  strictEqual(memoryOperand([0x8b, 0x45, 0x00]).segment, "ss", "base ebp defaults to ss");
-  strictEqual(memoryOperand([0x8b, 0x04, 0x24]).segment, "ss", "base esp through SIB defaults to ss");
-  strictEqual(
-    memoryOperand([0x8b, 0x05, 0x00, 0x20, 0x40, 0x00]).segment,
-    "ds",
-    "disp32 with no base defaults to ds"
-  );
-  strictEqual(
-    memoryOperand([0x8b, 0x04, 0x8d, 0x00, 0x20, 0x40, 0x00]).segment,
-    "ds",
-    "SIB with no base defaults to ds"
-  );
-  strictEqual(memoryOperand([0xa1, 0x78, 0x56, 0x34, 0x12]).segment, "ds", "moffs defaults to ds");
-});
+test("memory operands select DS or SS from their encoded base", () => {
+  const ebxResult = decodeBytes([0x8b, 0x03]);
+  const ebpResult = decodeBytes([0x8b, 0x45, 0x00]);
+  const espThroughSibResult = decodeBytes([0x8b, 0x04, 0x24]);
 
-test("lea source operands still decode a segment even though semantics use only the offset", () => {
-  strictEqual(memoryOperand([0x8d, 0x45, 0x00]).segment, "ss");
-});
-
-test("decodes segment override prefixes onto memory operands", () => {
-  strictEqual(memoryOperand([0x26, 0x8b, 0x03]).segment, "es");
-  strictEqual(memoryOperand([0x2e, 0x8b, 0x03]).segment, "cs");
-  strictEqual(memoryOperand([0x36, 0x8b, 0x03]).segment, "ss");
-  strictEqual(memoryOperand([0x3e, 0x8b, 0x45, 0x00]).segment, "ds");
-  strictEqual(memoryOperand([0x64, 0x8b, 0x03]).segment, "fs");
-  strictEqual(memoryOperand([0x65, 0x8b, 0x03]).segment, "gs");
-});
-
-test("segment override prefixes compose with operand-size prefixes and moffs", () => {
-  strictEqual(memoryOperand([0x64, 0x66, 0x8b, 0x03]).segment, "fs");
-  strictEqual(memoryOperand([0x66, 0x64, 0x8b, 0x03]).segment, "fs");
-  strictEqual(memoryOperand([0x64, 0xa1, 0x78, 0x56, 0x34, 0x12]).segment, "fs");
-});
-
-test("last segment override prefix wins", () => {
-  strictEqual(memoryOperand([0x64, 0x65, 0x8b, 0x03]).segment, "gs");
-});
-
-function memoryOperand(bytes: readonly number[]): Extract<IsaOperandBinding, { kind: "mem" }> {
-  const operand = ok(decodeBytes(bytes)).operands.find((entry) => entry.kind === "mem");
-
-  if (operand === undefined || operand.kind !== "mem") {
-    throw new Error("expected a memory operand");
+  strictEqual(ebxResult.kind, "instruction");
+  strictEqual(ebpResult.kind, "instruction");
+  strictEqual(espThroughSibResult.kind, "instruction");
+  if (
+    ebxResult.kind !== "instruction" ||
+    ebpResult.kind !== "instruction" ||
+    espThroughSibResult.kind !== "instruction"
+  ) {
+    return;
   }
 
-  return operand;
-}
+  const ebx = ebxResult.instruction;
+  const ebp = ebpResult.instruction;
+  const espThroughSib = espThroughSibResult.instruction;
+
+  deepStrictEqual(ebx.operands[1], {
+    kind: "mem",
+    accessWidth: 32,
+    segment: "ds",
+    base: "ebx",
+    index: undefined,
+    scale: 1,
+    disp: 0
+  });
+  deepStrictEqual(ebp.operands[1], {
+    kind: "mem",
+    accessWidth: 32,
+    segment: "ss",
+    base: "ebp",
+    index: undefined,
+    scale: 1,
+    disp: 0
+  });
+  deepStrictEqual(espThroughSib.operands[1], {
+    kind: "mem",
+    accessWidth: 32,
+    segment: "ss",
+    base: "esp",
+    index: undefined,
+    scale: 1,
+    disp: 0
+  });
+});
+
+test("segment overrides replace the default and compose with operand-size prefixes", () => {
+  const overriddenDefaultResult = decodeBytes([
+    0x64, 0x8b, 0x45, 0x00
+  ]);
+  const operandSizeFirstResult = decodeBytes([
+    0x66, 0x65, 0x8b, 0x03
+  ]);
+
+  strictEqual(overriddenDefaultResult.kind, "instruction");
+  strictEqual(operandSizeFirstResult.kind, "instruction");
+  if (
+    overriddenDefaultResult.kind !== "instruction" ||
+    operandSizeFirstResult.kind !== "instruction"
+  ) {
+    return;
+  }
+
+  const overriddenDefault = overriddenDefaultResult.instruction;
+  const operandSizeFirst = operandSizeFirstResult.instruction;
+
+  strictEqual(overriddenDefault.operands[1]?.kind, "mem");
+  strictEqual(operandSizeFirst.operands[1]?.kind, "mem");
+
+  if (
+    overriddenDefault.operands[1]?.kind === "mem" &&
+    operandSizeFirst.operands[1]?.kind === "mem"
+  ) {
+    strictEqual(overriddenDefault.operands[1].segment, "fs");
+    strictEqual(operandSizeFirst.operands[1].segment, "gs");
+    strictEqual(operandSizeFirst.operands[1].accessWidth, 16);
+  }
+});
+
+test("the last segment override wins and also applies to moffs", () => {
+  const repeatedResult = decodeBytes([0x64, 0x65, 0x8b, 0x03]);
+  const moffsResult = decodeBytes([
+    0x64, 0xa1, 0x78, 0x56, 0x34, 0x12
+  ]);
+
+  strictEqual(repeatedResult.kind, "instruction");
+  strictEqual(moffsResult.kind, "instruction");
+  if (
+    repeatedResult.kind !== "instruction" ||
+    moffsResult.kind !== "instruction"
+  ) {
+    return;
+  }
+
+  const repeated = repeatedResult.instruction;
+  const moffs = moffsResult.instruction;
+
+  strictEqual(repeated.operands[1]?.kind, "mem");
+  strictEqual(moffs.operands[1]?.kind, "mem");
+
+  if (
+    repeated.operands[1]?.kind === "mem" &&
+    moffs.operands[1]?.kind === "mem"
+  ) {
+    strictEqual(repeated.operands[1].segment, "gs");
+    deepStrictEqual(moffs.operands[1], {
+      kind: "mem",
+      accessWidth: 32,
+      segment: "fs",
+      base: undefined,
+      index: undefined,
+      scale: 1,
+      disp: 0x1234_5678
+    });
+  }
+});

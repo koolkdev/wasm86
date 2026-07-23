@@ -13,6 +13,7 @@ import {
   testFunctionCompleted
 } from "./harness.js";
 
+// Observable emitted-Wasm behavior for placement-owned cell storage.
 test("cell reads and writes execute through placement-owned storage", async () => {
   const fixture = completedTestFunction(0, (fn) => {
     const state = cpuStateAccess.bind(fn.region);

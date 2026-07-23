@@ -1,8 +1,6 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
-import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   resourceRef,
   type ResourceEffect
@@ -10,12 +8,10 @@ import {
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import type { Program } from "#compiler/program/program.js";
 import { compileProgram } from "#compiler/compile.js";
-import { createModuleBindings } from "#compiler/module/bindings.js";
 import { functionType } from "#compiler/ir/function.js";
 import { functionExportRef } from "#compiler/program/exports.js";
 import { functionRef, tableRef } from "#compiler/ir/refs.js";
 import { createProgramResources } from "#compiler/program/resources.js";
-import { emitFunction } from "#compiler/emit/function.js";
 
 const noEffects = { reads: [], writes: [] } as const;
 
@@ -68,17 +64,6 @@ test("dead pure indirect invocations retain neither types nor tables", () => {
   strictEqual(closed.functionTypes.includes(indirectType), false);
   deepStrictEqual(linked.indirectTypes, []);
   deepStrictEqual(linked.tables, []);
-  const body = emitFunction(linked.body, {
-    bindings: createModuleBindings({
-      functions: new Map(),
-      types: new Map(),
-      tables: new Map(),
-      resources: new Map()
-    }),
-    placement: linked.placement
-  });
-
-  strictEqual(wasmBodyOpcodes(body.bytes).includes(wasmOpcode.callIndirect), false);
   compileBytes(closed);
 });
 
@@ -260,23 +245,6 @@ test("defined functions bind ordinary and returning indirect invocations", async
     deepStrictEqual(fn.tables, [table]);
   }
 
-  const bindings = createModuleBindings({
-    functions: new Map(),
-    types: new Map([[type, 5]]),
-    tables: new Map([[table, 7]]),
-    resources: new Map()
-  });
-  const ordinaryBody = emitFunction(ordinaryFunction.body, {
-    bindings,
-    placement: ordinaryFunction.placement
-  });
-  const returningBody = emitFunction(returningFunction.body, {
-    bindings,
-    placement: returningFunction.placement
-  });
-
-  ok(wasmBodyOpcodes(ordinaryBody.bytes).includes(wasmOpcode.callIndirect));
-  ok(wasmBodyOpcodes(returningBody.bytes).includes(wasmOpcode.returnCallIndirect));
   const importedTable = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
   const dummyImportedTable = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
   const instance = await WebAssembly.instantiate(

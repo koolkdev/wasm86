@@ -11,7 +11,6 @@ import {
   writeGuestBytes
 } from "./harness.js";
 import { startAddress } from "#test/support/addresses.js";
-import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 
 test("interpreter binds MOV opcode low bits to EDI", async () => {
   const interpreter = await instantiateInterpreter();
@@ -60,7 +59,14 @@ test("truncated moffs32 raises instruction-fetch #PF at the first unavailable by
 
   const exit = interpreter.runFor(1);
 
-  deepStrictEqual(exit, fetchPageFaultStop(eip + 4));
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: {
+      kind: "PF",
+      linearAddress: eip + 4,
+      errorCode: 16
+    }
+  });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -77,6 +83,13 @@ test("truncated MOV r32, imm32 raises instruction-fetch #PF without changing arc
 
   const exit = interpreter.runFor(1);
 
-  deepStrictEqual(exit, fetchPageFaultStop(eip + 3));
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: {
+      kind: "PF",
+      linearAddress: eip + 3,
+      errorCode: 16
+    }
+  });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

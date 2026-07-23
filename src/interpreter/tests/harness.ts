@@ -18,7 +18,7 @@ import {
 } from "#test/support/cpu-state.js";
 import { testExecutionModel } from "#test/support/execution-model.js";
 
-export type InterpreterHarness = Readonly<{
+type InterpreterHarness = Readonly<{
   guestMemory: WebAssembly.Memory;
   stateView: DataView;
   guestView: DataView;

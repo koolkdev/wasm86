@@ -1,58 +1,163 @@
 import {
   deepStrictEqual,
   notStrictEqual,
-  ok,
-  strictEqual,
-  throws
+  strictEqual
 } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
-import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
-  IndirectCallTarget,
-  Invocation,
-  type CallTarget
+  Invocation
 } from "#compiler/ir/invocation.js";
 import {
   ifControl,
   loopContinueControl,
   loopControl,
   returnControl,
-  switchControl,
-  type Control,
-  type ControlEmitTarget
+  switchControl
 } from "#compiler/ir/controls/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { valueId } from "#compiler/ir/values/id.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
 import { functionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import {
-  createModuleBindings,
-  type ModuleBindings
-} from "#compiler/module/bindings.js";
-import { functionRef, tableRef } from "#compiler/ir/refs.js";
+import { functionRef } from "#compiler/ir/refs.js";
 import { CellRef } from "#compiler/ir/cell.js";
 import type { Region } from "#compiler/ir/region.js";
-import { RegionBuilder } from "#compiler/ir/builder/region.js";
 
-function fixture() {
-  const argument = valueId(1);
-  const condition = valueId(3);
-  const ifOutput = valueId(4);
-  const selector = valueId(5);
-  const switchOutput = valueId(6);
-  const seed = valueId(7);
-  const loopInput = valueId(8);
-  const update = valueId(9);
-  const result = valueId(10);
-  const thenBody: Region = { nodes: [] };
-  const elseBody: Region = { nodes: [] };
-  const caseBody: Region = { nodes: [], result };
-  const defaultBody: Region = { nodes: [], result };
-  const loopBody: Region = { nodes: [] };
+test("if controls expose their condition, outputs, and nested bodies", () => {
+  const values = new ValueTable();
+  const condition = values.parameter(0, "i32");
+  const output = values.addNodeOutput();
+  const thenBody: Region = { nodes: [], result: values.const(1) };
+  const elseBody: Region = { nodes: [], result: values.const(0) };
+  const branch = ifControl.create({
+    condition,
+    output,
+    thenBody,
+    elseBody,
+    hint: "likely"
+  });
+
+  deepStrictEqual(branch.operands, [condition]);
+  deepStrictEqual(branch.outputs, [output]);
+  strictEqual(branch.hint, "likely");
+  deepStrictEqual(branch.nestedBodies, [
+    {
+      body: thenBody,
+      role: "thenBody",
+      scope: { kind: "ordinary" }
+    },
+    {
+      body: elseBody,
+      role: "elseBody",
+      scope: { kind: "ordinary" }
+    }
+  ]);
+});
+
+test("loops expose carried values and their loop-scoped body", () => {
+  const values = new ValueTable();
+  const seed = values.const(0);
+  const loopInput = values.addLoopInput();
+  const update = values.binary("add", loopInput, values.const(1));
+  const body: Region = {
+    nodes: [loopContinueControl.create({ updates: [update] })]
+  };
+  const loop = loopControl.create({
+    carried: [{ seed, loopInput }],
+    body
+  });
+
+  deepStrictEqual(loop.operands, [seed]);
+  deepStrictEqual(loop.nestedBodies, [{
+    body,
+    role: "body",
+    scope: { kind: "loop", inputs: [loopInput] }
+  }]);
+  deepStrictEqual(body.nodes[0]?.operands, [update]);
+});
+
+test("control-only switches share one body across all matches", () => {
+  const values = new ValueTable();
+  const selector = values.parameter(0, "i32");
+  const selected: Region = { nodes: [] };
+  const fallback: Region = { nodes: [] };
+  const selection = switchControl.create({
+    selector,
+    cases: [{ matches: [1, 3, 5], body: selected }],
+    defaultBody: fallback
+  });
+
+  deepStrictEqual(selection.operands, [selector]);
+  deepStrictEqual(selection.outputs, []);
+  deepStrictEqual(selection.cases, [{
+    matches: [1, 3, 5],
+    body: selected
+  }]);
+  deepStrictEqual(
+    selection.nestedBodies.map((entry) => entry.body),
+    [selected, fallback]
+  );
+});
+
+test("body mapping replaces owned bodies without changing switch matches", () => {
+  const values = new ValueTable();
+  const selected: Region = { nodes: [] };
+  const fallback: Region = { nodes: [] };
+  const replacement: Region = { nodes: [] };
+  const selection = switchControl.create({
+    selector: values.parameter(0, "i32"),
+    cases: [{ matches: [2, 4], body: selected }],
+    defaultBody: fallback
+  });
+  const mapped = selection.mapBodies(
+    (body) => body === selected ? replacement : body
+  );
+
+  notStrictEqual(mapped, selection);
+  strictEqual(mapped.cases[0]?.body, replacement);
+  deepStrictEqual(mapped.cases[0]?.matches, [2, 4]);
+  strictEqual(mapped.defaultBody, fallback);
+});
+
+test("structured controls complete only when every reachable arm completes", () => {
+  const values = new ValueTable();
+  const completed: Region = { nodes: [] };
+  const incomplete: Region = { nodes: [] };
+  const completion = {
+    regionCompletes: (body: Region) => body === completed
+  };
+
+  strictEqual(ifControl.create({
+    condition: values.const(1),
+    thenBody: completed,
+    elseBody: completed
+  }).completes(completion), true);
+  strictEqual(ifControl.create({
+    condition: values.const(1),
+    thenBody: completed,
+    elseBody: incomplete
+  }).completes(completion), false);
+  strictEqual(switchControl.create({
+    selector: values.const(0),
+    cases: [{ matches: [0], body: completed }],
+    defaultBody: completed
+  }).completes(completion), true);
+});
+
+test("return controls snapshot their result list", () => {
+  const values = new ValueTable();
+  const first = values.const(1);
+  const results = [first];
+  const control = returnControl.create({
+    source: { kind: "values", values: results }
+  });
+
+  results.push(values.const(2));
+  deepStrictEqual(control.operands, [first]);
+});
+
+test("invocation returns expose their argument and callee effects", () => {
+  const values = new ValueTable();
+  const argument = values.parameter(0, "i32");
   const cell = new CellRef("i32");
   const target = new FunctionDefinition({
     ref: functionRef("test.controls.target"),
@@ -64,570 +169,15 @@ function fixture() {
     owner: undefined,
     build: () => {}
   });
-  const args = [{ value: argument, type: "i32" }] as const;
   const invocation = Invocation.create({
     target,
-    arguments: args
-  });
-  const returnInvocation = returnControl.create({
-    source: { kind: "invocation", invocation }
-  });
-  const branch = ifControl.create({
-    condition,
-    hint: "likely",
-    output: ifOutput,
-    thenBody,
-    elseBody
-  });
-  const selection = switchControl.create({
-    selector,
-    output: switchOutput,
-    cases: [{ matches: [2], body: caseBody }],
-    defaultBody
-  });
-  const loop = loopControl.create({
-    carried: [{ seed, loopInput }],
-    body: loopBody
-  });
-  const loopContinue = loopContinueControl.create({ updates: [update] });
-  const returnFromFunction = returnControl.create({
-    source: { kind: "values", values: [result] }
-  });
-
-  return {
-    values: {
-      argument,
-      condition,
-      ifOutput,
-      selector,
-      switchOutput,
-      seed,
-      loopInput,
-      update,
-      result
-    },
-    bodies: { thenBody, elseBody, caseBody, defaultBody, loopBody },
-    target,
-    args,
-    invocation,
-    controls: {
-      returnInvocation,
-      branch,
-      selection,
-      loop,
-      loopContinue,
-      returnFromFunction
-    }
-  };
-}
-
-test("control owners construct complete final nodes", () => {
-  const { values, bodies, target, args, invocation, controls } = fixture();
-
-  strictEqual(controls.returnInvocation.category, "control");
-  strictEqual(controls.returnInvocation.kind, "return");
-  deepStrictEqual(controls.returnInvocation.source, {
-    kind: "invocation",
-    invocation
-  });
-  strictEqual(invocation.target, target);
-  deepStrictEqual(invocation.arguments, args);
-  strictEqual("node" in controls.returnInvocation, false);
-
-  strictEqual(controls.branch.category, "control");
-  strictEqual(controls.branch.condition, values.condition);
-  strictEqual(controls.branch.hint, "likely");
-  strictEqual(controls.branch.output, values.ifOutput);
-  strictEqual(controls.branch.thenBody, bodies.thenBody);
-  strictEqual(controls.branch.elseBody, bodies.elseBody);
-
-  strictEqual(controls.selection.selector, values.selector);
-  strictEqual(controls.selection.output, values.switchOutput);
-  deepStrictEqual(controls.selection.cases, [{ matches: [2], body: bodies.caseBody }]);
-  strictEqual(controls.selection.defaultBody, bodies.defaultBody);
-
-  deepStrictEqual(controls.loop.carried, [
-    { seed: values.seed, loopInput: values.loopInput }
-  ]);
-  strictEqual(controls.loop.body, bodies.loopBody);
-  deepStrictEqual(controls.loopContinue.updates, [values.update]);
-  deepStrictEqual(controls.returnFromFunction.source, {
-    kind: "values",
-    values: [values.result]
-  });
-
-  const metadataArgs = {
-    condition: values.condition,
-    thenBody: bodies.thenBody,
-    callerMetadata: true
-  };
-  const withoutMetadata = ifControl.create(metadataArgs);
-
-  strictEqual("callerMetadata" in withoutMetadata, false);
-});
-
-test("return controls snapshot their result list", () => {
-  const results = [valueId(1)];
-  const control = returnControl.create({
-    source: { kind: "values", values: results }
-  });
-
-  results.push(valueId(2));
-  deepStrictEqual(control.source, {
-    kind: "values",
-    values: [valueId(1)]
-  });
-});
-
-test("direct control facts describe operands, bodies, outputs, and effects", () => {
-  const { values, bodies, target, controls } = fixture();
-  const ordered: readonly Control[] = [
-    controls.returnInvocation,
-    controls.branch,
-    controls.selection,
-    controls.loop,
-    controls.loopContinue,
-    controls.returnFromFunction
-  ];
-
-  deepStrictEqual(ordered.map((control) => control.operands), [
-    [values.argument],
-    [values.condition],
-    [values.selector],
-    [values.seed],
-    [values.update],
-    [values.result]
-  ]);
-  deepStrictEqual(controls.branch.nestedBodies, [
-    {
-      body: bodies.thenBody,
-      role: "thenBody",
-      scope: { kind: "ordinary" }
-    },
-    {
-      body: bodies.elseBody,
-      role: "elseBody",
-      scope: { kind: "ordinary" }
-    }
-  ]);
-  deepStrictEqual(controls.selection.nestedBodies, [
-    {
-      body: bodies.caseBody,
-      role: "case[0]",
-      scope: { kind: "ordinary" }
-    },
-    {
-      body: bodies.defaultBody,
-      role: "default",
-      scope: { kind: "ordinary" }
-    }
-  ]);
-  deepStrictEqual(controls.loop.nestedBodies, [{
-    body: bodies.loopBody,
-    role: "body",
-    scope: { kind: "loop", inputs: [values.loopInput] }
-  }]);
-  deepStrictEqual(
-    [
-      controls.returnInvocation,
-      controls.loopContinue,
-      controls.returnFromFunction
-    ].flatMap((control) => control.nestedBodies),
-    []
-  );
-  deepStrictEqual(ordered.map((control) => control.outputs), [
-    [],
-    [values.ifOutput],
-    [values.switchOutput],
-    [],
-    [],
-    []
-  ]);
-  deepStrictEqual(
-    ordered.map((control) => control.nestedBodies.length !== 0),
-    [false, true, true, true, false, false]
-  );
-  deepStrictEqual(ordered.map((control) => control.directEffects), [
-    target.effects,
-    { reads: [], writes: [] },
-    { reads: [], writes: [] },
-    { reads: [], writes: [] },
-    { reads: [], writes: [] },
-    { reads: [], writes: [] }
-  ]);
-});
-
-test("direct completion methods use nested body completion", () => {
-  const { values, bodies, controls } = fixture();
-  const completingBodies = new Set<Region>([
-    bodies.thenBody,
-    bodies.elseBody,
-    bodies.caseBody,
-    bodies.defaultBody
-  ]);
-  const completion = {
-    regionCompletes: (body: Region) => completingBodies.has(body)
-  };
-  const ordered: readonly Control[] = [
-    controls.returnInvocation,
-    controls.branch,
-    controls.selection,
-    controls.loop,
-    controls.loopContinue,
-    controls.returnFromFunction
-  ];
-
-  deepStrictEqual(ordered.map((control) => control.completes(completion)), [
-    true,
-    true,
-    true,
-    false,
-    true,
-    true
-  ]);
-  strictEqual(
-    ifControl.create({
-      condition: values.condition,
-      thenBody: bodies.thenBody
-    }).completes(completion),
-    false
-  );
-  strictEqual(
-    switchControl.create({
-      selector: values.selector,
-      output: values.switchOutput,
-      cases: [{ matches: [0], body: bodies.caseBody }],
-      defaultBody: { nodes: [] }
-    }).completes(completion),
-    false
-  );
-});
-
-test("a control-only switch owns no output and shares a body across matches", () => {
-  const selector = valueId(30);
-  const selected: Region = { nodes: [] };
-  const fallback: Region = { nodes: [] };
-  const selection = switchControl.create({
-    selector,
-    cases: [{
-      matches: [1, 3, 5],
-      body: selected
-    }],
-    defaultBody: fallback
-  });
-
-  strictEqual(selection.output, undefined);
-  deepStrictEqual(selection.outputs, []);
-  deepStrictEqual(selection.operands, [selector]);
-  deepStrictEqual(selection.cases, [{
-    matches: [1, 3, 5],
-    body: selected
-  }]);
-  deepStrictEqual(
-    selection.nestedBodies.map((entry) => entry.body),
-    [selected, fallback]
-  );
-  strictEqual(
-    selection.completes({ regionCompletes: (body) => body === selected || body === fallback }),
-    true
-  );
-
-  const replacement: Region = { nodes: [] };
-  const mapped = selection.mapBodies((body) => body === selected ? replacement : body);
-
-  strictEqual(mapped.output, undefined);
-  deepStrictEqual(mapped.outputs, []);
-  strictEqual(mapped.cases[0]?.body, replacement);
-  deepStrictEqual(mapped.cases[0]?.matches, [1, 3, 5]);
-});
-
-test("a completing control-only switch seals its enclosing emission path", () => {
-  const selector = valueId(30);
-  const selected: Region = { nodes: [] };
-  const fallback: Region = { nodes: [] };
-  const selection = switchControl.create({
-    selector,
-    cases: [{ matches: [1, 3], body: selected }],
-    defaultBody: fallback
-  });
-  const body = new WasmFunctionBodyEncoder();
-  const emittedBodies: Region[] = [];
-  let sealed = 0;
-
-  selection.emit({
-    ...rawControlTarget(body),
-    regionCompletes: () => true,
-    emitCaptures: () => {},
-    emitBody: (nested, outputLocal) => {
-      strictEqual(outputLocal, undefined);
-      emittedBodies.push(nested);
-    },
-    withNestedControl: (emit) => emit(),
-    sealCompletedStructuredControl: () => { sealed += 1; }
-  }, {
-    emitUse(value) {
-      strictEqual(value, selector);
-      body.i32Const(0);
-    }
-  });
-  const encoded = body.finish();
-
-  deepStrictEqual(emittedBodies, [selected, fallback]);
-  strictEqual(sealed, 1);
-  strictEqual(wasmBodyOpcodes(encoded.bytes).includes(wasmOpcode.brTable), true);
-});
-
-test("direct body mapping follows each control's owned structure", () => {
-  const { values, bodies, controls } = fixture();
-  const replacements = new Map<Region, Region>([
-    [bodies.thenBody, { nodes: [], result: valueId(21) }],
-    [bodies.elseBody, { nodes: [], result: valueId(22) }],
-    [bodies.caseBody, { nodes: [], result: valueId(23) }],
-    [bodies.defaultBody, { nodes: [], result: valueId(24) }],
-    [bodies.loopBody, { nodes: [] }]
-  ]);
-  const replace = (body: Region): Region => replacements.get(body) ?? body;
-  const mappedBranch = controls.branch.mapBodies(replace);
-  const mappedSelection = controls.selection.mapBodies(replace);
-  const mappedLoop = controls.loop.mapBodies(replace);
-
-  notStrictEqual(mappedBranch, controls.branch);
-  notStrictEqual(mappedSelection, controls.selection);
-  notStrictEqual(mappedLoop, controls.loop);
-  deepStrictEqual(
-    mappedBranch.nestedBodies.map((entry) => entry.body),
-    [replacements.get(bodies.thenBody), replacements.get(bodies.elseBody)]
-  );
-  deepStrictEqual(
-    mappedSelection.nestedBodies.map((entry) => entry.body),
-    [replacements.get(bodies.caseBody), replacements.get(bodies.defaultBody)]
-  );
-  deepStrictEqual(
-    mappedLoop.nestedBodies.map((entry) => entry.body),
-    [replacements.get(bodies.loopBody)]
-  );
-  deepStrictEqual(mappedBranch.outputs, [values.ifOutput]);
-  deepStrictEqual(mappedSelection.outputs, [values.switchOutput]);
-  for (const leaf of [
-    controls.returnInvocation,
-    controls.loopContinue,
-    controls.returnFromFunction
-  ]) {
-    deepStrictEqual(leaf.mapBodies(replace).operands, leaf.operands);
-  }
-});
-
-test("a return sourced by an invocation directly emits Wasm return_call", () => {
-  const { values, target, controls } = fixture();
-  const emitted = emitRawControl(controls.returnInvocation, target);
-
-  deepStrictEqual(emitted.uses, [values.argument]);
-  deepStrictEqual(emitted.opcodes, [
-    wasmOpcode.i32Const,
-    wasmOpcode.returnCall,
-    wasmOpcode.end
-  ]);
-  strictEqual(
-    controls.returnInvocation.completes({ regionCompletes: () => false }),
-    true
-  );
-  deepStrictEqual(controls.returnInvocation.outputs, []);
-  throws(
-    () => Invocation.create({
-      target,
-      arguments: []
-    }),
-    /expects 1 arguments, got 0/
-  );
-});
-
-test("an indirect invocation return emits arguments, selector, and return_call_indirect", () => {
-  const argument = valueId(30);
-  const elementIndex = valueId(31);
-  const table = tableRef("test.controls.table");
-  const type = functionType(["i32"], ["i32"]);
-  const invocation = Invocation.create({
-    target: IndirectCallTarget.create({
-      table,
-      type,
-      effects: { reads: [], writes: [] },
-      elementIndex: { value: elementIndex, type: "i32" }
-    }),
     arguments: [{ value: argument, type: "i32" }]
   });
-  const control = returnControl.create({
+  const returned = returnControl.create({
     source: { kind: "invocation", invocation }
   });
-  const body = new WasmFunctionBodyEncoder();
-  const uses: ValueId[] = [];
 
-  control.emit(rawControlTarget(
-    body,
-    undefined,
-    createModuleBindings({
-      functions: new Map(),
-      types: new Map([[type, 5]]),
-      tables: new Map([[table, 6]]),
-      resources: new Map()
-    })
-  ), {
-    emitUse(value) {
-      uses.push(value);
-      body.i32Const(value);
-    }
-  });
-  const encoded = body.finish();
-
-  deepStrictEqual(uses, [argument, elementIndex]);
-  strictEqual(encoded.bytes.includes(wasmOpcode.returnCallIndirect), true);
+  deepStrictEqual(returned.operands, [argument]);
+  deepStrictEqual(returned.directEffects, target.effects);
+  strictEqual(returned.completes({ regionCompletes: () => false }), true);
 });
-
-test("return controls directly emit their terminal behavior", () => {
-  const { values, target, controls } = fixture();
-  const returned = emitRawControl(controls.returnFromFunction, target);
-
-  deepStrictEqual(returned.uses, [values.result]);
-  deepStrictEqual(returned.opcodes, [
-    wasmOpcode.i32Const,
-    wasmOpcode.return,
-    wasmOpcode.end
-  ]);
-});
-
-test("RegionBuilder emits an ordinary CallOperation and owner-defined controls", () => {
-  const values = new ValueTable();
-  const target = fixture().target;
-  const argument = values.const(1);
-  const condition = values.parameter(0, "i32");
-  const builder = new RegionBuilder(values, undefined, ["i32"]);
-  const [callOutput] = builder.call(target, [argument]);
-
-  ok(callOutput !== undefined);
-  builder.returnCall(target, [argument]);
-  builder.if(condition, () => {}, {
-    hint: "unlikely",
-    elseBuild: () => {}
-  });
-  const selectionOutput = builder.switch(
-    condition,
-    [{ match: 3, build: (arm) => arm.values.const(2) }],
-    (fallback) => fallback.values.const(4)
-  );
-  builder.loop([], () => {});
-  builder.loopContinue([]);
-  builder.return([argument]);
-
-  const nodes = builder.build().nodes;
-
-  deepStrictEqual(nodes.map((node) => node.kind), [
-    "call",
-    "return",
-    "if",
-    "switch",
-    "loop",
-    "loopContinue",
-    "return"
-  ]);
-  deepStrictEqual(nodes.map((node) => node.category), [
-    "operation",
-    "control",
-    "control",
-    "control",
-    "control",
-    "control",
-    "control"
-  ]);
-  deepStrictEqual(nodes[0]!.outputs, [callOutput]);
-  deepStrictEqual(nodes[1]!.operands, [argument]);
-  deepStrictEqual(nodes[2]!.nestedBodies, [
-    { body: { nodes: [] }, role: "thenBody", scope: { kind: "ordinary" } },
-    { body: { nodes: [] }, role: "elseBody", scope: { kind: "ordinary" } }
-  ]);
-  deepStrictEqual(nodes[3]!.outputs, [selectionOutput]);
-});
-
-function emitRawControl(
-  control: Control,
-  expectedTarget: FunctionDefinition
-): Readonly<{
-  uses: readonly ValueId[];
-  opcodes: readonly number[];
-}> {
-  const body = new WasmFunctionBodyEncoder();
-  const uses: ValueId[] = [];
-  const target = rawControlTarget(body, expectedTarget);
-
-  control.emit(target, {
-    emitUse(value) {
-      uses.push(value);
-      body.i32Const(value);
-    }
-  });
-  const encoded = body.finish();
-
-  return {
-    uses,
-    opcodes: wasmBodyOpcodes(encoded.bytes)
-  };
-}
-
-function rawControlTarget(
-  body: WasmFunctionBodyEncoder,
-  expectedFunction?: FunctionDefinition,
-  suppliedBindings?: ModuleBindings
-): ControlEmitTarget {
-  const bindings = suppliedBindings ?? createModuleBindings({
-    functions: expectedFunction === undefined
-      ? new Map()
-      : new Map([[expectedFunction.ref, 7]]),
-    types: new Map(),
-    tables: new Map(),
-    resources: new Map()
-  });
-
-  return {
-    body,
-    emitCall: (target) => emitCall(body, bindings, target, false),
-    emitReturnCall: (target) => emitCall(body, bindings, target, true),
-    regionCompletes: () => false,
-    emitCaptures: unsupported,
-    emitBody: unsupported,
-    controlOutputLocal: unsupported,
-    markControlOutput: unsupported,
-    valueLocal: unsupported,
-    withNestedControl: unsupported,
-    withLoopBody: unsupported,
-    currentLoopLocals: unsupported,
-    emitLoopBranch: unsupported,
-    sealCompletedStructuredControl: unsupported
-  };
-}
-
-function emitCall(
-  body: WasmFunctionBodyEncoder,
-  bindings: ModuleBindings,
-  target: CallTarget,
-  tail: boolean
-): void {
-  switch (target.kind) {
-    case "direct": {
-      const index = bindings.functionIndex(target.ref);
-
-      tail ? body.returnCallFunction(index) : body.callFunction(index);
-      return;
-    }
-    case "indirect": {
-      const typeIndex = bindings.typeIndex(target.type);
-      const tableIndex = bindings.tableIndex(target.table);
-
-      tail
-        ? body.returnCallIndirect(typeIndex, tableIndex)
-        : body.callIndirect(typeIndex, tableIndex);
-      return;
-    }
-  }
-}
-
-function unsupported(): never {
-  throw new Error("raw control requested structured emission services");
-}

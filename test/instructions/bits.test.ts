@@ -1,6 +1,5 @@
 import { test } from "node:test";
 
-import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   assertInstructionCase,
@@ -132,7 +131,14 @@ test("adjusted memory bit reads fault at their actual positive and negative rang
       ecx: 32,
       ...preservedFlags
     },
-    expectedCompletion: fault(guestMemoryMinimumByteLength, 0),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 0
+      }
+    },
     expectedEip: startAddress,
     instructionCount: 0
   });
@@ -141,7 +147,14 @@ test("adjusted memory bit reads fault at their actual positive and negative rang
     name: "negative adjusted BT read fault",
     bytes: [0x0f, 0xa3, 0x08],
     initialState: { eax: 0, ecx: 0xffff_ffe0, ...preservedFlags },
-    expectedCompletion: fault(0xffff_fffc, 0),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: {
+        kind: "PF",
+        linearAddress: 0xffff_fffc,
+        errorCode: 0
+      }
+    },
     expectedEip: startAddress,
     instructionCount: 0
   });
@@ -159,7 +172,10 @@ test("mutating memory bit operations validate the entire adjusted dword before w
       ecx: 32,
       ...preservedFlags
     },
-    expectedCompletion: fault(address, PageFaultErrorCode.WRITE),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [{ address, bytes: initialBytes }],
@@ -259,7 +275,14 @@ test("bit scans read memory sources and publish only after a complete read", asy
     name: "BSF dword memory source fault",
     bytes: [0x0f, 0xbc, 0x05, ...dwordBytes(faultAddress)],
     initialState: { eax: 0xaaaa_5555, ...preservedFlags },
-    expectedCompletion: fault(faultAddress, 0),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: {
+        kind: "PF",
+        linearAddress: faultAddress,
+        errorCode: 0
+      }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [{ address: faultAddress, bytes: initialBytes }],
@@ -275,10 +298,6 @@ test("BSWAP reverses all four bytes and preserves flags", async () => {
     expectedState: { ebx: 0x7856_3412 }
   });
 });
-
-function fault(address: number, errorCode: number) {
-  return { kind: "cpuException" as const, exception: pageFault(address, errorCode) };
-}
 
 function dwordBytes(value: number): readonly number[] {
   return [

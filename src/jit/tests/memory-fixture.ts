@@ -3,6 +3,7 @@ import { ok } from "node:assert";
 import { writeBackingBytes } from "#memory/bytes.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
 
+// Guest-memory fixture shared by JIT decoding and compilation tests.
 export function jitMemoryWithBytes(
   values: readonly number[],
   baseAddress = 0

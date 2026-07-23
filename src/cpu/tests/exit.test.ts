@@ -2,63 +2,57 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import type { RunStop } from "#cpu/cpu.js";
-import { decodeExit, exitLayout } from "#cpu/exit.js";
-import { encodeVariant, type VariantValue } from "#compiler/layout/variant-codec.js";
-import {
-  exceptionExit,
-  segmentExit,
-  trapExit
-} from "#core/exits.js";
-import {
-  CpuExceptionVector,
-  divideError,
-  generalProtection,
-  invalidOpcode,
-  pageFault
-} from "#core/exceptions.js";
-import { instructionLimitExit } from "#interpreter/exits.js";
+import { decodeExit } from "#cpu/exit.js";
+import { CpuExceptionVector } from "#core/exceptions.js";
 
 const validExits: readonly Readonly<{
   name: string;
-  exit: VariantValue<number>;
+  encoded: bigint;
   stop: RunStop;
 }>[] = [
   {
     name: "instruction-limit",
-    exit: instructionLimitExit(),
+    encoded: 0x0007_0000_0000_0000n,
     stop: { kind: "instructionLimit" }
   },
   {
     name: "host-trap",
-    exit: trapExit(0xcd),
+    encoded: 0x0003_0000_0000_00cdn,
     stop: { kind: "hostTrap", vector: 0xcd }
   },
   {
     name: "segment-load",
-    exit: segmentExit(3, 0x1234),
+    encoded: 0x0005_0000_1234_0003n,
     stop: { kind: "segmentLoad", segment: "ds", selector: 0x1234 }
   },
   {
     name: "divide-error",
-    exit: exceptionExit(divideError<number>()),
-    stop: { kind: "cpuException", exception: divideError() }
+    encoded: 0x0001_0000_0000_0000n,
+    stop: { kind: "cpuException", exception: { kind: "DE" } }
   },
   {
     name: "invalid-opcode",
-    exit: exceptionExit(invalidOpcode<number>()),
-    stop: { kind: "cpuException", exception: invalidOpcode() }
+    encoded: 0x0006_0000_0000_0000n,
+    stop: { kind: "cpuException", exception: { kind: "UD" } }
   },
   {
     name: "general-protection",
-    exit: exceptionExit(generalProtection(0x1234)),
-    stop: { kind: "cpuException", exception: generalProtection(0x1234) }
+    encoded: 0x0002_0000_0000_1234n,
+    stop: {
+      kind: "cpuException",
+      exception: { kind: "GP", errorCode: 0x1234 }
+    }
   },
   {
     name: "page-fault",
-    exit: exceptionExit(pageFault(0xffff_fffc, 0x8001)),
+    encoded: 0x0004_8001_ffff_fffcn,
     stop: {
       kind: "cpuException",
-      exception: pageFault(0xffff_fffc, 0x8001)
+      exception: {
+        kind: "PF",
+        linearAddress: 0xffff_fffc,
+        errorCode: 0x8001
+      }
     }
   }
 ];
@@ -69,29 +63,25 @@ test("general-protection uses architectural vector 13", () => {
 
 for (const fixture of validExits) {
   test(`Cpu exit decoder classifies ${fixture.name}`, () => {
-    const encoded = encodeVariant(exitLayout, fixture.exit);
-
-    deepStrictEqual(decodeExit(encoded), fixture.stop);
+    deepStrictEqual(decodeExit(fixture.encoded), fixture.stop);
   });
 }
 
 test("Cpu exit decoder rejects zero, unknown tags, and noncanonical payload bits", () => {
-  const instructionLimit = encodeVariant(
-    exitLayout,
-    instructionLimitExit()
-  );
-  const unknownTag = 0xffn << BigInt(exitLayout.tagOffset * 8);
-
   throws(() => decodeExit(0n), /unknown cpu.exit variant tag: 0/);
-  throws(() => decodeExit(unknownTag), /unknown cpu.exit variant tag/);
   throws(
-    () => decodeExit(instructionLimit | 1n),
+    () => decodeExit(0x00ff_0000_0000_0000n),
+    /unknown cpu.exit variant tag/
+  );
+  throws(
+    () => decodeExit(0x0007_0000_0000_0001n),
     /nonzero unused payload bits/
   );
 });
 
 test("Cpu exit decoder rejects a segment-load request with an invalid architectural index", () => {
-  const encoded = encodeVariant(exitLayout, segmentExit(0xff, 0x1234));
-
-  throws(() => decodeExit(encoded), /invalid segment index/);
+  throws(
+    () => decodeExit(0x0005_0000_1234_00ffn),
+    /invalid segment index/
+  );
 });

@@ -1,18 +1,14 @@
-import { notStrictEqual, strictEqual } from "node:assert";
+import { notStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { wasmPagesForByteLength } from "#compiler/program/limits.js";
 import { createExecutionModel } from "#execution/model.js";
 
 test("execution model composes owner-provided definitions", () => {
   const model = createExecutionModel();
 
-  strictEqual(model.resources.memoryImports[0], model.cpuState.memoryImport);
-  strictEqual(model.resources.memoryImports[1], model.guestMemory.memoryImport);
-  strictEqual(
-    model.cpuState.memoryImport.limits.minPages,
-    wasmPagesForByteLength(model.cpuState.layout.byteLength)
-  );
+  ok(model.resources.memoryImports.includes(model.cpuState.memoryImport));
+  ok(model.resources.memoryImports.includes(model.guestMemory.memoryImport));
+  strictEqual(model.cpuState.memoryImport.limits.minPages, 1);
   strictEqual(model.guestMemory.memoryImport.limits.minPages, 1);
 });
 

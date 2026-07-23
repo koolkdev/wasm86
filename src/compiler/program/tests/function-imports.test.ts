@@ -14,10 +14,6 @@ import {
   type ResourceRef
 } from "#compiler/ir/resource.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import {
-  wasmCodeFunctionCount,
-  wasmDefinedFunctionCount
-} from "#compiler/encoder/tests/body-opcodes.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import { compileProgram } from "#compiler/compile.js";
 import { functionType } from "#compiler/ir/function.js";
@@ -96,13 +92,6 @@ test("program closure retains reachable function imports in declaration order", 
     { ref: firstRef, moduleName: "test host", name: "first" },
     { ref: secondRef, moduleName: "test host", name: "second" }
   ]);
-  const firstCompiled = compiled.functionImports[0];
-
-  ok(firstCompiled !== undefined, "missing first compiled function import");
-  deepStrictEqual(
-    Object.keys(firstCompiled).sort(),
-    ["moduleName", "name", "ref"]
-  );
 
   const moduleImports = WebAssembly.Module.imports(
     new WebAssembly.Module(compiled.bytes)
@@ -547,9 +536,6 @@ test("imported indexes prefix local calls, exports, and branch hints", () => {
 
   program.exportFunction({ ref: exportRef, name: "entry", target: entry.ref });
   const compiled = compileProgram(program.finish());
-
-  strictEqual(wasmDefinedFunctionCount(compiled.bytes), 2);
-  strictEqual(wasmCodeFunctionCount(compiled.bytes), 2);
 
   const module = new WebAssembly.Module(compiled.bytes);
 

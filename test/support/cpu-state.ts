@@ -1,8 +1,5 @@
-import { strictEqual } from "node:assert";
+import { ok, strictEqual } from "node:assert";
 
-import { assert } from "#common/assert.js";
-import { u32 } from "#common/numeric.js";
-import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import {
   flagStateFields,
   isConcreteFlagStateField
@@ -97,8 +94,16 @@ export type WasmCpuArchitecturalStateInit = Partial<
   WasmCpuArchitecturalStateSnapshot
 >;
 export type WasmCpuStatusFlag = X86StatusFlag;
-export type WasmCpuExpectedLazyFlagState = Readonly<{
-  kind: keyof typeof LAZY_FLAGS_KIND;
+
+const lazyFlagKindBytes = {
+  NONE: { 0: 0, 8: 0, 16: 4, 32: 8 },
+  SUB: { 0: 1, 8: 1, 16: 5, 32: 9 },
+  ADD: { 0: 2, 8: 2, 16: 6, 32: 10 },
+  LOGIC_RESULT: { 0: 3, 8: 3, 16: 7, 32: 11 }
+} as const;
+
+type WasmCpuExpectedLazyFlagState = Readonly<{
+  kind: keyof typeof lazyFlagKindBytes;
   width: 0 | 8 | 16 | 32;
   a?: number;
   b?: number;
@@ -108,8 +113,6 @@ type WasmCpuLazyFlagStateSnapshot = Pick<
   WasmCpuStateSnapshot,
   "lazyFlagsKind" | "lazyFlagsA" | "lazyFlagsB"
 >;
-
-export const wasmCpuStateSnapshotFields = wasmCpuStateFields;
 
 const gprByteLength = { 8: 1, 16: 2, 32: 4 } as const;
 const wasmCpuStateFieldLocations = createWasmCpuStateFieldLocations();
@@ -133,7 +136,7 @@ export function createWasmCpuArchitecturalStateSnapshot(
 export function readWasmCpuStateSnapshot(view: DataView): WasmCpuStateSnapshot {
   const state = {} as WasmCpuStateSnapshot;
 
-  for (const field of wasmCpuStateSnapshotFields) {
+  for (const field of wasmCpuStateFields) {
     state[field] = readWasmCpuStateField(view, field);
   }
 
@@ -152,7 +155,7 @@ export function wasmCpuArchitecturalStateOf(
 }
 
 export function writeWasmCpuStateSnapshot(view: DataView, state: WasmCpuStateInit): void {
-  for (const field of wasmCpuStateSnapshotFields) {
+  for (const field of wasmCpuStateFields) {
     writeWasmCpuStateField(view, field, state[field] ?? 0);
   }
 }
@@ -163,7 +166,7 @@ export function readWasmCpuStateField(view: DataView, field: WasmCpuStateField):
   return readUnsigned(view, resolved.offset, resolved.byteLength);
 }
 
-export function writeWasmCpuStateField(view: DataView, field: WasmCpuStateField, value: number): void {
+function writeWasmCpuStateField(view: DataView, field: WasmCpuStateField, value: number): void {
   const resolved = wasmCpuStateFieldLocations[field];
   const normalized = (x86Flags as readonly string[]).includes(field)
     ? (value === 0 ? 0 : 1)
@@ -187,7 +190,7 @@ export function assertLazyFlagState(
 
   strictEqual(
     actual.lazyFlagsKind,
-    lazyFlagsKindByte(LAZY_FLAGS_KIND[expected.kind], expected.width),
+    lazyFlagKindBytes[expected.kind][expected.width],
     `${label} lazy kind byte`
   );
 
@@ -223,12 +226,6 @@ export function readWasmCpuFlagByte(view: DataView, flag: X86Flag): number {
   return readWasmCpuStateChannel(view, flagStateFields.concrete[flag]);
 }
 
-export function writeWasmCpuFlagByte(view: DataView, flag: X86Flag, value: number): void {
-  const resolved = fieldLocation(flagStateFields.concrete[flag]);
-
-  view.setUint8(resolved.offset, value === 0 ? 0 : 1);
-}
-
 export function wasmCpuStatusFlagsOf(
   state: Pick<WasmCpuStateSnapshot, X86StatusFlag>
 ): Readonly<Record<X86StatusFlag, number>> {
@@ -239,24 +236,6 @@ export function wasmCpuStatusFlagsOf(
   }
 
   return flags;
-}
-
-export function wasmCpuStateSnapshotsEqual(left: WasmCpuStateSnapshot, right: WasmCpuStateSnapshot): boolean {
-  return wasmCpuStateSnapshotFields.every((field) => u32(left[field]) === u32(right[field]));
-}
-
-export function assertWasmCpuStateFields(
-  actual: WasmCpuStateSnapshot,
-  expected: Partial<WasmCpuStateSnapshot>,
-  messagePrefix: string
-): void {
-  for (const [field, expectedValue] of Object.entries(expected)) {
-    strictEqual(
-      actual[field as WasmCpuStateField],
-      expectedValue,
-      `${messagePrefix}: expected state.${field}`
-    );
-  }
 }
 
 type ResolvedLocation = Readonly<{
@@ -326,7 +305,7 @@ function arrayElementLocation<TWidth extends LayoutWidth>(
 ): ResolvedLocation {
   const array = cpuState.layout.array(arrayRef);
 
-  assert(index < array.count, `state element index ${index} is out of range`);
+  ok(index < array.count, `state element index ${index} is out of range`);
   return {
     offset: array.offset + index * array.stride + byteOffset,
     byteLength
@@ -365,13 +344,13 @@ function writeUnsigned(
 ): void {
   switch (byteLength) {
     case 1:
-      view.setUint8(offset, u32(value) & 0xff);
+      view.setUint8(offset, (value >>> 0) & 0xff);
       return;
     case 2:
-      view.setUint16(offset, u32(value) & 0xffff, true);
+      view.setUint16(offset, (value >>> 0) & 0xffff, true);
       return;
     case 4:
-      view.setUint32(offset, u32(value), true);
+      view.setUint32(offset, value >>> 0, true);
       return;
   }
 }

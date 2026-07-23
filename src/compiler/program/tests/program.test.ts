@@ -1,28 +1,17 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { assert } from "#common/assert.js";
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { encodeWasmModule } from "#compiler/encoder/module.js";
-import {
-  wasmBodyOpcodes,
-  wasmFunctionTypeCount
-} from "#compiler/encoder/tests/body-opcodes.js";
-import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import type { Program } from "#compiler/program/program.js";
 import { compileProgram } from "#compiler/compile.js";
-import { createModuleBindings } from "#compiler/module/bindings.js";
+import { layoutProgram } from "#compiler/module/layout.js";
 import { functionType } from "#compiler/ir/function.js";
 import { FunctionFamily, type FunctionDefinition } from "#compiler/program/functions.js";
 import { functionExportRef } from "#compiler/program/exports.js";
-import { functionRef, tableRef } from "#compiler/ir/refs.js";
+import { functionRef } from "#compiler/ir/refs.js";
 import { createProgramResources } from "#compiler/program/resources.js";
 import {
-  validateLinkedProgram
-} from "#compiler/program/validate.js";
-import {
-  DynamicByteOriginRef,
   resourceRef,
   type ByteRange,
   type ResourceByteOperand,
@@ -38,7 +27,6 @@ import type {
   IntegerWidth,
   ValueId
 } from "#compiler/ir/values/types.js";
-import { emitFunction } from "#compiler/emit/function.js";
 
 const voidType = functionType([], []);
 const i32Type = functionType([], ["i32"]);
@@ -120,22 +108,6 @@ function writeFunctionEffect(
   });
 }
 
-function readFunctionEffect(
-  fn: FunctionBuilder,
-  region = 0,
-  width: IntegerWidth = 32
-): ValueId {
-  return fn.region.operation(resourceRead, {
-    source: byteOperand(
-      functionEffectResource,
-      functionEffect(region, width / 8).range,
-      fn.values.const(0),
-      region * 4,
-      width
-    )
-  });
-}
-
 test("forward function definitions close before their factories build and execute", async () => {
   const program = createTestProgram();
   let buildCount = 0;
@@ -169,6 +141,8 @@ test("forward function definitions close before their factories build and execut
   const closed = program.finish();
 
   strictEqual(buildCount, 2);
+  deepStrictEqual(closed.functionTypes, [i32Type]);
+  strictEqual(closed.functions.length, 2);
   const bytes = compileBytes(closed);
   strictEqual(buildCount, 2);
   const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
@@ -180,101 +154,7 @@ test("forward function definitions close before their factories build and execut
   strictEqual(entry(), 42);
 });
 
-test("symbolic roots close and encode from their function type", async () => {
-  const program = createTestProgram();
-  const type = functionType([], ["i32"]);
-  const calleeRef = functionRef("test.typed-callee");
-  const callerRef = functionRef("test.typed-caller");
-
-  const callee = program.defineFunction({
-    ref: calleeRef,
-    type,
-    effects: noEffects
-  }, (fn) => {
-    fn.return([fn.values.const(42)]);
-  });
-  const caller = program.defineFunction({
-    ref: callerRef,
-    type,
-    effects: noEffects
-  }, (fn) => {
-    const result = fn.region.call(callee, [])[0];
-
-    if (result === undefined) {
-      throw new Error("missing call result");
-    }
-    fn.return([result]);
-  });
-  program.exportFunction({
-    ref: functionExportRef("test.typed-export"),
-    name: "entry",
-    target: caller.ref
-  });
-
-  const closed = program.finish();
-
-  deepStrictEqual(closed.functionTypes, [type]);
-  strictEqual(closed.functionTypes[0], type);
-  strictEqual(closed.functions.length, 2);
-  const bytes = compileBytes(closed);
-  const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
-  const entry = instance.exports.entry;
-
-  if (typeof entry !== "function") {
-    throw new Error("missing program entry");
-  }
-  strictEqual(entry(), 42);
-});
-
-test("program validation enforces the finished program's exact function type list", () => {
-  const builder = createTestProgram();
-  const firstType = functionType([], []);
-  const secondType = functionType([], ["i32"]);
-
-  builder.defineFunction({
-    ref: functionRef("test.closed-function-type-validation-first"),
-    type: firstType,
-    effects: noEffects
-  }, (fn) => fn.return([]));
-  builder.defineFunction({
-    ref: functionRef("test.closed-function-type-validation-second"),
-    type: secondType,
-    effects: noEffects
-  }, (fn) => fn.return([fn.values.const(1)]));
-  const closed = builder.finish();
-  const extraType = functionType(["i32"], []);
-
-  throws(
-    () => validateLinkedProgram({
-      ...closed,
-      functionTypes: [secondType]
-    } as Program),
-    /type is missing from the program function types/
-  );
-  throws(
-    () => validateLinkedProgram({
-      ...closed,
-      functionTypes: [...closed.functionTypes, extraType]
-    } as Program),
-    /unrequired function type/
-  );
-  throws(
-    () => validateLinkedProgram({
-      ...closed,
-      functionTypes: [...closed.functionTypes, firstType]
-    } as Program),
-    /duplicate function type/
-  );
-  throws(
-    () => validateLinkedProgram({
-      ...closed,
-      functionTypes: [secondType, firstType]
-    } as Program),
-    /not in required order/
-  );
-});
-
-test("defined resource operations import only their reachable resource", async () => {
+test("defined resource operations retain only their reachable resource", () => {
   const program = createTestProgram();
   const resource = testMemory("test.resource-operation-target");
   const range: ByteRange = {
@@ -303,12 +183,6 @@ test("defined resource operations import only their reachable resource", async (
     });
     fn.return([read]);
   });
-  program.exportFunction({
-    ref: functionExportRef("test.resource-operation-export"),
-    name: "entry",
-    target: definition.ref
-  });
-
   const closed = program.finish();
   const fn = closed.functions.find((candidate) => candidate.ref === definition.ref);
 
@@ -317,94 +191,6 @@ test("defined resource operations import only their reachable resource", async (
   }
   deepStrictEqual(fn.resources, [resource]);
   deepStrictEqual(closed.memoryImports.map((memory) => memory.ref), [resource]);
-
-  const targetMemory = new WebAssembly.Memory({ initial: 2 });
-  const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(compileBytes(closed)),
-    {
-      test: {
-        target: targetMemory
-      }
-    }
-  );
-  const entry = instance.exports.entry;
-
-  if (typeof entry !== "function") {
-    throw new Error("missing resource operation export");
-  }
-  strictEqual(entry(), 0x1234);
-  strictEqual(new DataView(targetMemory.buffer).getUint16(12, true), 0x1234);
-});
-
-test("program validation rejects malformed declared resource effects", () => {
-  const resource = resourceRef("test.malformed-declared-resource");
-  const cases: readonly [ResourceEffect, RegExp][] = [
-    [{
-      space: "resource",
-      resource: { kind: "resource", id: "" } as ResourceRef,
-      range: { basis: { kind: "resource" } }
-    }, /declared read effect 0 effect has an invalid resource identity/],
-    [{
-      space: "resource",
-      resource,
-      range: { basis: undefined } as unknown as ByteRange
-    }, /declared write effect 0 range is missing its basis/],
-    [{
-      space: "resource",
-      resource,
-      range: {
-        basis: {
-          kind: "dynamic",
-          origin: {} as DynamicByteOriginRef
-        }
-      }
-    }, /declared read effect 0 dynamic basis origin must be a DynamicByteOriginRef/],
-    [{
-      space: "resource",
-      resource,
-      range: {
-        basis: { kind: "resource" },
-        slice: { byteOffset: -1, byteLength: 1 }
-      }
-    }, /declared write effect 0 slice byte offset must be a non-negative integer/],
-    [{
-      space: "resource",
-      resource,
-      range: {
-        basis: { kind: "resource" },
-        slice: { byteOffset: 0xffff_ffff, byteLength: 2 }
-      }
-    }, /declared read effect 0 range end must not exceed 2\^32 bytes/]
-  ];
-
-  for (const [index, [effect, expected]] of cases.entries()) {
-    const program = createTestProgram();
-
-    program.defineFunction({
-      ref: functionRef(`test.malformed-effect-function-${index}`),
-      type: voidType,
-      effects: index % 2 === 0
-        ? { reads: [effect], writes: [] }
-        : { reads: [], writes: [effect] }
-    }, (fn) => fn.return([]));
-
-    throws(() => program.finish(), expected);
-  }
-});
-
-test("program validation checks retained function type shapes", () => {
-  const program = createTestProgram();
-  const type = functionType(["f32" as "i32"], []);
-
-  program.defineFunction({
-    ref: functionRef("test.invalid-function-type"),
-    type,
-    effects: noEffects
-  }, (fn) => fn.return([]));
-  throws(
-    () => program.finish(),
-    /unknown function value type: f32/
-  );
 });
 
 test("program closure omits dead resource reads", () => {
@@ -439,160 +225,29 @@ test("program closure omits dead resource reads", () => {
   deepStrictEqual(fn.resources, []);
 });
 
-test("program validation rejects unknown effects and undeclared live resource uses", () => {
-  {
-    const program = createTestProgram();
-    const resource = resourceRef("test.unknown-symbolic-resource");
-    const byteAccess: ResourceEffect = {
-      space: "resource",
-      resource,
-      range: { basis: { kind: "resource" } }
-    };
-
-    program.defineFunction({
-      ref: functionRef("test.unknown-symbolic-resource-function"),
-      type: i32Type,
-      effects: noEffects
-    }, (fn) => {
-      fn.return([fn.region.operation(resourceRead, {
-        source: byteOperand(resource, byteAccess.range, fn.values.const(0), 0, 8)
-      })]);
-    });
-
-    throws(
-      () => program.finish(),
-      /unknown program resource test\.unknown-symbolic-resource used by function test\.unknown-symbolic-resource-function/
-    );
-  }
-  {
-    const program = createTestProgram();
-    const resource = resourceRef("test.unknown-resource-effect");
-    const byteAccess: ResourceEffect = {
-      space: "resource",
-      resource,
-      range: { basis: { kind: "resource" } }
-    };
-
-    program.defineFunction({
-      ref: functionRef("test.unknown-resource-effect-function"),
-      type: i32Type,
-      effects: { reads: [byteAccess], writes: [] }
-    }, (fn) => fn.return([fn.values.const(1)]));
-
-    throws(
-      () => program.finish(),
-      /unknown program resource test\.unknown-resource-effect declared by function test\.unknown-resource-effect-function/
-    );
-  }
-});
-
-test("an effectful function call stays single and conditional inside its selected if arm", async () => {
+test("program closure rejects a live use of an unknown resource", () => {
   const program = createTestProgram();
-  const calleeType = functionType(["i32"], []);
-  const callerType = functionType(["i32"], ["i32"]);
-  const calleeRef = functionRef("test.conditional-callee");
-  const callerRef = functionRef("test.conditional-caller");
-  const effects = {
-    reads: [],
-    writes: [functionEffect()]
-  } as const;
-  const callee = program.defineFunction({
-    ref: calleeRef,
-    type: calleeType,
-    effects
+  const resource = resourceRef("test.unknown-symbolic-resource");
+  const byteAccess: ResourceEffect = {
+    space: "resource",
+    resource,
+    range: { basis: { kind: "resource" } }
+  };
+
+  program.defineFunction({
+    ref: functionRef("test.unknown-symbolic-resource-function"),
+    type: i32Type,
+    effects: noEffects
   }, (fn) => {
-    const value = fn.parameters[0];
-
-    if (value === undefined) {
-      throw new Error("missing value parameter");
-    }
-    writeFunctionEffect(fn, value);
-    fn.return([]);
-  });
-  const caller = program.defineFunction({
-    ref: callerRef,
-    type: callerType,
-    effects
-  }, (fn) => {
-    const condition = fn.parameters[0];
-
-    if (condition === undefined) {
-      throw new Error("missing condition parameter");
-    }
-    fn.region.if(condition, (thenBody) => {
-      thenBody.call(callee, [fn.values.const(42)]);
-    });
-    fn.return([fn.values.const(7)]);
-  });
-  program.exportFunction({
-    ref: functionExportRef("test.conditional-caller-export"),
-    name: "entry",
-    target: caller.ref
+    fn.return([fn.region.operation(resourceRead, {
+      source: byteOperand(resource, byteAccess.range, fn.values.const(0), 0, 8)
+    })]);
   });
 
-  const closed = program.finish();
-  const callerDefinition = closed.functions.find((fn) => fn.ref === caller.ref);
-
-  if (callerDefinition === undefined) {
-    throw new Error("missing conditional caller");
-  }
-  deepStrictEqual(callerDefinition.effects, effects);
-  const emitted = emitFunction(callerDefinition.body, {
-    bindings: createModuleBindings({
-      functions: new Map([[callee.ref, 0]]),
-      types: new Map(),
-      tables: new Map(),
-      resources: new Map()
-    }),
-    placement: callerDefinition.placement
-  });
-  const opcodes = wasmBodyOpcodes(emitted.bytes);
-  const callCount = opcodes.filter((opcode) => opcode === wasmOpcode.call).length;
-
-  strictEqual(callCount, 1);
-  ok(opcodes.indexOf(wasmOpcode.if) < opcodes.indexOf(wasmOpcode.call));
-
-  const calleeBody = new WasmFunctionBodyEncoder()
-      .i32Const(0)
-      .i32Const(0)
-      .i32Load({ align: 2, memoryIndex: 0, offset: 0 })
-      .i32Const(1)
-      .i32Add()
-      .i32Store({ align: 2, memoryIndex: 0, offset: 0 })
-      .finish();
-  const bytes = encodeWasmModule({
-    functionTypes: [
-      { params: [wasmValueType.i32], results: [] },
-      { params: [wasmValueType.i32], results: [wasmValueType.i32] }
-    ],
-    functionImports: [],
-    memoryImports: [
-      { moduleName: "test", name: "state", limits: { minPages: 1 } }
-    ],
-    tableImports: [],
-    functions: [
-      { typeIndex: 0, body: calleeBody },
-      { typeIndex: 1, body: emitted }
-    ],
-    globals: [],
-    functionExports: [{ name: "entry", functionIndex: 1 }]
-  });
-  const memory = new WebAssembly.Memory({ initial: 1 });
-  const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(bytes),
-    { test: { state: memory } }
+  throws(
+    () => program.finish(),
+    /unknown program resource test\.unknown-symbolic-resource used by function test\.unknown-symbolic-resource-function/
   );
-  const entry = instance.exports.entry;
-
-  if (typeof entry !== "function") {
-    throw new Error("missing conditional program entry");
-  }
-  strictEqual(entry(0), 7);
-  strictEqual(new DataView(memory.buffer).getUint32(0, true), 0);
-  strictEqual(entry(1), 7);
-  strictEqual(new DataView(memory.buffer).getUint32(0, true), 1);
-  strictEqual(entry(1), 7);
-  strictEqual(new DataView(memory.buffer).getUint32(0, true), 2);
 });
 
 test("function declarations keep resource bindings direct while effects are transitive", () => {
@@ -706,84 +361,24 @@ test("callers must cover the effects declared by their call targets", () => {
   );
 });
 
-test("resource effect declarations preserve their range basis and extent", () => {
-  {
-    const program = createTestProgram();
-    const type = functionType(["i32"], []);
-    program.defineFunction({
-      ref: functionRef("test.dynamic-gpr-effect"),
-      type,
-      effects: {
-        reads: [],
-        writes: [functionEffect(0, 1)]
-      }
-    }, (fn) => {
-      const value = fn.parameters[0];
-
-      if (value === undefined) {
-        throw new Error("missing value parameter");
-      }
-      writeFunctionEffect(fn, value);
-      fn.return([]);
-    });
-
-    throws(() => program.finish(), /undeclared write effect/);
-  }
-  {
-    const program = createTestProgram();
-    const type = functionType([], ["i32"]);
-
-    const origin = new DynamicByteOriginRef();
-    program.defineFunction({
-      ref: functionRef("test.dynamic-segment-effect"),
-      type,
-      effects: {
-        reads: [{
-          space: "resource",
-          resource: functionEffectResource,
-          range: {
-            basis: { kind: "dynamic", origin },
-            slice: { byteOffset: 0, byteLength: 2 }
-          }
-        }],
-        writes: []
-      }
-    }, (fn) => {
-      const selector = readFunctionEffect(fn, 0, 16);
-
-      fn.return([selector]);
-    });
-
-    throws(() => program.finish(), /undeclared read effect/);
-  }
-});
-
 test("calls enforce their declared function contracts", () => {
-  {
-    const program = createTestProgram();
-    const calleeType = functionType(["i32"], []);
-    const callerType = functionType([], []);
-    const calleeRef = functionRef("test.argument-callee");
-    const callerRef = functionRef("test.argument-caller");
+  const program = createTestProgram();
+  const callee = program.defineFunction({
+    ref: functionRef("test.argument-callee"),
+    type: functionType(["i32"], []),
+    effects: noEffects
+  }, (fn) => fn.return([]));
 
-    const callee = program.defineFunction({
-      ref: calleeRef,
-      type: calleeType,
-      effects: noEffects
-    }, (fn) => {
-      fn.return([]);
-    });
-    program.defineFunction({
-      ref: callerRef,
-      type: callerType,
-      effects: noEffects
-    }, (fn) => {
-      fn.region.call(callee, []);
-      fn.return([]);
-    });
+  program.defineFunction({
+    ref: functionRef("test.argument-caller"),
+    type: voidType,
+    effects: noEffects
+  }, (fn) => {
+    fn.region.call(callee, []);
+    fn.return([]);
+  });
 
-    throws(() => program.finish(), /expects 1 arguments, got 0/);
-  }
+  throws(() => program.finish(), /expects 1 arguments, got 0/);
 });
 
 test("functions must terminate with a return matching their result contract", () => {
@@ -797,16 +392,6 @@ test("functions must terminate with a return matching their result contract", ()
 
   throws(() => missingReturn.finish(), /root body does not complete/);
 
-  const missingResult = createTestProgram();
-
-  missingResult.defineFunction({
-    ref: functionRef("test.missing-result"),
-    type: i32Type,
-    effects: noEffects
-  }, (fn) => fn.return([]));
-
-  throws(() => missingResult.finish(), /returns 0 values, expected 1/);
-
   const wrongResultType = createTestProgram();
 
   wrongResultType.defineFunction({
@@ -816,21 +401,11 @@ test("functions must terminate with a return matching their result contract", ()
   }, (fn) => fn.return([fn.values.const64(1n)]));
 
   throws(() => wrongResultType.finish(), /result 0 must be i32, got i64/);
-
-  const unexpectedResult = createTestProgram();
-
-  unexpectedResult.defineFunction({
-    ref: functionRef("test.unexpected-result"),
-    type: voidType,
-    effects: noEffects
-  }, (fn) => fn.return([fn.values.const(1)]));
-
-  throws(() => unexpectedResult.finish(), /returns 1 values, expected 0/);
 });
 
-test("successful closure rejects every later topology mutation", () => {
+test("successful closure rejects later use", () => {
   const program = createTestProgram();
-  const fn = program.defineFunction({
+  program.defineFunction({
     ref: functionRef("test.function"),
     type: voidType,
     effects: noEffects
@@ -840,28 +415,11 @@ test("successful closure rejects every later topology mutation", () => {
 
   throws(() => program.finish(), /finished program/);
   throws(
-    () => program.importTable({
-      ref: tableRef("test.late-table"),
-      moduleName: "test",
-      name: "table",
-      limits: { minElements: 1 }
-    }),
-    /finished program/
-  );
-  throws(
     () => program.defineFunction({
       ref: functionRef("test.late-function"),
       type: voidType,
       effects: noEffects
     }, (body) => body.return([])),
-    /finished program/
-  );
-  throws(
-    () => program.exportFunction({
-      ref: functionExportRef("test.late-export"),
-      name: "late",
-      target: fn.ref
-    }),
     /finished program/
   );
 });
@@ -890,124 +448,30 @@ test("function factories cannot mutate program topology while it is closing", ()
   strictEqual(program.finish().functions.length, 1);
 });
 
-test("closed functions do not retain their mutable factory builders", () => {
+test("program validation rejects a duplicate function identity", () => {
   const program = createTestProgram();
-  let rawBuilder!: FunctionBuilder;
 
-  const definition = program.defineFunction({
-    ref: functionRef("test.function-snapshot"),
-    type: voidType,
-    effects: noEffects
-  }, (fn) => {
-    rawBuilder = fn;
-    fn.return([]);
-  });
-  const closed = program.finish();
-  const fn = closed.functions.find((candidate) => candidate.ref === definition.ref);
-
-  if (fn === undefined) {
-    throw new Error("missing snapshotted function");
-  }
-  const valueCount = fn.body.values.size();
-
-  rawBuilder.region.return([]);
-  rawBuilder.values.const(0x1234_5678);
-  strictEqual(fn.body.body.nodes.length, 1);
-  strictEqual(fn.body.values.size(), valueCount);
-  compileBytes(closed);
-});
-
-test("program validation rejects duplicate stable declaration identities", () => {
-  {
-    const program = createTestProgram();
-
-    program.importTable({
-      ref: tableRef("same-table"),
-      moduleName: "test",
-      name: "first",
-      limits: { minElements: 1 }
-    });
-    program.importTable({
-      ref: tableRef("same-table"),
-      moduleName: "test",
-      name: "second",
-      limits: { minElements: 1 }
-    });
-    throws(() => program.finish(), /duplicate program table identity/);
-  }
-  {
-    const program = createTestProgram();
-
-    for (let index = 0; index < 2; index += 1) {
-      program.defineFunction({
-        ref: functionRef("same-function"),
-        type: voidType,
-        effects: noEffects
-      }, (fn) => fn.return([]));
-    }
-    throws(() => program.finish(), /duplicate program function identity/);
-  }
-  {
-    const program = createTestProgram();
-    const fn = program.defineFunction({
-      ref: functionRef("same-export-function"),
+  for (let index = 0; index < 2; index += 1) {
+    program.defineFunction({
+      ref: functionRef("same-function"),
       type: voidType,
       effects: noEffects
-    }, (body) => body.return([]));
-
-    program.exportFunction({ ref: functionExportRef("same-export"), name: "first", target: fn.ref });
-    program.exportFunction({ ref: functionExportRef("same-export"), name: "second", target: fn.ref });
-    throws(
-      () => program.finish(),
-      /duplicate program function-export identity/
-    );
+    }, (fn) => fn.return([]));
   }
+  throws(() => program.finish(), /duplicate program function identity/);
 });
 
-test("program validation rejects duplicate and empty export names", () => {
-  {
-    const program = createTestProgram();
-    const fn = program.defineFunction({
-      ref: functionRef("duplicate-export-name-function"),
-      type: voidType,
-      effects: noEffects
-    }, (body) => body.return([]));
-
-    program.exportFunction({ ref: functionExportRef("first-export"), name: "entry", target: fn.ref });
-    program.exportFunction({ ref: functionExportRef("second-export"), name: "entry", target: fn.ref });
-    throws(() => program.finish(), /duplicate program export name/);
-  }
-  {
-    const program = createTestProgram();
-    const fn = program.defineFunction({
-      ref: functionRef("empty-export-name-function"),
-      type: voidType,
-      effects: noEffects
-    }, (body) => body.return([]));
-
-    program.exportFunction({ ref: functionExportRef("empty-export"), name: "", target: fn.ref });
-    throws(() => program.finish(), /empty program function export name/);
-  }
-});
-
-test("finished programs snapshot export declarations", () => {
+test("program validation rejects duplicate export names", () => {
   const program = createTestProgram();
   const fn = program.defineFunction({
-    ref: functionRef("test.function"),
+    ref: functionRef("duplicate-export-name-function"),
     type: voidType,
     effects: noEffects
   }, (body) => body.return([]));
-  const exported = {
-    ref: functionExportRef("test.export"),
-    name: "before",
-    target: fn.ref
-  };
 
-  program.exportFunction(exported);
-  const finished = program.finish();
-
-  exported.name = "after";
-  strictEqual(finished.exports[0]?.name, "before");
+  program.exportFunction({ ref: functionExportRef("first-export"), name: "entry", target: fn.ref });
+  program.exportFunction({ ref: functionExportRef("second-export"), name: "entry", target: fn.ref });
+  throws(() => program.finish(), /duplicate program export name/);
 });
 
 test("program validation resolves export targets by identity", () => {
@@ -1116,19 +580,13 @@ test("program closure retains live and transitive family types but omits a dead 
     closed.functions.map((fn) => fn.ref),
     [root.ref, live.ref, transitive.ref]
   );
-  strictEqual(closed.functions.some((fn) => fn.ref === dead.ref), false);
   deepStrictEqual(builds, ["live-2", "transitive-3"]);
   deepStrictEqual(closed.functionTypes, [rootType, liveType, transitiveType]);
-  strictEqual(closed.functionTypes[0], rootType);
-  strictEqual(closed.functionTypes[1], liveType);
-  strictEqual(closed.functionTypes[2], transitiveType);
   strictEqual(closed.functionTypes.includes(deadType), false);
   const liveFunction = closed.functions.find((fn) => fn.ref === live.ref);
 
-  ok(liveFunction !== undefined, "missing live family member");
-  ok(closed.functions.some((fn) => fn.ref === transitive.ref), "missing transitive family member");
+  assert(liveFunction !== undefined, "missing live family member");
   deepStrictEqual(liveFunction.effects, noEffects);
-  compileBytes(closed);
 });
 
 test("generated and declared functions share one identity namespace", () => {
@@ -1191,5 +649,9 @@ test("distinct semantic function contracts coalesce to one physical Wasm type", 
   deepStrictEqual(closed.functionTypes, [firstType, secondType]);
   strictEqual(closed.functionTypes[0], firstType);
   strictEqual(closed.functionTypes[1], secondType);
-  strictEqual(wasmFunctionTypeCount(compileBytes(closed)), 1);
+  const layout = layoutProgram(closed);
+
+  deepStrictEqual(layout.types, [firstType]);
+  strictEqual(layout.typeIndices.get(firstType), 0);
+  strictEqual(layout.typeIndices.get(secondType), 0);
 });

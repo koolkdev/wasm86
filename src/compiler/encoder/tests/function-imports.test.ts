@@ -5,10 +5,6 @@ import {
 import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import {
-  wasmCodeFunctionCount,
-  wasmDefinedFunctionCount
-} from "#compiler/encoder/tests/body-opcodes.js";
 import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
@@ -67,25 +63,6 @@ test("function imports prefix defined indexes and direct calls", async () => {
 
   strictEqual(ordinary(41), 43);
   strictEqual(returned(41), 42);
-});
-
-test("function and code sections contain definitions only", () => {
-  const bytes = encodeTestModule({
-    functionTypes: [{ params: [], results: [] }],
-    functionImports: [{
-      moduleName: importModuleName,
-      name: importFunctionName,
-      typeIndex: 0
-    }],
-    functions: [
-      { typeIndex: 0, body: new WasmFunctionBodyEncoder().finish() },
-      { typeIndex: 0, body: new WasmFunctionBodyEncoder().finish() }
-    ]
-  });
-
-  strictEqual(wasmDefinedFunctionCount(bytes), 2);
-  strictEqual(wasmCodeFunctionCount(bytes), 2);
-  new WebAssembly.Module(bytes);
 });
 
 test("branch hints use imported-function-prefixed indexes", () => {

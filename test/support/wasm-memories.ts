@@ -1,6 +1,6 @@
 import { testExecutionModel } from "#test/support/execution-model.js";
 
-export type TestWasmMemories = Readonly<{
+type TestWasmMemories = Readonly<{
   cpuStateMemory: WebAssembly.Memory;
   guestMemory: WebAssembly.Memory;
 }>;

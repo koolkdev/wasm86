@@ -1,7 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { u32 } from "#common/numeric.js";
 import {
   createLayoutHostView,
   type LayoutHostView
@@ -64,7 +63,7 @@ type AgreementCase = Readonly<{
 const fullMemberCases: AgreementCase[] = [];
 
 for (const [index, reg] of reg32.entries()) {
-  const hostSeed = u32(0x8123_4500 + index);
+  const hostSeed = 0x8123_4500 + index;
   const generatedWrite = 0x1_0000_0001 + index;
 
   fullMemberCases.push({
@@ -74,7 +73,7 @@ for (const [index, reg] of reg32.entries()) {
     hostSeed,
     expectedGeneratedRead: hostSeed,
     generatedWrite,
-    expectedHostRead: u32(generatedWrite),
+    expectedHostRead: 1 + index,
     readHost: ({ core }) => core.readReg32(reg)
   });
 }
@@ -166,30 +165,30 @@ for (const [index, reg] of segmentRegisters.entries()) {
       name: baseField,
       field: baseField,
       location: segmentBaseChannel(reg),
-      hostSeed: u32(0x8100_0000 + index),
-      expectedGeneratedRead: u32(0x8100_0000 + index),
+      hostSeed: 0x8100_0000 + index,
+      expectedGeneratedRead: 0x8100_0000 + index,
       generatedWrite: 0x1_9100_0000 + index,
-      expectedHostRead: u32(0x9100_0000 + index),
+      expectedHostRead: 0x9100_0000 + index,
       readHost: ({ core }) => core.readSegmentBase(reg)
     },
     {
       name: limitField,
       field: limitField,
       location: segmentLimitChannel(reg),
-      hostSeed: u32(0x8200_0000 + index),
-      expectedGeneratedRead: u32(0x8200_0000 + index),
+      hostSeed: 0x8200_0000 + index,
+      expectedGeneratedRead: 0x8200_0000 + index,
       generatedWrite: 0x1_9200_0000 + index,
-      expectedHostRead: u32(0x9200_0000 + index),
+      expectedHostRead: 0x9200_0000 + index,
       readHost: ({ core }) => core.readSegmentLimit(reg)
     },
     {
       name: accessField,
       field: accessField,
       location: segmentAccessChannel(reg),
-      hostSeed: u32(0x8300_0000 + index),
-      expectedGeneratedRead: u32(0x8300_0000 + index),
+      hostSeed: 0x8300_0000 + index,
+      expectedGeneratedRead: 0x8300_0000 + index,
       generatedWrite: 0x1_9300_0000 + index,
-      expectedHostRead: u32(0x9300_0000 + index),
+      expectedHostRead: 0x9300_0000 + index,
       readHost: ({ core }) => core.readSegmentAccess(reg)
     }
   );

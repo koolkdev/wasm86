@@ -10,8 +10,6 @@ import {
   writeGuestBytes
 } from "./harness.js";
 import { startAddress } from "#test/support/addresses.js";
-import { fetchPageFaultStop } from "#cpu/tests/stop-fixtures.js";
-import { invalidOpcode } from "#core/exceptions.js";
 
 test("a zero instruction budget returns the limit exit without changing architectural state", async () => {
   const interpreter = await instantiateInterpreter();
@@ -42,7 +40,10 @@ test("an undefined byte raises #UD without changing architectural state", async 
 
   const exit = interpreter.runFor(1);
 
-  deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: { kind: "UD" }
+  });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -124,7 +125,10 @@ test("undefined prefix streams raise #UD instead of misdecoding", async () => {
 
     const exit = interpreter.runFor(1);
 
-    deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
+    deepStrictEqual(exit, {
+      kind: "cpuException",
+      exception: { kind: "UD" }
+    });
     assertInterpreterStateEquals(interpreter.stateView, initialState);
   }
 });
@@ -140,9 +144,14 @@ test("a truncated two-byte opcode escape raises instruction-fetch #PF", async ()
   interpreter.guestView.setUint8(lastGuestByte, 0x0f);
 
   const exit = interpreter.runFor(1);
-  const expected = fetchPageFaultStop(interpreter.guestView.byteLength);
-
-  deepStrictEqual(exit, expected);
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: {
+      kind: "PF",
+      linearAddress: interpreter.guestView.byteLength,
+      errorCode: 16
+    }
+  });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -157,7 +166,10 @@ test("undefined two-byte opcode path raises #UD after consuming the escape", asy
 
   const exit = interpreter.runFor(1);
 
-  deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: { kind: "UD" }
+  });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });
 
@@ -174,6 +186,9 @@ test("the Interpreter rejects undefined F7 /1 before demanding its address bytes
 
   const exit = interpreter.runFor(1);
 
-  deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: { kind: "UD" }
+  });
   assertInterpreterStateEquals(interpreter.stateView, initialState);
 });

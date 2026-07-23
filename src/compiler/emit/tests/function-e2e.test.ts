@@ -2,19 +2,17 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { coreStateFields } from "#core/state/layout.js";
-import { PageFaultErrorCode } from "#core/exceptions.js";
 import { exceptionExit } from "#core/exits.js";
 import type { RunStop } from "#cpu/cpu.js";
-import { decodeExit } from "#cpu/exit.js";
+import { buildExit, decodeExit } from "#cpu/exit.js";
 import { resourceRead } from "#compiler/ir/operations/resource.js";
 import {
   flatMemoryOperand,
   flatMemoryResolution
 } from "#memory/flat.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
-import { assertPageFaultException } from "#cpu/tests/stop-fixtures.js";
+import { assertPageFaultException } from "#test/support/cpu-exception-assertions.js";
 import {
-  buildExit,
   cpuStateAccess,
   testExecutionModel
 } from "#test/support/execution-model.js";
@@ -94,6 +92,6 @@ test("a symbolic function preserves an instruction-fetch exit", async () => {
   assertCpuException(decoded);
   assertPageFaultException(decoded.exception);
   strictEqual(decoded.exception.linearAddress, eip + 2);
-  strictEqual(decoded.exception.errorCode, PageFaultErrorCode.INSTRUCTION_FETCH);
+  strictEqual(decoded.exception.errorCode, 16);
   strictEqual(readWasmCpuStateChannel(stateView, coreStateFields.eip), eip);
 });

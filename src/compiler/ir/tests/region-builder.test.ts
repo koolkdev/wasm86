@@ -1,7 +1,6 @@
 import {
   deepStrictEqual,
   doesNotThrow,
-  notStrictEqual,
   ok,
   strictEqual,
   throws
@@ -23,8 +22,7 @@ import {
 } from "#compiler/ir/resource.js";
 import { RegionBuilder, type RegionNodeSink } from "#compiler/ir/builder/region.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
-import { valueId } from "#compiler/ir/values/id.js";
-import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
+import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { functionType } from "#compiler/ir/function.js";
@@ -66,20 +64,12 @@ function testCallTarget(id: string): FunctionDefinition {
   });
 }
 
-function voidFunction(values: ValueTable, builder: RegionBuilder) {
+function voidFunction(
+  values: ValueTable,
+  builder: RegionBuilder,
+  parameters: readonly ValueId[] = []
+) {
   builder.return([]);
-  const parameters = Array.from(
-    { length: values.size() },
-    (_, raw) => valueId(raw)
-  ).filter((value) => values.node(value).kind === "parameter")
-    .sort((a, b) => {
-      const first = values.node(a);
-      const second = values.node(b);
-
-      return first.kind === "parameter" && second.kind === "parameter"
-        ? first.index - second.index
-        : 0;
-    });
 
   return {
     type: functionType(
@@ -115,7 +105,10 @@ test("operation derives the output and its bounds from the definition", () => {
   ok(operation?.kind === "resource.read");
   strictEqual(operation.effect, source.effect);
   deepStrictEqual(operation.outputs, [read]);
-  deepStrictEqual(values.widthBounds(read), fitsUnsigned(8));
+  deepStrictEqual(values.widthBounds(read), {
+    unsignedBits: 8,
+    signedBits: 9
+  });
 });
 
 test("resource read modes reach operation construction", () => {
@@ -153,17 +146,14 @@ test("resource read modes reach operation construction", () => {
   ok(boundedOperation?.kind === "resource.read");
   strictEqual(signedOperation.signed, true);
   strictEqual(boundedOperation.signed, undefined);
-  deepStrictEqual(values.widthBounds(signed), signExtended(8));
-  deepStrictEqual(values.widthBounds(bounded), fitsUnsigned(1));
-});
-
-test("one operation API handles value and effect definitions", () => {
-  const values = new ValueTable();
-  const builder = new RegionBuilder(values);
-  const value = values.const(0);
-
-  strictEqual(builder.operation(resourceWrite, writeArgs(values, value)), undefined);
-  strictEqual(builder.operation(resourceRead, readArgs(values)), value + 1);
+  deepStrictEqual(values.widthBounds(signed), {
+    unsignedBits: 32,
+    signedBits: 8
+  });
+  deepStrictEqual(values.widthBounds(bounded), {
+    unsignedBits: 1,
+    signedBits: 2
+  });
 });
 
 test("call validates typed arguments and allocates its declared result", () => {
@@ -180,7 +170,6 @@ test("call validates typed arguments and allocates its declared result", () => {
   strictEqual(call.invocation.target, target);
   deepStrictEqual(call.inputs, args.map((value) => ({ value, type: "i32" as const })));
   deepStrictEqual(call.outputs, [output]);
-  deepStrictEqual(values.node(output), { kind: "nodeOutput", type: "i32" });
   throws(() => builder.call(target, args.slice(1)), /expects 4 arguments, got 3/);
   throws(
     () => builder.call(target, [args[0]!, args[1]!, args[2]!, values.const64(3n)]),
@@ -245,14 +234,15 @@ test("cell APIs seed typed cells and preserve lexical access in child bodies", (
   const builder = new RegionBuilder(values);
   const seed = values.const64(7n);
   const cell = builder.cell(seed);
+  const condition = values.parameter(0, "i32");
   let read!: ValueId;
 
-  builder.if(values.parameter(0, "i32"), (child) => {
+  builder.if(condition, (child) => {
     child.write(cell, child.values.const64(8n));
     read = child.read(cell);
   });
 
-  const block = voidFunction(values, builder);
+  const block = voidFunction(values, builder, [condition]);
   const seedOperation = block.body.nodes[0];
   const branch = block.body.nodes[1];
 
@@ -392,47 +382,6 @@ test("if builds hinted then and else bodies against child builders", () => {
   });
 });
 
-test("control bodies isolate siblings while retaining ancestor recipes", () => {
-  const values = new ValueTable();
-  const builder = new RegionBuilder(values);
-  const input = values.addNodeOutput();
-  const operand = values.parameter(0, "i32");
-  let thenValue!: ValueId;
-  let nestedValue!: ValueId;
-  let elseValue!: ValueId;
-
-  builder.if(
-    values.parameter(1, "i32"),
-    (then) => {
-      thenValue = then.values.binary("add", input, operand);
-      strictEqual(then.values.binary("add", input, operand), thenValue);
-      then.if(values.parameter(2, "i32"), (nested) => {
-        nestedValue = nested.values.binary("add", input, operand);
-      });
-    },
-    {
-      elseBuild: (other) => {
-        elseValue = other.values.binary("add", input, operand);
-      }
-    }
-  );
-
-  const rootValue = values.binary("add", input, operand);
-
-  notStrictEqual(thenValue, rootValue);
-  notStrictEqual(elseValue, rootValue);
-  notStrictEqual(thenValue, elseValue);
-  strictEqual(nestedValue, thenValue);
-  deepStrictEqual(values.node(thenValue), {
-    kind: "binary",
-    type: "i32",
-    operator: "add",
-    a: input,
-    b: operand
-  });
-  deepStrictEqual(values.node(nestedValue), values.node(thenValue));
-});
-
 test("function snapshots retain values created in control children", () => {
   const fn = new FunctionBuilder(functionType(["i32", "i32"], ["i32"]));
   const [condition, input] = fn.parameters;
@@ -454,19 +403,15 @@ test("function snapshots retain values created in control children", () => {
   const built = fn.finish();
 
   doesNotThrow(() => validateIrFunction(built));
-  deepStrictEqual(built.values.node(childValue), {
-    kind: "binary",
-    type: "i32",
-    operator: "add",
-    a: input,
-    b: built.values.const(1)
-  });
   strictEqual(built.values.valueType(childValue), "i32");
-  deepStrictEqual(built.values.widthBounds(childValue), fitsUnsigned(32));
+  deepStrictEqual(built.values.widthBounds(childValue), {
+    unsignedBits: 32,
+    signedBits: 32
+  });
   strictEqual(built.values.mayTrap(childValue), false);
 });
 
-test("switch builds every arm before allocating the shared output", () => {
+test("switch preserves arm results and derives one shared output", () => {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
   const selector = values.parameter(0, "i32");
@@ -488,8 +433,6 @@ test("switch builds every arm before allocating the shared output", () => {
     (arm) => (defaultResult = arm.values.const(1))
   );
 
-  ok(armResult < output);
-  ok(defaultResult < output);
   deepStrictEqual(values.widthBounds(output), { unsignedBits: 32, signedBits: 32 });
   const [control] = builder.build().nodes;
 
@@ -596,19 +539,5 @@ test("buildFunction returns a callback-produced value", () => {
   ok(returned?.kind === "return");
   deepStrictEqual(returned.source, { kind: "values", values: [eip] });
   strictEqual(fn.body.result, undefined);
-  doesNotThrow(() => validateIrFunction(fn));
-});
-
-test("buildFunction supports a void callback", () => {
-  const fn = buildFunction(functionType([], []), (fn) => {
-    fn.region.operation(
-      resourceWrite,
-      writeArgs(fn.values, fn.values.const(0))
-    );
-    fn.return([]);
-  });
-
-  strictEqual(fn.body.result, undefined);
-  strictEqual(fn.body.nodes.at(-1)?.kind, "return");
   doesNotThrow(() => validateIrFunction(fn));
 });

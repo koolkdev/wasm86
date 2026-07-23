@@ -2,9 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { gprChannel } from "#core/state/channels.js";
-import { invalidOpcode } from "#core/exceptions.js";
 import type { RegName } from "#core/types.js";
-import { fetchPageFaultStop, readPageFaultStop } from "#cpu/tests/stop-fixtures.js";
 import {
   assertLazyFlagState,
   readWasmCpuStateChannel,
@@ -43,7 +41,10 @@ test("a program mixing mov, ALU, cmp, and jcc commits before a trailing #UD", as
 
   const exit = interpreter.runFor(100);
 
-  deepStrictEqual(exit, { kind: "cpuException", exception: invalidOpcode() });
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: { kind: "UD" }
+  });
   strictEqual(readRegister(interpreter.stateView, "eax"), 15);
   strictEqual(readRegister(interpreter.stateView, "ecx"), 0);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress + 0x11);
@@ -117,7 +118,10 @@ test("fetching the opcode past mapped memory raises #PF at the boundary", async 
 
   const exit = interpreter.runFor(10);
 
-  deepStrictEqual(exit, fetchPageFaultStop(eip));
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: { kind: "PF", linearAddress: eip, errorCode: 16 }
+  });
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -128,13 +132,19 @@ test("the flat memory model keeps its fetch boundary after backing memory grows"
 
   writeWasmCpuStateSnapshot(interpreter.stateView, { eip: boundary });
 
-  deepStrictEqual(interpreter.runFor(10), fetchPageFaultStop(boundary));
+  deepStrictEqual(interpreter.runFor(10), {
+    kind: "cpuException",
+    exception: { kind: "PF", linearAddress: boundary, errorCode: 16 }
+  });
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), boundary);
 
   interpreter.guestMemory.grow(1);
   writeGuestBytes(new DataView(interpreter.guestMemory.buffer), boundary, [0xcd, 0x2e]);
 
-  deepStrictEqual(interpreter.runFor(10), fetchPageFaultStop(boundary));
+  deepStrictEqual(interpreter.runFor(10), {
+    kind: "cpuException",
+    exception: { kind: "PF", linearAddress: boundary, errorCode: 16 }
+  });
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), boundary);
 });
 
@@ -147,7 +157,10 @@ test("an immediate crossing the end of memory raises #PF at the first unavailabl
 
   const exit = interpreter.runFor(10);
 
-  deepStrictEqual(exit, fetchPageFaultStop(eip + 2));
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: { kind: "PF", linearAddress: eip + 2, errorCode: 16 }
+  });
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -161,7 +174,10 @@ test("a displacement crossing the end of memory raises #PF at the first unavaila
 
   const exit = interpreter.runFor(10);
 
-  deepStrictEqual(exit, fetchPageFaultStop(eip + 5));
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: { kind: "PF", linearAddress: eip + 5, errorCode: 16 }
+  });
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
 });
 
@@ -174,7 +190,10 @@ test("a SIB byte past the end of memory raises #PF at its address", async () => 
 
   const exit = interpreter.runFor(10);
 
-  deepStrictEqual(exit, fetchPageFaultStop(eip + 2));
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: { kind: "PF", linearAddress: eip + 2, errorCode: 16 }
+  });
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -188,7 +207,10 @@ test("a SIB displacement crossing the end of memory raises #PF at the first unav
 
   const exit = interpreter.runFor(10);
 
-  deepStrictEqual(exit, fetchPageFaultStop(eip + 5));
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: { kind: "PF", linearAddress: eip + 5, errorCode: 16 }
+  });
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), eip);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });
@@ -208,7 +230,10 @@ test("a guest data load past the end raises data-read #PF", async () => {
 
   const exit = interpreter.runFor(10);
 
-  deepStrictEqual(exit, readPageFaultStop(address));
+  deepStrictEqual(exit, {
+    kind: "cpuException",
+    exception: { kind: "PF", linearAddress: address, errorCode: 0 }
+  });
   strictEqual(readWasmCpuStateField(interpreter.stateView, "eip"), startAddress);
   strictEqual(readWasmCpuStateField(interpreter.stateView, "instructionCount"), 0);
 });

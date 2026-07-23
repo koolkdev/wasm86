@@ -1,5 +1,4 @@
 import {
-  deepStrictEqual,
   ok,
   strictEqual,
   throws
@@ -8,24 +7,22 @@ import { test } from "node:test";
 
 import {
   ifControl,
-  loopControl,
-  returnControl
+  loopControl
 } from "#compiler/ir/controls/index.js";
 import { CellRef } from "#compiler/ir/cell.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
-import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { placeFunction } from "#compiler/placement/place.js";
 import { validatePlacement } from "#compiler/placement/validate.js";
-import { functionType } from "#compiler/ir/function.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
-import type { Region, RegionNode } from "#compiler/ir/region.js";
-import type { FunctionGraph, IrFunction } from "#compiler/ir/function.js";
+import type { Region } from "#compiler/ir/region.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
 import {
   compilerTestValues,
   resourceReadNode,
   resourceWriteNode
 } from "#test/support/storage-operations.js";
+import { completedPlacementFunction } from "./function-fixture.js";
 
 function write(
   cell: CellRef,
@@ -42,35 +39,8 @@ function read(
   return cellRead.create({ cell }, () => output);
 }
 
-function functionBlock(block: FunctionGraph): IrFunction {
-  (block.body.nodes as RegionNode[]).push(returnControl.create({
-    source: { kind: "values", values: [] }
-  }));
-  const parameters = Array.from(
-    { length: block.values.size() },
-    (_, raw) => valueId(raw)
-  ).filter((value) => block.values.node(value).kind === "parameter")
-    .sort((a, b) => {
-      const first = block.values.node(a);
-      const second = block.values.node(b);
-
-      return first.kind === "parameter" && second.kind === "parameter"
-        ? first.index - second.index
-        : 0;
-    });
-
-  return {
-    ...block,
-    type: functionType(
-      parameters.map((parameter) => block.values.valueType(parameter)),
-      []
-    ),
-    parameters
-  };
-}
-
-function place(block: FunctionGraph) {
-  return placeFunction(functionBlock(block));
+function place(block: FunctionGraph, parameterCount = 0) {
+  return placeFunction(completedPlacementFunction(block, parameterCount));
 }
 
 test("a referenced cell receives one typed local", () => {
@@ -90,8 +60,8 @@ test("a referenced cell receives one typed local", () => {
   const { plan } = place(block);
   const local = plan.cellLocals.get(cell);
 
-  strictEqual(local, 0);
-  deepStrictEqual(plan.localTypes, ["i32"]);
+  ok(local !== undefined);
+  strictEqual(plan.localTypes[local], "i32");
 });
 
 test("cell locals are allocated when a cell has only writes", () => {
@@ -107,9 +77,10 @@ test("cell locals are allocated when a cell has only writes", () => {
     }
   };
   const { plan } = place(block);
+  const local = plan.cellLocals.get(cell);
 
-  strictEqual(plan.cellLocals.size, 1);
-  deepStrictEqual(plan.localTypes, ["i32"]);
+  ok(local !== undefined);
+  strictEqual(plan.localTypes[local], "i32");
 });
 
 test("distinct cells receive distinct locals with their scalar types", () => {
@@ -159,7 +130,7 @@ test("nested branch and loop accesses share the declaring cell's local", () => {
       ]
     }
   };
-  const { plan } = place(block);
+  const { plan } = place(block, 1);
 
   strictEqual(plan.cellLocals.size, 1);
   strictEqual(plan.cellLocals.has(cell), true);
@@ -183,7 +154,7 @@ test("a cell never shares a local with an overlapping value temporary", () => {
       ]
     }
   };
-  const { analysis, plan } = place(block);
+  const { function: fn, analysis, plan } = place(block);
   const valuePlacement = plan.values[snapshot];
   const cellLocal = plan.cellLocals.get(cell);
 
@@ -195,11 +166,11 @@ test("a cell never shares a local with an overlapping value temporary", () => {
   strictEqual(cellLocal === valuePlacement.local, false);
 
   throws(
-    () => validatePlacement(block, analysis, { ...plan, cellLocals: new Map() }),
+    () => validatePlacement(fn, analysis, { ...plan, cellLocals: new Map() }),
     /referenced cell has no local/
   );
   throws(
-    () => validatePlacement(block, analysis, {
+    () => validatePlacement(fn, analysis, {
       ...plan,
       cellLocals: new Map([[cell, valuePlacement.local]])
     }),
@@ -226,7 +197,7 @@ test("placement validation rejects overlapping, mistyped, and stale cell locals"
       ]
     }
   };
-  const { analysis, plan } = place(block);
+  const { function: fn, analysis, plan } = place(block);
   const firstLocal = plan.cellLocals.get(first);
   const secondLocal = plan.cellLocals.get(second);
 
@@ -234,7 +205,7 @@ test("placement validation rejects overlapping, mistyped, and stale cell locals"
   ok(secondLocal !== undefined);
   strictEqual(firstLocal === secondLocal, false);
   throws(
-    () => validatePlacement(block, analysis, {
+    () => validatePlacement(fn, analysis, {
       ...plan,
       cellLocals: new Map([[first, firstLocal], [second, firstLocal]])
     }),
@@ -245,14 +216,14 @@ test("placement validation rejects overlapping, mistyped, and stale cell locals"
 
   wrongTypes[firstLocal] = "i64";
   throws(
-    () => validatePlacement(block, analysis, { ...plan, localTypes: wrongTypes }),
+    () => validatePlacement(fn, analysis, { ...plan, localTypes: wrongTypes }),
     /has the wrong type in local/
   );
 
   const unrelated = new CellRef("i32");
 
   throws(
-    () => validatePlacement(block, analysis, {
+    () => validatePlacement(fn, analysis, {
       ...plan,
       cellLocals: new Map([...plan.cellLocals, [unrelated, plan.localTypes.length]]),
       localTypes: [...plan.localTypes, "i32"]
@@ -283,8 +254,13 @@ test("cells with disjoint lifetimes pool one local", () => {
   };
   const { plan } = place(block);
 
-  strictEqual(plan.cellLocals.get(first), plan.cellLocals.get(second));
-  deepStrictEqual(plan.localTypes, ["i32"]);
+  const firstLocal = plan.cellLocals.get(first);
+  const secondLocal = plan.cellLocals.get(second);
+
+  ok(firstLocal !== undefined);
+  ok(secondLocal !== undefined);
+  strictEqual(firstLocal, secondLocal);
+  strictEqual(plan.localTypes[firstLocal], "i32");
 });
 
 test("a loop-crossing cell stays live through the whole loop", () => {

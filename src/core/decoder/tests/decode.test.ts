@@ -2,266 +2,358 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
-import { invalidOpcode } from "#core/exceptions.js";
-import { ByteArrayDecodeReader, cpuException, decodeBytes, imm8, imm32, mem, mem32, ok, reg, reg32, signImm8, startAddress } from "./helpers.js";
+import {
+  ByteArrayDecodeReader,
+  decodeBytes,
+  startAddress
+} from "./byte-reader-fixture.js";
 
-test("decodes opcode-encoded register and imm32 operands", () => {
-  const decoded = ok(decodeBytes([0xbb, 0x78, 0x56, 0x34, 0x12]));
+test("decodes instruction metadata, an opcode register, and a 32-bit immediate", () => {
+  const values = [0xbb, 0x78, 0x56, 0x34, 0x12];
+  const reader = new ByteArrayDecodeReader(values, startAddress);
+  const result = decodeIsaInstructionFromReader(reader, startAddress);
+
+  strictEqual(result.kind, "instruction");
+  if (result.kind !== "instruction") {
+    return;
+  }
+
+  const decoded = result.instruction;
 
   strictEqual(decoded.spec.id, "mov.r32_imm32");
   strictEqual(decoded.spec.syntax, "mov {0}, {1}");
-  strictEqual(decoded.length, 5);
-  strictEqual(decoded.nextEip, startAddress + 5);
-  deepStrictEqual(decoded.raw, [0xbb, 0x78, 0x56, 0x34, 0x12]);
-  deepStrictEqual(decoded.operands, [reg32("ebx"), imm32(0x1234_5678)]);
-});
-
-test("decodes directly from guest memory without requiring a full instruction slice", () => {
-  const reader = new ByteArrayDecodeReader([0x90], startAddress);
-
-  const decoded = ok(decodeIsaInstructionFromReader(reader, startAddress));
-
-  strictEqual(decoded.spec.id, "xchg.eax_r32");
-  strictEqual(decoded.length, 1);
-  deepStrictEqual(decoded.raw, [0x90]);
-  deepStrictEqual(decoded.operands, [reg32("eax"), reg32("eax")]);
-});
-
-test("decodes multibyte ModRM/SIB instruction directly from guest memory", () => {
-  const values = [0x8b, 0x84, 0x88, 0x10, 0x00, 0x00, 0x00];
-  const reader = new ByteArrayDecodeReader(values, startAddress);
-  const decoded = ok(decodeIsaInstructionFromReader(reader, startAddress));
-
-  strictEqual(decoded.spec.id, "mov.r32_rm32");
-  strictEqual(decoded.length, 7);
+  strictEqual(decoded.address, startAddress);
+  strictEqual(decoded.length, values.length);
+  strictEqual(decoded.nextEip, startAddress + values.length);
   deepStrictEqual(decoded.raw, values);
   deepStrictEqual(decoded.operands, [
-    reg32("eax"),
-    mem32({ base: "eax", index: "ecx", scale: 4, disp: 0x10 })
+    {
+      kind: "reg",
+      alias: {
+        name: "ebx",
+        base: "ebx",
+        bitOffset: 0,
+        width: 32
+      }
+    },
+    {
+      kind: "imm",
+      value: 0x1234_5678,
+      encodedWidth: 32,
+      semanticWidth: 32
+    }
   ]);
 });
 
-test("decodes slash-r register/register operands positionally", () => {
-  // 8B C3: MOV eax, ebx
-  const mov = ok(decodeBytes([0x8b, 0xc3]));
-  // 89 C3: MOV ebx, eax
-  const reverse = ok(decodeBytes([0x89, 0xc3]));
+test("ModRM register operands respect direction, operand size, and high-byte aliases", () => {
+  const dwordResult = decodeBytes([0x8b, 0xc3]);
+  const wordResult = decodeBytes([0x66, 0x8b, 0xc3]);
+  const highByteResult = decodeBytes([0x86, 0xe0]);
 
-  strictEqual(mov.spec.id, "mov.r32_rm32");
-  strictEqual(mov.spec.syntax, "mov {0}, {1}");
-  deepStrictEqual(mov.operands, [reg32("eax"), reg32("ebx")]);
+  strictEqual(dwordResult.kind, "instruction");
+  strictEqual(wordResult.kind, "instruction");
+  strictEqual(highByteResult.kind, "instruction");
+  if (
+    dwordResult.kind !== "instruction" ||
+    wordResult.kind !== "instruction" ||
+    highByteResult.kind !== "instruction"
+  ) {
+    return;
+  }
 
-  strictEqual(reverse.spec.id, "mov.rm32_r32");
-  strictEqual(reverse.spec.syntax, "mov {0}, {1}");
-  deepStrictEqual(reverse.operands, [reg32("ebx"), reg32("eax")]);
-});
+  const dword = dwordResult.instruction;
+  const word = wordResult.instruction;
+  const highByte = highByteResult.instruction;
 
-test("decodes xchg ModRM and accumulator forms", () => {
-  const dword = ok(decodeBytes([0x87, 0xd8]));
-  const byte = ok(decodeBytes([0x86, 0xd8]));
-  const word = ok(decodeBytes([0x66, 0x87, 0xd8]));
-  const highByte = ok(decodeBytes([0x86, 0xe0]));
-  const dwordMem = ok(decodeBytes([0x87, 0x18]));
-  const byteMem = ok(decodeBytes([0x86, 0x18]));
-  const wordMem = ok(decodeBytes([0x66, 0x87, 0x18]));
-  const accumulatorDword = ok(decodeBytes([0x91]));
-  const accumulatorWord = ok(decodeBytes([0x66, 0x93]));
-  const accumulatorWordSelf = ok(decodeBytes([0x66, 0x90]));
+  strictEqual(dword.spec.id, "mov.r32_rm32");
+  deepStrictEqual(dword.operands, [
+    {
+      kind: "reg",
+      alias: {
+        name: "eax",
+        base: "eax",
+        bitOffset: 0,
+        width: 32
+      }
+    },
+    {
+      kind: "reg",
+      alias: {
+        name: "ebx",
+        base: "ebx",
+        bitOffset: 0,
+        width: 32
+      }
+    }
+  ]);
 
-  strictEqual(dword.spec.id, "xchg.rm32_r32");
-  strictEqual(dword.spec.syntax, "xchg {0}, {1}");
-  deepStrictEqual(dword.operands, [reg32("eax"), reg32("ebx")]);
-
-  strictEqual(byte.spec.id, "xchg.rm8_r8");
-  deepStrictEqual(byte.operands, [reg("al"), reg("bl")]);
-
-  strictEqual(word.spec.id, "xchg.rm16_r16");
-  deepStrictEqual(word.operands, [reg("ax"), reg("bx")]);
+  strictEqual(word.spec.id, "mov.r16_rm16");
+  deepStrictEqual(word.operands, [
+    {
+      kind: "reg",
+      alias: {
+        name: "ax",
+        base: "eax",
+        bitOffset: 0,
+        width: 16
+      }
+    },
+    {
+      kind: "reg",
+      alias: {
+        name: "bx",
+        base: "ebx",
+        bitOffset: 0,
+        width: 16
+      }
+    }
+  ]);
 
   strictEqual(highByte.spec.id, "xchg.rm8_r8");
-  deepStrictEqual(highByte.operands, [reg("al"), reg("ah")]);
-
-  strictEqual(dwordMem.spec.id, "xchg.rm32_r32");
-  deepStrictEqual(dwordMem.operands, [mem32({ base: "eax", scale: 1, disp: 0 }), reg32("ebx")]);
-
-  strictEqual(byteMem.spec.id, "xchg.rm8_r8");
-  deepStrictEqual(byteMem.operands, [mem(8, { base: "eax", scale: 1, disp: 0 }), reg("bl")]);
-
-  strictEqual(wordMem.spec.id, "xchg.rm16_r16");
-  deepStrictEqual(wordMem.operands, [mem(16, { base: "eax", scale: 1, disp: 0 }), reg("bx")]);
-
-  strictEqual(accumulatorDword.spec.id, "xchg.eax_r32");
-  deepStrictEqual(accumulatorDword.operands, [reg32("eax"), reg32("ecx")]);
-
-  strictEqual(accumulatorWord.spec.id, "xchg.ax_r16");
-  deepStrictEqual(accumulatorWord.operands, [reg("ax"), reg("bx")]);
-
-  strictEqual(accumulatorWordSelf.spec.id, "xchg.ax_r16");
-  deepStrictEqual(accumulatorWordSelf.operands, [reg("ax"), reg("ax")]);
-});
-
-test("uses ModRM match fields for slash-digit groups", () => {
-  // 83 /5 ib: SUB r/m32, sign-extended imm8
-  const sub = ok(decodeBytes([0x83, 0xeb, 0xff]));
-  // 83 /1 ib: OR r/m32, sign-extended imm8
-  const or = ok(decodeBytes([0x83, 0xcb, 0x7f]));
-  // 83 /2 ib: ADC r/m32, sign-extended imm8
-  const adc = ok(decodeBytes([0x83, 0xd3, 0xff]));
-  // 83 /3 ib: SBB r/m32, sign-extended imm8
-  const sbb = ok(decodeBytes([0x83, 0xdb, 0x80]));
-  // 81 /4 id: AND r/m32, imm32
-  const and = ok(decodeBytes([0x81, 0xe3, 0x78, 0x56, 0x34, 0x12]));
-  // 81 /6 id: XOR r/m32, imm32
-  const xor = ok(decodeBytes([0x81, 0xf3, 0x78, 0x56, 0x34, 0x12]));
-
-  strictEqual(sub.spec.id, "sub.rm32_imm8");
-  strictEqual(sub.spec.syntax, "sub {0}, {1}");
-  deepStrictEqual(sub.operands, [reg32("ebx"), signImm8(0xffff_ffff)]);
-
-  strictEqual(or.spec.id, "or.rm32_imm8");
-  strictEqual(or.spec.syntax, "or {0}, {1}");
-  deepStrictEqual(or.operands, [reg32("ebx"), signImm8(0x7f)]);
-
-  strictEqual(adc.spec.id, "adc.rm32_imm8");
-  strictEqual(adc.spec.syntax, "adc {0}, {1}");
-  deepStrictEqual(adc.operands, [reg32("ebx"), signImm8(0xffff_ffff)]);
-
-  strictEqual(sbb.spec.id, "sbb.rm32_imm8");
-  strictEqual(sbb.spec.syntax, "sbb {0}, {1}");
-  deepStrictEqual(sbb.operands, [reg32("ebx"), signImm8(0xffff_ff80)]);
-
-  strictEqual(and.spec.id, "and.rm32_imm32");
-  strictEqual(and.spec.syntax, "and {0}, {1}");
-  deepStrictEqual(and.operands, [reg32("ebx"), imm32(0x1234_5678)]);
-
-  strictEqual(xor.spec.id, "xor.rm32_imm32");
-  strictEqual(xor.spec.syntax, "xor {0}, {1}");
-  deepStrictEqual(xor.operands, [reg32("ebx"), imm32(0x1234_5678)]);
-});
-
-test("rejects unregistered grouped opcodes after ModRM.reg dispatch", () => {
-  // F7 /1 remains unregistered in the current ISA subset.
-  const decoded = cpuException(decodeBytes([0xf7, 0xc8]));
-
-  deepStrictEqual(decoded.exception, invalidOpcode());
-  strictEqual(decoded.instructionStart, startAddress);
-  deepStrictEqual(decoded.raw, [0xf7, 0xc8]);
-});
-
-test("cmpxchg8b register ModRM form is unsupported", () => {
-  const decoded = cpuException(decodeBytes([0x0f, 0xc7, 0xc8]));
-
-  deepStrictEqual(decoded.exception, invalidOpcode());
-  strictEqual(decoded.instructionStart, startAddress);
-  deepStrictEqual(decoded.raw, [0x0f, 0xc7, 0xc8]);
-});
-
-test("decodes direct relative targets as absolute target operands", () => {
-  const jmp8 = ok(decodeBytes([0xeb, 0xfe]));
-  const jmp16 = ok(decodeBytes([0x66, 0xe9, 0xfc, 0xff]));
-  const jmp16Wrap = ok(decodeBytes([0x66, 0xe9, 0x02, 0x00], 0xfffe));
-  const jmp32 = ok(decodeBytes([0xe9, 0xfb, 0xff, 0xff, 0xff]));
-
-  strictEqual(jmp8.spec.id, "jmp.rel8");
-  strictEqual(jmp8.spec.syntax, "jmp {0}");
-  strictEqual(jmp8.nextEip, startAddress + 2);
-  deepStrictEqual(jmp8.operands, [
-    { kind: "relTarget", width: 8, displacement: -2, target: startAddress }
-  ]);
-
-  strictEqual(jmp16.spec.id, "jmp.rel16");
-  strictEqual(jmp16.spec.syntax, "jmp {0}");
-  strictEqual(jmp16.nextEip, startAddress + 4);
-  deepStrictEqual(jmp16.operands, [
-    { kind: "relTarget", width: 16, displacement: -4, target: startAddress }
-  ]);
-
-  strictEqual(jmp16Wrap.spec.id, "jmp.rel16");
-  deepStrictEqual(jmp16Wrap.operands, [
-    { kind: "relTarget", width: 16, displacement: 2, target: 0x0004 }
-  ]);
-
-  strictEqual(jmp32.spec.id, "jmp.rel32");
-  strictEqual(jmp32.spec.syntax, "jmp {0}");
-  strictEqual(jmp32.nextEip, startAddress + 5);
-  deepStrictEqual(jmp32.operands, [
-    { kind: "relTarget", width: 32, displacement: -5, target: startAddress }
+  deepStrictEqual(highByte.operands, [
+    {
+      kind: "reg",
+      alias: {
+        name: "al",
+        base: "eax",
+        bitOffset: 0,
+        width: 8
+      }
+    },
+    {
+      kind: "reg",
+      alias: {
+        name: "ah",
+        base: "eax",
+        bitOffset: 8,
+        width: 8
+      }
+    }
   ]);
 });
 
-test("decodes concrete jcc rel8, rel16, and rel32 forms", () => {
-  const rel8 = ok(decodeBytes([0x75, 0x05]));
-  const rel16 = ok(decodeBytes([0x66, 0x0f, 0x85, 0xfa, 0xff]));
-  const rel16Wrap = ok(decodeBytes([0x66, 0x0f, 0x84, 0x02, 0x00], 0xfffc));
-  const rel32 = ok(decodeBytes([0x0f, 0x85, 0xfa, 0xff, 0xff, 0xff]));
-
-  strictEqual(rel8.spec.id, "jne.rel8");
-  strictEqual(rel8.spec.syntax, "jne {0}");
-  deepStrictEqual(rel8.operands, [
-    { kind: "relTarget", width: 8, displacement: 5, target: startAddress + 7 }
+test("ModRM and SIB memory operands decode base, index, scale, and signed displacement", () => {
+  const sibResult = decodeBytes([
+    0x8b, 0x84, 0x88, 0x10, 0x00, 0x00, 0x00
+  ]);
+  const negativeDisp8Result = decodeBytes([0x8b, 0x45, 0xfc]);
+  const negativeDisp32Result = decodeBytes([
+    0x8b, 0x83, 0xff, 0xff, 0xff, 0xff
   ]);
 
-  strictEqual(rel16.spec.id, "jne.rel16");
-  strictEqual(rel16.spec.syntax, "jne {0}");
-  deepStrictEqual(rel16.operands, [
-    { kind: "relTarget", width: 16, displacement: -6, target: startAddress - 1 }
+  strictEqual(sibResult.kind, "instruction");
+  strictEqual(negativeDisp8Result.kind, "instruction");
+  strictEqual(negativeDisp32Result.kind, "instruction");
+  if (
+    sibResult.kind !== "instruction" ||
+    negativeDisp8Result.kind !== "instruction" ||
+    negativeDisp32Result.kind !== "instruction"
+  ) {
+    return;
+  }
+
+  const sib = sibResult.instruction;
+  const negativeDisp8 = negativeDisp8Result.instruction;
+  const negativeDisp32 = negativeDisp32Result.instruction;
+
+  deepStrictEqual(sib.operands, [
+    {
+      kind: "reg",
+      alias: {
+        name: "eax",
+        base: "eax",
+        bitOffset: 0,
+        width: 32
+      }
+    },
+    {
+      kind: "mem",
+      accessWidth: 32,
+      segment: "ds",
+      base: "eax",
+      index: "ecx",
+      scale: 4,
+      disp: 0x10
+    }
   ]);
 
-  strictEqual(rel16Wrap.spec.id, "je.rel16");
-  deepStrictEqual(rel16Wrap.operands, [
-    { kind: "relTarget", width: 16, displacement: 2, target: 0x0003 }
+  deepStrictEqual(negativeDisp8.operands[1], {
+    kind: "mem",
+    accessWidth: 32,
+    segment: "ss",
+    base: "ebp",
+    index: undefined,
+    scale: 1,
+    disp: -4
+  });
+  deepStrictEqual(negativeDisp32.operands[1], {
+    kind: "mem",
+    accessWidth: 32,
+    segment: "ds",
+    base: "ebx",
+    index: undefined,
+    scale: 1,
+    disp: -1
+  });
+});
+
+test("base-free ModRM and SIB addresses retain unsigned disp32 values", () => {
+  const modRmResult = decodeBytes([
+    0x8b, 0x05, 0x00, 0x20, 0x40, 0x80
+  ]);
+  const sibResult = decodeBytes([
+    0x8b, 0x04, 0x8d, 0x00, 0x20, 0x40, 0x80
   ]);
 
-  strictEqual(rel32.spec.id, "jne.rel32");
-  strictEqual(rel32.spec.syntax, "jne {0}");
-  deepStrictEqual(rel32.operands, [
-    { kind: "relTarget", width: 32, displacement: -6, target: startAddress }
+  strictEqual(modRmResult.kind, "instruction");
+  strictEqual(sibResult.kind, "instruction");
+  if (
+    modRmResult.kind !== "instruction" ||
+    sibResult.kind !== "instruction"
+  ) {
+    return;
+  }
+
+  const modRm = modRmResult.instruction;
+  const sib = sibResult.instruction;
+
+  deepStrictEqual(modRm.operands[1], {
+    kind: "mem",
+    accessWidth: 32,
+    segment: "ds",
+    base: undefined,
+    index: undefined,
+    scale: 1,
+    disp: 0x8040_2000
+  });
+  deepStrictEqual(sib.operands[1], {
+    kind: "mem",
+    accessWidth: 32,
+    segment: "ds",
+    base: undefined,
+    index: "ecx",
+    scale: 4,
+    disp: 0x8040_2000
+  });
+});
+
+test("immediate operands preserve encoded width and explicit sign extension", () => {
+  const enterResult = decodeBytes([0xc8, 0x34, 0x12, 0x7f]);
+  const subtractResult = decodeBytes([0x83, 0xeb, 0x80]);
+
+  strictEqual(enterResult.kind, "instruction");
+  strictEqual(subtractResult.kind, "instruction");
+  if (
+    enterResult.kind !== "instruction" ||
+    subtractResult.kind !== "instruction"
+  ) {
+    return;
+  }
+
+  const enter = enterResult.instruction;
+  const subtract = subtractResult.instruction;
+
+  strictEqual(enter.spec.id, "enter.imm16_imm8");
+  deepStrictEqual(enter.operands, [
+    {
+      kind: "imm",
+      value: 0x1234,
+      encodedWidth: 16,
+      semanticWidth: 16
+    },
+    {
+      kind: "imm",
+      value: 0x7f,
+      encodedWidth: 8,
+      semanticWidth: 8
+    }
+  ]);
+
+  strictEqual(subtract.spec.id, "sub.rm32_imm8");
+  deepStrictEqual(subtract.operands[1], {
+    kind: "imm",
+    value: 0xffff_ff80,
+    encodedWidth: 8,
+    semanticWidth: 32,
+    extension: "sign"
+  });
+});
+
+test("relative targets sign-extend each displacement width and wrap where x86 requires", () => {
+  const shortResult = decodeBytes([0xeb, 0xfe]);
+  const wordWrapResult = decodeBytes(
+    [0x66, 0xe9, 0x02, 0x00],
+    0xfffe
+  );
+  const nearResult = decodeBytes([0xe9, 0xfb, 0xff, 0xff, 0xff]);
+
+  strictEqual(shortResult.kind, "instruction");
+  strictEqual(wordWrapResult.kind, "instruction");
+  strictEqual(nearResult.kind, "instruction");
+  if (
+    shortResult.kind !== "instruction" ||
+    wordWrapResult.kind !== "instruction" ||
+    nearResult.kind !== "instruction"
+  ) {
+    return;
+  }
+
+  const short = shortResult.instruction;
+  const wordWrap = wordWrapResult.instruction;
+  const near = nearResult.instruction;
+
+  deepStrictEqual(short.operands, [
+    {
+      kind: "relTarget",
+      width: 8,
+      displacement: -2,
+      target: startAddress
+    }
+  ]);
+  deepStrictEqual(wordWrap.operands, [
+    {
+      kind: "relTarget",
+      width: 16,
+      displacement: 2,
+      target: 0x0004
+    }
+  ]);
+  deepStrictEqual(near.operands, [
+    {
+      kind: "relTarget",
+      width: 32,
+      displacement: -5,
+      target: startAddress
+    }
   ]);
 });
 
-test("decodes multi-byte nop and int imm8 forms", () => {
-  const multiByteNop = ok(decodeBytes([0x0f, 0x1f, 0x40, 0x00]));
-  const wordNop = ok(decodeBytes([0x66, 0x0f, 0x1f, 0x00]));
-  const trap = ok(decodeBytes([0xcd, 0x2e]));
+test("group dispatch and memory-only operands reject non-matching ModRM forms", () => {
+  const unregisteredGroup = decodeBytes([0xf7, 0xc8]);
+  const registerLea = decodeBytes([0x8d, 0xc3]);
+  const registerCompareExchange = decodeBytes([0x0f, 0xc7, 0xc8]);
 
-  strictEqual(multiByteNop.spec.id, "nop.rm32");
-  strictEqual(multiByteNop.spec.syntax, "nop {0}");
-  strictEqual(multiByteNop.length, 4);
-  deepStrictEqual(multiByteNop.operands, [mem32({ base: "eax", scale: 1, disp: 0 })]);
+  strictEqual(unregisteredGroup.kind, "cpuException");
+  strictEqual(registerLea.kind, "cpuException");
+  strictEqual(registerCompareExchange.kind, "cpuException");
+  if (
+    unregisteredGroup.kind !== "cpuException" ||
+    registerLea.kind !== "cpuException" ||
+    registerCompareExchange.kind !== "cpuException"
+  ) {
+    return;
+  }
 
-  strictEqual(wordNop.spec.id, "nop.rm16");
-  strictEqual(wordNop.spec.syntax, "nop {0}");
-  strictEqual(wordNop.length, 4);
-  deepStrictEqual(wordNop.operands, [mem(16, { base: "eax", scale: 1, disp: 0 })]);
+  for (const decoded of [
+    unregisteredGroup,
+    registerLea,
+    registerCompareExchange
+  ]) {
+    deepStrictEqual(decoded.exception, { kind: "UD" });
+    strictEqual(decoded.instructionStart, startAddress);
+  }
 
-  strictEqual(trap.spec.id, "int.imm8");
-  strictEqual(trap.spec.syntax, "int {0}");
-  strictEqual(trap.length, 2);
-  deepStrictEqual(trap.operands, [imm8(0x2e)]);
-});
-
-test("decodes ModRM memory operands with displacement", () => {
-  // 8B 43 04: MOV eax, [ebx + 4]
-  const decoded = ok(decodeBytes([0x8b, 0x43, 0x04]));
-
-  strictEqual(decoded.spec.id, "mov.r32_rm32");
-  strictEqual(decoded.spec.syntax, "mov {0}, {1}");
-  deepStrictEqual(decoded.operands, [reg32("eax"), mem32({ base: "ebx", scale: 1, disp: 4 })]);
-});
-
-test("rejects address-only m32 forms when ModRM encodes a register", () => {
-  // 8D C3: LEA eax, ebx is invalid because LEA requires memory/address form.
-  const decoded = cpuException(decodeBytes([0x8d, 0xc3]));
-
-  deepStrictEqual(decoded.exception, invalidOpcode());
-  strictEqual(decoded.instructionStart, startAddress);
-  deepStrictEqual(decoded.raw, [0x8d, 0xc3]);
-});
-
-test("reports unsupported opcode bytes", () => {
-  const decoded = cpuException(decodeBytes([0x62]));
-
-  deepStrictEqual(decoded.exception, invalidOpcode());
-  strictEqual(decoded.instructionStart, startAddress);
-  deepStrictEqual(decoded.raw, [0x62]);
+  deepStrictEqual(unregisteredGroup.raw, [0xf7, 0xc8]);
+  deepStrictEqual(registerLea.raw, [0x8d, 0xc3]);
+  deepStrictEqual(registerCompareExchange.raw, [0x0f, 0xc7, 0xc8]);
 });

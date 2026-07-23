@@ -59,7 +59,7 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "typecheck": "tsc --noEmit",
-    "test": "npm run clean && tsc -p tsconfig.json && node --conditions=test --test 'dist/src/**/tests/*.test.js' 'dist/test/**/*.test.js'"
+    "test": "npm run clean && tsc -p tsconfig.json && node --conditions=test --test 'dist/src/**/tests/*.test.js' 'dist/test/**/*.test.js' && node --test 'dist/test/production/*.prod.js'"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

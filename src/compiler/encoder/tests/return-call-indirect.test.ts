@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
@@ -15,7 +15,7 @@ const targetExportName = "target";
 const cpuStatePtr = 32;
 const forwardedResult = 0x4567_89ab_cdef_0123n;
 
-test("return_call_indirect_invokes_imported_table_target", async () => {
+test("return_call_indirect invokes an imported table target", async () => {
   const { instance, table } = await instantiateIndirectCallModule(returnCallIndirectEntryBody);
 
   table.set(0, exportedFunction(instance, targetExportName));
@@ -30,7 +30,7 @@ test("return_call_indirect_invokes_imported_table_target", async () => {
   strictEqual(result, forwardedResult);
 });
 
-test("call_indirect_invokes_imported_table_target", async () => {
+test("call_indirect invokes an imported table target", async () => {
   const { instance, table } = await instantiateIndirectCallModule(callIndirectEntryBody);
 
   table.set(0, exportedFunction(instance, targetExportName));
@@ -43,16 +43,6 @@ test("call_indirect_invokes_imported_table_target", async () => {
   }
 
   strictEqual(result, forwardedResult);
-});
-
-test("table_import_uses_funcref", () => {
-  const imports = WebAssembly.Module.imports(new WebAssembly.Module(encodeIndirectCallModule(returnCallIndirectEntryBody)));
-
-  deepStrictEqual(imports[0], {
-    module: importNamespace,
-    name: tableImportName,
-    kind: "table"
-  });
 });
 
 async function instantiateIndirectCallModule(

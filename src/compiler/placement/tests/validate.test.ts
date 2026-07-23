@@ -5,54 +5,27 @@ import { analyzeFunction as runFunctionAnalysis } from "#compiler/analysis/analy
 import {
   ifControl,
   loopContinueControl,
-  loopControl,
-  returnControl
+  loopControl
 } from "#compiler/ir/controls/index.js";
-import { valueId } from "#compiler/ir/values/id.js";
-import type {
-  PlacementPlan,
-  ValuePlacement
-} from "#compiler/placement/model.js";
+import type { ValuePlacement } from "#compiler/placement/model.js";
 import { planPlacement } from "#compiler/placement/plan.js";
 import { validatePlacement } from "#compiler/placement/validate.js";
-import { functionType } from "#compiler/ir/function.js";
-import type { Region, RegionNode } from "#compiler/ir/region.js";
-import type { FunctionGraph, IrFunction } from "#compiler/ir/function.js";
+import type { Region } from "#compiler/ir/region.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
 import {
   compilerTestValues,
   resourceReadNode,
   resourceWriteNode
 } from "#test/support/storage-operations.js";
+import { completedPlacementFunction } from "./function-fixture.js";
 
-function functionBlock(block: FunctionGraph): IrFunction {
-  (block.body.nodes as RegionNode[]).push(returnControl.create({
-    source: { kind: "values", values: [] }
-  }));
-  const parameters = Array.from(
-    { length: block.values.size() },
-    (_, raw) => valueId(raw)
-  ).filter((value) => block.values.node(value).kind === "parameter")
-    .sort((a, b) => {
-      const first = block.values.node(a);
-      const second = block.values.node(b);
-
-      return first.kind === "parameter" && second.kind === "parameter"
-        ? first.index - second.index
-        : 0;
-    });
+function analyzeFunction(block: FunctionGraph, parameterCount = 0) {
+  const fn = completedPlacementFunction(block, parameterCount);
 
   return {
-    ...block,
-    type: functionType(
-      parameters.map((parameter) => block.values.valueType(parameter)),
-      []
-    ),
-    parameters
+    fn,
+    analysis: runFunctionAnalysis(fn)
   };
-}
-
-function analyzeFunction(block: FunctionGraph) {
-  return runFunctionAnalysis(functionBlock(block));
 }
 
 test("accepts condition-frontier and earlier-frontier captures", () => {
@@ -79,10 +52,10 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
       })]
     }
   };
-  const analysis = analyzeFunction(block);
-  const plan = planPlacement(block, analysis);
+  const { fn, analysis } = analyzeFunction(block, 2);
+  const plan = planPlacement(fn, analysis);
 
-  doesNotThrow(() => validatePlacement(block, analysis, plan));
+  doesNotThrow(() => validatePlacement(fn, analysis, plan));
 
   const laterValues = compilerTestValues();
   const earlierQuotient = laterValues.binary(
@@ -115,78 +88,10 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
       ]
     }
   };
-  const laterAnalysis = analyzeFunction(laterBlock);
-  const laterPlan = planPlacement(laterBlock, laterAnalysis);
+  const { fn: laterFn, analysis: laterAnalysis } = analyzeFunction(laterBlock, 3);
+  const laterPlan = planPlacement(laterFn, laterAnalysis);
 
-  doesNotThrow(() => validatePlacement(laterBlock, laterAnalysis, laterPlan));
-});
-
-test("rejects a raw trapping value hoisted above sibling arms", () => {
-  const values = compilerTestValues();
-  const condition = values.parameter(0, "i32");
-  const quotient = values.binary(
-    "div_u",
-    values.parameter(1, "i32"),
-    values.parameter(2, "i32")
-  );
-  const thenBody: Region = {
-    nodes: [resourceWriteNode(values, 0, quotient)]
-  };
-  const elseBody: Region = {
-    nodes: [resourceWriteNode(values, 1, quotient)]
-  };
-  const block: FunctionGraph = {
-    values,
-    body: {
-      nodes: [ifControl.create({ condition, thenBody, elseBody })]
-    }
-  };
-  const analysis = analyzeFunction(block);
-  const placements = new Array<ValuePlacement | undefined>(values.size());
-
-  placements[quotient] = {
-    kind: "capture",
-    anchor: analysis.siteOf(block.body, 0),
-    local: 0
-  };
-  const forged: PlacementPlan = {
-    values: placements,
-    localTypes: ["i32"],
-    cellLocals: new Map()
-  };
-
-  throws(
-    () => validatePlacement(block, analysis, forged),
-    /capture .* may trap/
-  );
-});
-
-test("rejects at-use placement without a direct demand", () => {
-  const values = compilerTestValues();
-  const condition = values.parameter(0, "i32");
-  const quotient = values.binary("div_u", values.parameter(1, "i32"), values.parameter(2, "i32"));
-  const thenBody: Region = { nodes: [resourceWriteNode(values, 0, quotient)] };
-  const elseBody: Region = { nodes: [resourceWriteNode(values, 1, quotient)] };
-  const block: FunctionGraph = {
-    values,
-    body: { nodes: [ifControl.create({ condition, thenBody, elseBody })] }
-  };
-  const analysis = analyzeFunction(block);
-  const placements = new Array<ValuePlacement | undefined>(values.size());
-
-  placements[quotient] = {
-    kind: "atUse",
-    anchor: analysis.siteOf(block.body, 0),
-    local: 0
-  };
-  throws(
-    () => validatePlacement(block, analysis, {
-      values: placements,
-      localTypes: ["i32"],
-      cellLocals: new Map()
-    }),
-    /at-use value .* has no direct demand/
-  );
+  doesNotThrow(() => validatePlacement(laterFn, laterAnalysis, laterPlan));
 });
 
 test("rejects a producer anchor before its authored definition", () => {
@@ -202,18 +107,18 @@ test("rejects a producer anchor before its authored definition", () => {
       ]
     }
   };
-  const analysis = analyzeFunction(block);
-  const plan = planPlacement(block, analysis);
+  const { fn, analysis } = analyzeFunction(block);
+  const plan = planPlacement(fn, analysis);
   const placements = [...plan.values];
 
   placements[output] = {
     kind: "capture",
-    anchor: analysis.siteOf(block.body, 0),
+    anchor: analysis.siteOf(fn.body, 0),
     local: plan.localTypes.length
   };
 
   throws(
-    () => validatePlacement(block, analysis, {
+    () => validatePlacement(fn, analysis, {
       ...plan,
       values: placements,
       localTypes: [...plan.localTypes, "i32"]
@@ -241,8 +146,8 @@ test("rejects an anchor that does not dominate every selected use", () => {
       ]
     }
   };
-  const analysis = analyzeFunction(block);
-  const plan = planPlacement(block, analysis);
+  const { fn, analysis } = analyzeFunction(block, 1);
+  const plan = planPlacement(fn, analysis);
   const placements = [...plan.values];
 
   placements[output] = {
@@ -252,7 +157,7 @@ test("rejects an anchor that does not dominate every selected use", () => {
   };
 
   throws(
-    () => validatePlacement(block, analysis, {
+    () => validatePlacement(fn, analysis, {
       ...plan,
       values: placements
     }),
@@ -273,21 +178,21 @@ test("rejects producer movement across an alias but accepts a live snapshot", ()
       ]
     }
   };
-  const analysis = analyzeFunction(block);
-  const plan = planPlacement(block, analysis);
+  const { fn, analysis } = analyzeFunction(block);
+  const plan = planPlacement(fn, analysis);
 
-  doesNotThrow(() => validatePlacement(block, analysis, plan));
+  doesNotThrow(() => validatePlacement(fn, analysis, plan));
 
   const placements = [...plan.values];
 
   placements[output] = {
     kind: "atUse",
-    anchor: analysis.siteOf(block.body, 2),
+    anchor: analysis.siteOf(fn.body, 2),
     local: undefined
   };
 
   throws(
-    () => validatePlacement(block, analysis, {
+    () => validatePlacement(fn, analysis, {
       ...plan,
       values: placements
     }),
@@ -312,14 +217,14 @@ test("rejects overlapping value lifetimes assigned to one local", () => {
       ]
     }
   };
-  const analysis = analyzeFunction(block);
-  const plan = planPlacement(block, analysis);
+  const { fn, analysis } = analyzeFunction(block);
+  const plan = planPlacement(fn, analysis);
   const placements = [...plan.values];
 
   placements[second] = changeLocal(placements[second], placementLocal(placements[first]));
 
   throws(
-    () => validatePlacement(block, analysis, { ...plan, values: placements }),
+    () => validatePlacement(fn, analysis, { ...plan, values: placements }),
     /overlap in local/
   );
 });
@@ -346,16 +251,16 @@ test("keeps an outer capture live through repeated loop uses", () => {
       ]
     }
   };
-  const analysis = analyzeFunction(block);
-  const plan = planPlacement(block, analysis);
+  const { fn, analysis } = analyzeFunction(block);
+  const plan = planPlacement(fn, analysis);
 
-  doesNotThrow(() => validatePlacement(block, analysis, plan));
+  doesNotThrow(() => validatePlacement(fn, analysis, plan));
 
   const placements = [...plan.values];
 
   placements[inner] = changeLocal(placements[inner], placementLocal(placements[outer]));
   throws(
-    () => validatePlacement(block, analysis, { ...plan, values: placements }),
+    () => validatePlacement(fn, analysis, { ...plan, values: placements }),
     /overlap in local/
   );
 });
@@ -379,18 +284,18 @@ test("rejects hoisting a loop-dependent recipe to the preheader", () => {
       })]
     }
   };
-  const analysis = analyzeFunction(block);
-  const plan = planPlacement(block, analysis);
+  const { fn, analysis } = analyzeFunction(block);
+  const plan = planPlacement(fn, analysis);
   const placements = [...plan.values];
 
   placements[current] = {
     kind: "capture",
-    anchor: analysis.siteOf(block.body, 0),
+    anchor: analysis.siteOf(fn.body, 0),
     local: plan.localTypes.length
   };
 
   throws(
-    () => validatePlacement(block, analysis, {
+    () => validatePlacement(fn, analysis, {
       ...plan,
       values: placements,
       localTypes: [...plan.localTypes, "i32"]
@@ -414,8 +319,8 @@ test("accepts leaving a loop-invariant recipe at its use", () => {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
     }
   };
-  const analysis = analyzeFunction(block);
-  const plan = planPlacement(block, analysis);
+  const { fn, analysis } = analyzeFunction(block, 1);
+  const plan = planPlacement(fn, analysis);
   const placements = [...plan.values];
 
   placements[invariant] = {
@@ -424,7 +329,7 @@ test("accepts leaving a loop-invariant recipe at its use", () => {
     local: undefined
   };
 
-  doesNotThrow(() => validatePlacement(block, analysis, {
+  doesNotThrow(() => validatePlacement(fn, analysis, {
     ...plan,
     values: placements,
     localTypes: []

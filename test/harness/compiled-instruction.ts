@@ -31,14 +31,14 @@ import type { InstructionTerminals } from "#core/instruction/terminal.js";
 import type { RunStop } from "#cpu/cpu.js";
 import { createCpuStateHostView } from "#cpu/host-view.js";
 import {
-  decodeExit
+  buildExit,
+  decodeExit,
+  exitLayout
 } from "#cpu/exit.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import {
-  buildExit,
   cpuState,
   cpuStateAccess,
-  exitLayout,
   guestMemoryAccess,
   guestMemoryResource,
   testExecutionModel

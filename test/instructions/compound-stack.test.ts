@@ -1,6 +1,5 @@
 import { test } from "node:test";
 
-import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import { assertInstructionCase } from "#test/harness/instruction-case.js";
 import { startAddress } from "#test/support/addresses.js";
@@ -341,7 +340,10 @@ test("PUSHA-family writes validate the complete stack image before storing", asy
         edi: 0x7777_7777,
         ...allUserFlagsSet
       },
-      expectedCompletion: fault(address, PageFaultErrorCode.WRITE),
+      expectedCompletion: {
+        kind: "cpuException",
+        exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+      },
       expectedEip: startAddress,
       instructionCount: 0,
       memoryPatches: [{ address, bytes: initialBytes }],
@@ -380,7 +382,10 @@ test("POPA-family reads validate the complete stack image before restoring regis
         edi: 0x9999_9999,
         ...allUserFlagsSet
       },
-      expectedCompletion: fault(address, 0),
+      expectedCompletion: {
+        kind: "cpuException",
+        exception: { kind: "PF", linearAddress: address, errorCode: 0 }
+      },
       expectedEip: startAddress,
       instructionCount: 0,
       memoryPatches: [{ address, bytes: initialBytes }],
@@ -401,7 +406,10 @@ test("ENTER write preflight leaves state and its trailing bytes unchanged", asyn
       ebp: 0x1234_5678,
       ...allUserFlagsSet
     },
-    expectedCompletion: fault(address, PageFaultErrorCode.WRITE),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [{ address, bytes: initialBytes }],
@@ -423,7 +431,10 @@ test("ENTER read preflight leaves state and its would-be display stores unchange
       ebp: guestMemoryMinimumByteLength + 2,
       ...allUserFlagsSet
     },
-    expectedCompletion: fault(readAddress, 0),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: readAddress, errorCode: 0 }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [
@@ -436,10 +447,6 @@ test("ENTER read preflight leaves state and its would-be display stores unchange
     ]
   });
 });
-
-function fault(address: number, errorCode: number) {
-  return { kind: "cpuException" as const, exception: pageFault(address, errorCode) };
-}
 
 function wordsBytes(...values: readonly number[]): readonly number[] {
   return values.flatMap(wordBytes);

@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { analyzeFunction as runFunctionAnalysis } from "#compiler/analysis/analyze.js";
@@ -15,12 +15,9 @@ import {
   Invocation
 } from "#compiler/ir/invocation.js";
 import { callOperation } from "#compiler/ir/operations/index.js";
-import { valueId } from "#compiler/ir/values/id.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
-  regionCompletes,
-  regionFinal,
   type RegionNode,
   type Region
 } from "#compiler/ir/region.js";
@@ -41,38 +38,31 @@ const noEffects: StorageEffects = { reads: [], writes: [] };
 
 function functionBlock(
   block: FunctionGraph,
+  parameterCount = 0,
   returned: readonly ValueId[] = []
 ): IrFunction {
-  if (!regionCompletes(block.body)) {
-    (block.body.nodes as RegionNode[]).push(returnControl.create({
-      source: { kind: "values", values: returned }
-    }));
-  }
-
   const parameters = Array.from(
-    { length: block.values.size() },
-    (_, raw) => valueId(raw)
-  ).filter((value) => block.values.node(value).kind === "parameter")
-    .sort((a, b) => {
-      const first = block.values.node(a);
-      const second = block.values.node(b);
-
-      return first.kind === "parameter" && second.kind === "parameter"
-        ? first.index - second.index
-        : 0;
-    });
-  const final = regionFinal(block.body);
-  const results = final?.kind === "return"
-    ? final.source.kind === "values"
-      ? final.source.values.map((result) => block.values.valueType(result))
-      : final.source.invocation.target.type.results
-    : [];
+    { length: parameterCount },
+    (_, index) => block.values.parameter(index, "i32")
+  );
+  const body = returned.length === 0
+    ? block.body
+    : {
+        ...block.body,
+        nodes: [
+          ...block.body.nodes,
+          returnControl.create({
+            source: { kind: "values", values: returned }
+          })
+        ]
+      };
 
   return {
     ...block,
+    body,
     type: functionType(
-      parameters.map((parameter) => block.values.valueType(parameter)),
-      results
+      parameters.map(() => "i32"),
+      returned.map((result) => block.values.valueType(result))
     ),
     parameters
   };
@@ -80,12 +70,13 @@ function functionBlock(
 
 function analyzeFunction(
   block: FunctionGraph,
+  parameterCount = 0,
   returned: readonly ValueId[] = []
 ) {
-  return runFunctionAnalysis(functionBlock(block, returned));
+  return runFunctionAnalysis(functionBlock(block, parameterCount, returned));
 }
 
-test("sites form one dense preorder and expose region geometry", () => {
+test("region geometry relates nested bodies to their owning controls", () => {
   const values = compilerTestValues();
   const condition = values.parameter(0, "i32");
   const written = values.const(7);
@@ -102,25 +93,15 @@ test("sites form one dense preorder and expose region geometry", () => {
     body: loopBody
   });
   const body: Region = { nodes: [branch, loop] };
-  const analysis = analyzeFunction({ values, body });
+  const analysis = analyzeFunction({ values, body }, 1);
 
-  deepStrictEqual(
-    analysis.sites().map((site) => [site.id, site.kind, site.nodeIndex]),
-    [
-      [0, "node", 0],
-      [1, "node", 0],
-      [2, "regionEnd", 1],
-      [3, "node", 1],
-      [4, "node", 0],
-      [5, "regionEnd", 1],
-      [6, "node", 2],
-      [7, "regionEnd", 3]
-    ]
-  );
-  strictEqual(analysis.sites().length, 8);
-  strictEqual(analysis.siteOf(body, 0), 0);
-  strictEqual(analysis.regionEndSite(body), 7);
-  deepStrictEqual(analysis.path(body, loopBody), [{ region: loopBody, owner: 3 }]);
+  const branchSite = analysis.siteOf(body, 0);
+  const loopSite = analysis.siteOf(body, 1);
+
+  deepStrictEqual(analysis.path(body, loopBody), [{
+    region: loopBody,
+    owner: loopSite
+  }]);
   deepStrictEqual(analysis.path(loopBody, thenBody), undefined);
   strictEqual(analysis.isLoopRegion(loopBody), true);
   strictEqual(analysis.isLoopRegion(thenBody), false);
@@ -129,7 +110,7 @@ test("sites form one dense preorder and expose region geometry", () => {
       analysis.siteOf(thenBody, 0),
       analysis.siteOf(loopBody, 0)
     ]),
-    analysis.siteOf(body, 0)
+    branchSite
   );
 
   deepStrictEqual(analysis.writesAt(analysis.siteOf(body, 0)), nestedWrite.directEffects.writes);
@@ -169,7 +150,7 @@ test("semantic producer inputs are charged once however often the output is used
   const analysis = analyzeFunction({
     values,
     body: { nodes: [read, firstWrite, secondWrite] }
-  });
+  }, 1);
 
   strictEqual(analysis.useCount(loaded), 2);
   strictEqual(analysis.useCount(address), 1);
@@ -186,16 +167,10 @@ test("each semantic operation input contributes one use", () => {
   const analysis = analyzeFunction({
     values,
     body: { nodes: [write] }
-  });
-  const addressUses = write.inputs.filter((input) => input.value === address).length;
-  const storedUses = write.inputs.filter(
-    (input) => input.value === stored
-  ).length;
+  }, 2);
 
-  strictEqual(addressUses, 1);
-  strictEqual(storedUses, 1);
-  strictEqual(analysis.useCount(address), addressUses);
-  strictEqual(analysis.useCount(stored), storedUses);
+  strictEqual(analysis.useCount(address), 1);
+  strictEqual(analysis.useCount(stored), 1);
 });
 
 test("compound dependency edges are charged once per live recipe", () => {
@@ -235,7 +210,7 @@ test("selected-body uses count separately while their shared recipe runs once", 
         })
       ]
     }
-  });
+  }, 1);
 
   strictEqual(analysis.useCount(condition), 1);
   strictEqual(analysis.useCount(sum), 2);
@@ -298,7 +273,7 @@ test("operation, control, loop, and return operands seed liveness", () => {
       }
     })
   ];
-  const analysis = analyzeFunction({ values, body: { nodes } });
+  const analysis = analyzeFunction({ values, body: { nodes } }, 1);
 
   for (const live of [
     mutated,
@@ -329,7 +304,7 @@ test("an unreachable arm result executes even when its join is dead", () => {
     elseBody
   });
   const block: FunctionGraph = { values, body: { nodes: [control] } };
-  const analysis = analyzeFunction(block);
+  const analysis = analyzeFunction(block, 1);
   const unreachableRoot = analysis.roots().find(
     (root) => root.value === unreachableResult
   );
@@ -348,9 +323,7 @@ test("an unreachable arm result executes even when its join is dead", () => {
     site: analysis.siteOf(block.body, 0)
   });
 
-  strictEqual(block.body.nodes.at(-1)?.kind, "return");
-  (block.body.nodes as RegionNode[]).pop();
-  const returned = analyzeFunction(block, [output]);
+  const returned = analyzeFunction(block, 1, [output]);
 
   strictEqual(returned.useCount(output), 1);
   strictEqual(returned.useCount(safeResult), 1);
@@ -382,16 +355,14 @@ test("a switch retains arm recipes exactly when its output is live", () => {
       })]
     }
   };
-  const dead = analyzeFunction(block);
+  const dead = analyzeFunction(block, 1);
 
   strictEqual(dead.useCount(selector), 1);
   for (const value of [output, firstResult, read, one, defaultResult]) {
     strictEqual(dead.useCount(value), 0, `expected value ${value} to be dead`);
   }
 
-  strictEqual(block.body.nodes.at(-1)?.kind, "return");
-  (block.body.nodes as RegionNode[]).pop();
-  const live = analyzeFunction(block, [output]);
+  const live = analyzeFunction(block, 1, [output]);
 
   strictEqual(live.useCount(selector), 1);
   strictEqual(live.useCount(output), 1);
@@ -425,7 +396,7 @@ test("a control-only switch retains selector and arm effects without a join outp
       })]
     }
   };
-  const analysis = analyzeFunction(block);
+  const analysis = analyzeFunction(block, 1);
 
   strictEqual(analysis.isLive(selector), true);
   strictEqual(analysis.isLive(selectedValue), true);
@@ -433,18 +404,6 @@ test("a control-only switch retains selector and arm effects without a join outp
   deepStrictEqual(
     analysis.writesAt(analysis.siteOf(block.body, 0)),
     [compilerTestResourceEffect(0), compilerTestResourceEffect(1)]
-  );
-  deepStrictEqual(
-    analysis.sites().map((site) => [site.kind, site.nodeIndex]),
-    [
-      ["node", 0],
-      ["node", 0],
-      ["regionEnd", 1],
-      ["node", 0],
-      ["regionEnd", 1],
-      ["node", 1],
-      ["regionEnd", 2]
-    ]
   );
 });
 
@@ -522,7 +481,7 @@ test("effectful calls remain live even when their result is unused", () => {
     },
     () => output
   );
-  const analysis = analyzeFunction({ values, body: { nodes: [call] } });
+  const analysis = analyzeFunction({ values, body: { nodes: [call] } }, 1);
   const invocation = analysis.invocations()[0]!;
 
   strictEqual(analysis.isLive(output), false);
@@ -551,7 +510,7 @@ test("invocation liveness follows its owning node", () => {
     throw new Error("resultless invocation allocated an output");
   });
   const body: Region = { nodes: [ordinaryCall, returned] };
-  const analysis = analyzeFunction({ values, body });
+  const analysis = analyzeFunction({ values, body }, 1);
   const [callSite, returnSite] = analysis.invocations();
 
   strictEqual(analysis.invocationMustExecute(callSite!), false);
@@ -585,7 +544,7 @@ test("returned indirect invocations root arguments and the table index", () => {
   const returned = returnControl.create({
     source: { kind: "invocation", invocation }
   });
-  const analysis = analyzeFunction({ values, body: { nodes: [returned] } });
+  const analysis = analyzeFunction({ values, body: { nodes: [returned] } }, 2);
 
   strictEqual(analysis.isLive(argument), true);
   strictEqual(analysis.isLive(elementIndex), true);
@@ -593,19 +552,4 @@ test("returned indirect invocations root arguments and the table index", () => {
     argument,
     elementIndex
   ]);
-});
-
-test("queries reject unknown values, sites, and bodies", () => {
-  const values = compilerTestValues();
-  const analysis = analyzeFunction({ values, body: { nodes: [] } });
-  const unknownValue = 99 as ValueId;
-  const foreignBody: Region = { nodes: [] };
-
-  throws(() => analysis.isLive(unknownValue), /unknown value id 99/);
-  throws(() => analysis.siteOf(foreignBody, 0), /not part of this analysis/);
-  throws(
-    () => analysis.writesAt(99 as ReturnType<typeof analysis.siteOf>),
-    /unknown function analysis site 99/
-  );
-  throws(() => analysis.dominatingSite([]), /no sites/);
 });

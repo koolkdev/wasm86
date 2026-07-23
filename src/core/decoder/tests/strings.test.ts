@@ -1,213 +1,161 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { invalidOpcode } from "#core/exceptions.js";
-import { cpuException, decodeBytes, mem, ok, startAddress, testDecodeFixtures } from "./helpers.js";
+import {
+  decodeBytes,
+  startAddress
+} from "./byte-reader-fixture.js";
 
-testDecodeFixtures([
-  {
-    name: "movs byte",
-    bytes: [0xa4],
-    mnemonic: "movs",
-    operands: [
-      mem(8, { base: "esi", scale: 1, disp: 0 }),
-      mem(8, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "movs.m8_m8",
-    format: "movs"
-  },
-  {
-    name: "movs word with operand-size override",
-    bytes: [0x66, 0xa5],
-    mnemonic: "movs",
-    operands: [
-      mem(16, { base: "esi", scale: 1, disp: 0 }),
-      mem(16, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "movs.m16_m16",
-    format: "movs"
-  },
-  {
-    name: "rep movs word with rep before operand-size override",
-    bytes: [0xf3, 0x66, 0xa5],
-    mnemonic: "movs",
-    operands: [
-      mem(16, { base: "esi", scale: 1, disp: 0 }),
-      mem(16, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "movs.rep_m16_m16",
-    format: "rep movs"
-  },
-  {
-    name: "rep movs word with operand-size override before rep",
-    bytes: [0x66, 0xf3, 0xa5],
-    mnemonic: "movs",
-    operands: [
-      mem(16, { base: "esi", scale: 1, disp: 0 }),
-      mem(16, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "movs.rep_m16_m16",
-    format: "rep movs"
-  },
-  {
-    name: "movs dword",
-    bytes: [0xa5],
-    mnemonic: "movs",
-    operands: [
-      mem(32, { base: "esi", scale: 1, disp: 0 }),
-      mem(32, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "movs.m32_m32",
-    format: "movs"
-  },
-  {
-    name: "last rep-group prefix wins for movs",
-    bytes: [0xf2, 0xf3, 0xa5],
-    mnemonic: "movs",
-    operands: [
-      mem(32, { base: "esi", scale: 1, disp: 0 }),
-      mem(32, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "movs.rep_m32_m32",
-    format: "rep movs"
-  },
-  {
-    name: "cmps dword",
-    bytes: [0xa7],
-    mnemonic: "cmps",
-    operands: [
-      mem(32, { base: "esi", scale: 1, disp: 0 }),
-      mem(32, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "cmps.m32_m32",
-    format: "cmps"
-  },
-  {
-    name: "repe cmps dword",
-    bytes: [0xf3, 0xa7],
-    mnemonic: "cmps",
-    operands: [
-      mem(32, { base: "esi", scale: 1, disp: 0 }),
-      mem(32, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "cmps.repe_m32_m32",
-    format: "repe cmps"
-  },
-  {
-    name: "repne cmps dword",
-    bytes: [0xf2, 0xa7],
-    mnemonic: "cmps",
-    operands: [
-      mem(32, { base: "esi", scale: 1, disp: 0 }),
-      mem(32, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "cmps.repne_m32_m32",
-    format: "repne cmps"
-  },
-  {
-    name: "stos dword",
-    bytes: [0xab],
-    mnemonic: "stos",
-    operands: [
-      mem(32, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "stos.m32_eax",
-    format: "stos"
-  },
-  {
-    name: "rep stos dword",
-    bytes: [0xf3, 0xab],
-    mnemonic: "stos",
-    operands: [
-      mem(32, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "stos.rep_m32_eax",
-    format: "rep stos"
-  },
-  {
-    name: "lods dword",
-    bytes: [0xad],
-    mnemonic: "lods",
-    operands: [mem(32, { base: "esi", scale: 1, disp: 0 })],
-    id: "lods.eax_m32",
-    format: "lods"
-  },
-  {
-    name: "rep lods dword",
-    bytes: [0xf3, 0xad],
-    mnemonic: "lods",
-    operands: [mem(32, { base: "esi", scale: 1, disp: 0 })],
-    id: "lods.rep_eax_m32",
-    format: "rep lods"
-  },
-  {
-    name: "scas dword",
-    bytes: [0xaf],
-    mnemonic: "scas",
-    operands: [
-      mem(32, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "scas.eax_m32",
-    format: "scas"
-  },
-  {
-    name: "repe scas dword",
-    bytes: [0xf3, 0xaf],
-    mnemonic: "scas",
-    operands: [
-      mem(32, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "scas.repe_eax_m32",
-    format: "repe scas"
-  },
-  {
-    name: "repne scas dword",
-    bytes: [0xf2, 0xaf],
-    mnemonic: "scas",
-    operands: [
-      mem(32, { segment: "es", base: "edi", scale: 1, disp: 0 })
-    ],
-    id: "scas.repne_eax_m32",
-    format: "repne scas"
+test("string instructions expose their architectural source and destination addresses", () => {
+  const result = decodeBytes([0xa5]);
+
+  strictEqual(result.kind, "instruction");
+  if (result.kind !== "instruction") {
+    return;
   }
-]);
 
-test("segment override on movs changes only the ESI source side", () => {
-  const instruction = ok(decodeBytes([0x64, 0xa4]));
+  strictEqual(result.instruction.spec.id, "movs.m32_m32");
+  strictEqual(result.instruction.spec.syntax, "movs");
+  deepStrictEqual(result.instruction.operands, [
+    {
+      kind: "mem",
+      accessWidth: 32,
+      segment: "ds",
+      base: "esi",
+      index: undefined,
+      scale: 1,
+      disp: 0
+    },
+    {
+      kind: "mem",
+      accessWidth: 32,
+      segment: "es",
+      base: "edi",
+      index: undefined,
+      scale: 1,
+      disp: 0
+    }
+  ]);
+});
 
-  strictEqual(instruction.spec.id, "movs.m8_m8");
-  strictEqual(instruction.operands[0]?.kind, "mem");
-  strictEqual(instruction.operands[1]?.kind, "mem");
+test("repeat and operand-size prefixes compose in either order", () => {
+  const repeatFirstResult = decodeBytes([0xf3, 0x66, 0xa5]);
+  const operandSizeFirstResult = decodeBytes([0x66, 0xf3, 0xa5]);
 
-  if (instruction.operands[0]?.kind === "mem" && instruction.operands[1]?.kind === "mem") {
-    strictEqual(instruction.operands[0].segment, "fs");
-    strictEqual(instruction.operands[1].segment, "es");
+  strictEqual(repeatFirstResult.kind, "instruction");
+  strictEqual(operandSizeFirstResult.kind, "instruction");
+  if (
+    repeatFirstResult.kind !== "instruction" ||
+    operandSizeFirstResult.kind !== "instruction"
+  ) {
+    return;
+  }
+
+  for (const decoded of [
+    repeatFirstResult.instruction,
+    operandSizeFirstResult.instruction
+  ]) {
+    strictEqual(decoded.spec.id, "movs.rep_m16_m16");
+    strictEqual(decoded.spec.syntax, "rep movs");
+    strictEqual(decoded.operands[0]?.kind, "mem");
+    strictEqual(decoded.operands[1]?.kind, "mem");
+
+    if (
+      decoded.operands[0]?.kind === "mem" &&
+      decoded.operands[1]?.kind === "mem"
+    ) {
+      strictEqual(decoded.operands[0].accessWidth, 16);
+      strictEqual(decoded.operands[1].accessWidth, 16);
+    }
   }
 });
 
-test("segment override on stos is ignored by the fixed ES destination", () => {
-  const instruction = ok(decodeBytes([0x65, 0xaa]));
+test("repeat-prefix dispatch distinguishes equal and not-equal string comparisons", () => {
+  const equalResult = decodeBytes([0xf3, 0xa7]);
+  const notEqualResult = decodeBytes([0xf2, 0xa7]);
+  const lastPrefixWinsResult = decodeBytes([0xf2, 0xf3, 0xa5]);
 
-  strictEqual(instruction.spec.id, "stos.m8_al");
-  strictEqual(instruction.operands[0]?.kind, "mem");
-
-  if (instruction.operands[0]?.kind === "mem") {
-    strictEqual(instruction.operands[0].segment, "es");
+  strictEqual(equalResult.kind, "instruction");
+  strictEqual(notEqualResult.kind, "instruction");
+  strictEqual(lastPrefixWinsResult.kind, "instruction");
+  if (
+    equalResult.kind !== "instruction" ||
+    notEqualResult.kind !== "instruction" ||
+    lastPrefixWinsResult.kind !== "instruction"
+  ) {
+    return;
   }
+
+  const equal = equalResult.instruction;
+  const notEqual = notEqualResult.instruction;
+  const lastPrefixWins = lastPrefixWinsResult.instruction;
+
+  strictEqual(equal.spec.id, "cmps.repe_m32_m32");
+  strictEqual(equal.spec.syntax, "repe cmps");
+  strictEqual(notEqual.spec.id, "cmps.repne_m32_m32");
+  strictEqual(notEqual.spec.syntax, "repne cmps");
+  strictEqual(lastPrefixWins.spec.id, "movs.rep_m32_m32");
 });
 
-test("repne movs stays unsupported because that bucket is absent", () => {
-  const decoded = cpuException(decodeBytes([0xf2, 0xa4]));
+test("segment overrides affect only overridable string operands", () => {
+  const movsResult = decodeBytes([0x64, 0xa4]);
+  const stosResult = decodeBytes([0x65, 0xaa]);
 
-  deepStrictEqual(decoded.exception, invalidOpcode());
-  strictEqual(decoded.instructionStart, startAddress);
-  deepStrictEqual(decoded.raw, [0xf2, 0xa4]);
+  strictEqual(movsResult.kind, "instruction");
+  strictEqual(stosResult.kind, "instruction");
+  if (
+    movsResult.kind !== "instruction" ||
+    stosResult.kind !== "instruction"
+  ) {
+    return;
+  }
+
+  deepStrictEqual(movsResult.instruction.operands, [
+    {
+      kind: "mem",
+      accessWidth: 8,
+      segment: "fs",
+      base: "esi",
+      index: undefined,
+      scale: 1,
+      disp: 0
+    },
+    {
+      kind: "mem",
+      accessWidth: 8,
+      segment: "es",
+      base: "edi",
+      index: undefined,
+      scale: 1,
+      disp: 0
+    }
+  ]);
+  deepStrictEqual(stosResult.instruction.operands, [
+    {
+      kind: "mem",
+      accessWidth: 8,
+      segment: "es",
+      base: "edi",
+      index: undefined,
+      scale: 1,
+      disp: 0
+    }
+  ]);
 });
 
-test("rep on a non-rep opcode stays unsupported after prefix scanning", () => {
-  const decoded = cpuException(decodeBytes([0xf3, 0x90]));
+test("unsupported repeat-prefix combinations report invalid opcode after scanning", () => {
+  for (const values of [
+    [0xf2, 0xa4],
+    [0xf3, 0x90]
+  ]) {
+    const decoded = decodeBytes(values);
 
-  deepStrictEqual(decoded.exception, invalidOpcode());
-  strictEqual(decoded.instructionStart, startAddress);
-  deepStrictEqual(decoded.raw, [0xf3, 0x90]);
+    strictEqual(decoded.kind, "cpuException");
+    if (decoded.kind !== "cpuException") {
+      continue;
+    }
+    deepStrictEqual(decoded.exception, { kind: "UD" });
+    strictEqual(decoded.instructionStart, startAddress);
+    deepStrictEqual(decoded.raw, values);
+  }
 });

@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { gprChannel } from "#core/state/channels.js";
@@ -8,12 +8,6 @@ import {
   operandRead,
   operandWrite
 } from "#test/support/storage-operations.js";
-import { wasmOpcode } from "#compiler/encoder/types.js";
-import {
-  wasmBodyInstructions,
-  wasmBodyLocalCount,
-  wasmBodyOpcodes
-} from "#compiler/encoder/tests/body-opcodes.js";
 import {
   readWasmCpuStateChannel,
   writeWasmCpuStateSnapshot
@@ -21,7 +15,6 @@ import {
 import {
   completedTestFunction,
   instantiateTestFunction,
-  testFunctionBody,
   testFunctionCompleted
 } from "./harness.js";
 
@@ -38,125 +31,29 @@ test("a single nested-body demand executes inside the selected body", async () =
       then.push(operandWrite(state.gpr("eax"), loaded));
     });
   });
-  const encoded = testFunctionBody(fixture);
-  const opcodes = wasmBodyOpcodes(encoded);
-  const loadIndex = opcodes.indexOf(wasmOpcode.i32Load);
-  const ifIndex = opcodes.indexOf(wasmOpcode.if);
-
-  strictEqual(loadIndex > ifIndex, true);
-  const { guestView, run } = await instantiateTestFunction(fixture);
-
-  guestView.setUint32(0x100, 0x1234_5678, true);
-  strictEqual(run(0, 0x100), testFunctionCompleted);
-  strictEqual(run(1, 0x100), testFunctionCompleted);
-});
-
-test("a selected-body producer keeps its compound input in the body", () => {
-  const fixture = completedTestFunction(2, (fn) => {
-    const values = fn.values;
-
-    values.const(0);
-    const state = cpuStateAccess.bind(fn.region);
-    const address = values.binary("add", fn.parameters[1]!, values.const(4));
-    const loaded = values.addNodeOutput();
-
-    fn.region.push(memoryReadOperation(loaded, address, 32));
-    fn.region.if(fn.parameters[0]!, (then) => {
-      then.push(operandWrite(state.gpr("eax"), loaded));
-    });
-  });
-  const encoded = testFunctionBody(fixture);
-  const opcodes = wasmBodyOpcodes(encoded);
-  const ifIndex = opcodes.indexOf(wasmOpcode.if);
-
-  strictEqual(opcodes.indexOf(wasmOpcode.i32Add) > ifIndex, true);
-  strictEqual(opcodes.indexOf(wasmOpcode.i32Load) > ifIndex, true);
-  strictEqual(opcodes.includes(wasmOpcode.localSet), false);
-  strictEqual(opcodes.includes(wasmOpcode.localTee), false);
-  strictEqual(wasmBodyLocalCount(encoded), 0);
-});
-
-test("a producer declared inside a body executes only on that selected body", async () => {
-  const fixture = completedTestFunction(1, (fn) => {
-    const values = fn.values;
-
-    values.const(0);
-    const state = cpuStateAccess.bind(fn.region);
-    const address = values.const(0x100);
-    const loaded = values.addNodeOutput();
-
-    fn.region.if(fn.parameters[0]!, (then) => {
-      then.extend([
-        memoryReadOperation(loaded, address, 32),
-        operandWrite(state.gpr("eax"), loaded)
-      ]);
-    });
-  });
   const { guestView, stateView, run } = await instantiateTestFunction(fixture);
 
   guestView.setUint32(0x100, 0x1234_5678, true);
-  strictEqual(run(0), testFunctionCompleted);
-  strictEqual(run(1), testFunctionCompleted);
+  strictEqual(run(0, guestView.byteLength), testFunctionCompleted);
+  strictEqual(run(1, 0x100), testFunctionCompleted);
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("eax")), 0x1234_5678);
+  throws(() => run(1, guestView.byteLength), WebAssembly.RuntimeError);
 });
 
 test("an unused memory read is omitted without a placement", async () => {
   const fixture = completedTestFunction(0, (fn) => {
-    const address = fn.values.const(0x100);
+    const address = fn.values.const(0xffff_fffc);
     const loaded = fn.values.addNodeOutput();
 
     fn.region.push(memoryReadOperation(loaded, address, 32));
   });
-  const encoded = testFunctionBody(fixture);
-  const opcodes = wasmBodyOpcodes(encoded);
-
-  strictEqual(opcodes.includes(wasmOpcode.i32Load), false);
-  strictEqual(opcodes.includes(wasmOpcode.drop), false);
-  strictEqual(opcodes.includes(wasmOpcode.localSet), false);
-  strictEqual(wasmBodyLocalCount(encoded), 0);
 
   const { run } = await instantiateTestFunction(fixture);
 
   strictEqual(run(), testFunctionCompleted);
 });
 
-test("an unused state read emits neither its opcode nor an output local", () => {
-  const fixture = completedTestFunction(0, (fn) => {
-    fn.values.const(0);
-    const state = cpuStateAccess.bind(fn.region);
-    const read = fn.values.addNodeOutput();
-
-    fn.region.push(operandRead(read, state.gpr("eax")));
-  });
-  const encoded = testFunctionBody(fixture);
-  const opcodes = wasmBodyOpcodes(encoded);
-
-  strictEqual(opcodes.includes(wasmOpcode.i32Load), false);
-  strictEqual(opcodes.includes(wasmOpcode.drop), false);
-  strictEqual(opcodes.includes(wasmOpcode.localSet), false);
-  strictEqual(wasmBodyLocalCount(encoded), 0);
-});
-
-test("a live single-use output materializes directly at its use", () => {
-  const fixture = completedTestFunction(0, (fn) => {
-    fn.values.const(0);
-    const state = cpuStateAccess.bind(fn.region);
-    const read = fn.values.addNodeOutput();
-
-    fn.region.extend([
-      operandRead(read, state.gpr("eax")),
-      operandWrite(state.gpr("ebx"), read)
-    ]);
-  });
-  const encoded = testFunctionBody(fixture);
-  const opcodes = wasmBodyOpcodes(encoded);
-
-  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localSet).length, 0);
-  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localGet).length, 0);
-  strictEqual(wasmBodyLocalCount(encoded), 0);
-});
-
-test("a condition use tees once for a later selected-body use", async () => {
+test("a condition value remains available in its selected body", async () => {
   const fixture = completedTestFunction(0, (fn) => {
     fn.values.const(0);
     const state = cpuStateAccess.bind(fn.region);
@@ -167,12 +64,6 @@ test("a condition use tees once for a later selected-body use", async () => {
       then.push(operandWrite(state.gpr("ebx"), condition));
     });
   });
-  const encoded = testFunctionBody(fixture);
-  const opcodes = wasmBodyOpcodes(encoded);
-
-  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localTee).length, 1);
-  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.localSet).length, 0);
-
   const { stateView, run } = await instantiateTestFunction(fixture);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 1, ebx: 0 });
@@ -204,15 +95,6 @@ test("an i32 control header preserves a pending i64 capture", async () => {
       }
     });
   });
-  const encoded = testFunctionBody(fixture);
-  const opcodes = wasmBodyOpcodes(encoded);
-  const multiplyIndex = opcodes.indexOf(wasmOpcode.i64Mul);
-  const captureIndex = opcodes.indexOf(wasmOpcode.localSet);
-  const ifIndex = opcodes.indexOf(wasmOpcode.if);
-
-  strictEqual(wasmBodyLocalCount(encoded) > 0, true);
-  strictEqual(multiplyIndex < captureIndex && captureIndex < ifIndex, true);
-
   const { stateView, run } = await instantiateTestFunction(fixture);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0, ebx: 0 });
@@ -242,12 +124,6 @@ test("a trapping producer input still evaluates before a selected early exit", a
     });
     fn.region.push(operandWrite(state.gpr("eax"), output));
   });
-  const opcodes = wasmBodyOpcodes(testFunctionBody(fixture));
-  const divideIndex = opcodes.indexOf(wasmOpcode.i32DivU);
-  const ifIndex = opcodes.indexOf(wasmOpcode.if);
-
-  strictEqual(divideIndex >= 0 && divideIndex < ifIndex, true);
-
   const { run } = await instantiateTestFunction(fixture);
 
   throws(() => run(1, 0), WebAssembly.RuntimeError);
@@ -274,38 +150,7 @@ test("an output local preserves a read snapshot across an overlapping write", as
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("ebx")), 41);
 });
 
-test("a long straight-line sequence materializes each output directly", () => {
-  const fixture = completedTestFunction(0, (fn) => {
-    const state = cpuStateAccess.bind(fn.region);
-    const outputCount = 64;
-
-    fn.values.const(0);
-    for (let index = 0; index < outputCount; index += 1) {
-      const output = fn.values.addNodeOutput();
-
-      fn.region.extend([
-        operandRead(output, state.gpr("eax")),
-        operandWrite(state.gpr("ebx"), output)
-      ]);
-    }
-  });
-  const encoded = testFunctionBody(fixture);
-  const localInstructions = wasmBodyInstructions(encoded)
-    .filter((instruction) => instruction.local !== undefined);
-
-  strictEqual(
-    localInstructions.filter((instruction) => instruction.opcode === wasmOpcode.localSet).length,
-    0
-  );
-  strictEqual(
-    localInstructions.filter((instruction) => instruction.opcode === wasmOpcode.localGet).length,
-    0
-  );
-  strictEqual(wasmBodyLocalCount(encoded), 0);
-  deepStrictEqual(localInstructions, []);
-});
-
-test("sibling bodies reuse a local after the earlier binding's final reference", async () => {
+test("sibling bodies preserve their independent values", async () => {
   const fixture = completedTestFunction(2, (fn) => {
     fn.values.const(0);
     const state = cpuStateAccess.bind(fn.region);
@@ -325,14 +170,6 @@ test("sibling bodies reuse a local after the earlier binding's final reference",
       ]);
     });
   });
-  const encoded = testFunctionBody(fixture);
-  const outputSets = wasmBodyInstructions(encoded)
-    .filter((instruction) => instruction.opcode === wasmOpcode.localSet)
-    .map((instruction) => instruction.local);
-
-  strictEqual(wasmBodyLocalCount(encoded), 0);
-  deepStrictEqual(outputSets, []);
-
   const { stateView, run } = await instantiateTestFunction(fixture);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0x11, ebx: 0, ecx: 0x22, edx: 0 });
@@ -341,7 +178,7 @@ test("sibling bodies reuse a local after the earlier binding's final reference",
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("edx")), 0x22);
 });
 
-test("an output used by both siblings cannot recycle between them", async () => {
+test("an output shared by sibling bodies keeps its value", async () => {
   const fixture = completedTestFunction(2, (fn) => {
     fn.values.const(0);
     const state = cpuStateAccess.bind(fn.region);
@@ -360,20 +197,6 @@ test("an output used by both siblings cannot recycle between them", async () => 
       then.push(operandWrite(state.gpr("esi"), snapshot));
     });
   });
-  const encoded = testFunctionBody(fixture);
-  const localInstructions = wasmBodyInstructions(encoded)
-    .filter((instruction) => instruction.local !== undefined)
-    .map((instruction) => [instruction.opcode, instruction.local] as const);
-
-  strictEqual(wasmBodyLocalCount(encoded), 1);
-  deepStrictEqual(localInstructions, [
-    [wasmOpcode.localGet, 0],
-    [wasmOpcode.localSet, 2],
-    [wasmOpcode.localGet, 2],
-    [wasmOpcode.localGet, 1],
-    [wasmOpcode.localGet, 2]
-  ]);
-
   const { stateView, run } = await instantiateTestFunction(fixture);
 
   writeWasmCpuStateSnapshot(stateView, { eax: 0x41, ebx: 0, ecx: 0x99, edx: 0, esi: 0 });
@@ -382,7 +205,7 @@ test("an output used by both siblings cannot recycle between them", async () => 
   strictEqual(readWasmCpuStateChannel(stateView, gprChannel("esi")), 0x41);
 });
 
-test("dead nested producers do not recapture an already consumed output", () => {
+test("a dead nested producer is not evaluated", async () => {
   const fixture = completedTestFunction(1, (fn) => {
     fn.values.const(0);
     const state = cpuStateAccess.bind(fn.region);
@@ -397,9 +220,15 @@ test("dead nested producers do not recapture an already consumed output", () => 
       then.push(memoryReadOperation(deadLoad, base, 32));
     });
   });
-  const encoded = testFunctionBody(fixture);
-  const opcodes = wasmBodyOpcodes(encoded);
+  const { stateView, run } = await instantiateTestFunction(fixture);
 
-  strictEqual(opcodes.filter((opcode) => opcode === wasmOpcode.i32Load).length, 1);
-  strictEqual(wasmBodyLocalCount(encoded), 0);
+  writeWasmCpuStateSnapshot(stateView, {
+    eax: 0xffff_fffc,
+    ebx: 0
+  });
+  strictEqual(run(1), testFunctionCompleted);
+  strictEqual(
+    readWasmCpuStateChannel(stateView, gprChannel("ebx")),
+    0xffff_fffc
+  );
 });

@@ -1,7 +1,6 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import {
   runCompiledInstructions,
   type CompiledInstructionCompletion
@@ -21,16 +20,12 @@ type SuccessfulMemoryCase = Readonly<{
   initialState?: WasmCpuArchitecturalStateInit;
   expectedState?: WasmCpuArchitecturalStateInit;
   memoryPatches?: readonly MemoryPatch[];
-  expectedMemory?: readonly MemorySnapshot[];
+  expectedMemory?: readonly MemoryPatch[];
 }>;
 
 type MemoryPatch = Readonly<{
   address: number;
   bytes: readonly number[];
-}>;
-
-type MemorySnapshot = MemoryPatch & Readonly<{
-  byteLength: number;
 }>;
 
 test("MOV ModRM memory forms cover 8-, 16-, and 32-bit reads", async () => {
@@ -42,7 +37,7 @@ test("MOV ModRM memory forms cover 8-, 16-, and 32-bit reads", async () => {
       initialState: { eax: 0xaaaa_aa00, ebx: address - 4 },
       expectedState: { eax: 0xaaaa_aa7f },
       memoryPatches: [{ address, bytes: [0x7f] }],
-      expectedMemory: [memory(address, [0x7f])]
+      expectedMemory: [{ address, bytes: [0x7f] }]
     },
     {
       name: "word",
@@ -50,7 +45,7 @@ test("MOV ModRM memory forms cover 8-, 16-, and 32-bit reads", async () => {
       initialState: { eax: 0xaaaa_0000, ebx: address - 4 },
       expectedState: { eax: 0xaaaa_beef },
       memoryPatches: [{ address, bytes: wordBytes(0xbeef) }],
-      expectedMemory: [memory(address, wordBytes(0xbeef))]
+      expectedMemory: [{ address, bytes: wordBytes(0xbeef) }]
     },
     {
       name: "dword",
@@ -58,14 +53,14 @@ test("MOV ModRM memory forms cover 8-, 16-, and 32-bit reads", async () => {
       initialState: { eax: 0, ebx: address - 4 },
       expectedState: { eax: 0xc001_cafe },
       memoryPatches: [{ address, bytes: dwordBytes(0xc001_cafe) }],
-      expectedMemory: [memory(address, dwordBytes(0xc001_cafe))]
+      expectedMemory: [{ address, bytes: dwordBytes(0xc001_cafe) }]
     },
     {
       name: "absolute disp32",
       bytes: [0x8b, 0x05, ...disp32(address)],
       expectedState: { eax: 0xfeed_beef },
       memoryPatches: [{ address, bytes: dwordBytes(0xfeed_beef) }],
-      expectedMemory: [memory(address, dwordBytes(0xfeed_beef))]
+      expectedMemory: [{ address, bytes: dwordBytes(0xfeed_beef) }]
     }
   ];
 
@@ -82,21 +77,30 @@ test("MOV ModRM memory forms cover exact 8-, 16-, and 32-bit writes", async () =
       bytes: [0x88, 0x43, 0x04],
       initialState: { eax: 0x1234_5678, ebx: address - 4 },
       memoryPatches: [{ address: address - 1, bytes: [0xaa, 0, 0xbb] }],
-      expectedMemory: [memory(address - 1, [0xaa, 0x78, 0xbb])]
+      expectedMemory: [{
+        address: address - 1,
+        bytes: [0xaa, 0x78, 0xbb]
+      }]
     },
     {
       name: "word",
       bytes: [0x66, 0x89, 0x43, 0x04],
       initialState: { eax: 0x1234_5678, ebx: address - 4 },
       memoryPatches: [{ address: address - 1, bytes: [0xaa, 0, 0, 0xbb] }],
-      expectedMemory: [memory(address - 1, [0xaa, 0x78, 0x56, 0xbb])]
+      expectedMemory: [{
+        address: address - 1,
+        bytes: [0xaa, 0x78, 0x56, 0xbb]
+      }]
     },
     {
       name: "dword",
       bytes: [0x89, 0x43, 0x04],
       initialState: { eax: 0x1234_5678, ebx: address - 4 },
       memoryPatches: [{ address: address - 1, bytes: [0xaa, 0, 0, 0, 0, 0xbb] }],
-      expectedMemory: [memory(address - 1, [0xaa, 0x78, 0x56, 0x34, 0x12, 0xbb])]
+      expectedMemory: [{
+        address: address - 1,
+        bytes: [0xaa, 0x78, 0x56, 0x34, 0x12, 0xbb]
+      }]
     }
   ];
 
@@ -113,14 +117,20 @@ test("MOV C7 stores immediate words and dwords to memory", async () => {
       bytes: [0x66, 0xc7, 0x43, 0x04, 0xef, 0xbe],
       initialState: { ebx: address - 4 },
       memoryPatches: [{ address: address - 1, bytes: [0xaa, 0, 0, 0xbb] }],
-      expectedMemory: [memory(address - 1, [0xaa, 0xef, 0xbe, 0xbb])]
+      expectedMemory: [{
+        address: address - 1,
+        bytes: [0xaa, 0xef, 0xbe, 0xbb]
+      }]
     },
     {
       name: "dword",
       bytes: [0xc7, 0x43, 0x04, 0x78, 0x56, 0x34, 0x12],
       initialState: { ebx: address - 4 },
       memoryPatches: [{ address: address - 1, bytes: [0xaa, 0, 0, 0, 0, 0xbb] }],
-      expectedMemory: [memory(address - 1, [0xaa, 0x78, 0x56, 0x34, 0x12, 0xbb])]
+      expectedMemory: [{
+        address: address - 1,
+        bytes: [0xaa, 0x78, 0x56, 0x34, 0x12, 0xbb]
+      }]
     }
   ];
 
@@ -139,7 +149,7 @@ test("MOV moffs forms cover direct 8-, 16-, and 32-bit reads and writes", async 
       initialState: { eax: 0xaaaa_aa00 },
       expectedState: { eax: 0xaaaa_aa7f },
       memoryPatches: [{ address: readAddress, bytes: [0x7f] }],
-      expectedMemory: [memory(readAddress, [0x7f])]
+      expectedMemory: [{ address: readAddress, bytes: [0x7f] }]
     },
     {
       name: "read word",
@@ -147,35 +157,50 @@ test("MOV moffs forms cover direct 8-, 16-, and 32-bit reads and writes", async 
       initialState: { eax: 0xaaaa_0000 },
       expectedState: { eax: 0xaaaa_beef },
       memoryPatches: [{ address: readAddress, bytes: wordBytes(0xbeef) }],
-      expectedMemory: [memory(readAddress, wordBytes(0xbeef))]
+      expectedMemory: [{
+        address: readAddress,
+        bytes: wordBytes(0xbeef)
+      }]
     },
     {
       name: "read dword",
       bytes: [0xa1, ...disp32(readAddress)],
       expectedState: { eax: 0xc001_cafe },
       memoryPatches: [{ address: readAddress, bytes: dwordBytes(0xc001_cafe) }],
-      expectedMemory: [memory(readAddress, dwordBytes(0xc001_cafe))]
+      expectedMemory: [{
+        address: readAddress,
+        bytes: dwordBytes(0xc001_cafe)
+      }]
     },
     {
       name: "write byte",
       bytes: [0xa2, ...disp32(writeAddress)],
       initialState: { eax: 0x1234_5678 },
       memoryPatches: [{ address: writeAddress - 1, bytes: [0xaa, 0, 0xbb] }],
-      expectedMemory: [memory(writeAddress - 1, [0xaa, 0x78, 0xbb])]
+      expectedMemory: [{
+        address: writeAddress - 1,
+        bytes: [0xaa, 0x78, 0xbb]
+      }]
     },
     {
       name: "write word",
       bytes: [0x66, 0xa3, ...disp32(writeAddress)],
       initialState: { eax: 0x1234_5678 },
       memoryPatches: [{ address: writeAddress - 1, bytes: [0xaa, 0, 0, 0xbb] }],
-      expectedMemory: [memory(writeAddress - 1, [0xaa, 0x78, 0x56, 0xbb])]
+      expectedMemory: [{
+        address: writeAddress - 1,
+        bytes: [0xaa, 0x78, 0x56, 0xbb]
+      }]
     },
     {
       name: "write dword",
       bytes: [0xa3, ...disp32(writeAddress)],
       initialState: { eax: 0x1234_5678 },
       memoryPatches: [{ address: writeAddress - 1, bytes: [0xaa, 0, 0, 0, 0, 0xbb] }],
-      expectedMemory: [memory(writeAddress - 1, [0xaa, 0x78, 0x56, 0x34, 0x12, 0xbb])]
+      expectedMemory: [{
+        address: writeAddress - 1,
+        bytes: [0xaa, 0x78, 0x56, 0x34, 0x12, 0xbb]
+      }]
     }
   ];
 
@@ -193,7 +218,7 @@ test("MOVZX and MOVSX extend byte and word memory sources", async () => {
       initialState: { eax: 0xffff_ffff, ebx: address },
       expectedState: { eax: 0xfe },
       memoryPatches: [{ address, bytes: [0xfe] }],
-      expectedMemory: [memory(address, [0xfe])]
+      expectedMemory: [{ address, bytes: [0xfe] }]
     },
     {
       name: "MOVZX word to dword",
@@ -201,7 +226,7 @@ test("MOVZX and MOVSX extend byte and word memory sources", async () => {
       initialState: { eax: 0xffff_ffff, ebx: address },
       expectedState: { eax: 0x80ff },
       memoryPatches: [{ address, bytes: wordBytes(0x80ff) }],
-      expectedMemory: [memory(address, wordBytes(0x80ff))]
+      expectedMemory: [{ address, bytes: wordBytes(0x80ff) }]
     },
     {
       name: "MOVZX byte to word",
@@ -209,7 +234,7 @@ test("MOVZX and MOVSX extend byte and word memory sources", async () => {
       initialState: { eax: 0xaaaa_ffff, ebx: address },
       expectedState: { eax: 0xaaaa_00fe },
       memoryPatches: [{ address, bytes: [0xfe] }],
-      expectedMemory: [memory(address, [0xfe])]
+      expectedMemory: [{ address, bytes: [0xfe] }]
     },
     {
       name: "MOVSX byte to dword",
@@ -217,7 +242,7 @@ test("MOVZX and MOVSX extend byte and word memory sources", async () => {
       initialState: { ebx: address },
       expectedState: { eax: 0xffff_ff80 },
       memoryPatches: [{ address, bytes: [0x80] }],
-      expectedMemory: [memory(address, [0x80])]
+      expectedMemory: [{ address, bytes: [0x80] }]
     },
     {
       name: "MOVSX word to dword",
@@ -225,7 +250,7 @@ test("MOVZX and MOVSX extend byte and word memory sources", async () => {
       initialState: { ebx: address },
       expectedState: { eax: 0xffff_8001 },
       memoryPatches: [{ address, bytes: wordBytes(0x8001) }],
-      expectedMemory: [memory(address, wordBytes(0x8001))]
+      expectedMemory: [{ address, bytes: wordBytes(0x8001) }]
     },
     {
       name: "MOVSX byte to word",
@@ -233,7 +258,7 @@ test("MOVZX and MOVSX extend byte and word memory sources", async () => {
       initialState: { eax: 0xaaaa_0000, ebx: address },
       expectedState: { eax: 0xaaaa_ff80 },
       memoryPatches: [{ address, bytes: [0x80] }],
-      expectedMemory: [memory(address, [0x80])]
+      expectedMemory: [{ address, bytes: [0x80] }]
     }
   ];
 
@@ -250,7 +275,10 @@ test("MOV stores a segment selector as exactly one word", async () => {
     bytes: [0x8c, 0x2b],
     initialState: { ebx: address, gsSelector: 0xabcd },
     memoryPatches: [{ address: address - 1, bytes: [0x11, 0x22, 0x33, 0x44] }],
-    expectedMemory: [memory(address - 1, [0x11, 0xcd, 0xab, 0x44])]
+    expectedMemory: [{
+      address: address - 1,
+      bytes: [0x11, 0xcd, 0xab, 0x44]
+    }]
   });
 });
 
@@ -268,7 +296,7 @@ test("CMOVcc reads its memory source unconditionally and writes only a taken des
       },
       expectedState: { edx: 0x1234_5678 },
       memoryPatches: [{ address, bytes: sourceBytes }],
-      expectedMemory: [memory(address, sourceBytes)]
+      expectedMemory: [{ address, bytes: sourceBytes }]
     },
     {
       name: "CMOVNE not-taken memory source",
@@ -280,7 +308,7 @@ test("CMOVcc reads its memory source unconditionally and writes only a taken des
       },
       expectedState: { edx: 0xaaaa_1111 },
       memoryPatches: [{ address, bytes: sourceBytes }],
-      expectedMemory: [memory(address, sourceBytes)]
+      expectedMemory: [{ address, bytes: sourceBytes }]
     }
   ];
 
@@ -297,14 +325,20 @@ test("MOV applies effective, default, and overridden segments", async () => {
       initialState: { ebx: 0x20, fsBase: 0x1000 },
       expectedState: { eax: 0x1234_5678 },
       memoryPatches: [{ address: 0x1020, bytes: dwordBytes(0x1234_5678) }],
-      expectedMemory: [memory(0x1020, dwordBytes(0x1234_5678))]
+      expectedMemory: [{
+        address: 0x1020,
+        bytes: dwordBytes(0x1234_5678)
+      }]
     },
     {
       name: "GS override on moffs",
       bytes: [0x65, 0xa3, ...disp32(0x30)],
       initialState: { eax: 0xcafe_babe, gsBase: 0x2000 },
       memoryPatches: [{ address: 0x202f, bytes: [0xaa, 0, 0, 0, 0, 0xbb] }],
-      expectedMemory: [memory(0x202f, [0xaa, 0xbe, 0xba, 0xfe, 0xca, 0xbb])]
+      expectedMemory: [{
+        address: 0x202f,
+        bytes: [0xaa, 0xbe, 0xba, 0xfe, 0xca, 0xbb]
+      }]
     },
     {
       name: "FS override on no-base disp32",
@@ -312,7 +346,10 @@ test("MOV applies effective, default, and overridden segments", async () => {
       initialState: { fsBase: 0x1000 },
       expectedState: { eax: 0xfeed_face },
       memoryPatches: [{ address: 0x1030, bytes: dwordBytes(0xfeed_face) }],
-      expectedMemory: [memory(0x1030, dwordBytes(0xfeed_face))]
+      expectedMemory: [{
+        address: 0x1030,
+        bytes: dwordBytes(0xfeed_face)
+      }]
     },
     {
       name: "EBP default SS uses the flat effective offset",
@@ -320,7 +357,10 @@ test("MOV applies effective, default, and overridden segments", async () => {
       initialState: { ebp: 0x20, dsBase: 0x1000, ssBase: 0x3000 },
       expectedState: { eax: 0x2222_2222 },
       memoryPatches: [{ address: 0x20, bytes: dwordBytes(0x2222_2222) }],
-      expectedMemory: [memory(0x20, dwordBytes(0x2222_2222))]
+      expectedMemory: [{
+        address: 0x20,
+        bytes: dwordBytes(0x2222_2222)
+      }]
     },
     {
       name: "ESP default SS uses the flat effective offset",
@@ -328,7 +368,10 @@ test("MOV applies effective, default, and overridden segments", async () => {
       initialState: { esp: 0x30, dsBase: 0x1000, ssBase: 0x3000 },
       expectedState: { eax: 0x4444_4444 },
       memoryPatches: [{ address: 0x30, bytes: dwordBytes(0x4444_4444) }],
-      expectedMemory: [memory(0x30, dwordBytes(0x4444_4444))]
+      expectedMemory: [{
+        address: 0x30,
+        bytes: dwordBytes(0x4444_4444)
+      }]
     },
     {
       name: "no-base ModRM default DS uses the flat displacement",
@@ -336,7 +379,10 @@ test("MOV applies effective, default, and overridden segments", async () => {
       initialState: { dsBase: 0x1000, ssBase: 0x3000 },
       expectedState: { eax: 0x5555_5555 },
       memoryPatches: [{ address: 0x30, bytes: dwordBytes(0x5555_5555) }],
-      expectedMemory: [memory(0x30, dwordBytes(0x5555_5555))]
+      expectedMemory: [{
+        address: 0x30,
+        bytes: dwordBytes(0x5555_5555)
+      }]
     },
     {
       name: "moffs default DS uses the flat offset",
@@ -344,7 +390,10 @@ test("MOV applies effective, default, and overridden segments", async () => {
       initialState: { dsBase: 0x1000, ssBase: 0x3000 },
       expectedState: { eax: 0x7777_7777 },
       memoryPatches: [{ address: 0x40, bytes: dwordBytes(0x7777_7777) }],
-      expectedMemory: [memory(0x40, dwordBytes(0x7777_7777))]
+      expectedMemory: [{
+        address: 0x40,
+        bytes: dwordBytes(0x7777_7777)
+      }]
     },
     {
       name: "DS override on EBP uses the flat effective offset",
@@ -352,7 +401,10 @@ test("MOV applies effective, default, and overridden segments", async () => {
       initialState: { ebp: 0x20, dsBase: 0x1000, ssBase: 0x3000 },
       expectedState: { eax: 0x9999_9999 },
       memoryPatches: [{ address: 0x20, bytes: dwordBytes(0x9999_9999) }],
-      expectedMemory: [memory(0x20, dwordBytes(0x9999_9999))]
+      expectedMemory: [{
+        address: 0x20,
+        bytes: dwordBytes(0x9999_9999)
+      }]
     }
   ];
 
@@ -374,14 +426,14 @@ test("MOV accepts the last valid boundary address for each access width", async 
       initialState: { eax: 0, dsBase: 0 },
       expectedState: { eax: width === 8 ? 0x78 : width === 16 ? 0x5678 : value },
       memoryPatches: [{ address, bytes: expectedBytes }],
-      expectedMemory: [memory(address, expectedBytes)]
+      expectedMemory: [{ address, bytes: expectedBytes }]
     });
     await assertSuccessfulMemoryCase({
       name: `${width}-bit boundary write`,
       bytes: movWriteDisp32Bytes(width, address),
       initialState: { eax: value, dsBase: 0 },
       memoryPatches: [{ address, bytes: expectedBytes.map(() => 0) }],
-      expectedMemory: [memory(address, expectedBytes)]
+      expectedMemory: [{ address, bytes: expectedBytes }]
     });
   }
 });
@@ -394,7 +446,10 @@ test("MOV read guards report exact 1-, 2-, and 4-byte fault ranges", async () =>
       name: `${width}-bit read fault`,
       bytes: movReadDisp32Bytes(width, faultAddress),
       initialState: { eax: 0xaaaa_aaaa, dsBase: 0 },
-      expectedExit: pageFaultStop(faultAddress, 0)
+      expectedExit: {
+        kind: "cpuException",
+        exception: { kind: "PF", linearAddress: faultAddress, errorCode: 0 }
+      }
     });
   }
 });
@@ -413,9 +468,12 @@ test("MOV write guards fault before state or memory changes", async () => {
       name: `${width}-bit write fault`,
       bytes: movWriteDisp32Bytes(width, faultAddress),
       initialState: { eax: 0x1234_5678, dsBase: 0 },
-      expectedExit: pageFaultStop(faultAddress, PageFaultErrorCode.WRITE),
+      expectedExit: {
+        kind: "cpuException",
+        exception: { kind: "PF", linearAddress: faultAddress, errorCode: 2 }
+      },
       memoryPatches: [{ address: observedAddress, bytes: initialBytes }],
-      expectedMemory: [memory(observedAddress, initialBytes)]
+      expectedMemory: [{ address: observedAddress, bytes: initialBytes }]
     });
   }
 });
@@ -429,17 +487,23 @@ test("faulting moffs reads and writes preserve instruction-start state and memor
     name: "moffs dword read fault",
     bytes: [0xa1, ...disp32(faultAddress)],
     initialState: { eax: 0xaaaa_aaaa, dsBase: 0 },
-    expectedExit: pageFaultStop(faultAddress, 0),
+    expectedExit: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: faultAddress, errorCode: 0 }
+    },
     memoryPatches: [{ address: observedAddress, bytes: initialBytes }],
-    expectedMemory: [memory(observedAddress, initialBytes)]
+    expectedMemory: [{ address: observedAddress, bytes: initialBytes }]
   });
   await assertFaultingMemoryCase({
     name: "moffs dword write fault",
     bytes: [0xa3, ...disp32(faultAddress)],
     initialState: { eax: 0x1234_5678, dsBase: 0 },
-    expectedExit: pageFaultStop(faultAddress, PageFaultErrorCode.WRITE),
+    expectedExit: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: faultAddress, errorCode: 2 }
+    },
     memoryPatches: [{ address: observedAddress, bytes: initialBytes }],
-    expectedMemory: [memory(observedAddress, initialBytes)]
+    expectedMemory: [{ address: observedAddress, bytes: initialBytes }]
   });
 });
 
@@ -451,9 +515,12 @@ test("faulting segment-selector store reports a word write before committing", a
     name: "segment selector word write fault",
     bytes: [0x8c, 0x2b],
     initialState: { ebx: faultAddress, gsSelector: 0xabcd },
-    expectedExit: pageFaultStop(faultAddress, PageFaultErrorCode.WRITE),
+    expectedExit: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: faultAddress, errorCode: 2 }
+    },
     memoryPatches: [{ address: faultAddress, bytes: initialBytes }],
-    expectedMemory: [memory(faultAddress, initialBytes)]
+    expectedMemory: [{ address: faultAddress, bytes: initialBytes }]
   });
 });
 
@@ -469,9 +536,12 @@ test("not-taken CMOVcc reports its memory-source fault before any state write", 
       edx: 0xaaaa_1111,
       ZF: 1
     },
-    expectedExit: pageFaultStop(faultAddress, 0),
+    expectedExit: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: faultAddress, errorCode: 0 }
+    },
     memoryPatches: [{ address: faultAddress, bytes: sourceBytes }],
-    expectedMemory: [memory(faultAddress, sourceBytes)]
+    expectedMemory: [{ address: faultAddress, bytes: sourceBytes }]
   });
 });
 
@@ -486,17 +556,31 @@ async function assertSuccessfulMemoryCase(entry: SuccessfulMemoryCase): Promise<
     bytes: entry.bytes,
     initialState,
     ...(entry.memoryPatches === undefined ? {} : { memoryPatches: entry.memoryPatches }),
-    ...(entry.expectedMemory === undefined ? {} : { memoryRanges: entry.expectedMemory })
+    ...(entry.expectedMemory === undefined
+      ? {}
+      : {
+          memoryRanges: entry.expectedMemory.map(({ address, bytes }) => ({
+            address,
+            byteLength: bytes.length
+          }))
+        })
   });
 
-  deepStrictEqual(result.completion, completion(startAddress + entry.bytes.length), entry.name);
+  deepStrictEqual(result.completion, {
+    kind: "completed",
+    targetEip: startAddress + entry.bytes.length
+  }, entry.name);
   deepStrictEqual(result.state, {
     ...initialState,
     ...entry.expectedState,
     eip: startAddress + entry.bytes.length,
     instructionCount: initialState.instructionCount + 1
   }, entry.name);
-  deepStrictEqual(result.memory, entry.expectedMemory ?? [], entry.name);
+  deepStrictEqual(
+    result.memory.map(({ address, bytes }) => ({ address, bytes })),
+    entry.expectedMemory ?? [],
+    entry.name
+  );
 }
 
 async function assertFaultingMemoryCase(
@@ -514,7 +598,14 @@ async function assertFaultingMemoryCase(
     bytes: entry.bytes,
     initialState,
     ...(entry.memoryPatches === undefined ? {} : { memoryPatches: entry.memoryPatches }),
-    ...(entry.expectedMemory === undefined ? {} : { memoryRanges: entry.expectedMemory })
+    ...(entry.expectedMemory === undefined
+      ? {}
+      : {
+          memoryRanges: entry.expectedMemory.map(({ address, bytes }) => ({
+            address,
+            byteLength: bytes.length
+          }))
+        })
   });
 
   deepStrictEqual(result.completion, entry.expectedExit, entry.name);
@@ -523,19 +614,11 @@ async function assertFaultingMemoryCase(
     initialState,
     entry.name
   );
-  deepStrictEqual(result.memory, entry.expectedMemory ?? [], entry.name);
-}
-
-function completion(targetEip: number): CompiledInstructionCompletion {
-  return { kind: "completed", targetEip };
-}
-
-function pageFaultStop(address: number, errorCode: number): CompiledInstructionCompletion {
-  return { kind: "cpuException", exception: pageFault(address, errorCode) };
-}
-
-function memory(address: number, bytes: readonly number[]): MemorySnapshot {
-  return { address, byteLength: bytes.length, bytes };
+  deepStrictEqual(
+    result.memory.map(({ address, bytes }) => ({ address, bytes })),
+    entry.expectedMemory ?? [],
+    entry.name
+  );
 }
 
 function movReadDisp32Bytes(width: 8 | 16 | 32, address: number): readonly number[] {

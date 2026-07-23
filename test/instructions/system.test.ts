@@ -1,6 +1,5 @@
 import { test } from "node:test";
 
-import { invalidOpcode } from "#core/exceptions.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   assertInstructionCase,
@@ -232,7 +231,7 @@ const movSegmentCases = [
     initialState: { ...preservedState, csSelector: 0x1111 },
     expectedCompletion: {
       kind: "cpuException",
-      exception: invalidOpcode()
+      exception: { kind: "UD" }
     },
     expectedEip: startAddress,
     instructionCount: 0

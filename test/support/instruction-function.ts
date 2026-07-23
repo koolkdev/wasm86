@@ -24,7 +24,7 @@ export const testInstructionDispatch = new FunctionDefinition({
   build: (fn) => fn.return([fn.values.const64(0n)])
 });
 
-export type InstructionFunctionBuilder = Readonly<{
+type InstructionFunctionBuilder = Readonly<{
   add(
     template: SemanticTemplate,
     bindings: readonly OperandBinding[],
@@ -56,7 +56,7 @@ export function createInstructionFunction(
   };
 }
 
-export function instructionFunctionTerminals(): InstructionTerminals {
+function instructionFunctionTerminals(): InstructionTerminals {
   return {
     dispatch: (region, targetEip) => {
       region.returnCall(testInstructionDispatch, [targetEip]);

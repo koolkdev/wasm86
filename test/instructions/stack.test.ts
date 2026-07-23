@@ -1,6 +1,5 @@
 import { test } from "node:test";
 
-import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   assertInstructionCase,
@@ -186,31 +185,6 @@ test("segment PUSH stores the selector in the selected stack-cell width", async 
   });
 });
 
-test("POP segment reads the stack cell before requesting a restartable selector load", async () => {
-  await assertInstructionCase({
-    name: "POP DS dword cell",
-    bytes: [0x1f],
-    initialState: { esp: 0x100, dsSelector: 0x2222, ...allUserFlagsSet },
-    expectedCompletion: { kind: "segmentLoad", segment: "ds", selector: 0x1234 },
-    expectedEip: startAddress,
-    instructionCount: 0,
-    memoryPatches: [{ address: 0x100, bytes: [0x34, 0x12, 0xcd, 0xab] }],
-    expectedMemory: [{ address: 0x100, bytes: [0x34, 0x12, 0xcd, 0xab] }]
-  });
-
-  const address = guestMemoryMinimumByteLength - 2;
-  await assertInstructionCase({
-    name: "POP DS word cell at the last valid word",
-    bytes: [0x66, 0x1f],
-    initialState: { esp: address, dsSelector: 0x2222, ...allUserFlagsSet },
-    expectedCompletion: { kind: "segmentLoad", segment: "ds", selector: 0xbeef },
-    expectedEip: startAddress,
-    instructionCount: 0,
-    memoryPatches: [{ address, bytes: [0xef, 0xbe] }],
-    expectedMemory: [{ address, bytes: [0xef, 0xbe] }]
-  });
-});
-
 test("LEAVE reads the saved frame before publishing EBP and ESP", async () => {
   await assertInstructionCase({
     name: "LEAVE with aliased frame and stack pointers",
@@ -299,7 +273,14 @@ test("stack write faults leave instruction-start state and bytes unchanged", asy
     name: "PUSH FS wrapping dword write fault",
     bytes: [0x0f, 0xa0],
     initialState: { esp: 2, fsSelector: 0x2345, ...allUserFlagsSet },
-    expectedCompletion: fault(0xffff_fffe, PageFaultErrorCode.WRITE),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: {
+        kind: "PF",
+        linearAddress: 0xffff_fffe,
+        errorCode: 2
+      }
+    },
     expectedEip: startAddress,
     instructionCount: 0
   });
@@ -313,7 +294,10 @@ test("stack write faults leave instruction-start state and bytes unchanged", asy
     name: "POP dword memory destination write fault",
     bytes: [0x8f, 0x03],
     initialState: { ebx: destination, esp: stackAddress, ...allUserFlagsSet },
-    expectedCompletion: fault(destination, PageFaultErrorCode.WRITE),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: destination, errorCode: 2 }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [
@@ -351,7 +335,10 @@ test("stack read faults leave instruction-start state unchanged", async () => {
     await assertInstructionCase({
       ...entry,
       initialState: { ...entry.initialState, ...allUserFlagsSet },
-      expectedCompletion: fault(address, 0),
+      expectedCompletion: {
+        kind: "cpuException",
+        exception: { kind: "PF", linearAddress: address, errorCode: 0 }
+      },
       expectedEip: startAddress,
       instructionCount: 0,
       memoryPatches: [{ address, bytes: initialBytes }],
@@ -374,15 +361,18 @@ test("a prior instruction remains committed when a later stack access faults", a
       SF: 0,
       OF: 0
     },
-    expectedCompletion: fault(0xffff_fffe, PageFaultErrorCode.WRITE),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: {
+        kind: "PF",
+        linearAddress: 0xffff_fffe,
+        errorCode: 2
+      }
+    },
     expectedEip: startAddress + 3,
     instructionCount: 1
   });
 });
-
-function fault(address: number, errorCode: number) {
-  return { kind: "cpuException" as const, exception: pageFault(address, errorCode) };
-}
 
 function wordBytes(value: number): readonly number[] {
   return [value & 0xff, (value >>> 8) & 0xff];

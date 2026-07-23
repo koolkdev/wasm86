@@ -1,6 +1,5 @@
 import { test } from "node:test";
 
-import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   assertInstructionCase,
@@ -106,7 +105,10 @@ test("XCHG validates a complete memory write before changing the register or byt
     name: "XCHG trailing partial dword write fault",
     bytes: [0x87, 0x18],
     initialState: { eax: address, ebx: 0x1234_5678, ...allFlagsSet },
-    expectedCompletion: fault(address, PageFaultErrorCode.WRITE),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [{ address, bytes: initialBytes }],
@@ -181,7 +183,10 @@ test("XADD memory faults before publishing its source, flags, or store", async (
     name: "XADD trailing partial dword write fault",
     bytes: [0x0f, 0xc1, 0x18],
     initialState: { eax: address, ebx: 7, ...allFlagsSet },
-    expectedCompletion: fault(address, PageFaultErrorCode.WRITE),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [{ address, bytes: initialBytes }],
@@ -286,7 +291,10 @@ test("CMPXCHG memory validates its write view before changing state", async () =
     name: "CMPXCHG trailing partial dword write fault",
     bytes: [0x0f, 0xb1, 0x18],
     initialState: { eax: address, ebx: 9, ...allFlagsSet },
-    expectedCompletion: fault(address, PageFaultErrorCode.WRITE),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [{ address, bytes: initialBytes }],
@@ -360,17 +368,16 @@ test("CMPXCHG8B validates the full qword write before publishing any half", asyn
       ecx: 0x4444_4444,
       ...mixedFlags
     },
-    expectedCompletion: fault(address, PageFaultErrorCode.WRITE),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [{ address, bytes: initialBytes }],
     expectedMemory: [{ address, bytes: initialBytes }]
   });
 });
-
-function fault(address: number, errorCode: number) {
-  return { kind: "cpuException" as const, exception: pageFault(address, errorCode) };
-}
 
 function dwordBytes(value: number): readonly number[] {
   return [

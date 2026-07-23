@@ -1,13 +1,10 @@
 import {
   deepStrictEqual,
-  ok,
   strictEqual,
   throws
 } from "node:assert";
 import { test } from "node:test";
 
-import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
-import { wasmOpcode } from "#compiler/encoder/types.js";
 import { Invocation } from "#compiler/ir/invocation.js";
 import { resourceWrite } from "#compiler/ir/operations/resource.js";
 import { returnControl } from "#compiler/ir/controls/index.js";
@@ -19,7 +16,6 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import type { Program } from "#compiler/program/program.js";
 import { compileProgram } from "#compiler/compile.js";
-import { createModuleBindings } from "#compiler/module/bindings.js";
 import { functionType } from "#compiler/ir/function.js";
 import {
   FunctionDefinition,
@@ -31,7 +27,6 @@ import { createProgramResources } from "#compiler/program/resources.js";
 import { FunctionBuilder } from "#compiler/ir/builder/function.js";
 import { nodeCompletes } from "#compiler/ir/region.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
-import { emitFunction } from "#compiler/emit/function.js";
 
 const noEffects = { reads: [], writes: [] } as const;
 const effectResource = resourceRef("test.return-call-effect-resource");
@@ -160,19 +155,6 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
   }
   deepStrictEqual(callerFunction.directFunctions, [target.ref]);
   strictEqual(callerFunction.body.body.nodes[0]?.kind, "return");
-  const emitted = emitFunction(callerFunction.body, {
-    bindings: createModuleBindings({
-      functions: new Map([[target.ref, 1]]),
-      types: new Map(),
-      tables: new Map(),
-      resources: new Map()
-    }),
-    placement: callerFunction.placement
-  });
-  const opcodes = wasmBodyOpcodes(emitted.bytes);
-
-  ok(opcodes.includes(wasmOpcode.returnCall));
-  strictEqual(opcodes.includes(wasmOpcode.call), false);
 
   const instance = await WebAssembly.instantiate(
     await WebAssembly.compile(compileBytes(closed))

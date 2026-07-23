@@ -1,12 +1,10 @@
 import { test } from "node:test";
 
-import { PageFaultErrorCode } from "#core/exceptions.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   assertInstructionCase,
   type InstructionCase
 } from "#test/harness/instruction-case.js";
-import type { CompiledInstructionCompletion } from "#test/harness/compiled-instruction.js";
 import { startAddress } from "#test/support/addresses.js";
 
 type ConditionFlags = Readonly<{
@@ -150,7 +148,7 @@ test("every short Jcc condition dispatches when true and falls through when fals
       name: `J${entry.name} taken`,
       bytes,
       initialState: { eax: 0x1234_5678, DF: 1, ...entry.takenFlags },
-      expectedCompletion: dispatched(startAddress + 4),
+      expectedCompletion: { kind: "dispatched", targetEip: startAddress + 4 },
       expectedEip: startAddress + 4
     });
     await assertInstructionCase({
@@ -168,14 +166,14 @@ test("Jcc signed displacement widths resolve targets relative to the next instru
       name: "JNE rel16 negative displacement",
       bytes: [0x66, 0x0f, 0x85, 0xfc, 0xff],
       initialState: { ZF: 0, ...preservedFlags },
-      expectedCompletion: dispatched(startAddress + 1),
+      expectedCompletion: { kind: "dispatched", targetEip: startAddress + 1 },
       expectedEip: startAddress + 1
     },
     {
       name: "JL rel32 negative displacement",
       bytes: [0x0f, 0x8c, 0xfa, 0xff, 0xff, 0xff],
       initialState: { ...preservedFlags, SF: 1, OF: 0 },
-      expectedCompletion: dispatched(startAddress),
+      expectedCompletion: { kind: "dispatched", targetEip: startAddress },
       expectedEip: startAddress
     }
   ];
@@ -192,7 +190,7 @@ test("a taken same-target branch remains distinguishable from fallthrough", asyn
     name: "JE taken to its next EIP",
     bytes,
     initialState: { eax: 0xaaaa_aaaa, ZF: 1, DF: 1 },
-    expectedCompletion: dispatched(startAddress + 2)
+    expectedCompletion: { kind: "dispatched", targetEip: startAddress + 2 }
   });
   await assertInstructionCase({
     name: "JE false at the same numerical EIP",
@@ -207,35 +205,35 @@ test("near JMP forms dispatch signed relative and register targets", async () =>
       name: "JMP rel8 negative displacement",
       bytes: [0xeb, 0xfc],
       initialState: preservedFlags,
-      expectedCompletion: dispatched(startAddress - 2),
+      expectedCompletion: { kind: "dispatched", targetEip: startAddress - 2 },
       expectedEip: startAddress - 2
     },
     {
       name: "JMP rel16 negative displacement",
       bytes: [0x66, 0xe9, 0xfc, 0xff],
       initialState: preservedFlags,
-      expectedCompletion: dispatched(startAddress),
+      expectedCompletion: { kind: "dispatched", targetEip: startAddress },
       expectedEip: startAddress
     },
     {
       name: "JMP rel32 negative displacement",
       bytes: [0xe9, 0xfc, 0xff, 0xff, 0xff],
       initialState: preservedFlags,
-      expectedCompletion: dispatched(startAddress + 1),
+      expectedCompletion: { kind: "dispatched", targetEip: startAddress + 1 },
       expectedEip: startAddress + 1
     },
     {
       name: "JMP r/m32 register target",
       bytes: [0xff, 0xe0],
       initialState: { eax: 0x2000, ...preservedFlags },
-      expectedCompletion: dispatched(0x2000),
+      expectedCompletion: { kind: "dispatched", targetEip: 0x2000 },
       expectedEip: 0x2000
     },
     {
       name: "JMP r/m16 masks the register target without changing EAX",
       bytes: [0x66, 0xff, 0xe0],
       initialState: { eax: 0x1234_2000, ...preservedFlags },
-      expectedCompletion: dispatched(0x2000),
+      expectedCompletion: { kind: "dispatched", targetEip: 0x2000 },
       expectedEip: 0x2000
     }
   ];
@@ -291,10 +289,14 @@ test("SETcc supports a high-byte register and reports an exact memory write faul
       ZF: 1,
       ...preservedFlags
     },
-    expectedCompletion: pageFault(
-      guestMemoryMinimumByteLength,
-      PageFaultErrorCode.WRITE
-    ),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 2
+      }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [{
@@ -315,7 +317,10 @@ test("LOOP-family controls update ECX and preserve flags on taken and fallthroug
       bytes: [0xe2, 0x20],
       initialState: { ecx: 2, ZF: 1, ...preservedFlags },
       expectedState: { ecx: 1 },
-      expectedCompletion: dispatched(startAddress + 0x22),
+      expectedCompletion: {
+        kind: "dispatched",
+        targetEip: startAddress + 0x22
+      },
       expectedEip: startAddress + 0x22
     },
     {
@@ -329,7 +334,10 @@ test("LOOP-family controls update ECX and preserve flags on taken and fallthroug
       bytes: [0xe1, 0x20],
       initialState: { ecx: 2, ZF: 1, ...preservedFlags },
       expectedState: { ecx: 1 },
-      expectedCompletion: dispatched(startAddress + 0x22),
+      expectedCompletion: {
+        kind: "dispatched",
+        targetEip: startAddress + 0x22
+      },
       expectedEip: startAddress + 0x22
     },
     {
@@ -343,7 +351,10 @@ test("LOOP-family controls update ECX and preserve flags on taken and fallthroug
       bytes: [0xe0, 0x20],
       initialState: { ecx: 2, ...preservedFlags, ZF: 0 },
       expectedState: { ecx: 1 },
-      expectedCompletion: dispatched(startAddress + 0x22),
+      expectedCompletion: {
+        kind: "dispatched",
+        targetEip: startAddress + 0x22
+      },
       expectedEip: startAddress + 0x22
     },
     {
@@ -364,7 +375,10 @@ test("JECXZ tests ECX without changing it or the flags", async () => {
     name: "zero counter branches",
     bytes: [0xe3, 0x20],
     initialState: { ecx: 0, ZF: 1, ...preservedFlags },
-    expectedCompletion: dispatched(startAddress + 0x22),
+    expectedCompletion: {
+      kind: "dispatched",
+      targetEip: startAddress + 0x22
+    },
     expectedEip: startAddress + 0x22
   });
   await assertInstructionCase({
@@ -381,7 +395,10 @@ test("CALL pushes the next instruction address before dispatching", async () => 
       bytes: [0xe8, 0x0b, 0x00, 0x00, 0x00],
       initialState: { esp: 0x40, ...preservedFlags },
       expectedState: { esp: 0x3c },
-      expectedCompletion: dispatched(startAddress + 0x10),
+      expectedCompletion: {
+        kind: "dispatched",
+        targetEip: startAddress + 0x10
+      },
       expectedEip: startAddress + 0x10,
       memoryPatches: [{ address: 0x3b, bytes: [0xaa, 0, 0, 0, 0, 0xbb] }],
       expectedMemory: [{ address: 0x3b, bytes: [0xaa, 0x05, 0x10, 0x00, 0x00, 0xbb] }]
@@ -391,7 +408,10 @@ test("CALL pushes the next instruction address before dispatching", async () => 
       bytes: [0x66, 0xe8, 0x0b, 0x00],
       initialState: { esp: 0x40, ...preservedFlags },
       expectedState: { esp: 0x3e },
-      expectedCompletion: dispatched(startAddress + 0x0f),
+      expectedCompletion: {
+        kind: "dispatched",
+        targetEip: startAddress + 0x0f
+      },
       expectedEip: startAddress + 0x0f,
       memoryPatches: [{ address: 0x3d, bytes: [0xaa, 0, 0, 0xbb] }],
       expectedMemory: [{ address: 0x3d, bytes: [0xaa, 0x04, 0x10, 0xbb] }]
@@ -401,7 +421,7 @@ test("CALL pushes the next instruction address before dispatching", async () => 
       bytes: [0xff, 0x14, 0x24],
       initialState: { esp: 0x40, ...preservedFlags },
       expectedState: { esp: 0x3c },
-      expectedCompletion: dispatched(0x1234),
+      expectedCompletion: { kind: "dispatched", targetEip: 0x1234 },
       expectedEip: 0x1234,
       memoryPatches: [{
         address: 0x3b,
@@ -426,7 +446,10 @@ test("CALL validates its target read before any stack write and commits neither 
     name: "faulting memory target leaves a valid would-be stack slot unchanged",
     bytes: [0xff, 0x13],
     initialState: { ebx: sourceFault, esp: 0x80, ...preservedFlags },
-    expectedCompletion: pageFault(sourceFault, 0),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: sourceFault, errorCode: 0 }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [
@@ -447,10 +470,14 @@ test("CALL validates its target read before any stack write and commits neither 
       esp: guestMemoryMinimumByteLength + 2,
       ...preservedFlags
     },
-    expectedCompletion: pageFault(
-      guestMemoryMinimumByteLength - 2,
-      PageFaultErrorCode.WRITE
-    ),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength - 2,
+        errorCode: 2
+      }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [{
@@ -471,7 +498,7 @@ test("RET pops near targets and applies unsigned immediate cleanup before dispat
       bytes: [0xc3],
       initialState: { esp: 0x40, ...preservedFlags },
       expectedState: { esp: 0x44 },
-      expectedCompletion: dispatched(0x3000),
+      expectedCompletion: { kind: "dispatched", targetEip: 0x3000 },
       expectedEip: 0x3000,
       memoryPatches: [{ address: 0x40, bytes: [0x00, 0x30, 0x00, 0x00] }],
       expectedMemory: [{ address: 0x40, bytes: [0x00, 0x30, 0x00, 0x00] }]
@@ -481,7 +508,7 @@ test("RET pops near targets and applies unsigned immediate cleanup before dispat
       bytes: [0x66, 0xc3],
       initialState: { esp: 0x40, ...preservedFlags },
       expectedState: { esp: 0x42 },
-      expectedCompletion: dispatched(0x3456),
+      expectedCompletion: { kind: "dispatched", targetEip: 0x3456 },
       expectedEip: 0x3456,
       memoryPatches: [{ address: 0x40, bytes: [0x56, 0x34] }],
       expectedMemory: [{ address: 0x40, bytes: [0x56, 0x34] }]
@@ -491,7 +518,10 @@ test("RET pops near targets and applies unsigned immediate cleanup before dispat
       bytes: [0xc2, 0x34, 0x80],
       initialState: { esp: 0x40, ...preservedFlags },
       expectedState: { esp: 0x8078 },
-      expectedCompletion: dispatched(0x1234_5678),
+      expectedCompletion: {
+        kind: "dispatched",
+        targetEip: 0x1234_5678
+      },
       expectedEip: 0x1234_5678,
       memoryPatches: [{ address: 0x40, bytes: [0x78, 0x56, 0x34, 0x12] }],
       expectedMemory: [{ address: 0x40, bytes: [0x78, 0x56, 0x34, 0x12] }]
@@ -501,7 +531,7 @@ test("RET pops near targets and applies unsigned immediate cleanup before dispat
       bytes: [0x66, 0xc2, 0x08, 0x00],
       initialState: { esp: 0x40, ...preservedFlags },
       expectedState: { esp: 0x4a },
-      expectedCompletion: dispatched(0x5678),
+      expectedCompletion: { kind: "dispatched", targetEip: 0x5678 },
       expectedEip: 0x5678,
       memoryPatches: [{ address: 0x40, bytes: [0x78, 0x56] }],
       expectedMemory: [{ address: 0x40, bytes: [0x78, 0x56] }]
@@ -520,24 +550,13 @@ test("RET read faults leave EIP, ESP, cleanup, and memory uncommitted", async ()
     name: "partial dword target read",
     bytes: [0xc2, 0x34, 0x80],
     initialState: { esp: faultAddress, ...preservedFlags },
-    expectedCompletion: pageFault(faultAddress, 0),
+    expectedCompletion: {
+      kind: "cpuException",
+      exception: { kind: "PF", linearAddress: faultAddress, errorCode: 0 }
+    },
     expectedEip: startAddress,
     instructionCount: 0,
     memoryPatches: [{ address: faultAddress, bytes: [0x78, 0x56] }],
     expectedMemory: [{ address: faultAddress, bytes: [0x78, 0x56] }]
   });
 });
-
-function dispatched(targetEip: number): CompiledInstructionCompletion {
-  return { kind: "dispatched", targetEip };
-}
-
-function pageFault(
-  linearAddress: number,
-  errorCode: number
-): CompiledInstructionCompletion {
-  return {
-    kind: "cpuException",
-    exception: { kind: "PF", linearAddress, errorCode }
-  };
-}
