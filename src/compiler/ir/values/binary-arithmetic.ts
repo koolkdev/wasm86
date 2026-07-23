@@ -18,9 +18,7 @@ export const binaryArithmetic: Readonly<
   add: {
     evaluate: (a, b) => i32(a + b),
     fold: ({ a, b, left, right }) => right === 0 ? a : left === 0 ? b : undefined,
-    bounds: unboundedWidthBounds,
-    emitI32: (body) => body.i32Add(),
-    emitI64: (body) => body.i64Add()
+    bounds: unboundedWidthBounds
   },
   sub: {
     evaluate: (a, b) => i32(a - b),
@@ -33,9 +31,7 @@ export const binaryArithmetic: Readonly<
         ? context.constant(0)
         : undefined;
     },
-    bounds: unboundedWidthBounds,
-    emitI32: (body) => body.i32Sub(),
-    emitI64: (body) => body.i64Sub()
+    bounds: unboundedWidthBounds
   },
   mul: {
     evaluate: Math.imul,
@@ -56,9 +52,7 @@ export const binaryArithmetic: Readonly<
         ? context.constant(0)
         : undefined;
     },
-    bounds: unboundedWidthBounds,
-    emitI32: (body) => body.i32Mul(),
-    emitI64: (body) => body.i64Mul()
+    bounds: unboundedWidthBounds
   },
   div_s: {
     evaluate: (a, b) => {
@@ -83,9 +77,7 @@ export const binaryArithmetic: Readonly<
       const minimum = type === "i32" ? -0x8000_0000n : -0x8000_0000_0000_0000n;
 
       return dividend === undefined || dividend === minimum;
-    },
-    emitI32: (body) => body.i32DivS(),
-    emitI64: (body) => body.i64DivS()
+    }
   },
   div_u: {
     evaluate: (a, b) => {
@@ -94,9 +86,7 @@ export const binaryArithmetic: Readonly<
     },
     fold: ({ a, right }) => right === 1 ? a : undefined,
     bounds: ({ context, a }) => fitsUnsigned(context.widthBounds(a).unsignedBits),
-    mayTrap: zeroDivisorMayTrap,
-    emitI32: (body) => body.i32DivU(),
-    emitI64: (body) => body.i64DivU()
+    mayTrap: zeroDivisorMayTrap
   },
   rem_s: {
     evaluate: (a, b) => {
@@ -108,9 +98,7 @@ export const binaryArithmetic: Readonly<
         ? context.constant(0)
         : undefined,
     bounds: unboundedWidthBounds,
-    mayTrap: zeroDivisorMayTrap,
-    emitI32: (body) => body.i32RemS(),
-    emitI64: (body) => body.i64RemS()
+    mayTrap: zeroDivisorMayTrap
   },
   rem_u: {
     evaluate: (a, b) => {
@@ -121,9 +109,7 @@ export const binaryArithmetic: Readonly<
       ? context.constant(0)
       : undefined,
     bounds: ({ context, b }) => fitsUnsigned(context.widthBounds(b).unsignedBits),
-    mayTrap: zeroDivisorMayTrap,
-    emitI32: (body) => body.i32RemU(),
-    emitI64: (body) => body.i64RemU()
+    mayTrap: zeroDivisorMayTrap
   }
 };
 

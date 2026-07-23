@@ -21,7 +21,7 @@ export const selectValue: ValueDefinition<SelectArgs, SelectNode> = {
     kind: "scoped",
     key: (node) => [node.condition, node.whenTrue, node.whenFalse]
   },
-  // Wasm select consumes its two alternatives before its condition.
+  // Both alternatives evaluate before the condition.
   inputs: (node) => [
     { value: node.whenTrue, type: "i32" },
     { value: node.whenFalse, type: "i32" },
@@ -45,6 +45,5 @@ export const selectValue: ValueDefinition<SelectArgs, SelectNode> = {
 
     return condition === 0 ? node.whenFalse : node.whenTrue;
   },
-  captureMode: "compute",
-  emit: (_id, _node, target) => target.body.select()
+  captureMode: "compute"
 };

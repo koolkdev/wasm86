@@ -1,4 +1,3 @@
-import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import type { IntegerWidth } from "./types.js";
 import type {
   ValueId,
@@ -39,24 +38,12 @@ export type ValueFoldContext = ValueBoundsContext & ValueTrapContext & Readonly<
   eqz(value: ValueId): ValueId;
 }>;
 
-// Definitions emit only the value's own instruction or leaf realization.
-// Operand evaluation is owned by the table from the stored `inputs` list.
-export type ValueEmitTarget = Readonly<{
-  body: WasmInstructionWriter;
-  emitNodeOutput(id: ValueId): void;
-  emitParameter(index: number): void;
-  emitLoopInput(id: ValueId): void;
-}>;
-
-export type ValueEmitContext = ValueEmitTarget & Readonly<{
-  emitUse(id: ValueId): void;
-}>;
-
 // A definition owns one normalized node kind. Optional hooks mean the form has
 // no special behavior; StoredValueEntry supplies their common defaults.
 export type ValueDefinition<Args, Node extends ValueNodeBase> = Readonly<{
   create(args: Args): Node;
   identity: ValueIdentity<Node>;
+  // Typed dependencies in their eager evaluation order.
   inputs?(node: Node): readonly ValueInput[];
   resultType(node: Node): ValueType;
   widthBounds(node: Node, context: ValueBoundsContext): WidthBounds;
@@ -65,5 +52,4 @@ export type ValueDefinition<Args, Node extends ValueNodeBase> = Readonly<{
   captureMode: ValueCaptureMode;
   constValue?(node: Node): number | undefined;
   integerValue?(node: Node): bigint | undefined;
-  emit(id: ValueId, node: Node, target: ValueEmitTarget): void;
 }>;

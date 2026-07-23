@@ -35,9 +35,7 @@ export const binaryBitwise: Readonly<
         ? context.constant(0)
         : undefined;
     },
-    bounds: bitwiseBounds,
-    emitI32: (body) => body.i32Xor(),
-    emitI64: (body) => body.i64Xor()
+    bounds: bitwiseBounds
   },
   or: {
     evaluate: (a, b) => a | b,
@@ -58,9 +56,7 @@ export const binaryBitwise: Readonly<
         ? context.constant(-1)
         : undefined;
     },
-    bounds: bitwiseBounds,
-    emitI32: (body) => body.i32Or(),
-    emitI64: (body) => body.i64Or()
+    bounds: bitwiseBounds
   },
   and: {
     evaluate: (a, b) => a & b,
@@ -89,16 +85,12 @@ export const binaryBitwise: Readonly<
         Math.min(left.unsignedBits, right.unsignedBits),
         Math.max(left.signedBits, right.signedBits)
       );
-    },
-    emitI32: (body) => body.i32And(),
-    emitI64: (body) => body.i64And()
+    }
   },
   shl: {
     evaluate: (a, b) => a << (b & 31),
     fold: foldShift,
-    bounds: unboundedWidthBounds,
-    emitI32: (body) => body.i32Shl(),
-    emitI64: (body) => body.i64Shl()
+    bounds: unboundedWidthBounds
   },
   rotl: {
     evaluate: (a, b) => {
@@ -107,9 +99,7 @@ export const binaryBitwise: Readonly<
       return i32((a << shift) | (a >>> ((32 - shift) & 31)));
     },
     fold: foldShift,
-    bounds: unboundedWidthBounds,
-    emitI32: (body) => body.i32Rotl(),
-    emitI64: (body) => body.i64Rotl()
+    bounds: unboundedWidthBounds
   },
   rotr: {
     evaluate: (a, b) => {
@@ -118,16 +108,12 @@ export const binaryBitwise: Readonly<
       return i32((a >>> shift) | (a << ((32 - shift) & 31)));
     },
     fold: foldShift,
-    bounds: unboundedWidthBounds,
-    emitI32: (body) => body.i32Rotr(),
-    emitI64: (body) => body.i64Rotr()
+    bounds: unboundedWidthBounds
   },
   shr_s: {
     evaluate: (a, b) => a >> (b & 31),
     fold: foldShift,
-    bounds: unboundedWidthBounds,
-    emitI32: (body) => body.i32ShrS(),
-    emitI64: (body) => body.i64ShrS()
+    bounds: unboundedWidthBounds
   },
   shr_u: {
     evaluate: (a, b) => i32(a >>> (b & 31)),
@@ -139,9 +125,7 @@ export const binaryBitwise: Readonly<
       return shift === undefined
         ? clampedBounds(left.unsignedBits, 32)
         : fitsUnsigned(Math.max(1, left.unsignedBits - (shift & 31)));
-    },
-    emitI32: (body) => body.i32ShrU(),
-    emitI64: (body) => body.i64ShrU()
+    }
   }
 };
 

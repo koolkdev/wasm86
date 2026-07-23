@@ -1,4 +1,3 @@
-import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import type { ValueDefinition } from "./definition.js";
 import type { ValueId, ValueType } from "./types.js";
 import { fitsUnsigned } from "./width-bounds.js";
@@ -7,8 +6,6 @@ type ComparisonDefinition = Readonly<{
   evaluate(a: number, b: number): boolean;
   same: boolean;
   signed: boolean;
-  emitI32(body: WasmInstructionWriter): void;
-  emitI64(body: WasmInstructionWriter): void;
 }>;
 
 export type CompareOperator =
@@ -27,72 +24,52 @@ const comparisons: Readonly<Record<CompareOperator, ComparisonDefinition>> = {
   eq: {
     evaluate: (a, b) => a === b,
     same: true,
-    signed: false,
-    emitI32: (body) => body.i32Eq(),
-    emitI64: (body) => body.i64Eq()
+    signed: false
   },
   ne: {
     evaluate: (a, b) => a !== b,
     same: false,
-    signed: false,
-    emitI32: (body) => body.i32Ne(),
-    emitI64: (body) => body.i64Ne()
+    signed: false
   },
   lt_u: {
     evaluate: (a, b) => (a >>> 0) < (b >>> 0),
     same: false,
-    signed: false,
-    emitI32: (body) => body.i32LtU(),
-    emitI64: (body) => body.i64LtU()
+    signed: false
   },
   le_u: {
     evaluate: (a, b) => (a >>> 0) <= (b >>> 0),
     same: true,
-    signed: false,
-    emitI32: (body) => body.i32LeU(),
-    emitI64: (body) => body.i64LeU()
+    signed: false
   },
   gt_u: {
     evaluate: (a, b) => (a >>> 0) > (b >>> 0),
     same: false,
-    signed: false,
-    emitI32: (body) => body.i32GtU(),
-    emitI64: (body) => body.i64GtU()
+    signed: false
   },
   ge_u: {
     evaluate: (a, b) => (a >>> 0) >= (b >>> 0),
     same: true,
-    signed: false,
-    emitI32: (body) => body.i32GeU(),
-    emitI64: (body) => body.i64GeU()
+    signed: false
   },
   lt_s: {
     evaluate: (a, b) => a < b,
     same: false,
-    signed: true,
-    emitI32: (body) => body.i32LtS(),
-    emitI64: (body) => body.i64LtS()
+    signed: true
   },
   le_s: {
     evaluate: (a, b) => a <= b,
     same: true,
-    signed: true,
-    emitI32: (body) => body.i32LeS(),
-    emitI64: (body) => body.i64LeS()
+    signed: true
   },
   gt_s: {
     evaluate: (a, b) => a > b,
     same: false,
-    signed: true,
-    emitI32: (body) => body.i32GtS(),
-    emitI64: (body) => body.i64GtS()
+    signed: true
   },
   ge_s: {
     evaluate: (a, b) => a >= b,
     same: true,
-    signed: true,
-    emitI32: (body) => body.i32GeS(),
-    emitI64: (body) => body.i64GeS()
+    signed: true
   }
 };
 
@@ -140,19 +117,7 @@ export const comparisonValue: ValueDefinition<ComparisonArgs, ComparisonNode> = 
       ? context.constant(definition.same ? 1 : 0)
       : undefined;
   },
-  captureMode: "compute",
-  emit: (_id, node, target) => {
-    const definition = comparisons[node.operator];
-
-    switch (node.type) {
-      case "i32":
-        definition.emitI32(target.body);
-        break;
-      case "i64":
-        definition.emitI64(target.body);
-        break;
-    }
-  }
+  captureMode: "compute"
 };
 
 export function compareIsSigned(operator: CompareOperator): boolean {

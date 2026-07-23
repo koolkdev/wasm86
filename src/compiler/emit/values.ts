@@ -9,9 +9,8 @@ import type { CellRef } from "#compiler/ir/cell.js";
 import type {
   OperationEmitTarget
 } from "#compiler/ir/operations/definition.js";
-import type { ValueEmitContext } from "#compiler/ir/values/definition.js";
-import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
+import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { PlacementIndex } from "#compiler/placement/index.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
 import type { ModuleBindings } from "#compiler/module/bindings.js";
@@ -19,32 +18,32 @@ import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer
 import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
 import type { ValueUseEmitter } from "#compiler/ir/node.js";
 import { emitCall, emitReturnCall } from "./context.js";
+import { emitValueNode } from "./value-instructions.js";
 
-export type ValueEmitterContext = Readonly<{
-  body: WasmInstructionWriter;
-  values: ValueTable;
-  analysis: FunctionAnalysis;
-  plan: PlacementPlan;
-  index: PlacementIndex;
-  // Physical plan local -> the Wasm local allocated for this function.
-  locals: readonly number[];
-  bindings: ModuleBindings;
-}>;
-
-// Executes a placement plan mechanically. Mutable state records only which
-// planned sources have already been emitted and the current structural site.
+// Executes a placement plan and lowers demanded value recipes. Mutable state
+// records only which planned sources have already been emitted and the current
+// structural site.
 export class ValueEmitter implements ValueUseEmitter {
-  readonly #context: ValueEmitterContext;
   readonly #body: WasmInstructionWriter;
   readonly #values: ValueTable;
   readonly #analysis: FunctionAnalysis;
   readonly #plan: PlacementPlan;
+  readonly #captures: PlacementIndex["captures"];
+  readonly #locals: readonly number[];
   readonly #realized: Uint8Array;
   readonly #sites: SiteId[] = [];
   readonly #operationTarget: OperationEmitTarget;
-  readonly #valueContext: ValueEmitContext;
 
-  constructor(context: ValueEmitterContext) {
+  constructor(context: Readonly<{
+    body: WasmInstructionWriter;
+    values: ValueTable;
+    analysis: FunctionAnalysis;
+    plan: PlacementPlan;
+    index: PlacementIndex;
+    // Physical plan local -> the Wasm local allocated for this function.
+    locals: readonly number[];
+    bindings: ModuleBindings;
+  }>) {
     assert(
       context.locals.length === context.plan.localTypes.length,
       "placement local table does not match its plan"
@@ -53,11 +52,12 @@ export class ValueEmitter implements ValueUseEmitter {
       context.index.captures.length === context.analysis.sites().length,
       "placement capture index does not match its sites"
     );
-    this.#context = context;
     this.#body = context.body;
     this.#values = context.values;
     this.#analysis = context.analysis;
     this.#plan = context.plan;
+    this.#captures = context.index.captures;
+    this.#locals = context.locals;
     this.#realized = new Uint8Array(context.values.size());
 
     this.#operationTarget = {
@@ -67,13 +67,6 @@ export class ValueEmitter implements ValueUseEmitter {
       emitReturnCall: (target) =>
         emitReturnCall(context.body, context.bindings, target),
       resourceIndex: (resource) => context.bindings.resourceIndex(resource)
-    };
-    this.#valueContext = {
-      body: context.body,
-      emitUse: (id) => this.emitUse(id),
-      emitNodeOutput: (id) => this.#emitSource(id),
-      emitParameter: (index) => context.body.localGet(index),
-      emitLoopInput: (id) => context.body.localGet(this.valueLocal(id))
     };
   }
 
@@ -117,7 +110,7 @@ export class ValueEmitter implements ValueUseEmitter {
     const mode = this.#values.captureMode(value);
 
     if (mode === "reemit") {
-      this.#values.emit(value, this.#valueContext);
+      this.#emitValue(value);
       return;
     }
 
@@ -168,7 +161,7 @@ export class ValueEmitter implements ValueUseEmitter {
 
   #local(local: number): number {
     assert(Number.isInteger(local) && local >= 0, `invalid placement local ${local}`);
-    const wasmLocal = this.#context.locals[local];
+    const wasmLocal = this.#locals[local];
 
     assert(wasmLocal !== undefined, `placement local ${local} is not allocated`);
     return wasmLocal;
@@ -192,7 +185,7 @@ export class ValueEmitter implements ValueUseEmitter {
   }
 
   #emitCapturesAt(site: SiteId): void {
-    for (const value of this.#context.index.captures[site] ?? []) {
+    for (const value of this.#captures[site] ?? []) {
       this.#capture(value, site);
     }
   }
@@ -223,11 +216,29 @@ export class ValueEmitter implements ValueUseEmitter {
         return;
       }
       case "compute":
-        this.#values.emit(value, this.#valueContext);
+        this.#emitValue(value);
         return;
       case "reemit":
         assert(false, `value ${value} cannot have a planned source`);
     }
+  }
+
+  #emitValue(value: ValueId): void {
+    for (const child of this.#values.children(value)) {
+      this.emitUse(child);
+    }
+
+    const node = this.#values.node(value);
+
+    if (node.kind === "nodeOutput") {
+      assert(false, `node output ${value} must emit through its producer`);
+      return;
+    }
+    if (node.kind === "loopInput") {
+      this.#body.localGet(this.valueLocal(value));
+      return;
+    }
+    emitValueNode(this.#body, node);
   }
 
   #currentSite(): SiteId {

@@ -1,4 +1,3 @@
-import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import type { ValueDefinition } from "./definition.js";
 import type { ValueId, WidthBounds } from "./types.js";
 import { fitsUnsigned, unboundedWidthBounds } from "./width-bounds.js";
@@ -6,7 +5,6 @@ import { fitsUnsigned, unboundedWidthBounds } from "./width-bounds.js";
 type UnaryDefinition = Readonly<{
   evaluate(value: number): number;
   bounds: WidthBounds;
-  emit(body: WasmInstructionWriter): void;
 }>;
 
 export type UnaryOperator = "popcnt" | "ctz" | "clz" | "eqz";
@@ -24,8 +22,7 @@ const unaryOperators: Readonly<Record<UnaryOperator, UnaryDefinition>> = {
 
       return count;
     },
-    bounds: unboundedWidthBounds,
-    emit: (body) => body.i32Popcnt()
+    bounds: unboundedWidthBounds
   },
   ctz: {
     evaluate: (value) => {
@@ -33,18 +30,15 @@ const unaryOperators: Readonly<Record<UnaryOperator, UnaryDefinition>> = {
 
       return unsigned === 0 ? 32 : 31 - Math.clz32(unsigned & -unsigned);
     },
-    bounds: fitsUnsigned(6),
-    emit: (body) => body.i32Ctz()
+    bounds: fitsUnsigned(6)
   },
   clz: {
     evaluate: Math.clz32,
-    bounds: fitsUnsigned(6),
-    emit: (body) => body.i32Clz()
+    bounds: fitsUnsigned(6)
   },
   eqz: {
     evaluate: (value) => value === 0 ? 1 : 0,
-    bounds: fitsUnsigned(1),
-    emit: (body) => body.i32Eqz()
+    bounds: fitsUnsigned(1)
   }
 };
 
@@ -67,6 +61,5 @@ export const unaryValue: ValueDefinition<UnaryArgs, UnaryNode> = {
       ? undefined
       : context.constant(unaryOperators[node.operator].evaluate(constant));
   },
-  captureMode: "compute",
-  emit: (_id, node, target) => unaryOperators[node.operator].emit(target.body)
+  captureMode: "compute"
 };

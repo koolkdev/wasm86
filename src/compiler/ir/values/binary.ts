@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import {
   binaryArithmetic,
   type BinaryArithmeticOperator
@@ -46,8 +45,6 @@ export type BinaryDefinition = Readonly<{
   fold(value: BinaryFoldCase): ValueId | undefined;
   bounds: WidthBounds | ((value: BinaryBoundsCase) => WidthBounds);
   mayTrap?: (value: BinaryTrapCase) => boolean;
-  emitI32(body: WasmInstructionWriter): void;
-  emitI64(body: WasmInstructionWriter): void;
 }>;
 
 export type BinaryOperator = BinaryArithmeticOperator | BinaryBitwiseOperator;
@@ -122,17 +119,5 @@ export const binaryValue: ValueDefinition<BinaryArgs, BinaryNode> = {
       a: node.a,
       b: node.b
     }) ?? false,
-  captureMode: "compute",
-  emit: (_id, node, target) => {
-    const definition = binaryOperations[node.operator];
-
-    switch (node.type) {
-      case "i32":
-        definition.emitI32(target.body);
-        break;
-      case "i64":
-        definition.emitI64(target.body);
-        break;
-    }
-  }
+  captureMode: "compute"
 };

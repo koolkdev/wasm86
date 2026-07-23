@@ -7,7 +7,7 @@ import {
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
 import { emitFunctionRegions } from "./region.js";
-import { wasmTypeForValue } from "./value.js";
+import { wasmTypeForValue } from "./values.js";
 
 export type FunctionEmitContext = Readonly<{
   bindings: ModuleBindings;

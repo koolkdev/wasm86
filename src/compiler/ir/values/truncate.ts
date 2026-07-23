@@ -1,6 +1,6 @@
 import type { IntegerWidth } from "./types.js";
 import type { ValueDefinition } from "./definition.js";
-import { emitUnsignedWidth, truncateInteger } from "./integer-width.js";
+import { truncateInteger } from "./integer-width.js";
 import type { ValueId, ValueType } from "./types.js";
 import { fitsUnsigned } from "./width-bounds.js";
 
@@ -58,16 +58,5 @@ export const truncateValue: ValueDefinition<TruncateArgs, TruncateNode> = {
       }
     }
   },
-  captureMode: "compute",
-  emit: (_id, node, target) => {
-    switch (node.inputType) {
-      case "i32":
-        break;
-      case "i64":
-        target.body.i32WrapI64();
-        break;
-    }
-
-    emitUnsignedWidth(target.body, node.width);
-  }
+  captureMode: "compute"
 };

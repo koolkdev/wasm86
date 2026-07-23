@@ -11,7 +11,6 @@ import {
   type ValueBoundsContext,
   type ValueCaptureMode,
   type ValueDefinition,
-  type ValueEmitContext,
   type ValueFoldContext,
   type ValueKey
 } from "./definition.js";
@@ -65,11 +64,9 @@ interface StoredValue {
   captureMode(): ValueCaptureMode;
   constValue(): number | undefined;
   integerValue(): bigint | undefined;
-  emit(id: ValueId, context: ValueEmitContext): void;
 }
 
 class StoredValueEntry<Args, Node extends ValueNode> implements StoredValue {
-  readonly #inputs: readonly ValueInput[];
   readonly #children: readonly ValueId[];
 
   constructor(
@@ -79,7 +76,6 @@ class StoredValueEntry<Args, Node extends ValueNode> implements StoredValue {
     private readonly intrinsicMayTrap: boolean,
     private readonly nonTrapping: boolean
   ) {
-    this.#inputs = inputs;
     this.#children = inputs.length === 0
       ? noChildren
       : inputs.map((input) => input.value);
@@ -115,14 +111,6 @@ class StoredValueEntry<Args, Node extends ValueNode> implements StoredValue {
 
   integerValue(): bigint | undefined {
     return this.definition.integerValue?.(this.node);
-  }
-
-  emit(id: ValueId, context: ValueEmitContext): void {
-    for (const input of this.#inputs) {
-      context.emitUse(input.value);
-    }
-
-    this.definition.emit(id, this.node, context);
   }
 }
 
@@ -216,6 +204,7 @@ export class ValueTable implements ValueBuilder {
     });
   }
 
+  // Preserves definition input order, which is eager evaluation order.
   children(id: ValueId): readonly ValueId[] {
     return this.#entry(id).children();
   }
@@ -253,10 +242,6 @@ export class ValueTable implements ValueBuilder {
 
   captureMode(id: ValueId): ValueCaptureMode {
     return this.#entry(id).captureMode();
-  }
-
-  emit(id: ValueId, context: ValueEmitContext): void {
-    this.#entry(id).emit(id, context);
   }
 
   // The node's compile-time i32 constant, when it is one.

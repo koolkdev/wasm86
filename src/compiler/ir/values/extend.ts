@@ -2,8 +2,6 @@ import { assert } from "#common/assert.js";
 import type { IntegerWidth } from "./types.js";
 import type { ValueDefinition } from "./definition.js";
 import {
-  emitSignedWidth,
-  emitUnsignedWidth,
   signExtendInteger,
   truncateInteger
 } from "./integer-width.js";
@@ -74,24 +72,5 @@ export const extendValue: ValueDefinition<ExtendArgs, ExtendNode> = {
         return undefined;
     }
   },
-  captureMode: "compute",
-  emit: (_id, node, target) => {
-    if (node.signed) {
-      emitSignedWidth(target.body, node.width);
-    } else {
-      emitUnsignedWidth(target.body, node.width);
-    }
-
-    switch (node.resultType) {
-      case "i32":
-        break;
-      case "i64":
-        if (node.signed) {
-          target.body.i64ExtendI32S();
-        } else {
-          target.body.i64ExtendI32U();
-        }
-        break;
-    }
-  }
+  captureMode: "compute"
 };

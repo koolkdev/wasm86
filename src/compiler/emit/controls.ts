@@ -16,7 +16,7 @@ import {
   createFunctionFrame,
   emitReturnCall
 } from "./context.js";
-import type { ValueEmitter } from "./value.js";
+import type { ValueEmitter } from "./values.js";
 
 export function createControlEmitter({
   body,

@@ -8,7 +8,7 @@ import type { ModuleBindings } from "#compiler/module/bindings.js";
 import type { FunctionPlacement } from "#compiler/placement/place.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import { createControlEmitter } from "./controls.js";
-import { ValueEmitter } from "./value.js";
+import { ValueEmitter } from "./values.js";
 
 export type RegionEmitContext = Readonly<{
   body: WasmInstructionWriter;
