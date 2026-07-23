@@ -1,16 +1,8 @@
 import { assert } from "#common/assert.js";
-import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ValueInput } from "#compiler/ir/values/types.js";
 import type { FunctionType } from "#compiler/ir/function.js";
 import type { FunctionRef, TableRef } from "#compiler/ir/refs.js";
-import type { ValueUseEmitter } from "#compiler/ir/node.js";
-
-export type InvocationEmitTarget = Readonly<{
-  body: WasmInstructionWriter;
-  emitCall: (target: CallTarget) => void;
-  emitReturnCall: (target: CallTarget) => void;
-}>;
 
 export type DirectCallTarget = Readonly<{
   kind: "direct";
@@ -51,7 +43,6 @@ export class IndirectCallTarget {
   }: IndirectCallTargetArgs): IndirectCallTarget {
     return new IndirectCallTarget(table, type, effects, elementIndex);
   }
-
 }
 
 export type InvocationArgs = Readonly<{
@@ -90,11 +81,5 @@ export class Invocation {
 
   static create({ target, arguments: inputs }: InvocationArgs): Invocation {
     return new Invocation(target, inputs);
-  }
-
-  emitInputs(values: ValueUseEmitter): void {
-    for (const input of this.inputs) {
-      values.emitUse(input.value);
-    }
   }
 }

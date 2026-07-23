@@ -16,10 +16,6 @@ export type RegionCompletionContext = Readonly<{
   regionCompletes: (body: Region) => boolean;
 }>;
 
-export type ValueUseEmitter = Readonly<{
-  emitUse: (value: ValueId) => void;
-}>;
-
 // Operations and controls expose the same structural facts directly. Only
 // context-dependent completion and structural rebuilding remain functions.
 export interface RegionNodeBase {

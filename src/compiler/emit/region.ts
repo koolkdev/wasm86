@@ -8,6 +8,7 @@ import type { ModuleBindings } from "#compiler/module/bindings.js";
 import type { FunctionPlacement } from "#compiler/placement/place.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import { createControlEmitter } from "./controls.js";
+import { emitOperation } from "./operations.js";
 import { ValueEmitter } from "./values.js";
 
 export type RegionEmitContext = Readonly<{
@@ -62,7 +63,7 @@ export function emitFunctionRegions(
       !node.outputs.some((output) => analysis.isLive(output)) &&
       analysis.operationMustExecute(node)
     ) {
-      valueEmitter.emitOperation(node);
+      emitOperation(body, bindings, valueEmitter, node);
       for (const _output of node.outputs) {
         body.drop();
       }

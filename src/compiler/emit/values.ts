@@ -4,11 +4,7 @@ import type {
   RegionSite,
   SiteId
 } from "#compiler/analysis/model.js";
-import type { Operation } from "#compiler/ir/operations/index.js";
 import type { CellRef } from "#compiler/ir/cell.js";
-import type {
-  OperationEmitTarget
-} from "#compiler/ir/operations/definition.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { PlacementIndex } from "#compiler/placement/index.js";
@@ -16,15 +12,15 @@ import type { PlacementPlan } from "#compiler/placement/model.js";
 import type { ModuleBindings } from "#compiler/module/bindings.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
-import type { ValueUseEmitter } from "#compiler/ir/node.js";
-import { emitCall, emitReturnCall } from "./context.js";
+import { emitOperation } from "./operations.js";
 import { emitValueNode } from "./value-instructions.js";
 
 // Executes a placement plan and lowers demanded value recipes. Mutable state
 // records only which planned sources have already been emitted and the current
 // structural site.
-export class ValueEmitter implements ValueUseEmitter {
+export class ValueEmitter {
   readonly #body: WasmInstructionWriter;
+  readonly #bindings: ModuleBindings;
   readonly #values: ValueTable;
   readonly #analysis: FunctionAnalysis;
   readonly #plan: PlacementPlan;
@@ -32,7 +28,6 @@ export class ValueEmitter implements ValueUseEmitter {
   readonly #locals: readonly number[];
   readonly #realized: Uint8Array;
   readonly #sites: SiteId[] = [];
-  readonly #operationTarget: OperationEmitTarget;
 
   constructor(context: Readonly<{
     body: WasmInstructionWriter;
@@ -53,21 +48,13 @@ export class ValueEmitter implements ValueUseEmitter {
       "placement capture index does not match its sites"
     );
     this.#body = context.body;
+    this.#bindings = context.bindings;
     this.#values = context.values;
     this.#analysis = context.analysis;
     this.#plan = context.plan;
     this.#captures = context.index.captures;
     this.#locals = context.locals;
     this.#realized = new Uint8Array(context.values.size());
-
-    this.#operationTarget = {
-      body: context.body,
-      cellLocal: (cell) => this.#cellLocal(cell),
-      emitCall: (target) => emitCall(context.body, context.bindings, target),
-      emitReturnCall: (target) =>
-        emitReturnCall(context.body, context.bindings, target),
-      resourceIndex: (resource) => context.bindings.resourceIndex(resource)
-    };
   }
 
   withSite(site: SiteId, emit: () => void): void {
@@ -83,10 +70,6 @@ export class ValueEmitter implements ValueUseEmitter {
     } finally {
       assert(this.#sites.pop() === site, "placement site stack changed");
     }
-  }
-
-  emitOperation(operation: Operation): void {
-    operation.emit(this.#operationTarget, this);
   }
 
   constValue(value: ValueId): number | undefined {
@@ -159,6 +142,13 @@ export class ValueEmitter implements ValueUseEmitter {
     return this.#local(local);
   }
 
+  cellLocal(cell: CellRef): number {
+    const local = this.#plan.cellLocals.get(cell);
+
+    assert(local !== undefined, "cell has no planned local");
+    return this.#local(local);
+  }
+
   #local(local: number): number {
     assert(Number.isInteger(local) && local >= 0, `invalid placement local ${local}`);
     const wasmLocal = this.#locals[local];
@@ -212,7 +202,7 @@ export class ValueEmitter implements ValueUseEmitter {
         const producer = this.#analysis.producer(value);
 
         assert(producer !== undefined, `node output ${value} has no producer`);
-        this.emitOperation(producer.operation);
+        emitOperation(this.#body, this.#bindings, this, producer.operation);
         return;
       }
       case "compute":
@@ -246,13 +236,6 @@ export class ValueEmitter implements ValueUseEmitter {
 
     assert(site !== undefined, "value realization occurred outside a placement site");
     return site;
-  }
-
-  #cellLocal(cell: CellRef): number {
-    const local = this.#plan.cellLocals.get(cell);
-
-    assert(local !== undefined, "cell has no planned local");
-    return this.#local(local);
   }
 }
 

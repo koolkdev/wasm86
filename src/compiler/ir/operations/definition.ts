@@ -1,18 +1,15 @@
 import { assert } from "#common/assert.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
-import type { InvocationEmitTarget } from "#compiler/ir/invocation.js";
 import type {
   ValueId,
   ValueInput,
   ValueType,
   WidthBounds
 } from "#compiler/ir/values/types.js";
-import type { CellRef } from "#compiler/ir/cell.js";
 import type {
   RegionCompletionContext,
-  RegionNodeBase,
-  ValueUseEmitter
+  RegionNodeBase
 } from "#compiler/ir/node.js";
 import type { Region } from "#compiler/ir/region.js";
 
@@ -30,13 +27,6 @@ export function operationResult(type: ValueType): OperationResult {
   }
 }
 
-// Lowering-only services available to every operation occurrence. An
-// occurrence's direct `emit` function uses only the capabilities it needs.
-export type OperationEmitTarget = InvocationEmitTarget & Readonly<{
-  cellLocal: (cell: CellRef) => number;
-  resourceIndex: (resource: ResourceRef) => number;
-}>;
-
 export type OperationOutputAllocator = (result: OperationResult) => ValueId;
 
 type OperationFacts = Readonly<{
@@ -53,7 +43,8 @@ type OperationFacts = Readonly<{
 // extension before they can become operation kinds.
 export abstract class OperationBase implements RegionNodeBase {
   readonly category = "operation";
-  // Repeated values are repeated semantic uses and remain repeated entries.
+  // Inputs are typed dependencies in eager evaluation order. Repeated values
+  // are repeated semantic uses and remain repeated entries.
   readonly inputs: readonly ValueInput[];
   readonly results: readonly OperationResult[];
   readonly operands: readonly ValueId[];
@@ -90,10 +81,6 @@ export abstract class OperationBase implements RegionNodeBase {
   }
 
   abstract readonly kind: string;
-  abstract emit(
-    target: OperationEmitTarget,
-    values: ValueUseEmitter
-  ): void;
 }
 
 // Construction is the only separate factory concern. Every returned

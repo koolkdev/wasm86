@@ -7,15 +7,13 @@ import type {
   ReturnControl,
   SwitchControl
 } from "#compiler/ir/controls/index.js";
+import type { CallTarget } from "#compiler/ir/invocation.js";
 import { regionCompletes, type Region } from "#compiler/ir/region.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ModuleBindings } from "#compiler/module/bindings.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
-import {
-  createFunctionFrame,
-  emitReturnCall
-} from "./context.js";
+import { createFunctionFrame } from "./frame.js";
 import type { ValueEmitter } from "./values.js";
 
 export function createControlEmitter({
@@ -155,10 +153,15 @@ export function createControlEmitter({
         }
         body.returnFromFunction();
         return;
-      case "invocation":
-        control.source.invocation.emitInputs(valueEmitter);
-        emitReturnCall(body, bindings, control.source.invocation.target);
+      case "invocation": {
+        const { invocation } = control.source;
+
+        for (const input of invocation.inputs) {
+          valueEmitter.emitUse(input.value);
+        }
+        emitReturnCall(body, bindings, invocation.target);
         return;
+      }
     }
   }
 
@@ -216,4 +219,22 @@ function switchLabelDepths(cases: SwitchControl["cases"]): number[] {
     }
   }
   return table;
+}
+
+function emitReturnCall(
+  body: WasmInstructionWriter,
+  bindings: ModuleBindings,
+  target: CallTarget
+): void {
+  switch (target.kind) {
+    case "direct":
+      body.returnCallFunction(bindings.functionIndex(target.ref));
+      return;
+    case "indirect":
+      body.returnCallIndirect(
+        bindings.typeIndex(target.type),
+        bindings.tableIndex(target.table)
+      );
+      return;
+  }
 }

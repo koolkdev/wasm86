@@ -1,10 +1,8 @@
 import type { CellRef } from "#compiler/ir/cell.js";
 import type { ValueId, ValueInput } from "#compiler/ir/values/types.js";
-import type { ValueUseEmitter } from "#compiler/ir/node.js";
 import {
   operationResult,
   OperationBase,
-  type OperationEmitTarget,
   type OperationFactory,
   type OperationOutputAllocator,
   type OperationResult
@@ -40,13 +38,6 @@ export class CellReadOperation extends OperationBase {
     const result = operationResult(cell.type);
 
     return new CellReadOperation(cell, result, allocateOutput(result));
-  }
-
-  emit(
-    { body, cellLocal }: OperationEmitTarget,
-    _values: ValueUseEmitter
-  ): void {
-    body.localGet(cellLocal(this.cell));
   }
 }
 
@@ -90,14 +81,6 @@ export class CellWriteOperation extends OperationBase {
     initialization
   }: CellWriteArgs): CellWriteOperation {
     return new CellWriteOperation(cell, value, initialization);
-  }
-
-  emit(
-    { body, cellLocal }: OperationEmitTarget,
-    values: ValueUseEmitter
-  ): void {
-    values.emitUse(this.inputs[0].value);
-    body.localSet(cellLocal(this.cell));
   }
 }
 

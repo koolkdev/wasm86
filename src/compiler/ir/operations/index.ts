@@ -23,7 +23,6 @@ export type {
 } from "./cells.js";
 export type {
   OperationBase,
-  OperationEmitTarget,
   OperationFactory,
   OperationResult
 } from "./definition.js";

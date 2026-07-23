@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import type { WasmMemoryImmediate } from "#compiler/encoder/memory.js";
 import {
   type ResourceByteOperand,
   type ResourceEffect,
@@ -12,10 +11,8 @@ import type {
   ValueInput,
   WidthBounds
 } from "#compiler/ir/values/types.js";
-import type { ValueUseEmitter } from "#compiler/ir/node.js";
 import {
   OperationBase,
-  type OperationEmitTarget,
   type OperationFactory,
   type OperationOutputAllocator,
   type OperationResult
@@ -83,31 +80,6 @@ export class ResourceReadOperation extends OperationBase {
   ): ResourceReadOperation {
     return new ResourceReadOperation(op, allocateOutput);
   }
-
-  emit(target: OperationEmitTarget, values: ValueUseEmitter): void {
-    values.emitUse(this.inputs[0].value);
-    const immediate = resourceImmediate(
-      target.resourceIndex(this.effect.resource),
-      this.width,
-      this.displacement
-    );
-
-    switch (this.width) {
-      case 8:
-        this.signed
-          ? target.body.i32Load8S(immediate)
-          : target.body.i32Load8U(immediate);
-        return;
-      case 16:
-        this.signed
-          ? target.body.i32Load16S(immediate)
-          : target.body.i32Load16U(immediate);
-        return;
-      case 32:
-        target.body.i32Load(immediate);
-        return;
-    }
-  }
 }
 
 export const resourceRead = ResourceReadOperation satisfies OperationFactory<
@@ -153,28 +125,6 @@ export class ResourceWriteOperation extends OperationBase {
   static create(op: ResourceWriteArgs): ResourceWriteOperation {
     return new ResourceWriteOperation(op);
   }
-
-  emit(target: OperationEmitTarget, values: ValueUseEmitter): void {
-    values.emitUse(this.inputs[0].value);
-    values.emitUse(this.inputs[1].value);
-    const immediate = resourceImmediate(
-      target.resourceIndex(this.effect.resource),
-      this.width,
-      this.displacement
-    );
-
-    switch (this.width) {
-      case 8:
-        target.body.i32Store8(immediate);
-        return;
-      case 16:
-        target.body.i32Store16(immediate);
-        return;
-      case 32:
-        target.body.i32Store(immediate);
-        return;
-    }
-  }
 }
 
 export const resourceWrite = ResourceWriteOperation satisfies OperationFactory<
@@ -201,21 +151,3 @@ function readResult(
   }
   return { type: "i32", bounds: signed ? signExtended(width) : fitsUnsigned(width) };
 }
-
-function resourceImmediate(
-  memoryIndex: number,
-  width: IntegerWidth,
-  displacement: number
-): WasmMemoryImmediate {
-  return {
-    align: naturalAlignment[width],
-    offset: displacement,
-    memoryIndex
-  };
-}
-
-const naturalAlignment: Readonly<Record<IntegerWidth, number>> = {
-  8: 0,
-  16: 1,
-  32: 2
-};

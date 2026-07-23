@@ -1,10 +1,8 @@
 import { assert } from "#common/assert.js";
 import { Invocation } from "#compiler/ir/invocation.js";
-import type { ValueUseEmitter } from "#compiler/ir/node.js";
 import {
   operationResult,
   OperationBase,
-  type OperationEmitTarget,
   type OperationFactory,
   type OperationOutputAllocator,
   type OperationResult
@@ -47,11 +45,6 @@ export class CallOperation extends OperationBase {
     allocateOutput: OperationOutputAllocator
   ): CallOperation {
     return new CallOperation(invocation, allocateOutput);
-  }
-
-  emit(target: OperationEmitTarget, values: ValueUseEmitter): void {
-    this.invocation.emitInputs(values);
-    target.emitCall(this.invocation.target);
   }
 }
 
