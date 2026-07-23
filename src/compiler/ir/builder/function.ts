@@ -7,53 +7,42 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { RegionBuilder } from "./region.js";
 
-export class FunctionBuilder {
-  readonly values = new ValueTable();
-  readonly region: RegionBuilder;
-  readonly parameters: readonly ValueId[];
-  readonly #type: FunctionType;
-  #finished = false;
-
-  constructor(type: FunctionType) {
-    assert(
-      type.results.length <= 1,
-      `functions with ${type.results.length} results are not supported yet`
-    );
-    this.#type = type;
-    this.region = new RegionBuilder(this.values, undefined, type.results);
-    this.parameters = type.parameters.map((parameterType, index) =>
-      this.values.parameter(index, parameterType)
-    );
-  }
-
-  return(results: readonly ValueId[]): void {
-    this.region.return(results);
-  }
-
-  returnCall(target: CallTarget, args: readonly ValueId[]): void {
-    this.region.returnCall(target, args);
-  }
-
-  finish(): IrFunction {
-    assert(!this.#finished, "cannot finish a function twice");
-    this.#finished = true;
-    return {
-      type: this.#type,
-      parameters: [...this.parameters],
-      body: snapshotRegion(this.region.build()),
-      values: this.values.fork()
-    };
-  }
-}
+export type FunctionBuilder = Readonly<{
+  values: ValueTable;
+  region: RegionBuilder;
+  parameters: readonly ValueId[];
+  return(results: readonly ValueId[]): void;
+  returnCall(target: CallTarget, args: readonly ValueId[]): void;
+}>;
 
 export function buildFunction(
   type: FunctionType,
   build: (fn: FunctionBuilder) => void
 ): IrFunction {
-  const fn = new FunctionBuilder(type);
+  assert(
+    type.results.length <= 1,
+    `functions with ${type.results.length} results are not supported yet`
+  );
+  const values = new ValueTable();
+  const region = new RegionBuilder(values, undefined, type.results);
+  const parameters = type.parameters.map((parameterType, index) =>
+    values.parameter(index, parameterType)
+  );
+  const fn: FunctionBuilder = {
+    values,
+    region,
+    parameters,
+    return: (results) => region.return(results),
+    returnCall: (target, args) => region.returnCall(target, args)
+  };
 
   build(fn);
-  return fn.finish();
+  return {
+    type,
+    parameters: [...parameters],
+    body: snapshotRegion(region.build()),
+    values: values.fork()
+  };
 }
 
 function snapshotRegion(region: Region): Region {

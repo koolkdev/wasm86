@@ -225,20 +225,21 @@ function buildInstructionProgram(
     type: entryType,
     effects: compiledInstructionEffects
   }, (fn) => {
-    const builder = instructionConstruction.createBuilder(
+    const finalFallthrough = instructionConstruction.build(
       fn.region,
-      instructionFunctionTerminals(dispatch)
-    );
-    for (const instruction of instructions) {
-      if (!builder.add(
-        instruction.spec.semantics,
-        instruction.operands.map(staticOperandBinding),
-        staticInstructionLocation(instruction.address, instruction.nextEip)
-      )) {
-        break;
+      instructionFunctionTerminals(dispatch),
+      (builder) => {
+        for (const instruction of instructions) {
+          if (!builder.add(
+            instruction.spec.semantics,
+            instruction.operands.map(staticOperandBinding),
+            staticInstructionLocation(instruction.address, instruction.nextEip)
+          )) {
+            break;
+          }
+        }
       }
-    }
-    const finalFallthrough = builder.finish();
+    );
 
     if (finalFallthrough !== undefined) {
       fn.returnCall(fallthrough, [finalFallthrough]);

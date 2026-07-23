@@ -23,17 +23,17 @@ export function buildInterpreterInstruction(
   const entryState = stateAccess.bind(region);
   const entryCount = entryState.readField(instructionCountField);
   const instructionLimit = entryState.readField(instructionLimitField);
-  const builder = instructionConstruction.createBuilder(
+  const nextEip = instructionConstruction.build(
     region,
-    interpreterTerminals()
+    interpreterTerminals(),
+    (builder) => {
+      builder.add(
+        decoded.instruction.semantics,
+        decoded.bindings,
+        valueInstructionLocation(decoded.instructionStart, decoded.nextEip)
+      );
+    }
   );
-
-  builder.add(
-    decoded.instruction.semantics,
-    decoded.bindings,
-    valueInstructionLocation(decoded.instructionStart, decoded.nextEip)
-  );
-  const nextEip = builder.finish();
 
   if (nextEip !== undefined) {
     continueInterpreter(

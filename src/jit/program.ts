@@ -123,24 +123,23 @@ function buildJitBlockBody(
     return;
   }
 
-  const builder = instructionConstruction.createBuilder(
+  const finalFallthrough = instructionConstruction.build(
     fn.region,
-    jitInstructionTerminals(dispatch)
-  );
+    jitInstructionTerminals(dispatch),
+    (builder) => {
+      for (const instruction of decoded.instructions) {
+        const continues = builder.add(
+          instruction.spec.semantics,
+          instruction.operands.map(staticOperandBinding),
+          staticInstructionLocation(instruction.address, instruction.nextEip)
+        );
 
-  for (const instruction of decoded.instructions) {
-    const continues = builder.add(
-      instruction.spec.semantics,
-      instruction.operands.map(staticOperandBinding),
-      staticInstructionLocation(instruction.address, instruction.nextEip)
-    );
-
-    if (!continues) {
-      break;
+        if (!continues) {
+          break;
+        }
+      }
     }
-  }
-
-  const finalFallthrough = builder.finish();
+  );
 
   if (finalFallthrough === undefined) {
     return;

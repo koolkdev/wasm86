@@ -63,14 +63,14 @@ export type InstructionBuilder = Readonly<{
     bindings: readonly OperandBinding[],
     location: InstructionLocation
   ): boolean;
-  finish(): ValueId | undefined;
 }>;
 
 export type InstructionConstruction = Readonly<{
-  createBuilder(
+  build(
     region: RegionBuilder,
-    terminals: InstructionTerminals
-  ): InstructionBuilder;
+    terminals: InstructionTerminals,
+    addInstructions: (builder: InstructionBuilder) => void
+  ): ValueId | undefined;
 }>;
 
 export type InstructionConstructionOptions = Readonly<{
@@ -94,23 +94,15 @@ export function createInstructionConstruction(
   const statusFlagResolvers = createStatusFlagResolvers(options.stateAccess);
 
   return {
-    createBuilder: (region, terminals) => createInstructionBuilder(region, {
-      ...options,
-      statusFlagResolvers,
-      terminals
-    })
-  };
-}
-
-function createInstructionBuilder(
-  region: RegionBuilder,
-  options: InstructionBuilderOptions
-): InstructionBuilder {
-  const builder = new InstructionBuilderImpl(region, options);
-
-  return {
-    add: (template, bindings, location) => builder.add(template, bindings, location),
-    finish: () => builder.finish()
+    build: (region, terminals, addInstructions) =>
+      new InstructionBuilderImpl(
+        region,
+        {
+          ...options,
+          statusFlagResolvers,
+          terminals
+        }
+      ).build(addInstructions)
   };
 }
 
@@ -125,7 +117,7 @@ export function valueInstructionLocation(
   return { kind: "value", eip, nextEip };
 }
 
-// Coordinates one instruction-construction transaction. Semantic callbacks
+// Coordinates one instruction-sequence transaction. Semantic callbacks
 // receive InstructionSemantics instances fixed to their lexical scope; this
 // session owns lifecycle, joins, completion, and the shared pending state.
 class InstructionBuilderImpl implements InstructionSemanticsSession {
@@ -139,7 +131,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   readonly #scopeStorage = new WeakMap<SemanticRegionScope, ScopedInstructionStorage>();
   readonly #scopeSemantics = new WeakMap<SemanticRegionScope, InstructionSemantics>();
   #instructionLocation: InstructionLocationValues | undefined;
-  #finished = false;
+  #closed = false;
   // "terminated" means the root region already holds its terminator.
   #blockEnd: "fallthrough" | "jump" | "terminated" = "fallthrough";
 
@@ -174,12 +166,28 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     );
   }
 
+  build(
+    addInstructions: (builder: InstructionBuilder) => void
+  ): ValueId | undefined {
+    const facade: InstructionBuilder = {
+      add: (template, bindings, location) =>
+        this.add(template, bindings, location)
+    };
+
+    try {
+      addInstructions(facade);
+      return this.#complete();
+    } finally {
+      this.#closed = true;
+    }
+  }
+
   add(
     template: SemanticTemplate,
     bindings: readonly OperandBinding[],
     location: InstructionLocation
   ): boolean {
-    assert(!this.#finished, "cannot add instructions to a finished instruction builder");
+    assert(!this.#closed, "cannot add instructions to a closed instruction builder");
     assert(this.#blockEnd === "fallthrough", "cannot add instructions after a block terminator");
     assert(this.#instructionLocation === undefined, "instruction builder has an incomplete instruction");
 
@@ -202,10 +210,8 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     return !this.#isTerminated();
   }
 
-  finish(): ValueId | undefined {
-    assert(!this.#finished, "instruction builder is already finished");
+  #complete(): ValueId | undefined {
     assert(this.#instructionLocation === undefined, "instruction builder has an incomplete instruction");
-    this.#finished = true;
 
     switch (this.#blockEnd) {
       case "fallthrough": {
@@ -421,7 +427,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   }
 
   // A dispatching arm terminates where it occurs. The root records the
-  // dispatch until finish() publishes its completed state and terminal.
+  // dispatch until sequence completion publishes its state and terminal.
   #completeDispatch(scope: SemanticRegionScope): void {
     switch (scope.kind) {
       case "root":

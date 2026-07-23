@@ -8,10 +8,7 @@ import {
 import { test } from "node:test";
 
 import type { RegionNode } from "#compiler/ir/region.js";
-import {
-  buildFunction,
-  FunctionBuilder
-} from "#compiler/ir/builder/function.js";
+import { buildFunction } from "#compiler/ir/builder/function.js";
 import {
   resourceRead,
   resourceWrite
@@ -383,24 +380,25 @@ test("if builds hinted then and else bodies against child builders", () => {
 });
 
 test("function snapshots retain values created in control children", () => {
-  const fn = new FunctionBuilder(functionType(["i32", "i32"], ["i32"]));
-  const [condition, input] = fn.parameters;
-
-  ok(condition !== undefined && input !== undefined);
   let childValue!: ValueId;
+  const built = buildFunction(
+    functionType(["i32", "i32"], ["i32"]),
+    (fn) => {
+      const [condition, input] = fn.parameters;
 
-  const result = fn.region.ifValue(
-    condition,
-    (child) => {
-      childValue = child.values.binary("add", input, child.values.const(1));
-      return childValue;
-    },
-    () => input
+      ok(condition !== undefined && input !== undefined);
+      const result = fn.region.ifValue(
+        condition,
+        (child) => {
+          childValue = child.values.binary("add", input, child.values.const(1));
+          return childValue;
+        },
+        () => input
+      );
+
+      fn.return([result]);
+    }
   );
-
-  fn.return([result]);
-
-  const built = fn.finish();
 
   doesNotThrow(() => validateIrFunction(built));
   strictEqual(built.values.valueType(childValue), "i32");

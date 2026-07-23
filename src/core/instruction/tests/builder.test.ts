@@ -8,7 +8,8 @@ import { test } from "node:test";
 
 import {
   staticInstructionLocation as loc,
-  valueInstructionLocation
+  valueInstructionLocation,
+  type InstructionBuilder
 } from "#core/instruction/builder.js";
 import {
   immBinding,
@@ -32,7 +33,7 @@ import { validateIrFunction } from "#compiler/ir/validate.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
-  createInstructionFunction,
+  buildInstructionFunction,
   testInstructionDispatch
 } from "./instruction-function.js";
 import {
@@ -105,30 +106,34 @@ function rootIf(block: FunctionGraph): IfControl | undefined {
   );
 }
 
-test("finish publishes state and leaves fallthrough continuation to its caller", () => {
+test("build publishes state and leaves fallthrough continuation to its caller", () => {
   const values = new ValueTable();
   const instructionStart = values.parameter(0, "i32");
   const nextEip = values.parameter(1, "i32");
   const region = new RegionBuilder(values, undefined, ["i64"]);
   const dispatched: ValueId[] = [];
-  const builder = testInstructionConstruction.createBuilder(region, {
-    dispatch: (_body, targetEip) => {
-      dispatched.push(targetEip);
+  const finalFallthrough = testInstructionConstruction.build(
+    region,
+    {
+      dispatch: (_body, targetEip) => {
+        dispatched.push(targetEip);
+      },
+      returnExit: (body, result) => {
+        body.return([result]);
+      }
     },
-    returnExit: (body, result) => {
-      body.return([result]);
+    (builder) => {
+      strictEqual(
+        builder.add(
+          movSemantic(32),
+          [regBinding("eax"), immBinding(1)],
+          valueInstructionLocation(instructionStart, nextEip)
+        ),
+        true
+      );
     }
-  });
-
-  strictEqual(
-    builder.add(
-      movSemantic(32),
-      [regBinding("eax"), immBinding(1)],
-      valueInstructionLocation(instructionStart, nextEip)
-    ),
-    true
   );
-  strictEqual(builder.finish(), nextEip);
+  strictEqual(finalFallthrough, nextEip);
   deepStrictEqual(dispatched, []);
 
   const nodes = region.build().nodes;
@@ -150,25 +155,23 @@ test("finish publishes state and leaves fallthrough continuation to its caller",
 });
 
 test("pending values forward across instructions and the last write wins", () => {
-  const builder = createInstructionFunction();
-
-  builder.add(
-    movSemantic(32),
-    [regBinding("eax"), immBinding(7)],
-    loc(0x1000, 0x1005)
-  );
-  builder.add(
-    movSemantic(32),
-    [regBinding("ebx"), regBinding("eax")],
-    loc(0x1005, 0x1007)
-  );
-  builder.add(
-    movSemantic(32),
-    [regBinding("eax"), immBinding(9)],
-    loc(0x1007, 0x100c)
-  );
-
-  const block = builder.finish();
+  const block = buildInstructionFunction((builder) => {
+    builder.add(
+      movSemantic(32),
+      [regBinding("eax"), immBinding(7)],
+      loc(0x1000, 0x1005)
+    );
+    builder.add(
+      movSemantic(32),
+      [regBinding("ebx"), regBinding("eax")],
+      loc(0x1005, 0x1007)
+    );
+    builder.add(
+      movSemantic(32),
+      [regBinding("eax"), immBinding(9)],
+      loc(0x1007, 0x100c)
+    );
+  });
   const eaxWrites = stateWritesFor(
     block,
     block.body.nodes,
@@ -197,20 +200,18 @@ test("pending values forward across instructions and the last write wins", () =>
 });
 
 test("an overlapping byte write is committed before a wider register read", () => {
-  const builder = createInstructionFunction();
-
-  builder.add(
-    movSemantic(8),
-    [regBinding("al"), immBinding(0xaa)],
-    loc(0x1000, 0x1002)
-  );
-  builder.add(
-    movSemantic(32),
-    [regBinding("ecx"), regBinding("eax")],
-    loc(0x1002, 0x1004)
-  );
-
-  const block = builder.finish();
+  const block = buildInstructionFunction((builder) => {
+    builder.add(
+      movSemantic(8),
+      [regBinding("al"), immBinding(0xaa)],
+      loc(0x1000, 0x1002)
+    );
+    builder.add(
+      movSemantic(32),
+      [regBinding("ecx"), regBinding("eax")],
+      loc(0x1002, 0x1004)
+    );
+  });
   const nodes = block.body.nodes;
   const alWriteIndex = nodes.findIndex((node) =>
     writesStateChannel(block.values, node, gprChannel("al"))
@@ -243,11 +244,9 @@ test("a value captured before a dynamic branch remains valid in both arms", () =
         otherwise.write(otherwise.reg("ebx"), value, { width: 32 })
     );
   };
-  const builder = createInstructionFunction();
-
-  builder.add(useCapturedValue, [], loc(0x1000, 0x1001));
-
-  const block = builder.finish();
+  const block = buildInstructionFunction((builder) => {
+    builder.add(useCapturedValue, [], loc(0x1000, 0x1001));
+  });
   const branch = rootIf(block);
   const eaxReads = stateReadsFor(
     block,
@@ -292,11 +291,9 @@ test("continuing branch writes are joined before later instructions read them", 
       { width: 32 }
     );
   };
-  const builder = createInstructionFunction();
-
-  builder.add(selectValue, [], loc(0x1000, 0x1001));
-
-  const block = builder.finish();
+  const block = buildInstructionFunction((builder) => {
+    builder.add(selectValue, [], loc(0x1000, 0x1001));
+  });
   const branch = rootIf(block);
   const joinedReads = stateReadsFor(
     block,
@@ -334,14 +331,12 @@ test("a jump in a dynamic arm terminates that arm but preserves fallthrough", ()
       (then) => then.jump(v.const(0x2000))
     );
   };
-  const builder = createInstructionFunction();
-
-  strictEqual(
-    builder.add(conditionalJump, [], loc(0x1000, 0x1005)),
-    true
-  );
-
-  const block = builder.finish();
+  const block = buildInstructionFunction((builder) => {
+    strictEqual(
+      builder.add(conditionalJump, [], loc(0x1000, 0x1005)),
+      true
+    );
+  });
   const targets = dispatchTargets(block)
     .map((target) => block.values.constValue(target))
     .sort((a, b) => (a ?? 0) - (b ?? 0));
@@ -359,14 +354,12 @@ test("two terminating branch arms complete the instruction path", () => {
     );
     s.write(s.reg("ebx"), v.const(7), { width: 32 });
   };
-  const builder = createInstructionFunction();
-
-  strictEqual(
-    builder.add(trapEitherWay, [], loc(0x1000, 0x1005)),
-    false
-  );
-
-  const block = builder.finish();
+  const block = buildInstructionFunction((builder) => {
+    strictEqual(
+      builder.add(trapEitherWay, [], loc(0x1000, 0x1005)),
+      false
+    );
+  });
   const nodes = allNodes(block);
   const eipWrites = stateWritesFor(
     block,
@@ -388,31 +381,29 @@ test("two terminating branch arms complete the instruction path", () => {
 });
 
 test("a root jump flushes pending state and rejects later instructions", () => {
-  const builder = createInstructionFunction();
-
-  builder.add(
-    movSemantic(32),
-    [regBinding("eax"), immBinding(0x77)],
-    loc(0x1000, 0x1005)
-  );
-  strictEqual(
+  const block = buildInstructionFunction((builder) => {
     builder.add(
-      jmpSemantic(),
-      [immBinding(0x2000)],
-      loc(0x1005, 0x100a)
-    ),
-    false
-  );
-  throws(
-    () => builder.add(
       movSemantic(32),
-      [regBinding("ebx"), immBinding(1)],
-      loc(0x100a, 0x100f)
-    ),
-    /after a block terminator/
-  );
-
-  const block = builder.finish();
+      [regBinding("eax"), immBinding(0x77)],
+      loc(0x1000, 0x1005)
+    );
+    strictEqual(
+      builder.add(
+        jmpSemantic(),
+        [immBinding(0x2000)],
+        loc(0x1005, 0x100a)
+      ),
+      false
+    );
+    throws(
+      () => builder.add(
+        movSemantic(32),
+        [regBinding("ebx"), immBinding(1)],
+        loc(0x100a, 0x100f)
+      ),
+      /after a block terminator/
+    );
+  });
   const eaxWrites = stateWritesFor(
     block,
     block.body.nodes,
@@ -439,11 +430,9 @@ test("a host trap commits the resume EIP and stops the semantic tail", () => {
       { width: 32, value: v.const(1) }
     );
   };
-  const builder = createInstructionFunction();
-
-  builder.add(trapThenStore, [], loc(0x1000, 0x1005));
-
-  const block = builder.finish();
+  const block = buildInstructionFunction((builder) => {
+    builder.add(trapThenStore, [], loc(0x1000, 0x1005));
+  });
   const nodes = allNodes(block);
   const eipWrites = stateWritesFor(
     block,
@@ -466,16 +455,14 @@ test("a CPU exception restores the faulting EIP and earlier pending state", () =
     s.cpuException(invalidOpcode());
     s.write(s.reg("ebx"), v.const(1), { width: 32 });
   };
-  const builder = createInstructionFunction();
-
-  builder.add(
-    movSemantic(32),
-    [regBinding("eax"), immBinding(0x77)],
-    loc(0x1000, 0x1005)
-  );
-  strictEqual(builder.add(fault, [], loc(0x1005, 0x1006)), false);
-
-  const block = builder.finish();
+  const block = buildInstructionFunction((builder) => {
+    builder.add(
+      movSemantic(32),
+      [regBinding("eax"), immBinding(0x77)],
+      loc(0x1000, 0x1005)
+    );
+    strictEqual(builder.add(fault, [], loc(0x1005, 0x1006)), false);
+  });
   const nodes = block.body.nodes;
   const eaxWrites = stateWritesFor(block, nodes, gprChannel("eax"));
   const eipWrites = stateWritesFor(block, nodes, coreStateFields.eip);
@@ -506,16 +493,14 @@ test("a memory fault restores the instruction boundary, not partial writes", () 
       { width: 32 }
     );
   };
-  const builder = createInstructionFunction();
-
-  builder.add(
-    movSemantic(32),
-    [regBinding("eax"), immBinding(0x77)],
-    loc(0x1000, 0x1005)
-  );
-  builder.add(writeThenRead, [], loc(0x1005, 0x1007));
-
-  const block = builder.finish();
+  const block = buildInstructionFunction((builder) => {
+    builder.add(
+      movSemantic(32),
+      [regBinding("eax"), immBinding(0x77)],
+      loc(0x1000, 0x1005)
+    );
+    builder.add(writeThenRead, [], loc(0x1005, 0x1007));
+  });
   const faultRegion = regionsIn(block.body).slice(1).find((region) =>
     region.nodes.some((node) =>
       node.kind === "return" && node.source.kind === "values"
@@ -600,65 +585,74 @@ test("a possible fault cannot be introduced after a memory write", () => {
   };
 
   throws(
-    () => createInstructionFunction().add(
-      storeThenGuard,
-      [],
-      loc(0x1000, 0x1001)
-    ),
+    () => buildInstructionFunction((builder) => {
+      builder.add(
+        storeThenGuard,
+        [],
+        loc(0x1000, 0x1001)
+      );
+    }),
     /CPU exception cannot follow a memory write/
   );
 });
 
 test("a failed instruction poisons the builder transaction", () => {
-  const builder = createInstructionFunction();
   const partiallyInvalid: SemanticTemplate = (s, v) => {
     s.write(s.operand(0), v.const(1), { width: 32 });
     s.write(s.operand(1), v.const(2), { width: 32 });
   };
 
   throws(
-    () => builder.add(
-      partiallyInvalid,
-      [regBinding("eax"), immBinding(0)],
-      loc(0x1000, 0x1002)
-    ),
-    /immediate operand is not writable/
-  );
-  throws(
-    () => builder.add(
-      movSemantic(32),
-      [regBinding("ecx"), immBinding(2)],
-      loc(0x1002, 0x1007)
-    ),
+    () => buildInstructionFunction((builder) => {
+      throws(
+        () => builder.add(
+          partiallyInvalid,
+          [regBinding("eax"), immBinding(0)],
+          loc(0x1000, 0x1002)
+        ),
+        /immediate operand is not writable/
+      );
+      throws(
+        () => builder.add(
+          movSemantic(32),
+          [regBinding("ecx"), immBinding(2)],
+          loc(0x1002, 0x1007)
+        ),
+        /incomplete instruction/
+      );
+    }),
     /incomplete instruction/
   );
-  throws(() => builder.finish(), /incomplete instruction/);
 });
 
-test("builder lifecycle rejects empty, repeated, and post-finish use", () => {
+test("build rejects an empty sequence and closes its builder afterward", () => {
   throws(
-    () => createInstructionFunction().finish(),
+    () => buildInstructionFunction(() => {}),
     /no instructions were added/
   );
 
-  const builder = createInstructionFunction();
+  let escaped: InstructionBuilder | undefined;
 
-  builder.add(
-    movSemantic(32),
-    [regBinding("eax"), immBinding(1)],
-    loc(0x1000, 0x1005)
-  );
-  builder.finish();
+  buildInstructionFunction((builder) => {
+    escaped = builder;
+    builder.add(
+      movSemantic(32),
+      [regBinding("eax"), immBinding(1)],
+      loc(0x1000, 0x1005)
+    );
+  });
+
+  ok(escaped !== undefined);
+  const closedBuilder = escaped;
 
   throws(
-    () => builder.add(
+    () => closedBuilder.add(
       movSemantic(32),
       [regBinding("ecx"), immBinding(2)],
       loc(0x1005, 0x100a)
     ),
-    /finished instruction builder/
+    /closed instruction builder/
   );
-  throws(() => builder.finish(), /already finished/);
 });
 
 test("constant branches build only the reachable semantic path", () => {
@@ -679,11 +673,9 @@ test("constant branches build only the reachable semantic path", () => {
       { width: 32 }
     );
   };
-  const builder = createInstructionFunction();
-
-  builder.add(folded, [], loc(0x1000, 0x1001));
-
-  const block = builder.finish();
+  const block = buildInstructionFunction((builder) => {
+    builder.add(folded, [], loc(0x1000, 0x1001));
+  });
   const eaxWrites = stateWritesFor(
     block,
     block.body.nodes,
@@ -713,21 +705,19 @@ test("constant branches build only the reachable semantic path", () => {
 });
 
 test("memory operands still participate in the builder's guarded access path", () => {
-  const builder = createInstructionFunction();
-
-  builder.add(
-    movSemantic(32),
-    [
-      regBinding("eax"),
-      memBinding(
-        { base: "ebx", index: undefined, scale: 1, disp: 8 },
-        staticMemSegment("ds")
-      )
-    ],
-    loc(0x1000, 0x1003)
-  );
-
-  const block = builder.finish();
+  const block = buildInstructionFunction((builder) => {
+    builder.add(
+      movSemantic(32),
+      [
+        regBinding("eax"),
+        memBinding(
+          { base: "ebx", index: undefined, scale: 1, disp: 8 },
+          staticMemSegment("ds")
+        )
+      ],
+      loc(0x1000, 0x1003)
+    );
+  });
 
   validateIrFunction(block);
   strictEqual(block.body.nodes.filter(isMemoryRead).length, 1);
