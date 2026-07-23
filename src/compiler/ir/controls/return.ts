@@ -4,11 +4,7 @@ import {
 } from "#compiler/ir/effects.js";
 import { Invocation } from "#compiler/ir/invocation.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { ValueUseEmitter } from "#compiler/ir/node.js";
-import {
-  TerminalControlBase,
-  type ControlEmitTarget
-} from "./definition.js";
+import { TerminalControlBase } from "./definition.js";
 
 export type ReturnSource =
   | Readonly<{ kind: "values"; values: readonly ValueId[] }>
@@ -41,21 +37,6 @@ export class ReturnControl extends TerminalControlBase {
 
   static create({ source }: ReturnControlArgs): ReturnControl {
     return new ReturnControl(source);
-  }
-
-  emit(target: ControlEmitTarget, values: ValueUseEmitter): void {
-    switch (this.source.kind) {
-      case "values":
-        for (const value of this.source.values) {
-          values.emitUse(value);
-        }
-        target.body.returnFromFunction();
-        return;
-      case "invocation":
-        this.source.invocation.emitInputs(values);
-        target.emitReturnCall(this.source.invocation.target);
-        return;
-    }
   }
 }
 

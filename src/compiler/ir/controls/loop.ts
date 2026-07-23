@@ -1,15 +1,12 @@
-import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { Region } from "#compiler/ir/region.js";
 import type {
   RegionCompletionContext,
-  NestedRegion,
-  ValueUseEmitter
+  NestedRegion
 } from "#compiler/ir/node.js";
 import {
   ControlBase,
-  TerminalControlBase,
-  type ControlEmitTarget
+  TerminalControlBase
 } from "./definition.js";
 
 // One loop-carried local, seeded at loop entry and read inside the body through
@@ -62,21 +59,6 @@ export class LoopControl extends ControlBase {
   mapBodies(map: (body: Region) => Region): LoopControl {
     return LoopControl.create({ carried: this.carried, body: map(this.body) });
   }
-
-  emit(target: ControlEmitTarget, values: ValueUseEmitter): void {
-    const carriedLocals = this.carried.map((cell) => {
-      const local = target.valueLocal(cell.loopInput);
-
-      values.emitUse(cell.seed);
-      target.body.localSet(local);
-      return local;
-    });
-
-    target.emitCaptures();
-    target.body.loop();
-    target.withLoopBody(carriedLocals, () => target.emitBody(this.body));
-    target.body.endBlock();
-  }
 }
 
 export const loopControl = LoopControl;
@@ -97,23 +79,6 @@ export class LoopContinueControl extends TerminalControlBase {
 
   static create({ updates }: LoopContinueControlArgs): LoopContinueControl {
     return new LoopContinueControl(updates);
-  }
-
-  emit(target: ControlEmitTarget, values: ValueUseEmitter): void {
-    const carriedLocals = target.currentLoopLocals();
-
-    assert(
-      this.updates.length === carriedLocals.length,
-      "loopContinue updates do not align with the loop's cells"
-    );
-    // Compute every update before overwriting any carried cell.
-    for (const update of this.updates) {
-      values.emitUse(update);
-    }
-    for (let index = carriedLocals.length - 1; index >= 0; index -= 1) {
-      target.body.localSet(carriedLocals[index]!);
-    }
-    target.emitLoopBranch();
   }
 }
 

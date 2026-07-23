@@ -1,15 +1,12 @@
-import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { Region } from "#compiler/ir/region.js";
 import type {
   RegionCompletionContext,
-  NestedRegion,
-  ValueUseEmitter
+  NestedRegion
 } from "#compiler/ir/node.js";
 import {
   ControlBase,
-  type BranchHint,
-  type ControlEmitTarget
+  type BranchHint
 } from "./definition.js";
 
 export type IfControlArgs = Readonly<{
@@ -75,41 +72,6 @@ export class IfControl extends ControlBase {
       thenBody: map(this.thenBody),
       ...(this.elseBody === undefined ? {} : { elseBody: map(this.elseBody) })
     });
-  }
-
-  emit(target: ControlEmitTarget, values: ValueUseEmitter): void {
-    const {
-      condition,
-      thenBody,
-      elseBody,
-      output,
-      hint
-    } = this;
-    const outputLocal = output === undefined
-      ? undefined
-      : target.controlOutputLocal(output);
-
-    values.emitUse(condition);
-    target.emitCaptures();
-    target.body.ifBlock({ hint });
-    target.withNestedControl(() => {
-      target.emitBody(thenBody, outputLocal);
-
-      if (elseBody !== undefined) {
-        target.body.elseBlock();
-        target.emitBody(elseBody, outputLocal);
-      } else {
-        assert(output === undefined, "value-producing if has no else body");
-      }
-    });
-    target.body.endBlock();
-
-    if (output !== undefined && outputLocal !== undefined) {
-      target.markControlOutput(output);
-    }
-    if (ifCompletes(thenBody, elseBody, target)) {
-      target.sealCompletedStructuredControl();
-    }
   }
 }
 

@@ -2,13 +2,9 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import type { Region } from "#compiler/ir/region.js";
 import type {
   RegionCompletionContext,
-  NestedRegion,
-  ValueUseEmitter
+  NestedRegion
 } from "#compiler/ir/node.js";
-import {
-  ControlBase,
-  type ControlEmitTarget
-} from "./definition.js";
+import { ControlBase } from "./definition.js";
 
 export type SwitchCase = Readonly<{
   // Every match routes to this one body without repeating it.
@@ -22,7 +18,7 @@ export const maxSwitchMatch = 255;
 // Selects one body by selector match, the default when none matches. A
 // value-producing switch joins the selected body's fallthrough result through
 // `output`; a control-only switch has neither arm results nor an output. The
-// occurrence derives the dense br_table from the match values during emission.
+// backend derives the dense br_table from the match values during emission.
 export type SwitchControlArgs = Readonly<{
   selector: ValueId;
   output?: ValueId;
@@ -90,63 +86,6 @@ export class SwitchControl extends ControlBase {
       defaultBody: map(this.defaultBody)
     });
   }
-
-  emit(target: ControlEmitTarget, values: ValueUseEmitter): void {
-    const outputLocal = this.output === undefined
-      ? undefined
-      : target.controlOutputLocal(this.output);
-    const caseCount = this.cases.length;
-
-    // Open order: join, default, case n-1 .. case 0.
-    for (let index = 0; index <= caseCount + 1; index += 1) {
-      target.body.block();
-    }
-
-    values.emitUse(this.selector);
-    target.emitCaptures();
-    target.body.brTable(switchLabelDepths(this.cases), caseCount);
-
-    this.cases.forEach((entry, index) => {
-      target.body.endBlock();
-      target.withNestedControl(
-        () => target.emitBody(entry.body, outputLocal),
-        caseCount - index + 1
-      );
-      target.body.br(caseCount - index);
-    });
-
-    target.body.endBlock();
-    target.withNestedControl(
-      () => target.emitBody(this.defaultBody, outputLocal),
-      1
-    );
-    target.body.endBlock();
-
-    if (this.output !== undefined && outputLocal !== undefined) {
-      target.markControlOutput(this.output);
-    }
-    if (this.completes(target)) {
-      target.sealCompletedStructuredControl();
-    }
-  }
 }
 
 export const switchControl = SwitchControl;
-
-function switchLabelDepths(cases: readonly SwitchCase[]): number[] {
-  let size = 0;
-
-  for (const entry of cases) {
-    for (const match of entry.matches) {
-      size = Math.max(size, match + 1);
-    }
-  }
-  const table = new Array<number>(size).fill(cases.length);
-
-  for (const [depth, entry] of cases.entries()) {
-    for (const match of entry.matches) {
-      table[match] = depth;
-    }
-  }
-  return table;
-}

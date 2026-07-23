@@ -17,8 +17,7 @@ export {
 };
 export type {
   BranchHint,
-  ControlBase,
-  ControlEmitTarget
+  ControlBase
 } from "./definition.js";
 export type {
   IfControl,
