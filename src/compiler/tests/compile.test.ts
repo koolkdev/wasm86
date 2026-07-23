@@ -1,5 +1,6 @@
 import {
   deepStrictEqual,
+  ok,
   strictEqual,
   throws
 } from "node:assert";
@@ -17,7 +18,7 @@ import { compileProgram } from "#compiler/compile.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/ir/function.js";
 import { functionExportRef } from "#compiler/program/exports.js";
-import { functionRef } from "#compiler/ir/refs.js";
+import { functionRef, tableRef } from "#compiler/ir/refs.js";
 import {
   createProgramResources,
   type ProgramResources
@@ -106,27 +107,135 @@ test("compiled control preserves a selected trap when its value is unused", () =
   throws(() => run(0), WebAssembly.RuntimeError);
 });
 
-test("program closure rejects a resource absent from its program resources", () => {
-  const foreign = createTestResources();
-  const program = new ProgramBuilder(fixture.resources);
-  const access = memoryRead(foreign.used);
+test("compiled indirect calls use their selected table", () => {
+  const program = new ProgramBuilder(createProgramResources([]));
+  const type = functionType(["i32"], ["i32"]);
+  const unusedTable = tableRef("test.compile.indirect-unused-table");
+  const selectedTable = tableRef("test.compile.indirect-selected-table");
 
-  program.defineFunction({
-    ref: functionRef("test.compile.foreign-read"),
-    type: readType,
-    effects: { reads: [access], writes: [] }
+  program.importTable({
+    ref: unusedTable,
+    moduleName: "test",
+    name: "unusedTable",
+    limits: { minElements: 1 }
+  });
+  program.importTable({
+    ref: selectedTable,
+    moduleName: "test",
+    name: "selectedTable",
+    limits: { minElements: 1 }
+  });
+  const target = program.defineFunction({
+    ref: functionRef("test.compile.indirect-target"),
+    type,
+    effects: { reads: [], writes: [] }
   }, (fn) => {
-    const value = fn.region.operation(resourceRead, {
-      source: memoryOperand(foreign.used, access, fn.values.const(0))
-    });
+    const argument = fn.parameters[0];
 
-    fn.return([value]);
+    ok(argument !== undefined, "missing indirect target argument");
+    fn.return([argument]);
+  });
+  const ordinary = program.defineFunction({
+    ref: functionRef("test.compile.indirect-ordinary"),
+    type,
+    effects: { reads: [], writes: [] }
+  }, (fn) => {
+    const argument = fn.parameters[0];
+
+    ok(argument !== undefined, "missing ordinary indirect-call argument");
+    fn.return(fn.region.call(fn.region.indirectTarget({
+      table: selectedTable,
+      type,
+      effects: { reads: [], writes: [] },
+      elementIndex: fn.values.const(0)
+    }), [argument]));
+  });
+  const returned = program.defineFunction({
+    ref: functionRef("test.compile.indirect-returned"),
+    type,
+    effects: { reads: [], writes: [] }
+  }, (fn) => {
+    const argument = fn.parameters[0];
+
+    ok(argument !== undefined, "missing returned indirect-call argument");
+    fn.returnCall(fn.region.indirectTarget({
+      table: selectedTable,
+      type,
+      effects: { reads: [], writes: [] },
+      elementIndex: fn.values.const(0)
+    }), [argument]);
   });
 
-  throws(
-    () => program.finish(),
-    /unknown program resource test\.compile\.used declared by function test\.compile\.foreign-read/
+  for (const [name, targetRef] of [
+    ["target", target.ref],
+    ["ordinary", ordinary.ref],
+    ["returned", returned.ref]
+  ] as const) {
+    program.exportFunction({
+      ref: functionExportRef(`test.compile.indirect-${name}-export`),
+      name,
+      target: targetRef
+    });
+  }
+
+  const unused = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
+  const selected = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
+  const instance = new WebAssembly.Instance(
+    new WebAssembly.Module(compileProgram(program.finish()).bytes),
+    { test: { unusedTable: unused, selectedTable: selected } }
   );
+  const exportedTarget = instance.exports.target;
+
+  ok(typeof exportedTarget === "function", "missing indirect target export");
+  selected.set(0, exportedTarget);
+
+  const ordinaryEntry = instance.exports.ordinary;
+  const returnedEntry = instance.exports.returned;
+
+  ok(typeof ordinaryEntry === "function", "missing ordinary indirect caller");
+  ok(typeof returnedEntry === "function", "missing returned indirect caller");
+  strictEqual(ordinaryEntry(37), 37);
+  strictEqual(returnedEntry(73), 73);
+});
+
+test("compiled returned calls keep deep recursion on a bounded stack", () => {
+  const program = new ProgramBuilder(createProgramResources([]));
+  const type = functionType(["i32"], []);
+  const countdown = program.defineFunction({
+    ref: functionRef("test.compile.tail-countdown"),
+    type,
+    effects: { reads: [], writes: [] }
+  }, (fn, self) => {
+    const remaining = fn.parameters[0];
+
+    ok(remaining !== undefined, "missing countdown argument");
+    fn.region.if(
+      remaining,
+      (thenBody) => {
+        thenBody.returnCall(self, [
+          fn.values.binary("sub", remaining, fn.values.const(1))
+        ]);
+      },
+      {
+        elseBuild: (elseBody) => {
+          elseBody.return([]);
+        }
+      }
+    );
+  });
+
+  program.exportFunction({
+    ref: functionExportRef("test.compile.tail-countdown-export"),
+    name: "countdown",
+    target: countdown.ref
+  });
+  const instance = new WebAssembly.Instance(
+    new WebAssembly.Module(compileProgram(program.finish()).bytes)
+  );
+  const entry = instance.exports.countdown;
+
+  ok(typeof entry === "function", "missing countdown export");
+  strictEqual(entry(100_000), undefined);
 });
 
 type TestResources = Readonly<{

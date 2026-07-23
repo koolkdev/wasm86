@@ -24,33 +24,36 @@ import {
   functionExportRef,
   type FunctionExportRef
 } from "#compiler/program/exports.js";
-import { functionRef } from "#compiler/ir/refs.js";
+import {
+  functionRef,
+  type FunctionRef
+} from "#compiler/ir/refs.js";
 import { createProgramResources } from "#compiler/program/resources.js";
 
 const fixture = createInstanceFixture();
 
-test("compiled program instances bind arbitrary external names and resolve exact exports", () => {
+test("compiled program instances bind memory and functions in one external module", () => {
   const memory = new WebAssembly.Memory({ initial: 1 });
 
-  new DataView(memory.buffer).setUint32(0, 42, true);
+  new DataView(memory.buffer).setUint32(0, 41, true);
   const instance = instantiateCompiledProgram(
     fixture.compiled,
     {
       memories: new Map([[fixture.resource, memory]]),
-      functions: new Map()
+      functions: new Map([[fixture.functionRef, (value: number) => value + 1]])
     }
   );
-  const read = instance.functionExports.get(fixture.exportRef);
+  const run = instance.functionExports.get(fixture.exportRef);
 
-  strictEqual(typeof read, "function");
-  strictEqual((read as () => number)(), 42);
+  strictEqual(typeof run, "function");
+  strictEqual((run as () => number)(), 42);
 });
 
 test("compiled program instances reject a missing memory binding", () => {
   throws(
     () => instantiateCompiledProgram(fixture.compiled, {
       memories: new Map(),
-      functions: new Map()
+      functions: new Map([[fixture.functionRef, () => 42]])
     }),
     /missing memory binding for program resource test\.instance\.memory/
   );
@@ -65,10 +68,35 @@ test("compiled program instances reject a same-ID foreign resource ref", () => {
       fixture.compiled,
       {
         memories: new Map([[foreignResource, memory]]),
-        functions: new Map()
+        functions: new Map([[fixture.functionRef, () => 42]])
       }
     ),
     /missing memory binding for program resource test\.instance\.memory/
+  );
+});
+
+test("compiled program instances reject a missing function binding", () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+
+  throws(
+    () => instantiateCompiledProgram(fixture.compiled, {
+      memories: new Map([[fixture.resource, memory]]),
+      functions: new Map()
+    }),
+    /missing function binding for program function test\.instance\.function/
+  );
+});
+
+test("compiled program instances reject a same-ID foreign function ref", () => {
+  const foreignFunction = functionRef(fixture.functionRef.id);
+  const memory = new WebAssembly.Memory({ initial: 1 });
+
+  throws(
+    () => instantiateCompiledProgram(fixture.compiled, {
+      memories: new Map([[fixture.resource, memory]]),
+      functions: new Map([[foreignFunction, () => 42]])
+    }),
+    /missing function binding for program function test\.instance\.function/
   );
 });
 
@@ -82,13 +110,13 @@ test("compiled program instances accept memory from another realm", () => {
     fixture.compiled,
     {
       memories: new Map([[fixture.resource, memory]]),
-      functions: new Map()
+      functions: new Map([[fixture.functionRef, (value: number) => value]])
     }
   );
-  const read = instance.functionExports.get(fixture.exportRef);
+  const run = instance.functionExports.get(fixture.exportRef);
 
-  strictEqual(typeof read, "function");
-  strictEqual((read as () => number)(), 42);
+  strictEqual(typeof run, "function");
+  strictEqual((run as () => number)(), 42);
 });
 
 test("compiled program instances reject undersized memory before instantiation", () => {
@@ -100,7 +128,7 @@ test("compiled program instances reject undersized memory before instantiation",
       undersizedFixture.compiled,
       {
         memories: new Map([[undersizedFixture.resource, memory]]),
-        functions: new Map()
+        functions: new Map([[undersizedFixture.functionRef, () => 42]])
       }
     ),
     /memory binding for program resource test\.instance\.memory is smaller than its declared minimum/
@@ -113,7 +141,7 @@ test("compiled program instances do not resolve a same-ID foreign export ref", (
     fixture.compiled,
     {
       memories: new Map([[fixture.resource, memory]]),
-      functions: new Map()
+      functions: new Map([[fixture.functionRef, () => 42]])
     }
   );
   const foreignExport = functionExportRef(fixture.exportRef.id);
@@ -124,6 +152,7 @@ test("compiled program instances do not resolve a same-ID foreign export ref", (
 type InstanceFixture = Readonly<{
   compiled: CompiledProgram;
   resource: ResourceRef;
+  functionRef: FunctionRef;
   exportRef: FunctionExportRef;
 }>;
 
@@ -139,27 +168,39 @@ function createInstanceFixture(
   }]);
   const program = new ProgramBuilder(resources);
   const access = memoryRead(resource);
-  const read = program.defineFunction({
-    ref: functionRef("test.instance.read"),
+  const imported = program.importFunction({
+    ref: functionRef("test.instance.function"),
+    type: functionType(["i32"], ["i32"]),
+    effects: { reads: [], writes: [] },
+    moduleName: "external runtime/2026",
+    name: "function.with punctuation"
+  });
+  const entry = program.defineFunction({
+    ref: functionRef("test.instance.entry"),
     type: functionType([], ["i32"]),
     effects: { reads: [access], writes: [] }
   }, (fn) => {
     const value = fn.region.operation(resourceRead, {
       source: memoryOperand(resource, access, fn.values.const(0))
     });
+    const result = fn.region.call(imported, [value])[0];
 
-    fn.return([value]);
+    if (result === undefined) {
+      throw new Error("missing imported function result");
+    }
+    fn.return([result]);
   });
-  const exportRef = functionExportRef("test.instance.read-export");
+  const exportRef = functionExportRef("test.instance.entry-export");
 
   program.exportFunction({
     ref: exportRef,
-    name: "read.with punctuation",
-    target: read.ref
+    name: "run.with punctuation",
+    target: entry.ref
   });
   return {
     compiled: compileProgram(program.finish()),
     resource,
+    functionRef: imported.ref,
     exportRef
   };
 }
