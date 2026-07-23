@@ -71,6 +71,41 @@ test("compiled programs preserve reachable memories, exact exports, and runnable
   strictEqual((exportedRead as () => number)(), 42);
 });
 
+test("compiled control preserves a selected trap when its value is unused", () => {
+  const program = new ProgramBuilder(createProgramResources([]));
+  const entry = program.defineFunction({
+    ref: functionRef("test.compile.selected-trap"),
+    type: functionType(["i32"], []),
+    effects: { reads: [], writes: [] }
+  }, (fn) => {
+    fn.region.ifValue(
+      fn.parameters[0]!,
+      (then) => then.values.const(7),
+      (otherwise) => otherwise.values.unreachable()
+    );
+    fn.return([]);
+  });
+  const exportRef = functionExportRef("test.compile.selected-trap-export");
+
+  program.exportFunction({
+    ref: exportRef,
+    name: "run",
+    target: entry.ref
+  });
+  const compiled = compileProgram(program.finish());
+  const instance = new WebAssembly.Instance(
+    new WebAssembly.Module(compiled.bytes)
+  );
+  const run = instance.exports.run;
+
+  strictEqual(typeof run, "function");
+  if (typeof run !== "function") {
+    throw new Error("compiled control export is missing");
+  }
+  strictEqual(run(1), undefined);
+  throws(() => run(0), WebAssembly.RuntimeError);
+});
+
 test("program closure rejects a resource absent from its program resources", () => {
   const foreign = createTestResources();
   const program = new ProgramBuilder(fixture.resources);
