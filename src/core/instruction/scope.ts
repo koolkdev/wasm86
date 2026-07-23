@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { OperandScope } from "./operand-resolver.js";
 
 export type SemanticScopeKind = "root" | "arm" | "loop";

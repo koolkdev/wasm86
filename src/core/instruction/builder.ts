@@ -23,7 +23,7 @@ import type {
   ValueInput
 } from "#core/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
-import { RegionBuilder } from "#ir/region-builder.js";
+import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type {
   MemoryAccessConstruction
 } from "#memory/access.js";

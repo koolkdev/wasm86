@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type {
-  BodyAnalysis,
+  FunctionAnalysis,
   SiteId,
   ValueDemand
 } from "#compiler/analysis/model.js";
@@ -8,8 +8,9 @@ import type { StorageAccess } from "#compiler/ir/effects.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { mayAlias } from "#ir/aliasing.js";
-import type { Body, IrBlock } from "#ir/block.js";
+import { mayAlias } from "#compiler/ir/effects.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { Region } from "#compiler/ir/region.js";
 import { canCaptureAtDeadline } from "./capture-safety.js";
 import { LoopAnchors } from "./loop-anchors.js";
 
@@ -23,8 +24,8 @@ export type PlannedValue = AnchoredValue & Readonly<{
 }>;
 
 export function planValueAnchors(
-  block: IrBlock,
-  analysis: BodyAnalysis
+  block: FunctionGraph,
+  analysis: FunctionAnalysis
 ): readonly (PlannedValue | undefined)[] {
   return new AnchorPlanner(block, analysis).plan();
 }
@@ -35,8 +36,8 @@ class AnchorPlanner {
   readonly #loopAnchors: LoopAnchors;
 
   constructor(
-    private readonly block: IrBlock,
-    private readonly analysis: BodyAnalysis
+    private readonly block: FunctionGraph,
+    private readonly analysis: FunctionAnalysis
   ) {
     this.#anchored = new Array(block.values.size()).fill(undefined);
     this.#loopAnchors = new LoopAnchors(block, analysis);
@@ -86,7 +87,7 @@ class AnchorPlanner {
           lastDemand: lastDemand(demands)
         };
         for (const dependency of controlDependencies) {
-          // The body-end root is the selected unreachable arm's one concrete
+          // The region-end root is the selected unreachable arm's one concrete
           // occurrence. The join dependency describes the same occurrence.
           if (!this.block.values.isUnreachable(dependency.value)) {
             this.#addDemand(dependency);
@@ -199,7 +200,7 @@ class AnchorPlanner {
       demands.map((demand) => demand.consumedAt)
     );
 
-    anchor = this.#clampBeforeNestedLoop(this.#site(producerSite).body, anchor);
+    anchor = this.#clampBeforeNestedLoop(this.#site(producerSite).region, anchor);
 
     if (
       !this.#isAfterProducer(producerSite, anchor) ||
@@ -213,12 +214,12 @@ class AnchorPlanner {
     return anchor;
   }
 
-  #clampBeforeNestedLoop(producerBody: Body, anchor: SiteId): SiteId {
-    const path = this.analysis.path(producerBody, this.#site(anchor).body);
+  #clampBeforeNestedLoop(producerRegion: Region, anchor: SiteId): SiteId {
+    const path = this.analysis.path(producerRegion, this.#site(anchor).region);
 
     assert(path !== undefined, "producer demand leaves its producer scope");
     for (const step of path) {
-      if (this.analysis.isLoopBody(step.body)) {
+      if (this.analysis.isLoopRegion(step.region)) {
         return step.owner;
       }
     }
@@ -230,11 +231,11 @@ class AnchorPlanner {
     const producerSite = this.#site(producer);
     const anchorSite = this.#site(anchor);
 
-    if (producerSite.body === anchorSite.body) {
+    if (producerSite.region === anchorSite.region) {
       return anchorSite.nodeIndex > producerSite.nodeIndex;
     }
 
-    const first = this.analysis.path(producerSite.body, anchorSite.body)?.[0];
+    const first = this.analysis.path(producerSite.region, anchorSite.region)?.[0];
 
     if (first === undefined) {
       return false;
@@ -256,33 +257,33 @@ class AnchorPlanner {
     }
     const producerSite = this.#site(producerSiteId);
     const anchor = this.#site(anchorId);
-    const path = this.analysis.path(producerSite.body, anchor.body);
+    const path = this.analysis.path(producerSite.region, anchor.region);
 
     assert(path !== undefined, "producer anchor leaves its producer scope");
-    let body = producerSite.body;
+    let region = producerSite.region;
     let start = producerSite.nodeIndex + 1;
 
     for (const step of path) {
       const owner = this.#site(step.owner);
 
-      if (this.#rangeAliases(body, start, owner.nodeIndex, reads)) {
+      if (this.#rangeAliases(region, start, owner.nodeIndex, reads)) {
         return true;
       }
-      body = step.body;
+      region = step.region;
       start = 0;
     }
 
-    return this.#rangeAliases(body, start, anchor.nodeIndex, reads);
+    return this.#rangeAliases(region, start, anchor.nodeIndex, reads);
   }
 
   #rangeAliases(
-    body: Body,
+    region: Region,
     start: number,
     end: number,
     reads: readonly StorageAccess[]
   ): boolean {
     for (let index = start; index < end; index += 1) {
-      const site = this.analysis.siteOf(body, index);
+      const site = this.analysis.siteOf(region, index);
 
       if (
         this.analysis.writesAt(site).some((write) =>

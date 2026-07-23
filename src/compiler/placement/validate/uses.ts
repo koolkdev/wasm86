@@ -1,12 +1,12 @@
 import { assert } from "#common/assert.js";
 import type {
-  BodyAnalysis,
+  FunctionAnalysis,
   SiteId,
   ValueDemand
 } from "#compiler/analysis/model.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { IrBlock } from "#ir/block.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
 import { canCaptureAtDeadline } from "../capture-safety.js";
 import type { PlacementPlan, ValuePlacement } from "../model.js";
 
@@ -15,8 +15,8 @@ export type PlacementProof = Readonly<{
 }>;
 
 export function validatePlacementUses(
-  block: IrBlock,
-  analysis: BodyAnalysis,
+  block: FunctionGraph,
+  analysis: FunctionAnalysis,
   plan: PlacementPlan
 ): PlacementProof {
   const demands = Array.from({ length: block.values.size() }, (): ValueDemand[] => []);
@@ -99,8 +99,8 @@ export function validatePlacementUses(
 }
 
 function validatePlacementShape(
-  block: IrBlock,
-  analysis: BodyAnalysis,
+  block: FunctionGraph,
+  analysis: FunctionAnalysis,
   value: ValueId,
   placement: ValuePlacement | undefined,
   loopInput: boolean,
@@ -157,7 +157,7 @@ function validatePlacementShape(
 }
 
 function availableBefore(
-  analysis: BodyAnalysis,
+  analysis: FunctionAnalysis,
   plan: PlacementPlan,
   candidate: ValueId,
   value: ValueId,
@@ -179,7 +179,7 @@ function availableBefore(
   return analysis.dominatingSite([placement.anchor, anchor]) === placement.anchor;
 }
 
-function collectLoopInputs(analysis: BodyAnalysis): Set<ValueId> {
+function collectLoopInputs(analysis: FunctionAnalysis): Set<ValueId> {
   const result = new Set<ValueId>();
 
   for (const site of analysis.sites()) {

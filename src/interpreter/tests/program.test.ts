@@ -5,7 +5,7 @@ import { testExecutionModel } from "#test/support/execution-model.js";
 import { createStatusFlagResolvers } from "#core/flags/lazy/resolvers.js";
 import { x86StatusFlags } from "#core/flags/definitions.js";
 import { buildInterpreterProgram } from "#interpreter/program.js";
-import type { Body } from "#ir/block.js";
+import type { Region } from "#compiler/ir/region.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { SwitchControl } from "#compiler/ir/controls/index.js";
@@ -95,7 +95,7 @@ test("selected ModRM forms own and place their register-index recipes", () => {
 
       ok(site !== undefined, "register-index recipe has an unknown placement site");
       ok(
-        placement.analysis.path(entry.body, site.body) !== undefined,
+        placement.analysis.path(entry.body, site.region) !== undefined,
         "register-index calculation must stay in its selected ModRM case"
       );
     }
@@ -142,7 +142,7 @@ function interpreterRun() {
   return run;
 }
 
-function controls(body: Body): readonly Body["nodes"][number][] {
+function controls(body: Region): readonly Region["nodes"][number][] {
   return body.nodes.flatMap((node) => [
     node,
     ...node.nestedBodies.flatMap((nested) => controls(nested.body))
@@ -150,7 +150,7 @@ function controls(body: Body): readonly Body["nodes"][number][] {
 }
 
 function registerIndexes(
-  body: Body,
+  body: Region,
   values: ValueTable,
   selector: ValueId
 ): ReadonlySet<ValueId> {

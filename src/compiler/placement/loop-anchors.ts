@@ -1,8 +1,9 @@
 import { assert } from "#common/assert.js";
-import type { BodyAnalysis, SiteId } from "#compiler/analysis/model.js";
+import { valueDependsOn } from "#compiler/analysis/dependencies.js";
+import type { FunctionAnalysis, SiteId } from "#compiler/analysis/model.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { Body, IrBlock } from "#ir/block.js";
-import { valueDependsOn } from "#ir/traverse.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { Region } from "#compiler/ir/region.js";
 
 type LoopBoundary = Readonly<{
   owner: SiteId;
@@ -10,11 +11,11 @@ type LoopBoundary = Readonly<{
 }>;
 
 export class LoopAnchors {
-  readonly #loops = new Map<Body, LoopBoundary>();
+  readonly #loops = new Map<Region, LoopBoundary>();
 
   constructor(
-    private readonly block: IrBlock,
-    private readonly analysis: BodyAnalysis
+    private readonly block: FunctionGraph,
+    private readonly analysis: FunctionAnalysis
   ) {
     const addScoped = (
       value: ValueId,
@@ -24,7 +25,7 @@ export class LoopAnchors {
         loop.scoped.add(value);
       }
     };
-    const visit = (body: Body, loops: readonly LoopBoundary[]): void => {
+    const visit = (body: Region, loops: readonly LoopBoundary[]): void => {
       for (const [index, node] of body.nodes.entries()) {
         for (const output of node.outputs) {
           addScoped(output, loops);
@@ -97,7 +98,7 @@ export class LoopAnchors {
     const site = this.analysis.sites()[anchor];
 
     assert(site !== undefined && site.id === anchor, `unknown placement site ${anchor}`);
-    const loop = this.#loops.get(site.body);
+    const loop = this.#loops.get(site.region);
 
     return loop !== undefined &&
         !valueDependsOn(this.block.values, value, loop.scoped)

@@ -1,7 +1,7 @@
-import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import type { OperandWidth } from "#core/types.js";
+import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
+import type { IntegerWidth } from "./types.js";
 
-export function truncateInteger(width: OperandWidth, value: number): number {
+export function truncateInteger(width: IntegerWidth, value: number): number {
   switch (width) {
     case 8:
       return value & 0xff;
@@ -12,7 +12,7 @@ export function truncateInteger(width: OperandWidth, value: number): number {
   }
 }
 
-export function signExtendInteger(width: OperandWidth, value: number): number {
+export function signExtendInteger(width: IntegerWidth, value: number): number {
   switch (width) {
     case 8:
       return (value << 24) >> 24;
@@ -24,7 +24,7 @@ export function signExtendInteger(width: OperandWidth, value: number): number {
 }
 
 // These emitters consume the i32 already on the Wasm stack.
-export function emitUnsignedWidth(body: WasmFunctionBodyEncoder, width: OperandWidth): void {
+export function emitUnsignedWidth(body: WasmInstructionWriter, width: IntegerWidth): void {
   switch (width) {
     case 32:
       return;
@@ -39,7 +39,7 @@ export function emitUnsignedWidth(body: WasmFunctionBodyEncoder, width: OperandW
   }
 }
 
-export function emitSignedWidth(body: WasmFunctionBodyEncoder, width: OperandWidth): void {
+export function emitSignedWidth(body: WasmInstructionWriter, width: IntegerWidth): void {
   switch (width) {
     case 32:
       return;

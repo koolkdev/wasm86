@@ -1,16 +1,16 @@
 import { assert } from "#common/assert.js";
-import type { BodyAnalysis, BodySite, Producer, SiteId } from "#compiler/analysis/model.js";
+import type { FunctionAnalysis, Producer, RegionSite, SiteId } from "#compiler/analysis/model.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { mayAlias } from "#ir/aliasing.js";
-import type { IrBlock } from "#ir/block.js";
+import { mayAlias } from "#compiler/ir/effects.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
 import { LoopAnchors } from "../loop-anchors.js";
 import type { PlacementPlan } from "../model.js";
 import type { PlacementProof } from "./uses.js";
 
 export function validatePlacementGeometry(
-  block: IrBlock,
-  analysis: BodyAnalysis,
+  block: FunctionGraph,
+  analysis: FunctionAnalysis,
   plan: PlacementPlan,
   proof: PlacementProof
 ): void {
@@ -45,7 +45,7 @@ export function validatePlacementGeometry(
 }
 
 function validateComputed(
-  analysis: BodyAnalysis,
+  analysis: FunctionAnalysis,
   loopAnchors: LoopAnchors,
   value: ValueId,
   anchor: SiteId,
@@ -62,20 +62,20 @@ function validateComputed(
 }
 
 function validateProducer(
-  block: IrBlock,
-  analysis: BodyAnalysis,
+  block: FunctionGraph,
+  analysis: FunctionAnalysis,
   producer: Producer,
   anchorId: SiteId
 ): void {
   const authored = getSite(analysis, producer.site);
   const anchor = getSite(analysis, anchorId);
-  const path = authored.body === anchor.body
+  const path = authored.region === anchor.region
     ? []
-    : analysis.path(authored.body, anchor.body);
+    : analysis.path(authored.region, anchor.region);
 
   assert(authored.kind === "node", `producer ${producer.output} has no node site`);
   assert(path !== undefined, `producer ${producer.output} leaves its definition scope`);
-  if (authored.body === anchor.body) {
+  if (authored.region === anchor.region) {
     assert(
       anchor.nodeIndex >= authored.nodeIndex,
       `producer ${producer.output} is anchored before its definition`
@@ -90,7 +90,7 @@ function validateProducer(
     );
     for (const step of path) {
       assert(
-        !analysis.isLoopBody(step.body),
+        !analysis.isLoopRegion(step.region),
         `producer ${producer.output} moves from outside into a loop`
       );
     }
@@ -107,11 +107,11 @@ function validateProducer(
   }
 
   const reads = producer.operation.directEffects.reads;
-  let body = authored.body;
+  let region = authored.region;
   let start = authored.nodeIndex + 1;
   const stableThrough = (end: number): void => {
     for (let index = start; index < end; index += 1) {
-      const writes = analysis.writesAt(analysis.siteOf(body, index));
+      const writes = analysis.writesAt(analysis.siteOf(region, index));
 
       assert(
         !writes.some((write) => reads.some((read) => mayAlias(read, write))),
@@ -122,13 +122,13 @@ function validateProducer(
 
   for (const step of path) {
     stableThrough(getSite(analysis, step.owner).nodeIndex);
-    body = step.body;
+    region = step.region;
     start = 0;
   }
   stableThrough(anchor.nodeIndex);
 }
 
-function getSite(analysis: BodyAnalysis, id: SiteId): BodySite {
+function getSite(analysis: FunctionAnalysis, id: SiteId): RegionSite {
   const site = analysis.sites()[id];
 
   assert(site !== undefined && site.id === id, `unknown placement site ${id}`);

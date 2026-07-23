@@ -1,7 +1,0 @@
-export function u32(value: number): number {
-  return value >>> 0;
-}
-
-export function i32(value: number): number {
-  return value | 0;
-}

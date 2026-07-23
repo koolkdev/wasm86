@@ -6,11 +6,12 @@ import type {
 } from "#compiler/ir/operations/index.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { Body, BodyNode, IrBlock } from "#ir/block.js";
+import type { Region, RegionNode } from "#compiler/ir/region.js";
+import type { IrFunction } from "#compiler/ir/function.js";
 import type {
-  BodyAnalysis,
-  BodyPathStep,
-  BodySite,
+  FunctionAnalysis,
+  RegionPathStep,
+  RegionSite,
   InvocationSite,
   JoinControlProducer,
   OperationSite,
@@ -18,15 +19,15 @@ import type {
   SiteId,
   ValueDemand
 } from "./model.js";
-import { SiteIndex } from "./sites.js";
+import { FunctionGeometry } from "./geometry.js";
 
-export function analyzeBody(block: IrBlock): BodyAnalysis {
-  return new BodyAnalyzer(block);
+export function analyzeFunction(fn: IrFunction): FunctionAnalysis {
+  return new FunctionAnalyzer(fn);
 }
 
 const noWrites: readonly StorageAccess[] = [];
 
-type BodyWalkResult = Readonly<{
+type RegionWalkResult = Readonly<{
   writes: readonly StorageAccess[];
   mandatoryResult: ValueDemand | undefined;
 }>;
@@ -36,9 +37,9 @@ type ControlProduction = Readonly<{
   dependencies: readonly ValueDemand[];
 }>;
 
-class BodyAnalyzer implements BodyAnalysis {
-  readonly #block: IrBlock;
-  readonly #siteIndex: SiteIndex;
+class FunctionAnalyzer implements FunctionAnalysis {
+  readonly #function: IrFunction;
+  readonly #geometry: FunctionGeometry;
   readonly #writesBySite: (readonly StorageAccess[] | undefined)[] = [];
 
   readonly #roots: ValueDemand[] = [];
@@ -54,12 +55,12 @@ class BodyAnalyzer implements BodyAnalysis {
     Operation | null
   >();
 
-  constructor(block: IrBlock) {
-    this.#block = block;
-    this.#siteIndex = new SiteIndex(block.body);
-    this.#useCounts = new Uint32Array(block.values.size());
+  constructor(fn: IrFunction) {
+    this.#function = fn;
+    this.#geometry = new FunctionGeometry(fn.body);
+    this.#useCounts = new Uint32Array(fn.values.size());
 
-    this.#walkBody(block.body);
+    this.#walkRegion(fn.body);
     this.#seedRoots();
     this.#propagateUses();
     if (this.#recordRequiredOperationDemands()) {
@@ -69,34 +70,34 @@ class BodyAnalyzer implements BodyAnalysis {
     }
 
     assert(
-      this.#writesBySite.length === this.#siteIndex.sites().length &&
+      this.#writesBySite.length === this.#geometry.sites().length &&
         this.#writesBySite.every((writes) => writes !== undefined),
-      "body analysis did not record writes for every site"
+      "function analysis did not record writes for every site"
     );
   }
 
-  sites(): readonly BodySite[] {
-    return this.#siteIndex.sites();
+  sites(): readonly RegionSite[] {
+    return this.#geometry.sites();
   }
 
-  siteOf(body: Body, nodeIndex: number): SiteId {
-    return this.#siteIndex.siteOf(body, nodeIndex);
+  siteOf(region: Region, nodeIndex: number): SiteId {
+    return this.#geometry.siteOf(region, nodeIndex);
   }
 
-  path(ancestor: Body, descendant: Body): readonly BodyPathStep[] | undefined {
-    return this.#siteIndex.path(ancestor, descendant);
+  path(ancestor: Region, descendant: Region): readonly RegionPathStep[] | undefined {
+    return this.#geometry.path(ancestor, descendant);
   }
 
-  isLoopBody(body: Body): boolean {
-    return this.#siteIndex.isLoopBody(body);
+  isLoopRegion(region: Region): boolean {
+    return this.#geometry.isLoopRegion(region);
   }
 
   dominatingSite(sites: readonly SiteId[]): SiteId {
-    return this.#siteIndex.dominatingSite(sites);
+    return this.#geometry.dominatingSite(sites);
   }
 
-  bodyEndSite(body: Body): SiteId {
-    return this.#siteIndex.bodyEndSite(body);
+  regionEndSite(region: Region): SiteId {
+    return this.#geometry.regionEndSite(region);
   }
 
   roots(): readonly ValueDemand[] {
@@ -104,32 +105,32 @@ class BodyAnalyzer implements BodyAnalysis {
   }
 
   controlDependencies(output: ValueId): readonly ValueDemand[] | undefined {
-    this.#block.values.node(output);
+    this.#function.values.node(output);
     return this.#controlProductions.get(output)?.dependencies;
   }
 
   controlProducer(output: ValueId): JoinControlProducer | undefined {
-    this.#block.values.node(output);
+    this.#function.values.node(output);
     return this.#controlProductions.get(output)?.producer;
   }
 
   producer(output: ValueId): Producer | undefined {
-    this.#block.values.node(output);
+    this.#function.values.node(output);
     return this.#producers.get(output);
   }
 
   isLive(id: ValueId): boolean {
-    this.#block.values.node(id);
+    this.#function.values.node(id);
     return this.#useCounts[id] !== 0;
   }
 
   useCount(id: ValueId): number {
-    this.#block.values.node(id);
+    this.#function.values.node(id);
     return this.#useCounts[id] ?? 0;
   }
 
   writesAt(site: SiteId): readonly StorageAccess[] {
-    this.#siteIndex.site(site);
+    this.#geometry.site(site);
     const writes = this.#writesBySite[site];
 
     assert(writes !== undefined, `site ${site} has no writes`);
@@ -162,12 +163,12 @@ class BodyAnalyzer implements BodyAnalysis {
     return operation === null || this.operationMustExecute(operation);
   }
 
-  #walkBody(body: Body): BodyWalkResult {
-    const bodyWrites: StorageAccess[] = [];
+  #walkRegion(region: Region): RegionWalkResult {
+    const regionWrites: StorageAccess[] = [];
     let mandatoryResult: ValueDemand | undefined;
 
-    for (const [nodeIndex, node] of body.nodes.entries()) {
-      const nodeSite = this.#siteIndex.addNode(body, nodeIndex, node);
+    for (const [nodeIndex, node] of region.nodes.entries()) {
+      const nodeSite = this.#geometry.addNode(region, nodeIndex, node);
 
       this.#writesBySite.push(undefined);
       const demand = (value: ValueId): ValueDemand => ({
@@ -177,19 +178,19 @@ class BodyAnalyzer implements BodyAnalysis {
       const nodeWrites = this.#walkNode(node, nodeSite, demand);
 
       this.#writesBySite[nodeSite] = nodeWrites;
-      bodyWrites.push(...nodeWrites);
+      regionWrites.push(...nodeWrites);
     }
 
-    const endSite = this.#siteIndex.addEnd(body);
+    const endSite = this.#geometry.addEnd(region);
 
     this.#writesBySite.push(noWrites);
 
     if (
-      body.result !== undefined &&
-      this.#block.values.isUnreachable(body.result)
+      region.result !== undefined &&
+      this.#function.values.isUnreachable(region.result)
     ) {
       mandatoryResult = {
-        value: body.result,
+        value: region.result,
         consumedAt: endSite
       };
 
@@ -197,13 +198,13 @@ class BodyAnalyzer implements BodyAnalysis {
     }
 
     return {
-      writes: bodyWrites,
+      writes: regionWrites,
       mandatoryResult
     };
   }
 
   #walkNode(
-    node: BodyNode,
+    node: RegionNode,
     site: SiteId,
     demand: (value: ValueId) => ValueDemand
   ): readonly StorageAccess[] {
@@ -216,15 +217,15 @@ class BodyAnalyzer implements BodyAnalysis {
       this.#recordReturnInvocation(node, site);
     }
     const nested = node.nestedBodies;
-    const bodies = nested.map((entry) => entry.body);
+    const regions = nested.map((entry) => entry.body);
     const walked = nested.map((entry) =>
-      this.#walkNestedBody(entry.body, site, entry.scope.kind === "loop")
+      this.#walkNestedRegion(entry.body, site, entry.scope.kind === "loop")
     );
     const outputs = node.outputs;
 
     assert(outputs.length <= 1, `${node.kind} control has multiple join outputs`);
     if (outputs.length === 1) {
-      this.#recordControlOutput(outputs[0]!, node, site, bodies, walked);
+      this.#recordControlOutput(outputs[0]!, node, site, regions, walked);
     }
 
     return mergeWrites([
@@ -277,35 +278,35 @@ class BodyAnalyzer implements BodyAnalysis {
     this.#operationByInvocationSite.set(invocationSite, null);
   }
 
-  #walkNestedBody(
-    body: Body,
+  #walkNestedRegion(
+    region: Region,
     owner: SiteId,
     isLoop = false
-  ): BodyWalkResult {
-    this.#siteIndex.registerNested(body, owner, isLoop);
-    return this.#walkBody(body);
+  ): RegionWalkResult {
+    this.#geometry.registerNested(region, owner, isLoop);
+    return this.#walkRegion(region);
   }
 
   #recordControlOutput(
     output: ValueId,
     control: Control,
     site: SiteId,
-    bodies: readonly Body[],
-    walked: readonly BodyWalkResult[]
+    regions: readonly Region[],
+    walked: readonly RegionWalkResult[]
   ): void {
     const dependencies: ValueDemand[] = [];
 
-    for (const [index, body] of bodies.entries()) {
-      const result = body.result;
-      const bodyResult = walked[index];
+    for (const [index, region] of regions.entries()) {
+      const result = region.result;
+      const regionResult = walked[index];
 
       assert(result !== undefined, `${control.kind} arm has no result`);
-      assert(bodyResult !== undefined, `${control.kind} arm was not analyzed`);
-      const end = this.bodyEndSite(body);
-      const mandatory = bodyResult.mandatoryResult;
+      assert(regionResult !== undefined, `${control.kind} arm was not analyzed`);
+      const end = this.regionEndSite(region);
+      const mandatory = regionResult.mandatoryResult;
 
       if (mandatory !== undefined) {
-        assert(mandatory.value === result, "mandatory body result has the wrong value");
+        assert(mandatory.value === result, "mandatory region result has the wrong value");
         dependencies.push(mandatory);
       } else {
         dependencies.push({
@@ -362,7 +363,7 @@ class BodyAnalyzer implements BodyAnalysis {
   #propagateUses(): void {
     const propagatedOperations = new Set<Operation>();
 
-    for (let rawId = this.#block.values.size() - 1; rawId >= 0; rawId -= 1) {
+    for (let rawId = this.#function.values.size() - 1; rawId >= 0; rawId -= 1) {
       const id = valueId(rawId);
 
       if (this.#useCounts[id] === 0) {
@@ -384,24 +385,24 @@ class BodyAnalyzer implements BodyAnalysis {
 
       if (control !== undefined) {
         // An unreachable arm result is an execution requirement in its own
-        // right. Its body-end root is also the selected arm's only realization,
+        // right. Its region-end root is also the selected arm's only realization,
         // so a live join must not count a second use of the same occurrence.
         for (const dependency of control.dependencies) {
-          if (!this.#block.values.isUnreachable(dependency.value)) {
+          if (!this.#function.values.isUnreachable(dependency.value)) {
             this.#addUse(dependency.value);
           }
         }
         continue;
       }
 
-      for (const dependency of this.#block.values.children(id)) {
+      for (const dependency of this.#function.values.children(id)) {
         this.#addUse(dependency);
       }
     }
   }
 
   #addUse(id: ValueId): void {
-    this.#block.values.node(id);
+    this.#function.values.node(id);
     this.#useCounts[id] = (this.#useCounts[id] ?? 0) + 1;
   }
 }

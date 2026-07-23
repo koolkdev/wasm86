@@ -1,13 +1,24 @@
 import { assert } from "#common/assert.js";
-import type { WasmMemoryLimits } from "#compiler/encoder/memory.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
-import { maximumWasmMemoryPages } from "./pages.js";
+import type { TableRef } from "#compiler/ir/refs.js";
+import {
+  maximumWasmMemoryPages,
+  type MemoryLimits,
+  type TableLimits
+} from "./limits.js";
 
 export type MemoryImport = Readonly<{
   ref: ResourceRef;
   moduleName: string;
   name: string;
-  limits: WasmMemoryLimits;
+  limits: MemoryLimits;
+}>;
+
+export type TableImport = Readonly<{
+  ref: TableRef;
+  moduleName: string;
+  name: string;
+  limits: TableLimits;
 }>;
 
 export type ProgramResources = Readonly<{

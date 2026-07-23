@@ -1,7 +1,7 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { RegionBuilder } from "#ir/region-builder.js";
+import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { StateFieldTracker } from "../state/field-tracker.js";
 import type { StatePathKind } from "../state/pending-buffer.js";
 import { GprState, type GprReadOptions } from "../state/gpr.js";
@@ -16,7 +16,7 @@ import {
   segmentSelectorChannel
 } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
-import type { BodyNode } from "#ir/block.js";
+import type { RegionNode } from "#compiler/ir/region.js";
 import type { ResourceEffect } from "#compiler/ir/resource.js";
 import { resourceWrite } from "#compiler/ir/operations/resource.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
@@ -37,7 +37,7 @@ import {
 
 type Harness = Readonly<{
   values: ValueTable;
-  nodes: BodyNode[];
+  nodes: RegionNode[];
   pending: PendingHarness;
 }>;
 
@@ -56,7 +56,7 @@ type PendingHarness = Readonly<{
 function createHarness(): Harness {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
-  const nodes = body.build().nodes as BodyNode[];
+  const nodes = body.build().nodes as RegionNode[];
   const accessConstruction = new StateAccess(cpuState);
   const access = accessConstruction.bind(body);
   const fields = new StateFieldTracker(accessConstruction);

@@ -3,22 +3,20 @@ import { test } from "node:test";
 
 import { assert } from "#common/assert.js";
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { encodeWasmModule } from "#compiler/encoder/module.js";
 import {
   wasmBodyOpcodes,
   wasmFunctionTypeCount
 } from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode, wasmValueType } from "#compiler/encoder/types.js";
-import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
-import { compileProgram } from "#compiler/program/compile.js";
-import { createModuleBindings } from "#compiler/program/bindings.js";
-import { functionType } from "#compiler/program/function-type.js";
+import { ProgramBuilder } from "#compiler/program/builder.js";
+import type { Program } from "#compiler/program/program.js";
+import { compileProgram } from "#compiler/compile.js";
+import { createModuleBindings } from "#compiler/module/bindings.js";
+import { functionType } from "#compiler/ir/function.js";
 import { FunctionFamily, type FunctionDefinition } from "#compiler/program/functions.js";
-import {
-  functionExportRef,
-  functionRef,
-  tableRef
-} from "#compiler/program/refs.js";
+import { functionExportRef } from "#compiler/program/exports.js";
+import { functionRef, tableRef } from "#compiler/ir/refs.js";
 import { createProgramResources } from "#compiler/program/resources.js";
 import {
   validateLinkedProgram
@@ -31,7 +29,7 @@ import {
   type ResourceEffect,
   type ResourceRef
 } from "#compiler/ir/resource.js";
-import type { FunctionBuilder } from "#ir/function.js";
+import type { FunctionBuilder } from "#compiler/ir/builder/function.js";
 import {
   resourceRead,
   resourceWrite
@@ -40,7 +38,7 @@ import type {
   IntegerWidth,
   ValueId
 } from "#compiler/ir/values/types.js";
-import { emitFunction } from "#wasm/emit/action.js";
+import { emitFunction } from "#compiler/emit/function.js";
 
 const voidType = functionType([], []);
 const i32Type = functionType([], ["i32"]);
@@ -554,35 +552,34 @@ test("an effectful function call stays single and conditional inside its selecte
   strictEqual(callCount, 1);
   ok(opcodes.indexOf(wasmOpcode.if) < opcodes.indexOf(wasmOpcode.call));
 
-  const module = new WasmModuleEncoder();
-  const memoryIndex = module.importMemory("test", "state", { minPages: 1 });
-  const calleeTypeIndex = module.addFunctionType({
-    params: [wasmValueType.i32],
-    results: []
-  });
-  const callerTypeIndex = module.addFunctionType({
-    params: [wasmValueType.i32],
-    results: [wasmValueType.i32]
-  });
-  const calleeIndex = module.addFunction(
-    calleeTypeIndex,
-    new WasmFunctionBodyEncoder()
+  const calleeBody = new WasmFunctionBodyEncoder()
       .i32Const(0)
       .i32Const(0)
-      .i32Load({ align: 2, memoryIndex, offset: 0 })
+      .i32Load({ align: 2, memoryIndex: 0, offset: 0 })
       .i32Const(1)
       .i32Add()
-      .i32Store({ align: 2, memoryIndex, offset: 0 })
-      .finish()
-  );
-
-  strictEqual(calleeIndex, 0);
-  const callerIndex = module.addFunction(callerTypeIndex, emitted);
-
-  module.exportFunction("entry", callerIndex);
+      .i32Store({ align: 2, memoryIndex: 0, offset: 0 })
+      .finish();
+  const bytes = encodeWasmModule({
+    functionTypes: [
+      { params: [wasmValueType.i32], results: [] },
+      { params: [wasmValueType.i32], results: [wasmValueType.i32] }
+    ],
+    functionImports: [],
+    memoryImports: [
+      { moduleName: "test", name: "state", limits: { minPages: 1 } }
+    ],
+    tableImports: [],
+    functions: [
+      { typeIndex: 0, body: calleeBody },
+      { typeIndex: 1, body: emitted }
+    ],
+    globals: [],
+    functionExports: [{ name: "entry", functionIndex: 1 }]
+  });
   const memory = new WebAssembly.Memory({ initial: 1 });
   const instance = await WebAssembly.instantiate(
-    await WebAssembly.compile(module.encode()),
+    await WebAssembly.compile(bytes),
     { test: { state: memory } }
   );
   const entry = instance.exports.entry;

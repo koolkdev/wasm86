@@ -1,4 +1,4 @@
-import { wasmPagesForByteLength } from "#compiler/program/pages.js";
+import { wasmPagesForByteLength } from "#compiler/program/limits.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import { createCpu, type Cpu } from "#cpu/cpu.js";
 import {

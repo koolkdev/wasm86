@@ -17,9 +17,9 @@ import type { SegmentStateField } from "#core/state/channels.js";
 import type { InstructionStateChannel } from "../state/channels.js";
 import type { OperandWidth } from "#core/types.js";
 import { cpuState } from "#test/support/execution-model.js";
-import type { BodyNode } from "#ir/block.js";
-import { RegionBuilder } from "#ir/region-builder.js";
-import { covers } from "#ir/aliasing.js";
+import type { RegionNode } from "#compiler/ir/region.js";
+import { RegionBuilder } from "#compiler/ir/builder/region.js";
+import { covers } from "#compiler/ir/effects.js";
 
 type TestValueId = ValueId | number;
 type OperationOf<Kind extends Operation["kind"]> = Extract<Operation, { kind: Kind }>;
@@ -105,7 +105,7 @@ export function dynamicSegmentEffect(
 
 export function readsStateChannel(
   values: ValueTable,
-  node: BodyNode,
+  node: RegionNode,
   channel: InstructionStateChannel
 ): node is StateReadOperation {
   return isStateRead(node) && effectsEqual(
@@ -116,7 +116,7 @@ export function readsStateChannel(
 
 export function writesStateChannel(
   values: ValueTable,
-  node: BodyNode,
+  node: RegionNode,
   channel: InstructionStateChannel
 ): node is StateWriteOperation {
   return isStateWrite(node) && effectsEqual(
@@ -127,7 +127,7 @@ export function writesStateChannel(
 
 export function readsDynamicGpr(
   values: ValueTable,
-  node: BodyNode,
+  node: RegionNode,
   index: ValueId,
   width: OperandWidth
 ): node is StateReadOperation {
@@ -139,7 +139,7 @@ export function readsDynamicGpr(
 
 export function writesDynamicGpr(
   values: ValueTable,
-  node: BodyNode,
+  node: RegionNode,
   index: ValueId,
   width: OperandWidth
 ): node is StateWriteOperation {
@@ -151,7 +151,7 @@ export function writesDynamicGpr(
 
 export function readsDynamicSegment(
   values: ValueTable,
-  node: BodyNode,
+  node: RegionNode,
   index: ValueId,
   field: SegmentStateField
 ): node is StateReadOperation {
@@ -169,7 +169,7 @@ export function stateEffectsEqual(
 }
 
 export function isStateRead(
-  node: BodyNode
+  node: RegionNode
 ): node is StateReadOperation {
   return node.kind === "resource.read" &&
     node.effect.resource === cpuState.resource &&
@@ -177,7 +177,7 @@ export function isStateRead(
 }
 
 export function isStateWrite(
-  node: BodyNode
+  node: RegionNode
 ): node is StateWriteOperation {
   return node.kind === "resource.write" &&
     node.effect.resource === cpuState.resource;

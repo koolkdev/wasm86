@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
-import type { BodyAnalysis } from "#compiler/analysis/model.js";
-import type { IrBlock } from "#ir/block.js";
+import type { FunctionAnalysis } from "#compiler/analysis/model.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
 import type { PlacementPlan } from "./model.js";
 import { validatePlacementGeometry } from "./validate/geometry.js";
 import { validatePlacementLocals } from "./validate/locals.js";
@@ -10,8 +10,8 @@ import { validatePlacementUses } from "./validate/uses.js";
 // Capture safety uses the emitter's fixed ordering: captures run on ordinary
 // site entry, but after direct operands at structured headers.
 export function validatePlacement(
-  block: IrBlock,
-  analysis: BodyAnalysis,
+  block: FunctionGraph,
+  analysis: FunctionAnalysis,
   plan: PlacementPlan
 ): void {
   assert(

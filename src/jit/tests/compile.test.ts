@@ -9,8 +9,8 @@ import { test } from "node:test";
 
 import { encodeVariant } from "#compiler/layout/variant-codec.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
-import { instantiateCompiledProgram } from "#compiler/program/instance.js";
-import { functionRef } from "#compiler/program/refs.js";
+import { instantiateCompiledProgram } from "#compiler/instantiate.js";
+import { functionRef } from "#compiler/ir/refs.js";
 import {
   compileJitArtifact,
   compileJitFromMemory,

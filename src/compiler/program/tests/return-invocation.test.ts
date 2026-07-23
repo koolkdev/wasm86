@@ -16,24 +16,22 @@ import {
   type ResourceEffect
 } from "#compiler/ir/resource.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
-import { compileProgram } from "#compiler/program/compile.js";
-import { createModuleBindings } from "#compiler/program/bindings.js";
-import { functionType } from "#compiler/program/function-type.js";
+import { ProgramBuilder } from "#compiler/program/builder.js";
+import type { Program } from "#compiler/program/program.js";
+import { compileProgram } from "#compiler/compile.js";
+import { createModuleBindings } from "#compiler/module/bindings.js";
+import { functionType } from "#compiler/ir/function.js";
 import {
   FunctionDefinition,
   FunctionFamily
 } from "#compiler/program/functions.js";
-import {
-  functionExportRef,
-  functionRef
-} from "#compiler/program/refs.js";
+import { functionExportRef } from "#compiler/program/exports.js";
+import { functionRef } from "#compiler/ir/refs.js";
 import { createProgramResources } from "#compiler/program/resources.js";
-import { FunctionBuilder } from "#ir/function.js";
-import { nodeCompletes } from "#ir/block.js";
-import { effectsOf } from "#ir/aliasing.js";
-import { validateIrFunction } from "#ir/validate.js";
-import { emitFunction } from "#wasm/emit/action.js";
+import { FunctionBuilder } from "#compiler/ir/builder/function.js";
+import { nodeCompletes } from "#compiler/ir/region.js";
+import { validateIrFunction } from "#compiler/ir/validate.js";
+import { emitFunction } from "#compiler/emit/function.js";
 
 const noEffects = { reads: [], writes: [] } as const;
 const effectResource = resourceRef("test.return-call-effect-resource");
@@ -160,7 +158,7 @@ test("returnCall closes and emits a typed terminal tail call", async () => {
   if (callerFunction === undefined) {
     throw new Error("missing returnCall caller");
   }
-  deepStrictEqual(callerFunction.directTargets, [target]);
+  deepStrictEqual(callerFunction.directFunctions, [target.ref]);
   strictEqual(callerFunction.body.body.nodes[0]?.kind, "return");
   const emitted = emitFunction(callerFunction.body, {
     bindings: createModuleBindings({
@@ -287,5 +285,5 @@ test("returnCall enforces argument and enclosing-result types", () => {
   }
   strictEqual(nodeCompletes(control), true);
   deepStrictEqual(control.operands, []);
-  deepStrictEqual(effectsOf(control), noEffects);
+  deepStrictEqual(control.directEffects, noEffects);
 });

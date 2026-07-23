@@ -1,18 +1,15 @@
 import { ByteSink } from "./byte-sink.js";
+import {
+  type WasmBranchHint,
+  type WasmInstructionWriter
+} from "./instruction-writer.js";
 import { encodeI32Leb128, encodeI64Leb128 } from "./leb128.js";
 import { encodeMemoryImmediate, type WasmMemoryImmediate } from "./memory.js";
 import { wasmBlockType, wasmOpcode, type WasmValueType } from "./types.js";
 
-export const wasmBranchHint = {
-  unlikely: 0,
-  likely: 1
-} as const;
-
-export type WasmBranchHint = (typeof wasmBranchHint)[keyof typeof wasmBranchHint];
-
 export type EncodedBranchHint = Readonly<{
   offset: number;
-  value: WasmBranchHint;
+  value: 0 | 1;
 }>;
 
 declare const encodedBodyBrand: unique symbol;
@@ -47,10 +44,10 @@ class EncodedFunctionBody implements EncodedWasmFunctionBody {
 
 type InstructionBranchHint = Readonly<{
   instructionOffset: number;
-  value: WasmBranchHint;
+  value: 0 | 1;
 }>;
 
-export class WasmFunctionBodyEncoder {
+export class WasmFunctionBodyEncoder implements WasmInstructionWriter {
   readonly #instructions = new ByteSink();
   readonly #locals: WasmValueType[] = [];
   readonly #branchHints: InstructionBranchHint[] = [];
@@ -124,7 +121,7 @@ export class WasmFunctionBodyEncoder {
     if (hint !== undefined) {
       this.#branchHints.push({
         instructionOffset: this.#instructions.byteLength,
-        value: hint
+        value: encodeBranchHint(hint)
       });
     }
 
@@ -148,7 +145,7 @@ export class WasmFunctionBodyEncoder {
     if (hint !== undefined) {
       this.#branchHints.push({
         instructionOffset: this.#instructions.byteLength,
-        value: hint
+        value: encodeBranchHint(hint)
       });
     }
 
@@ -626,6 +623,15 @@ export class WasmFunctionBodyEncoder {
     if (this.#finished) {
       throw new Error(message);
     }
+  }
+}
+
+function encodeBranchHint(hint: WasmBranchHint): 0 | 1 {
+  switch (hint) {
+    case "unlikely":
+      return 0;
+    case "likely":
+      return 1;
   }
 }
 

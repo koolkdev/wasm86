@@ -1,4 +1,4 @@
-import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import type { ValueDefinition } from "./definition.js";
 import type { ValueId, WidthBounds } from "./types.js";
 import { fitsUnsigned, unboundedWidthBounds } from "./width-bounds.js";
@@ -6,7 +6,7 @@ import { fitsUnsigned, unboundedWidthBounds } from "./width-bounds.js";
 type UnaryDefinition = Readonly<{
   evaluate(value: number): number;
   bounds: WidthBounds;
-  emit(body: WasmFunctionBodyEncoder): void;
+  emit(body: WasmInstructionWriter): void;
 }>;
 
 export type UnaryOperator = "popcnt" | "ctz" | "clz" | "eqz";

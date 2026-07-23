@@ -10,7 +10,7 @@ import {
   instructionCountField,
   instructionLimitField
 } from "#cpu/instruction-count.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { instructionLimitExit } from "./exits.js";
 import type { DecodedInstruction } from "./decode.js";
 

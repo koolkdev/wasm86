@@ -4,7 +4,7 @@ import {
 } from "#compiler/ir/effects.js";
 import { Invocation } from "#compiler/ir/invocation.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { ValueUseEmitter } from "#ir/node.js";
+import type { ValueUseEmitter } from "#compiler/ir/node.js";
 import {
   TerminalControlBase,
   type ControlEmitTarget
@@ -53,7 +53,7 @@ export class ReturnControl extends TerminalControlBase {
         return;
       case "invocation":
         this.source.invocation.emitInputs(values);
-        this.source.invocation.target.emitReturnCall(target);
+        target.emitReturnCall(this.source.invocation.target);
         return;
     }
   }

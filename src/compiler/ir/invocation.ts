@@ -1,36 +1,25 @@
 import { assert } from "#common/assert.js";
-import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ValueInput } from "#compiler/ir/values/types.js";
-import type { ModuleBindings } from "#compiler/program/bindings.js";
-import type { FunctionType } from "#compiler/program/function-type.js";
-import type { FunctionRef, TableRef } from "#compiler/program/refs.js";
-import type { ValueUseEmitter } from "#ir/node.js";
+import type { FunctionType } from "#compiler/ir/function.js";
+import type { FunctionRef, TableRef } from "#compiler/ir/refs.js";
+import type { ValueUseEmitter } from "#compiler/ir/node.js";
 
 export type InvocationEmitTarget = Readonly<{
-  body: WasmFunctionBodyEncoder;
-  bindings: ModuleBindings;
+  body: WasmInstructionWriter;
+  emitCall: (target: CallTarget) => void;
+  emitReturnCall: (target: CallTarget) => void;
 }>;
 
-export type DirectFunctionTarget = CallTarget & Readonly<{
+export type DirectCallTarget = Readonly<{
+  kind: "direct";
   ref: FunctionRef;
-  isAvailableTo(owner: object): boolean;
+  type: FunctionType;
+  effects: StorageEffects;
 }>;
 
-export type CallTargetReferences = Readonly<{
-  functions: readonly DirectFunctionTarget[];
-  types: readonly FunctionType[];
-  tables: readonly TableRef[];
-}>;
-
-export interface CallTarget {
-  readonly type: FunctionType;
-  readonly effects: StorageEffects;
-  readonly targetInputs: readonly ValueInput[];
-  readonly references: CallTargetReferences;
-  emitCall(context: InvocationEmitTarget): void;
-  emitReturnCall(context: InvocationEmitTarget): void;
-}
+export type CallTarget = DirectCallTarget | IndirectCallTarget;
 
 export type IndirectCallTargetArgs = Readonly<{
   table: TableRef;
@@ -39,7 +28,9 @@ export type IndirectCallTargetArgs = Readonly<{
   elementIndex: ValueInput;
 }>;
 
-export class IndirectCallTarget implements CallTarget {
+export class IndirectCallTarget {
+  readonly kind = "indirect";
+
   private constructor(
     readonly table: TableRef,
     readonly type: FunctionType,
@@ -61,27 +52,6 @@ export class IndirectCallTarget implements CallTarget {
     return new IndirectCallTarget(table, type, effects, elementIndex);
   }
 
-  get targetInputs(): readonly [ValueInput] {
-    return [this.elementIndex];
-  }
-
-  get references(): CallTargetReferences {
-    return { functions: [], types: [this.type], tables: [this.table] };
-  }
-
-  emitCall(context: InvocationEmitTarget): void {
-    context.body.callIndirect(
-      context.bindings.typeIndex(this.type),
-      context.bindings.tableIndex(this.table)
-    );
-  }
-
-  emitReturnCall(context: InvocationEmitTarget): void {
-    context.body.returnCallIndirect(
-      context.bindings.typeIndex(this.type),
-      context.bindings.tableIndex(this.table)
-    );
-  }
 }
 
 export type InvocationArgs = Readonly<{
@@ -113,7 +83,9 @@ export class Invocation {
       );
     }
 
-    this.inputs = [...this.arguments, ...target.targetInputs];
+    this.inputs = target.kind === "direct"
+      ? this.arguments
+      : [...this.arguments, target.elementIndex];
   }
 
   static create({ target, arguments: inputs }: InvocationArgs): Invocation {

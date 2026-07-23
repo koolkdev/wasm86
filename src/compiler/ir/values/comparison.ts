@@ -1,4 +1,4 @@
-import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import type { ValueDefinition } from "./definition.js";
 import type { ValueId, ValueType } from "./types.js";
 import { fitsUnsigned } from "./width-bounds.js";
@@ -7,8 +7,8 @@ type ComparisonDefinition = Readonly<{
   evaluate(a: number, b: number): boolean;
   same: boolean;
   signed: boolean;
-  emitI32(body: WasmFunctionBodyEncoder): void;
-  emitI64(body: WasmFunctionBodyEncoder): void;
+  emitI32(body: WasmInstructionWriter): void;
+  emitI64(body: WasmInstructionWriter): void;
 }>;
 
 export type CompareOperator =

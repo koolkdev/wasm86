@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import { i32 } from "#core/numeric.js";
+import { i32 } from "#common/numeric.js";
 import type { BinaryDefinition, BinaryTrapCase } from "./binary.js";
 import { fitsUnsigned, unboundedWidthBounds } from "./width-bounds.js";
 

@@ -1,10 +1,10 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { CellRef } from "#compiler/refs/cell.js";
+import { CellRef } from "#compiler/ir/cell.js";
 import type { EncodedValue } from "#core/decoder/model/types.js";
 import { exceptionExit } from "#core/exits.js";
 import type { BuildExit } from "#core/instruction/terminal.js";
 import type { OperandWidth } from "#core/types.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { MemoryAccessConstruction } from "#memory/access.js";
 
 export class InstructionByteStream {

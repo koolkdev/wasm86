@@ -1,10 +1,10 @@
+import { u32 } from "#common/numeric.js";
 import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
 import type {
   IsaDecodedInstruction,
   IsaDecodeExceptionResult,
   IsaDecodeReader
 } from "#core/decoder/types.js";
-import { u32 } from "#core/numeric.js";
 import type { InstructionByteSnapshot } from "./instruction-snapshot.js";
 import type { JitBlockPolicy } from "./policy.js";
 

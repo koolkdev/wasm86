@@ -5,10 +5,11 @@ import type {
 import type { OperandBinding } from "#core/instruction/bindings.js";
 import type { InstructionTerminals } from "#core/instruction/terminal.js";
 import type { SemanticTemplate } from "#core/semantics/builder.js";
-import { functionType } from "#compiler/program/function-type.js";
+import { functionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef } from "#compiler/program/refs.js";
-import { FunctionBuilder, type IrFunction } from "#ir/function.js";
+import { functionRef } from "#compiler/ir/refs.js";
+import { FunctionBuilder } from "#compiler/ir/builder/function.js";
+import type { IrFunction } from "#compiler/ir/function.js";
 import { testInstructionConstruction } from "./execution-model.js";
 
 const instructionFunctionType = functionType([], ["i64"]);

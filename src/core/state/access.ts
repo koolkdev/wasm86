@@ -29,7 +29,7 @@ import type {
   RegName,
   SegmentRegister
 } from "#core/types.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 
 export type StateResource = Readonly<{

@@ -1,7 +1,7 @@
 import { notStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { wasmPagesForByteLength } from "#compiler/program/pages.js";
+import { wasmPagesForByteLength } from "#compiler/program/limits.js";
 import { createExecutionModel } from "#execution/model.js";
 
 test("execution model composes owner-provided definitions", () => {

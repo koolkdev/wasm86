@@ -11,8 +11,8 @@ import { flagStateFields } from "#core/flags/layout.js";
 import type { InstructionStateChannel } from "../state/channels.js";
 import { gprChannel } from "#core/state/channels.js";
 import type { IfControl, LoopControl } from "#compiler/ir/controls/index.js";
-import type { BodyNode, Body, IrBlock } from "#ir/block.js";
-import type { IrFunction } from "#ir/function.js";
+import type { RegionNode, Region } from "#compiler/ir/region.js";
+import type { FunctionGraph, IrFunction } from "#compiler/ir/function.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { movSemantic } from "#core/semantics/mov.js";
@@ -26,7 +26,7 @@ import {
   repMovsSemantic,
   repStosSemantic
 } from "#core/semantics/strings.js";
-import { validateIrFunction } from "#ir/validate.js";
+import { validateIrFunction } from "#compiler/ir/validate.js";
 import {
   stateWriteValue,
   isStateRead,
@@ -60,14 +60,14 @@ function repMovsBlock(): IrFunction {
   return builder.finish();
 }
 
-function findLoop(block: IrBlock): LoopControl {
+function findLoop(block: FunctionGraph): LoopControl {
   const loops = collectLoops(block.body.nodes);
 
   strictEqual(loops.length, 1, "block has exactly one loop control");
   return loops[0]!;
 }
 
-function collectLoops(nodes: readonly BodyNode[]): LoopControl[] {
+function collectLoops(nodes: readonly RegionNode[]): LoopControl[] {
   return nodes.flatMap((node): LoopControl[] => {
     if (node.category === "operation") {
       return [];
@@ -93,7 +93,7 @@ function collectLoops(nodes: readonly BodyNode[]): LoopControl[] {
 }
 
 // The if whose then-body is the single loopContinue control: the back edge.
-function backEdgeIndex(body: Body): number {
+function backEdgeIndex(body: Region): number {
   const index = body.nodes.findIndex(
     (node) => node.kind === "if" && node.thenBody.nodes[0]?.kind === "loopContinue"
   );
@@ -102,7 +102,7 @@ function backEdgeIndex(body: Body): number {
   return index;
 }
 
-function backEdgeUpdates(body: Body): readonly ValueId[] {
+function backEdgeUpdates(body: Region): readonly ValueId[] {
   const backEdge = body.nodes[backEdgeIndex(body)] as IfControl;
   const loopContinue = backEdge.thenBody.nodes[0]!;
 
@@ -110,13 +110,13 @@ function backEdgeUpdates(body: Body): readonly ValueId[] {
   return loopContinue.updates;
 }
 
-function stateWrites(nodes: readonly BodyNode[]): StateWriteOperation[] {
+function stateWrites(nodes: readonly RegionNode[]): StateWriteOperation[] {
   return nodes.filter(isStateWrite);
 }
 
 function readFor(
-  block: IrBlock,
-  nodes: readonly BodyNode[],
+  block: FunctionGraph,
+  nodes: readonly RegionNode[],
   channel: InstructionStateChannel
 ): StateReadOperation | undefined {
   return nodes.find((node): node is StateReadOperation =>
@@ -125,7 +125,7 @@ function readFor(
 }
 
 function carriedCellFor(
-  block: IrBlock,
+  block: FunctionGraph,
   loop: LoopControl,
   channel: InstructionStateChannel
 ): LoopControl["carried"][number] | undefined {
@@ -139,7 +139,7 @@ function carriedCellFor(
 }
 
 function assertCarriedChannels(
-  block: IrBlock,
+  block: FunctionGraph,
   loop: LoopControl,
   channels: readonly InstructionStateChannel[]
 ): void {
@@ -167,13 +167,13 @@ function assertCarriedChannels(
   }
 }
 
-function stateTraffic(nodes: readonly BodyNode[]): BodyNode[] {
+function stateTraffic(nodes: readonly RegionNode[]): RegionNode[] {
   return nodes.filter((node) =>
     isStateRead(node) || isStateWrite(node)
   );
 }
 
-function preLoopNodes(block: IrBlock, loop: LoopControl): readonly BodyNode[] {
+function preLoopNodes(block: FunctionGraph, loop: LoopControl): readonly RegionNode[] {
   const nodes = nodesBeforeLoop(block.body.nodes, loop);
 
   ok(nodes !== undefined, "loop belongs to the block");
@@ -181,9 +181,9 @@ function preLoopNodes(block: IrBlock, loop: LoopControl): readonly BodyNode[] {
 }
 
 function nodesBeforeLoop(
-  nodes: readonly BodyNode[],
+  nodes: readonly RegionNode[],
   target: LoopControl
-): readonly BodyNode[] | undefined {
+): readonly RegionNode[] | undefined {
   for (let index = 0; index < nodes.length; index += 1) {
     const node = nodes[index]!;
 
@@ -191,7 +191,7 @@ function nodesBeforeLoop(
       return nodes.slice(0, index);
     }
 
-    const nestedBodies: readonly Body[] = node.kind === "if"
+    const nestedBodies: readonly Region[] = node.kind === "if"
       ? [node.thenBody, ...(node.elseBody === undefined ? [] : [node.elseBody])]
       : node.kind === "switch"
         ? [...node.cases.map((entry) => entry.body), node.defaultBody]

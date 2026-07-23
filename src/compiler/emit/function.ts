@@ -1,0 +1,35 @@
+import { assert } from "#common/assert.js";
+import type { IrFunction } from "#compiler/ir/function.js";
+import type { ModuleBindings } from "#compiler/module/bindings.js";
+import type { FunctionPlacement } from "#compiler/placement/place.js";
+import {
+  WasmFunctionBodyEncoder,
+  type EncodedWasmFunctionBody
+} from "#compiler/encoder/function-body.js";
+import { emitFunctionRegions } from "./region.js";
+import { wasmTypeForValue } from "./value.js";
+
+export type FunctionEmitContext = Readonly<{
+  bindings: ModuleBindings;
+  placement: FunctionPlacement;
+}>;
+
+export function emitFunction(
+  fn: IrFunction,
+  context: FunctionEmitContext
+): EncodedWasmFunctionBody {
+  assert(context.placement.function === fn, "placement belongs to another IR function");
+
+  const body = new WasmFunctionBodyEncoder(fn.parameters.length);
+  const locals = context.placement.plan.localTypes.map((type) =>
+    body.addLocal(wasmTypeForValue(type))
+  );
+
+  emitFunctionRegions(fn, {
+    body,
+    bindings: context.bindings,
+    placement: context.placement,
+    locals
+  });
+  return body.finish();
+}

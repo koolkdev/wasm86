@@ -11,24 +11,24 @@ import {
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 import { placeFunction } from "#compiler/placement/place.js";
-import { functionType } from "#compiler/program/function-type.js";
-import { bodyCompletes, type Body, type BodyNode, type IrBlock } from "#ir/block.js";
-import type { IrFunction } from "#ir/function.js";
-import { RegionBuilder } from "#ir/region-builder.js";
+import { functionType } from "#compiler/ir/function.js";
+import { regionCompletes, type Region, type RegionNode } from "#compiler/ir/region.js";
+import type { FunctionGraph, IrFunction } from "#compiler/ir/function.js";
+import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import {
   compilerTestValues,
   memoryWriteOperation,
   resourceReadNode,
   resourceWriteNode
-} from "#ir/tests/storage-op-helpers.js";
+} from "#test/support/storage-operations.js";
 
 function functionBlock(
-  block: IrBlock,
+  block: FunctionGraph,
   results: readonly ValueType[] = [],
   returned: readonly ValueId[] = []
 ): IrFunction {
-  if (!bodyCompletes(block.body)) {
-    (block.body.nodes as BodyNode[]).push(returnControl.create({
+  if (!regionCompletes(block.body)) {
+    (block.body.nodes as RegionNode[]).push(returnControl.create({
       source: { kind: "values", values: returned }
     }));
   }
@@ -55,7 +55,7 @@ function functionBlock(
   };
 }
 
-function place(block: IrBlock, returned?: ValueId) {
+function place(block: FunctionGraph, returned?: ValueId) {
   return placeFunction(functionBlock(
     block,
     returned === undefined ? [] : [block.values.valueType(returned)],
@@ -67,10 +67,10 @@ test("a producer used only in a selected body realizes at that use", () => {
   const values = compilerTestValues();
   const condition = values.parameter(0, "i32");
   const output = values.addNodeOutput();
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [resourceWriteNode(values, 1, output)]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -99,10 +99,10 @@ test("a recipe used only in a selected body stays at its use", () => {
   const values = compilerTestValues();
   const condition = values.parameter(0, "i32");
   const result = values.binary("add", values.parameter(1, "i32"), values.const(1));
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [resourceWriteNode(values, 0, result)]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [ifControl.create({ condition, thenBody })]
@@ -141,7 +141,7 @@ test("identical recipes authored by sibling if arms stay at their selected uses"
       }
     }
   );
-  const block: IrBlock = { values, body: builder.build() };
+  const block: FunctionGraph = { values, body: builder.build() };
   const control = block.body.nodes[0];
 
   if (thenResult === undefined || elseResult === undefined) {
@@ -173,10 +173,10 @@ test("identical recipes authored by sibling if arms stay at their selected uses"
 test("a recipe shared with parent flow anchors at the common dominator", () => {
   const values = compilerTestValues();
   const shared = values.binary("add", values.parameter(0, "i32"), values.const(1));
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [resourceWriteNode(values, 0, shared)]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [ifControl.create({ condition: shared, thenBody })]
@@ -202,17 +202,17 @@ test("a return result is placed at its selected return", () => {
     values.extend64(32, payload, false),
     values.const64(0x1200n)
   );
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [returnControl.create({
       source: { kind: "values", values: [result] }
     })]
   };
-  const elseBody: Body = {
+  const elseBody: Region = {
     nodes: [returnControl.create({
       source: { kind: "values", values: [values.const64(0n)] }
     })]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [ifControl.create({ condition, thenBody, elseBody })]
@@ -233,13 +233,13 @@ test("an aliasing write captures a producer at its authored site", () => {
   const values = compilerTestValues();
   const condition = values.parameter(0, "i32");
   const output = values.addNodeOutput();
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [
       resourceWriteNode(values, 0, values.const(5)),
       resourceWriteNode(values, 1, output)
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -266,7 +266,7 @@ test("operation-local repetition does not create a placement local", () => {
   const increment = values.const(1);
   const byteLength = values.binary("add", base, increment);
   const write = memoryWriteOperation(address, byteLength, 32);
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: { nodes: [write] }
   };
@@ -285,14 +285,14 @@ test("an outer producer used by a loop is captured in the preheader", () => {
   const values = compilerTestValues();
   const output = values.addNodeOutput();
   const loopInput = values.addLoopInput();
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [resourceWriteNode(values, 1, output)]
   };
   const loop = loopControl.create({
     carried: [{ seed: output, loopInput }],
     body: loopBody
   });
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: { nodes: [resourceReadNode(values, output, 0), loop] }
   };
@@ -310,13 +310,13 @@ test("an outer producer used by a loop is captured in the preheader", () => {
 test("a loop-invariant recipe captures at the loop entry", () => {
   const values = compilerTestValues();
   const invariant = values.binary("add", values.parameter(0, "i32"), values.const(1));
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       resourceWriteNode(values, 0, invariant),
       loopContinueControl.create({ updates: [] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
@@ -337,13 +337,13 @@ test("a loop-input recipe remains inside the loop", () => {
   const values = compilerTestValues();
   const loopInput = values.addLoopInput();
   const current = values.binary("add", loopInput, values.const(1));
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       resourceWriteNode(values, 0, current),
       loopContinueControl.create({ updates: [loopInput] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({
@@ -366,14 +366,14 @@ test("a recipe over a loop-local output remains inside the loop", () => {
   const values = compilerTestValues();
   const output = values.addNodeOutput();
   const current = values.binary("add", output, values.const(1));
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       resourceReadNode(values, output, 0),
       resourceWriteNode(values, 1, current),
       loopContinueControl.create({ updates: [] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
@@ -396,7 +396,7 @@ test("a recipe over a loop-local control output remains inside the loop", () => 
   const whenFalse = values.const(2);
   const selected = values.addNodeOutput();
   const current = values.binary("add", selected, values.const(1));
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       ifControl.create({
         condition,
@@ -408,7 +408,7 @@ test("a recipe over a loop-local control output remains inside the loop", () => 
       loopContinueControl.create({ updates: [] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
@@ -432,13 +432,13 @@ test("a transitively trapping recipe remains inside the loop", () => {
     values.parameter(1, "i32")
   );
   const adjusted = values.binary("add", quotient, values.const(1));
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       resourceWriteNode(values, 0, adjusted),
       loopContinueControl.create({ updates: [] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
@@ -454,20 +454,20 @@ test("a transitively trapping recipe remains inside the loop", () => {
   });
 });
 
-test("an invariant recipe in a selected loop body stays selected", () => {
+test("an invariant recipe in a selected loop region stays selected", () => {
   const values = compilerTestValues();
   const condition = values.parameter(0, "i32");
   const invariant = values.binary("add", values.parameter(1, "i32"), values.const(1));
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [resourceWriteNode(values, 0, invariant)]
   };
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       ifControl.create({ condition, thenBody }),
       loopContinueControl.create({ updates: [] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
@@ -486,7 +486,7 @@ test("an invariant recipe in a selected loop body stays selected", () => {
 test("an invariant shared by both loop arms captures at the loop entry", () => {
   const values = compilerTestValues();
   const invariant = values.binary("add", values.parameter(1, "i32"), values.const(1));
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       ifControl.create({
         condition: values.parameter(0, "i32"),
@@ -500,7 +500,7 @@ test("an invariant shared by both loop arms captures at the loop entry", () => {
       loopContinueControl.create({ updates: [] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({ carried: [], body: loopBody })]
@@ -521,19 +521,19 @@ test("an outer-loop recipe captures at an inner loop entry", () => {
   const values = compilerTestValues();
   const outerInput = values.addLoopInput();
   const current = values.binary("add", outerInput, values.const(1));
-  const innerBody: Body = {
+  const innerBody: Region = {
     nodes: [
       resourceWriteNode(values, 0, current),
       loopContinueControl.create({ updates: [] })
     ]
   };
-  const outerBody: Body = {
+  const outerBody: Region = {
     nodes: [
       loopControl.create({ carried: [], body: innerBody }),
       loopContinueControl.create({ updates: [outerInput] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({
@@ -556,19 +556,19 @@ test("an outer-loop recipe captures at an inner loop entry", () => {
 test("an invariant recipe crosses nested loop entries", () => {
   const values = compilerTestValues();
   const invariant = values.binary("add", values.parameter(0, "i32"), values.const(1));
-  const innerBody: Body = {
+  const innerBody: Region = {
     nodes: [
       resourceWriteNode(values, 0, invariant),
       loopContinueControl.create({ updates: [] })
     ]
   };
-  const outerBody: Body = {
+  const outerBody: Region = {
     nodes: [
       loopControl.create({ carried: [], body: innerBody }),
       loopContinueControl.create({ updates: [] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({ carried: [], body: outerBody })]
@@ -588,10 +588,10 @@ test("an invariant recipe crosses nested loop entries", () => {
 test("an if operand realizes at use before its nested replay", () => {
   const values = compilerTestValues();
   const output = values.addNodeOutput();
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [resourceWriteNode(values, 1, output)]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -618,13 +618,13 @@ test("an if can capture a contextually safe value after its condition", () => {
     values.parameter(1, "i32")
   );
   const adjusted = values.binary("add", quotient, values.const(1));
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [resourceWriteNode(values, 0, adjusted)]
   };
-  const elseBody: Body = {
+  const elseBody: Region = {
     nodes: [resourceWriteNode(values, 1, adjusted)]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [ifControl.create({
@@ -654,13 +654,13 @@ test("an unreachable structured operand makes pending captures safe", () => {
   const values = compilerTestValues();
   const unreachable = values.unreachable();
   const wrapped = values.unary("eqz", unreachable);
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [resourceWriteNode(values, 0, wrapped)]
   };
-  const elseBody: Body = {
+  const elseBody: Region = {
     nodes: [resourceWriteNode(values, 1, wrapped)]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [ifControl.create({
@@ -690,13 +690,13 @@ test("an earlier captured trap frontier makes a later pre-evaluation safe", () =
   );
   const adjusted = values.binary("add", quotient, values.const(1));
   const condition = values.parameter(2, "i32");
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [resourceWriteNode(values, 0, adjusted)]
   };
-  const elseBody: Body = {
+  const elseBody: Region = {
     nodes: [resourceWriteNode(values, 1, adjusted)]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -731,7 +731,7 @@ test("an unrelated trap shared by only some switch arms has no deadline", () => 
   );
   const fallback = values.const(7);
   const output = values.addNodeOutput();
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -759,10 +759,10 @@ test("a loop input carries its local without an evaluation anchor", () => {
   const values = compilerTestValues();
   const seed = values.const(0);
   const loopInput = values.addLoopInput();
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [loopContinueControl.create({ updates: [loopInput] })]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({
@@ -783,15 +783,15 @@ test("control outputs and selected results share one planned slot", () => {
   const whenTrue = values.const(1);
   const whenFalse = values.const(2);
   const output = values.addNodeOutput();
-  const thenBody: Body = { nodes: [], result: whenTrue };
-  const elseBody: Body = { nodes: [], result: whenFalse };
+  const thenBody: Region = { nodes: [], result: whenTrue };
+  const elseBody: Region = { nodes: [], result: whenFalse };
   const control = ifControl.create({
     condition,
     output,
     thenBody,
     elseBody
   });
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [control, resourceWriteNode(values, 0, output)]
@@ -807,15 +807,15 @@ test("control outputs and selected results share one planned slot", () => {
   });
 });
 
-test("a live join counts an unreachable arm only at its body end", () => {
+test("a live join counts an unreachable arm only at its region end", () => {
   const values = compilerTestValues();
   const condition = values.parameter(0, "i32");
   const unreachable = values.unreachable();
   const fallback = values.const(7);
   const output = values.addNodeOutput();
-  const thenBody: Body = { nodes: [], result: unreachable };
-  const elseBody: Body = { nodes: [], result: fallback };
-  const block: IrBlock = {
+  const thenBody: Region = { nodes: [], result: unreachable };
+  const elseBody: Region = { nodes: [], result: fallback };
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [ifControl.create({
@@ -836,7 +836,7 @@ test("nonoverlapping captured values reuse one physical slot", () => {
   const values = compilerTestValues();
   const first = values.addNodeOutput();
   const second = values.addNodeOutput();
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [

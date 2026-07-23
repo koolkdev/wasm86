@@ -1,36 +1,35 @@
 import { buildDefinition } from "#build";
-import { analyzeBody } from "#compiler/analysis/analyze.js";
-import type { BodyAnalysis } from "#compiler/analysis/model.js";
-import type { IrBlock } from "#ir/block.js";
-import type { IrFunction } from "#ir/function.js";
-import { validateIrFunction } from "#ir/validate.js";
+import { analyzeFunction } from "#compiler/analysis/analyze.js";
+import type { FunctionAnalysis } from "#compiler/analysis/model.js";
+import type { IrFunction } from "#compiler/ir/function.js";
+import { validateIrFunction } from "#compiler/ir/validate.js";
 import { indexPlacement, type PlacementIndex } from "./index.js";
 import type { PlacementPlan } from "./model.js";
 import { planPlacement } from "./plan.js";
 import { validatePlacement } from "./validate.js";
 
-export type BodyPlacement = Readonly<{
-  block: IrBlock;
-  analysis: BodyAnalysis;
+export type FunctionPlacement = Readonly<{
+  function: IrFunction;
+  analysis: FunctionAnalysis;
   plan: PlacementPlan;
   index: PlacementIndex;
 }>;
 
-export function placeFunction(fn: IrFunction): BodyPlacement {
+export function placeFunction(fn: IrFunction): FunctionPlacement {
   if (buildDefinition.validation) {
     validateIrFunction(fn);
   }
   return createPlacement(fn);
 }
 
-function createPlacement(block: IrBlock): BodyPlacement {
-  const analysis = analyzeBody(block);
-  const plan = planPlacement(block, analysis);
+function createPlacement(fn: IrFunction): FunctionPlacement {
+  const analysis = analyzeFunction(fn);
+  const plan = planPlacement(fn, analysis);
 
   if (buildDefinition.validation) {
-    validatePlacement(block, analysis, plan);
+    validatePlacement(fn, analysis, plan);
   }
   const index = indexPlacement(analysis, plan);
 
-  return { block, analysis, plan, index };
+  return { function: fn, analysis, plan, index };
 }

@@ -12,7 +12,8 @@ import { wasmBodyOpcodes } from "#compiler/encoder/tests/body-opcodes.js";
 import { wasmOpcode } from "#compiler/encoder/types.js";
 import {
   IndirectCallTarget,
-  Invocation
+  Invocation,
+  type CallTarget
 } from "#compiler/ir/invocation.js";
 import {
   ifControl,
@@ -26,13 +27,16 @@ import {
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { functionType } from "#compiler/program/function-type.js";
+import { functionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import { createModuleBindings } from "#compiler/program/bindings.js";
-import { functionRef, tableRef } from "#compiler/program/refs.js";
-import { CellRef } from "#compiler/refs/cell.js";
-import type { Body } from "#ir/block.js";
-import { RegionBuilder } from "#ir/region-builder.js";
+import {
+  createModuleBindings,
+  type ModuleBindings
+} from "#compiler/module/bindings.js";
+import { functionRef, tableRef } from "#compiler/ir/refs.js";
+import { CellRef } from "#compiler/ir/cell.js";
+import type { Region } from "#compiler/ir/region.js";
+import { RegionBuilder } from "#compiler/ir/builder/region.js";
 
 function fixture() {
   const argument = valueId(1);
@@ -44,11 +48,11 @@ function fixture() {
   const loopInput = valueId(8);
   const update = valueId(9);
   const result = valueId(10);
-  const thenBody: Body = { nodes: [] };
-  const elseBody: Body = { nodes: [] };
-  const caseBody: Body = { nodes: [], result };
-  const defaultBody: Body = { nodes: [], result };
-  const loopBody: Body = { nodes: [] };
+  const thenBody: Region = { nodes: [] };
+  const elseBody: Region = { nodes: [] };
+  const caseBody: Region = { nodes: [], result };
+  const defaultBody: Region = { nodes: [], result };
+  const loopBody: Region = { nodes: [] };
   const cell = new CellRef("i32");
   const target = new FunctionDefinition({
     ref: functionRef("test.controls.target"),
@@ -255,14 +259,14 @@ test("direct control facts describe operands, bodies, outputs, and effects", () 
 
 test("direct completion methods use nested body completion", () => {
   const { values, bodies, controls } = fixture();
-  const completingBodies = new Set<Body>([
+  const completingBodies = new Set<Region>([
     bodies.thenBody,
     bodies.elseBody,
     bodies.caseBody,
     bodies.defaultBody
   ]);
   const completion = {
-    bodyCompletes: (body: Body) => completingBodies.has(body)
+    regionCompletes: (body: Region) => completingBodies.has(body)
   };
   const ordered: readonly Control[] = [
     controls.returnInvocation,
@@ -301,8 +305,8 @@ test("direct completion methods use nested body completion", () => {
 
 test("a control-only switch owns no output and shares a body across matches", () => {
   const selector = valueId(30);
-  const selected: Body = { nodes: [] };
-  const fallback: Body = { nodes: [] };
+  const selected: Region = { nodes: [] };
+  const fallback: Region = { nodes: [] };
   const selection = switchControl.create({
     selector,
     cases: [{
@@ -324,11 +328,11 @@ test("a control-only switch owns no output and shares a body across matches", ()
     [selected, fallback]
   );
   strictEqual(
-    selection.completes({ bodyCompletes: (body) => body === selected || body === fallback }),
+    selection.completes({ regionCompletes: (body) => body === selected || body === fallback }),
     true
   );
 
-  const replacement: Body = { nodes: [] };
+  const replacement: Region = { nodes: [] };
   const mapped = selection.mapBodies((body) => body === selected ? replacement : body);
 
   strictEqual(mapped.output, undefined);
@@ -339,20 +343,20 @@ test("a control-only switch owns no output and shares a body across matches", ()
 
 test("a completing control-only switch seals its enclosing emission path", () => {
   const selector = valueId(30);
-  const selected: Body = { nodes: [] };
-  const fallback: Body = { nodes: [] };
+  const selected: Region = { nodes: [] };
+  const fallback: Region = { nodes: [] };
   const selection = switchControl.create({
     selector,
     cases: [{ matches: [1, 3], body: selected }],
     defaultBody: fallback
   });
   const body = new WasmFunctionBodyEncoder();
-  const emittedBodies: Body[] = [];
+  const emittedBodies: Region[] = [];
   let sealed = 0;
 
   selection.emit({
     ...rawControlTarget(body),
-    bodyCompletes: () => true,
+    regionCompletes: () => true,
     emitCaptures: () => {},
     emitBody: (nested, outputLocal) => {
       strictEqual(outputLocal, undefined);
@@ -375,14 +379,14 @@ test("a completing control-only switch seals its enclosing emission path", () =>
 
 test("direct body mapping follows each control's owned structure", () => {
   const { values, bodies, controls } = fixture();
-  const replacements = new Map<Body, Body>([
+  const replacements = new Map<Region, Region>([
     [bodies.thenBody, { nodes: [], result: valueId(21) }],
     [bodies.elseBody, { nodes: [], result: valueId(22) }],
     [bodies.caseBody, { nodes: [], result: valueId(23) }],
     [bodies.defaultBody, { nodes: [], result: valueId(24) }],
     [bodies.loopBody, { nodes: [] }]
   ]);
-  const replace = (body: Body): Body => replacements.get(body) ?? body;
+  const replace = (body: Region): Region => replacements.get(body) ?? body;
   const mappedBranch = controls.branch.mapBodies(replace);
   const mappedSelection = controls.selection.mapBodies(replace);
   const mappedLoop = controls.loop.mapBodies(replace);
@@ -424,7 +428,7 @@ test("a return sourced by an invocation directly emits Wasm return_call", () => 
     wasmOpcode.end
   ]);
   strictEqual(
-    controls.returnInvocation.completes({ bodyCompletes: () => false }),
+    controls.returnInvocation.completes({ regionCompletes: () => false }),
     true
   );
   deepStrictEqual(controls.returnInvocation.outputs, []);
@@ -457,15 +461,16 @@ test("an indirect invocation return emits arguments, selector, and return_call_i
   const body = new WasmFunctionBodyEncoder();
   const uses: ValueId[] = [];
 
-  control.emit({
-    ...rawControlTarget(body),
-    bindings: createModuleBindings({
+  control.emit(rawControlTarget(
+    body,
+    undefined,
+    createModuleBindings({
       functions: new Map(),
       types: new Map([[type, 5]]),
       tables: new Map([[table, 6]]),
       resources: new Map()
     })
-  }, {
+  ), {
     emitUse(value) {
       uses.push(value);
       body.i32Const(value);
@@ -568,19 +573,23 @@ function emitRawControl(
 
 function rawControlTarget(
   body: WasmFunctionBodyEncoder,
-  expectedFunction?: FunctionDefinition
+  expectedFunction?: FunctionDefinition,
+  suppliedBindings?: ModuleBindings
 ): ControlEmitTarget {
+  const bindings = suppliedBindings ?? createModuleBindings({
+    functions: expectedFunction === undefined
+      ? new Map()
+      : new Map([[expectedFunction.ref, 7]]),
+    types: new Map(),
+    tables: new Map(),
+    resources: new Map()
+  });
+
   return {
     body,
-    bindings: createModuleBindings({
-      functions: expectedFunction === undefined
-        ? new Map()
-        : new Map([[expectedFunction.ref, 7]]),
-      types: new Map(),
-      tables: new Map(),
-      resources: new Map()
-    }),
-    bodyCompletes: () => false,
+    emitCall: (target) => emitCall(body, bindings, target, false),
+    emitReturnCall: (target) => emitCall(body, bindings, target, true),
+    regionCompletes: () => false,
     emitCaptures: unsupported,
     emitBody: unsupported,
     controlOutputLocal: unsupported,
@@ -592,6 +601,31 @@ function rawControlTarget(
     emitLoopBranch: unsupported,
     sealCompletedStructuredControl: unsupported
   };
+}
+
+function emitCall(
+  body: WasmFunctionBodyEncoder,
+  bindings: ModuleBindings,
+  target: CallTarget,
+  tail: boolean
+): void {
+  switch (target.kind) {
+    case "direct": {
+      const index = bindings.functionIndex(target.ref);
+
+      tail ? body.returnCallFunction(index) : body.callFunction(index);
+      return;
+    }
+    case "indirect": {
+      const typeIndex = bindings.typeIndex(target.type);
+      const tableIndex = bindings.tableIndex(target.table);
+
+      tail
+        ? body.returnCallIndirect(typeIndex, tableIndex)
+        : body.callIndirect(typeIndex, tableIndex);
+      return;
+    }
+  }
 }
 
 function unsupported(): never {

@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { OperandWidth } from "#core/types.js";
+import type { IntegerWidth } from "./types.js";
 import type { ValueDefinition } from "./definition.js";
 import {
   emitSignedWidth,
@@ -15,7 +15,7 @@ import { fitsUnsigned, signExtended } from "./width-bounds.js";
 // is promoted to i64 according to resultType.
 type ExtendArgs = Readonly<{
   resultType: ValueType;
-  width: OperandWidth;
+  width: IntegerWidth;
   value: ValueId;
   signed: boolean;
 }>;

@@ -1,5 +1,5 @@
-import { compileProgram, type CompiledProgram } from "#compiler/program/compile.js";
-import type { FunctionExportRef } from "#compiler/program/refs.js";
+import { compileProgram, type CompiledProgram } from "#compiler/compile.js";
+import type { FunctionExportRef } from "#compiler/program/exports.js";
 import type { ExecutionModel } from "#execution/model.js";
 import {
   snapshotInstructionBytes,

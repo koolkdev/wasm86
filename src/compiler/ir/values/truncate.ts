@@ -1,4 +1,4 @@
-import type { OperandWidth } from "#core/types.js";
+import type { IntegerWidth } from "./types.js";
 import type { ValueDefinition } from "./definition.js";
 import { emitUnsignedWidth, truncateInteger } from "./integer-width.js";
 import type { ValueId, ValueType } from "./types.js";
@@ -8,7 +8,7 @@ import { fitsUnsigned } from "./width-bounds.js";
 // both input types are then masked to the requested meaningful width.
 type TruncateArgs = Readonly<{
   inputType: ValueType;
-  width: OperandWidth;
+  width: IntegerWidth;
   value: ValueId;
 }>;
 

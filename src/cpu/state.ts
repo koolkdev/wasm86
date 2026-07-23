@@ -2,7 +2,7 @@ import { resourceRef } from "#compiler/ir/resource.js";
 import { createLayout } from "#compiler/layout/layout.js";
 import type { LayoutStructure } from "#compiler/layout/structure.js";
 import type { MemoryImport } from "#compiler/program/resources.js";
-import { wasmPagesForByteLength } from "#compiler/program/pages.js";
+import { wasmPagesForByteLength } from "#compiler/program/limits.js";
 import {
   StateAccess,
   type StateResource

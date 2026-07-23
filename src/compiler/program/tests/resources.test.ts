@@ -2,6 +2,8 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { resourceRef } from "#compiler/ir/resource.js";
+import { tableRef } from "#compiler/ir/refs.js";
+import { ProgramBuilder } from "#compiler/program/builder.js";
 import {
   createProgramResources,
   type MemoryImport
@@ -96,6 +98,34 @@ test("program resources validate memory names and limits", () => {
       limits: { minPages: 0x1_0001 }
     }]),
     /memory minimum pages out of range/
+  );
+});
+
+test("program declarations validate table limits", () => {
+  const negativeMinimum = new ProgramBuilder(createProgramResources([]));
+
+  negativeMinimum.importTable({
+    ref: tableRef("test.negative-minimum"),
+    moduleName: "test",
+    name: "negativeMinimum",
+    limits: { minElements: -1 }
+  });
+  throws(
+    () => negativeMinimum.finish(),
+    /minimum elements out of range/
+  );
+
+  const invertedRange = new ProgramBuilder(createProgramResources([]));
+
+  invertedRange.importTable({
+    ref: tableRef("test.inverted-range"),
+    moduleName: "test",
+    name: "invertedRange",
+    limits: { minElements: 2, maxElements: 1 }
+  });
+  throws(
+    () => invertedRange.finish(),
+    /maximum elements are below its minimum/
   );
 });
 

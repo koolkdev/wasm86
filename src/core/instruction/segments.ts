@@ -2,7 +2,7 @@ import { segmentRegisterIndex } from "#core/segments.js";
 import type { SegmentDynamicOperandBinding, SegmentOperandBinding } from "#core/instruction/bindings.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { InstructionTerminator } from "./terminal.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 
 // A selector write's consequence is mode policy, not state: it may end the

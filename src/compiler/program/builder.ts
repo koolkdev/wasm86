@@ -1,37 +1,33 @@
 import { assert } from "#common/assert.js";
 import { buildDefinition } from "#build";
-import type { WasmTableLimits } from "#compiler/encoder/module.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
-import { Declarations } from "./declarations.js";
 import {
   type BuildFunction,
   FunctionDefinition
-} from "./functions.js";
+} from "#compiler/program/functions.js";
 import {
   FunctionImport,
   type FunctionImportDeclaration
 } from "./imports.js";
-import { linkProgram } from "./link.js";
-import type { FunctionType } from "./function-type.js";
+import { buildProgram, DeclarationCollection } from "./closure.js";
+import type { FunctionType } from "#compiler/ir/function.js";
 import type {
   FunctionDeclaration,
-  FunctionExport,
-  Program,
-  TableImport
-} from "./model.js";
-import type { FunctionRef } from "./refs.js";
-import type { ProgramResources } from "./resources.js";
+  Program
+} from "./program.js";
+import type { FunctionExport } from "./exports.js";
+import type { FunctionRef } from "#compiler/ir/refs.js";
+import type { ProgramResources, TableImport } from "./resources.js";
+import type { TableLimits } from "./limits.js";
 import {
   validateLinkedProgram,
   validateProgramDeclarations
 } from "./validate.js";
 
-export type { Program, ProgramFunction } from "./model.js";
-
 export class ProgramBuilder {
-  readonly #tables = new Declarations<TableImport>();
-  readonly #functions = new Declarations<FunctionDeclaration>();
-  readonly #exports = new Declarations<FunctionExport>();
+  readonly #tables = new DeclarationCollection<TableImport>();
+  readonly #functions = new DeclarationCollection<FunctionDeclaration>();
+  readonly #exports = new DeclarationCollection<FunctionExport>();
   readonly #owner = {};
   readonly #resources: ProgramResources;
   #closing = false;
@@ -104,7 +100,7 @@ export class ProgramBuilder {
       if (buildDefinition.validation) {
         validateProgramDeclarations(declarations);
       }
-      const program = linkProgram(declarations);
+      const program = buildProgram(declarations);
 
       if (buildDefinition.validation) {
         validateLinkedProgram(program);
@@ -122,7 +118,7 @@ export class ProgramBuilder {
   }
 }
 
-function copyTableLimits(limits: WasmTableLimits): WasmTableLimits {
+function copyTableLimits(limits: TableLimits): TableLimits {
   return limits.maxElements === undefined
     ? { minElements: limits.minElements }
     : { minElements: limits.minElements, maxElements: limits.maxElements };

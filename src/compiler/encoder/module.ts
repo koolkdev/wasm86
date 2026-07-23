@@ -1,10 +1,11 @@
+import { buildDefinition } from "#build";
 import { ByteSink } from "./byte-sink.js";
 import {
   type EncodedBranchHint,
   type EncodedWasmFunctionBody
 } from "./function-body.js";
 import { encodeI32Leb128, encodeI64Leb128 } from "./leb128.js";
-import { validateMemoryLimits, type WasmMemoryLimits } from "./memory.js";
+import type { WasmMemoryLimits } from "./memory.js";
 import {
   wasmExternalKind,
   wasmFunctionTypePrefix,
@@ -15,257 +16,232 @@ import {
   wasmVersion,
   type WasmFunctionType
 } from "./types.js";
+import { validateModuleDescription } from "./validate.js";
 
-export class WasmModuleEncoder {
-  readonly #types: WasmFunctionType[] = [];
-  readonly #functionImports: FunctionImport[] = [];
-  readonly #memoryImports: MemoryImport[] = [];
-  readonly #tableImports: TableImport[] = [];
-  readonly #functions: number[] = [];
-  readonly #globals: WasmGlobalDefinition[] = [];
-  readonly #exports: FunctionExport[] = [];
-  readonly #bodies: ModuleFunctionBody[] = [];
-
-  addFunctionType(type: WasmFunctionType): number {
-    const existing = this.#types.findIndex((candidate) => functionTypesEqual(candidate, type));
-
-    if (existing !== -1) {
-      return existing;
-    }
-
-    const index = this.#types.length;
-    this.#types.push(type);
-    return index;
-  }
-
-  importFunction(moduleName: string, name: string, typeIndex: number): number {
-    this.#validateFunctionTypeIndex(typeIndex);
-    if (this.#functions.length > 0) {
-      throw new Error("cannot import a Wasm function after adding a defined function");
-    }
-
-    const functionIndex = this.#functionImports.length;
-
-    this.#functionImports.push({ moduleName, name, typeIndex });
-    return functionIndex;
-  }
-
-  importMemory(moduleName: string, name: string, limits: WasmMemoryLimits): number {
-    validateMemoryLimits(limits);
-
-    const memoryIndex = this.#memoryImports.length;
-    this.#memoryImports.push({ moduleName, name, limits });
-    return memoryIndex;
-  }
-
-  importTable(moduleName: string, name: string, limits: WasmTableLimits): number {
-    validateTableLimits(limits);
-
-    const tableIndex = this.#tableImports.length;
-    this.#tableImports.push({ moduleName, name, limits });
-    return tableIndex;
-  }
-
-  addFunction(typeIndex: number, body: EncodedWasmFunctionBody): number {
-    this.#validateFunctionTypeIndex(typeIndex);
-
-    const functionIndex = this.#functionImports.length + this.#functions.length;
-    this.#functions.push(typeIndex);
-    this.#bodies.push({ bytes: body.bytes, branchHints: body.branchHints });
-    return functionIndex;
-  }
-
-  addGlobal(definition: WasmGlobalDefinition): number {
-    const globalIndex = this.#globals.length;
-    this.#globals.push(definition);
-    return globalIndex;
-  }
-
-  exportFunction(name: string, functionIndex: number): void {
-    const functionCount = this.#functionImports.length + this.#functions.length;
-
-    if (!Number.isInteger(functionIndex) || functionIndex < 0 || functionIndex >= functionCount) {
-      throw new RangeError(`unknown Wasm function index: ${functionIndex}`);
-    }
-
-    this.#exports.push({ name, functionIndex });
-  }
-
-  encode(): Uint8Array<ArrayBuffer> {
-    const module = new ByteSink();
-
-    module.writeBytes(wasmMagic);
-    module.writeBytes(wasmVersion);
-    module.writeSection(wasmSectionId.type, (section) => this.#writeTypeSection(section));
-    if (this.#hasImports()) {
-      module.writeSection(wasmSectionId.import, (section) => this.#writeImportSection(section));
-    }
-    module.writeSection(wasmSectionId.function, (section) => this.#writeFunctionSection(section));
-    if (this.#globals.length > 0) {
-      module.writeSection(wasmSectionId.global, (section) => this.#writeGlobalSection(section));
-    }
-    module.writeSection(wasmSectionId.export, (section) => this.#writeExportSection(section));
-    if (this.#hasBranchHints()) {
-      module.writeSection(wasmSectionId.custom, (section) => this.#writeBranchHintSection(section));
-    }
-    module.writeSection(wasmSectionId.code, (section) => this.#writeCodeSection(section));
-
-    return module.toBytes();
-  }
-
-  #writeImportSection(section: ByteSink): void {
-    section.writeVecLength(
-      this.#functionImports.length +
-        this.#memoryImports.length +
-        this.#tableImports.length
-    );
-
-    for (const entry of this.#functionImports) {
-      section.writeName(entry.moduleName);
-      section.writeName(entry.name);
-      section.writeByte(wasmExternalKind.function);
-      section.writeU32(entry.typeIndex);
-    }
-
-    for (const entry of this.#memoryImports) {
-      section.writeName(entry.moduleName);
-      section.writeName(entry.name);
-      section.writeByte(wasmExternalKind.memory);
-      writeMemoryType(section, entry.limits);
-    }
-
-    for (const entry of this.#tableImports) {
-      section.writeName(entry.moduleName);
-      section.writeName(entry.name);
-      section.writeByte(wasmExternalKind.table);
-      writeTableType(section, entry.limits);
-    }
-  }
-
-  #writeTypeSection(section: ByteSink): void {
-    section.writeVecLength(this.#types.length);
-
-    for (const type of this.#types) {
-      section.writeByte(wasmFunctionTypePrefix);
-      section.writeVecLength(type.params.length);
-      section.writeBytes(type.params);
-      section.writeVecLength(type.results.length);
-      section.writeBytes(type.results);
-    }
-  }
-
-  #writeFunctionSection(section: ByteSink): void {
-    section.writeVecLength(this.#functions.length);
-
-    for (const typeIndex of this.#functions) {
-      section.writeU32(typeIndex);
-    }
-  }
-
-  #writeGlobalSection(section: ByteSink): void {
-    section.writeVecLength(this.#globals.length);
-
-    for (const global of this.#globals) {
-      section.writeByte(global.type);
-      section.writeByte(global.mutable ? 0x01 : 0x00);
-      writeGlobalInit(section, global);
-    }
-  }
-
-  #writeExportSection(section: ByteSink): void {
-    section.writeVecLength(this.#exports.length);
-
-    for (const entry of this.#exports) {
-      section.writeName(entry.name);
-      section.writeByte(wasmExternalKind.function);
-      section.writeU32(entry.functionIndex);
-    }
-  }
-
-  #writeCodeSection(section: ByteSink): void {
-    section.writeVecLength(this.#bodies.length);
-
-    for (const body of this.#bodies) {
-      section.writeU32(body.bytes.byteLength);
-      section.writeBytes(body.bytes);
-    }
-  }
-
-  #hasBranchHints(): boolean {
-    return this.#bodies.some((body) => body.branchHints.length > 0);
-  }
-
-  #hasImports(): boolean {
-    return this.#functionImports.length + this.#memoryImports.length + this.#tableImports.length > 0;
-  }
-
-  #writeBranchHintSection(section: ByteSink): void {
-    section.writeName("metadata.code.branch_hint");
-    section.writeVecLength(this.#bodies.filter((body) => body.branchHints.length > 0).length);
-
-    for (let bodyIndex = 0; bodyIndex < this.#bodies.length; bodyIndex += 1) {
-      const body = this.#bodies[bodyIndex];
-
-      if (body === undefined || body.branchHints.length === 0) {
-        continue;
-      }
-
-      section.writeU32(this.#functionImports.length + bodyIndex);
-      writeBranchHints(section, body.branchHints);
-    }
-  }
-
-  #validateFunctionTypeIndex(typeIndex: number): void {
-    if (!Number.isInteger(typeIndex) || typeIndex < 0 || typeIndex >= this.#types.length) {
-      throw new RangeError(`unknown Wasm function type index: ${typeIndex}`);
-    }
-  }
-}
-
-function functionTypesEqual(a: WasmFunctionType, b: WasmFunctionType): boolean {
-  return valueTypesEqual(a.params, b.params) && valueTypesEqual(a.results, b.results);
-}
-
-function valueTypesEqual(a: readonly number[], b: readonly number[]): boolean {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
-}
-
-type MemoryImport = Readonly<{
-  moduleName: string;
-  name: string;
-  limits: WasmMemoryLimits;
-}>;
-
-type FunctionImport = Readonly<{
+export type WasmFunctionImport = Readonly<{
   moduleName: string;
   name: string;
   typeIndex: number;
 }>;
 
-export type WasmGlobalDefinition =
-  | Readonly<{ type: typeof wasmValueType.i32; mutable: boolean; initialValue: number }>
-  | Readonly<{ type: typeof wasmValueType.i64; mutable: boolean; initialValue: bigint }>;
+export type WasmMemoryImport = Readonly<{
+  moduleName: string;
+  name: string;
+  limits: WasmMemoryLimits;
+}>;
 
 export type WasmTableLimits = Readonly<{
   minElements: number;
   maxElements?: number;
 }>;
 
-type TableImport = Readonly<{
+export type WasmTableImport = Readonly<{
   moduleName: string;
   name: string;
   limits: WasmTableLimits;
 }>;
 
-type FunctionExport = Readonly<{
+export type WasmGlobalDefinition =
+  | Readonly<{ type: typeof wasmValueType.i32; mutable: boolean; initialValue: number }>
+  | Readonly<{ type: typeof wasmValueType.i64; mutable: boolean; initialValue: bigint }>;
+
+export type WasmDefinedFunction = Readonly<{
+  typeIndex: number;
+  body: EncodedWasmFunctionBody;
+}>;
+
+export type WasmFunctionExport = Readonly<{
   name: string;
   functionIndex: number;
 }>;
 
-type ModuleFunctionBody = Readonly<{
-  bytes: Uint8Array<ArrayBuffer>;
-  branchHints: readonly EncodedBranchHint[];
+// A fully indexed Wasm module ready for serialization.
+// Array order determines the corresponding Wasm index spaces.
+export type WasmModuleDescription = Readonly<{
+  functionTypes: readonly WasmFunctionType[];
+  functionImports: readonly WasmFunctionImport[];
+  memoryImports: readonly WasmMemoryImport[];
+  tableImports: readonly WasmTableImport[];
+  functions: readonly WasmDefinedFunction[];
+  globals: readonly WasmGlobalDefinition[];
+  functionExports: readonly WasmFunctionExport[];
 }>;
+
+export function encodeWasmModule(
+  description: WasmModuleDescription
+): Uint8Array<ArrayBuffer> {
+  if (buildDefinition.validation) {
+    validateModuleDescription(description);
+  }
+
+  const module = new ByteSink();
+
+  module.writeBytes(wasmMagic);
+  module.writeBytes(wasmVersion);
+  module.writeSection(wasmSectionId.type, (section) => {
+    writeTypeSection(section, description.functionTypes);
+  });
+  if (hasImports(description)) {
+    module.writeSection(wasmSectionId.import, (section) => {
+      writeImportSection(section, description);
+    });
+  }
+  module.writeSection(wasmSectionId.function, (section) => {
+    writeFunctionSection(section, description.functions);
+  });
+  if (description.globals.length > 0) {
+    module.writeSection(wasmSectionId.global, (section) => {
+      writeGlobalSection(section, description.globals);
+    });
+  }
+  module.writeSection(wasmSectionId.export, (section) => {
+    writeExportSection(section, description.functionExports);
+  });
+  if (hasBranchHints(description.functions)) {
+    module.writeSection(wasmSectionId.custom, (section) => {
+      writeBranchHintSection(
+        section,
+        description.functionImports.length,
+        description.functions
+      );
+    });
+  }
+  module.writeSection(wasmSectionId.code, (section) => {
+    writeCodeSection(section, description.functions);
+  });
+
+  return module.toBytes();
+}
+
+function hasImports(description: WasmModuleDescription): boolean {
+  return description.functionImports.length +
+    description.memoryImports.length +
+    description.tableImports.length > 0;
+}
+
+function writeImportSection(
+  section: ByteSink,
+  description: WasmModuleDescription
+): void {
+  section.writeVecLength(
+    description.functionImports.length +
+      description.memoryImports.length +
+      description.tableImports.length
+  );
+
+  for (const entry of description.functionImports) {
+    section.writeName(entry.moduleName);
+    section.writeName(entry.name);
+    section.writeByte(wasmExternalKind.function);
+    section.writeU32(entry.typeIndex);
+  }
+
+  for (const entry of description.memoryImports) {
+    section.writeName(entry.moduleName);
+    section.writeName(entry.name);
+    section.writeByte(wasmExternalKind.memory);
+    writeMemoryType(section, entry.limits);
+  }
+
+  for (const entry of description.tableImports) {
+    section.writeName(entry.moduleName);
+    section.writeName(entry.name);
+    section.writeByte(wasmExternalKind.table);
+    writeTableType(section, entry.limits);
+  }
+}
+
+function writeTypeSection(
+  section: ByteSink,
+  functionTypes: readonly WasmFunctionType[]
+): void {
+  section.writeVecLength(functionTypes.length);
+
+  for (const type of functionTypes) {
+    section.writeByte(wasmFunctionTypePrefix);
+    section.writeVecLength(type.params.length);
+    section.writeBytes(type.params);
+    section.writeVecLength(type.results.length);
+    section.writeBytes(type.results);
+  }
+}
+
+function writeFunctionSection(
+  section: ByteSink,
+  functions: readonly WasmDefinedFunction[]
+): void {
+  section.writeVecLength(functions.length);
+
+  for (const fn of functions) {
+    section.writeU32(fn.typeIndex);
+  }
+}
+
+function writeGlobalSection(
+  section: ByteSink,
+  globals: readonly WasmGlobalDefinition[]
+): void {
+  section.writeVecLength(globals.length);
+
+  for (const global of globals) {
+    section.writeByte(global.type);
+    section.writeByte(global.mutable ? 0x01 : 0x00);
+    writeGlobalInit(section, global);
+  }
+}
+
+function writeExportSection(
+  section: ByteSink,
+  exports: readonly WasmFunctionExport[]
+): void {
+  section.writeVecLength(exports.length);
+
+  for (const entry of exports) {
+    section.writeName(entry.name);
+    section.writeByte(wasmExternalKind.function);
+    section.writeU32(entry.functionIndex);
+  }
+}
+
+function writeCodeSection(
+  section: ByteSink,
+  functions: readonly WasmDefinedFunction[]
+): void {
+  section.writeVecLength(functions.length);
+
+  for (const fn of functions) {
+    const bytes = fn.body.bytes;
+
+    section.writeU32(bytes.byteLength);
+    section.writeBytes(bytes);
+  }
+}
+
+function hasBranchHints(functions: readonly WasmDefinedFunction[]): boolean {
+  return functions.some((fn) => fn.body.branchHints.length > 0);
+}
+
+function writeBranchHintSection(
+  section: ByteSink,
+  functionImportCount: number,
+  functions: readonly WasmDefinedFunction[]
+): void {
+  section.writeName("metadata.code.branch_hint");
+  section.writeVecLength(
+    functions.filter((fn) => fn.body.branchHints.length > 0).length
+  );
+
+  for (let bodyIndex = 0; bodyIndex < functions.length; bodyIndex += 1) {
+    const fn = functions[bodyIndex];
+
+    if (fn === undefined || fn.body.branchHints.length === 0) {
+      continue;
+    }
+
+    section.writeU32(functionImportCount + bodyIndex);
+    writeBranchHints(section, fn.body.branchHints);
+  }
+}
 
 function writeMemoryType(section: ByteSink, limits: WasmMemoryLimits): void {
   writeResizableLimits(section, limits.minPages, limits.maxPages);
@@ -286,24 +262,6 @@ function writeResizableLimits(section: ByteSink, minimum: number, maximum: numbe
   section.writeByte(0x01);
   section.writeU32(minimum);
   section.writeU32(maximum);
-}
-
-function validateTableLimits(limits: WasmTableLimits): void {
-  validateU32(limits.minElements, "table minimum elements");
-
-  if (limits.maxElements !== undefined) {
-    validateU32(limits.maxElements, "table maximum elements");
-
-    if (limits.maxElements < limits.minElements) {
-      throw new RangeError("table maximum elements must be greater than or equal to minimum elements");
-    }
-  }
-}
-
-function validateU32(value: number, label: string): void {
-  if (!Number.isInteger(value) || value < 0 || value > 0xffff_ffff) {
-    throw new RangeError(`${label} out of range: ${value}`);
-  }
 }
 
 function writeGlobalInit(section: ByteSink, global: WasmGlobalDefinition): void {

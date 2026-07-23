@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { CellRef } from "#compiler/refs/cell.js";
+import type { CellRef } from "#compiler/ir/cell.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { RegName, SegmentRegister } from "#core/types.js";
 

@@ -3,7 +3,7 @@ import type { CpuException } from "#core/exceptions.js";
 import type { SimpleFlagSource } from "#core/flags/lazy/sources.js";
 import type { X86Flag } from "#core/flags/definitions.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { CellRef } from "#compiler/refs/cell.js";
+import type { CellRef } from "#compiler/ir/cell.js";
 import type {
   MemoryAccess,
   MemoryDataAccessIntent

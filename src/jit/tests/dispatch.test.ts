@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { encodeVariant } from "#compiler/layout/variant-codec.js";
-import { instantiateCompiledProgram } from "#compiler/program/instance.js";
+import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import { decodeExit, exitLayout } from "#cpu/exit.js";
 import { compileJitFromMemory } from "#jit/compile.js";
 import { instructionLimitExit } from "#interpreter/exits.js";

@@ -4,16 +4,14 @@ import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import { encodeVariant } from "#compiler/layout/variant-codec.js";
 import type { StorageAccess, StorageEffects } from "#compiler/ir/effects.js";
 import type { CallTarget } from "#compiler/ir/invocation.js";
-import { buildVariant } from "#compiler/ir/values/variant.js";
-import { compileProgram } from "#compiler/program/compile.js";
-import { instantiateCompiledProgram } from "#compiler/program/instance.js";
+import { buildVariant } from "#compiler/ir/builder/variant.js";
+import { compileProgram } from "#compiler/compile.js";
+import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/program/function-type.js";
+import { functionType } from "#compiler/ir/function.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
-import {
-  functionExportRef,
-  functionRef
-} from "#compiler/program/refs.js";
+import { functionExportRef } from "#compiler/program/exports.js";
+import { functionRef } from "#compiler/ir/refs.js";
 import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
 import type {
   IsaDecodedInstruction,

@@ -1,10 +1,10 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
-import { functionType } from "#compiler/program/function-type.js";
+import { functionType } from "#compiler/ir/function.js";
 import { FunctionFamily } from "#compiler/program/functions.js";
 import type { StateAccess } from "#core/state/access.js";
-import type { FunctionBuilder } from "#ir/function.js";
-import type { SwitchArm } from "#ir/region-builder.js";
+import type { FunctionBuilder } from "#compiler/ir/builder/function.js";
+import type { SwitchArm } from "#compiler/ir/builder/region.js";
 import type { OperandWidth } from "#core/types.js";
 import type { X86StatusFlag } from "../definitions.js";
 import { flagStateFields } from "../layout.js";

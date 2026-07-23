@@ -29,8 +29,8 @@ import {
   resourceWrite
 } from "#compiler/ir/operations/resource.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
-import type { BodyNode } from "#ir/block.js";
-import { RegionBuilder, type BodyNodeSink } from "#ir/region-builder.js";
+import type { RegionNode } from "#compiler/ir/region.js";
+import { RegionBuilder, type RegionNodeSink } from "#compiler/ir/builder/region.js";
 import type { OperandResolver } from "./operand-resolver.js";
 import type { InstructionState } from "./state/state.js";
 import {
@@ -113,16 +113,16 @@ export class LoopBuilder {
   }
 }
 
-class LoopBodySink implements BodyNodeSink {
+class LoopBodySink implements RegionNodeSink {
   readonly #scope: StateLoopScope;
   readonly #entryOperations: Operation[] = [];
-  readonly #bodyNodes: BodyNode[] = [];
+  readonly #bodyNodes: RegionNode[] = [];
 
   constructor(scope: StateLoopScope) {
     this.#scope = scope;
   }
 
-  push(node: BodyNode): void {
+  push(node: RegionNode): void {
     if (node.category !== "operation") {
       this.#bodyNodes.push(node);
       return;
@@ -143,7 +143,7 @@ class LoopBodySink implements BodyNodeSink {
     this.#bodyNodes.push(node);
   }
 
-  nodes(): readonly BodyNode[] {
+  nodes(): readonly RegionNode[] {
     return this.#bodyNodes;
   }
 

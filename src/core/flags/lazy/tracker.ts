@@ -8,7 +8,7 @@ import {
 } from "#core/flags/lazy/sources.js";
 import type { StatusFlagValues } from "#core/flags/values.js";
 import type { CompareOperator } from "#compiler/ir/values/comparison.js";
-import type { RegionBuilder, SwitchArm } from "#ir/region-builder.js";
+import type { RegionBuilder, SwitchArm } from "#compiler/ir/builder/region.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import {
   flagStateFields,

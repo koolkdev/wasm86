@@ -1,15 +1,15 @@
 import { assert } from "#common/assert.js";
-import type { BodyAnalysis, SiteId } from "#compiler/analysis/model.js";
+import type { FunctionAnalysis, SiteId } from "#compiler/analysis/model.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { IrBlock } from "#ir/block.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
 
 // A capture at an ordinary site runs on entry. Structured headers first emit
 // their operands, so captured recipes may also replay locals materialized by
 // those direct uses. The planner still owns the safety decision; the emitter
 // only follows this fixed deadline.
 export function canCaptureAtDeadline(
-  block: IrBlock,
-  analysis: BodyAnalysis,
+  block: FunctionGraph,
+  analysis: FunctionAnalysis,
   anchors: readonly (SiteId | undefined)[],
   value: ValueId,
   site: SiteId,
@@ -89,7 +89,7 @@ export function canCaptureAtDeadline(
 }
 
 function canEvaluateWithoutTrap(
-  block: IrBlock,
+  block: FunctionGraph,
   value: ValueId,
   isBound: (value: ValueId) => boolean
 ): boolean {

@@ -8,7 +8,7 @@ import type {
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { type ValueId, type WidthBounds } from "#compiler/ir/values/types.js";
 import { isConcreteFlagStateField } from "#core/flags/layout.js";
-import { mayAlias } from "#ir/aliasing.js";
+import { mayAlias } from "#compiler/ir/effects.js";
 import type {
   BoundStateAccess,
   StateAccess

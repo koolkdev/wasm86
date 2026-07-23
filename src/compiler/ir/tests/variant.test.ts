@@ -1,7 +1,7 @@
 import { ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { buildVariant } from "#compiler/ir/values/variant.js";
+import { buildVariant } from "#compiler/ir/builder/variant.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import {
   VariantFieldRef,

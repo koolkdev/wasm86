@@ -2,25 +2,32 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 test("a mutable i32 global initializes and round-trips through set/get", async () => {
-  const module = new WasmModuleEncoder();
-  const globalIndex = module.addGlobal({ type: wasmValueType.i32, mutable: true, initialValue: 7 });
-  const getType = module.addFunctionType({ params: [], results: [wasmValueType.i32] });
-  const setType = module.addFunctionType({ params: [wasmValueType.i32], results: [] });
-
-  module.exportFunction(
-    "get",
-    module.addFunction(getType, new WasmFunctionBodyEncoder().globalGet(globalIndex).finish())
-  );
-  module.exportFunction(
-    "set",
-    module.addFunction(setType, new WasmFunctionBodyEncoder(1).localGet(0).globalSet(globalIndex).finish())
-  );
-
-  const instance = await WebAssembly.instantiate(await WebAssembly.compile(module.encode()));
+  const bytes = encodeTestModule({
+    functionTypes: [
+      { params: [], results: [wasmValueType.i32] },
+      { params: [wasmValueType.i32], results: [] }
+    ],
+    functions: [
+      {
+        typeIndex: 0,
+        body: new WasmFunctionBodyEncoder().globalGet(0).finish()
+      },
+      {
+        typeIndex: 1,
+        body: new WasmFunctionBodyEncoder(1).localGet(0).globalSet(0).finish()
+      }
+    ],
+    globals: [{ type: wasmValueType.i32, mutable: true, initialValue: 7 }],
+    functionExports: [
+      { name: "get", functionIndex: 0 },
+      { name: "set", functionIndex: 1 }
+    ]
+  });
+  const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
   const get = exportedFunction(instance, "get");
   const set = exportedFunction(instance, "set");
 
@@ -31,16 +38,16 @@ test("a mutable i32 global initializes and round-trips through set/get", async (
 
 test("an i64 global keeps its full-width initial value", async () => {
   const expected = 0x0006_0000_1234_5678n;
-  const module = new WasmModuleEncoder();
-  const globalIndex = module.addGlobal({ type: wasmValueType.i64, mutable: false, initialValue: expected });
-  const getType = module.addFunctionType({ params: [], results: [wasmValueType.i64] });
-
-  module.exportFunction(
-    "get",
-    module.addFunction(getType, new WasmFunctionBodyEncoder().globalGet(globalIndex).finish())
-  );
-
-  const instance = await WebAssembly.instantiate(await WebAssembly.compile(module.encode()));
+  const bytes = encodeTestModule({
+    functionTypes: [{ params: [], results: [wasmValueType.i64] }],
+    functions: [{
+      typeIndex: 0,
+      body: new WasmFunctionBodyEncoder().globalGet(0).finish()
+    }],
+    globals: [{ type: wasmValueType.i64, mutable: false, initialValue: expected }],
+    functionExports: [{ name: "get", functionIndex: 0 }]
+  });
+  const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
 
   strictEqual(exportedFunction(instance, "get")(), expected);
 });

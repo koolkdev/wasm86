@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import { i32 } from "#core/numeric.js";
+import { i32 } from "#common/numeric.js";
 import type { ValueDefinition } from "./definition.js";
 import type { ValueType, WidthBounds } from "./types.js";
 import { unboundedWidthBounds } from "./width-bounds.js";

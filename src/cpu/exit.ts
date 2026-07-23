@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import { buildVariant } from "#compiler/ir/values/variant.js";
+import { buildVariant } from "#compiler/ir/builder/variant.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {

@@ -5,7 +5,7 @@ import type { InstructionStateChannel } from "./channels.js";
 import type { ResourceEffect } from "#compiler/ir/resource.js";
 import type { ValueId, WidthBounds } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { mayAlias } from "#ir/aliasing.js";
+import { mayAlias } from "#compiler/ir/effects.js";
 import { channelReadBounds } from "./field-tracker.js";
 import type { InstructionState } from "./state.js";
 import type { BoundStateAccess } from "#core/state/access.js";

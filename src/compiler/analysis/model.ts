@@ -2,31 +2,31 @@ import type { StorageAccess } from "#compiler/ir/effects.js";
 import type { Invocation } from "#compiler/ir/invocation.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { Body, BodyNode } from "#ir/block.js";
+import type { Region, RegionNode } from "#compiler/ir/region.js";
 
 declare const siteIdBrand: unique symbol;
 
-export type SiteId = number & { readonly [siteIdBrand]: "body-analysis-site" };
+export type SiteId = number & { readonly [siteIdBrand]: "function-analysis-site" };
 
-export type BodyNodeSite = Readonly<{
+export type RegionNodeSite = Readonly<{
   id: SiteId;
   kind: "node";
-  body: Body;
+  region: Region;
   nodeIndex: number;
-  node: BodyNode;
+  node: RegionNode;
 }>;
 
-export type BodyEndSite = Readonly<{
+export type RegionEndSite = Readonly<{
   id: SiteId;
-  kind: "bodyEnd";
-  body: Body;
+  kind: "regionEnd";
+  region: Region;
   nodeIndex: number;
 }>;
 
-export type BodySite = BodyNodeSite | BodyEndSite;
+export type RegionSite = RegionNodeSite | RegionEndSite;
 
-export type BodyPathStep = Readonly<{
-  body: Body;
+export type RegionPathStep = Readonly<{
+  region: Region;
   owner: SiteId;
 }>;
 
@@ -56,13 +56,13 @@ export type InvocationSite = Readonly<{
   site: SiteId;
 }>;
 
-export type BodyAnalysis = Readonly<{
-  sites(): readonly BodySite[];
-  siteOf(body: Body, nodeIndex: number): SiteId;
-  path(ancestor: Body, descendant: Body): readonly BodyPathStep[] | undefined;
-  isLoopBody(body: Body): boolean;
+export type FunctionAnalysis = Readonly<{
+  sites(): readonly RegionSite[];
+  siteOf(region: Region, nodeIndex: number): SiteId;
+  path(ancestor: Region, descendant: Region): readonly RegionPathStep[] | undefined;
+  isLoopRegion(region: Region): boolean;
   dominatingSite(sites: readonly SiteId[]): SiteId;
-  bodyEndSite(body: Body): SiteId;
+  regionEndSite(region: Region): SiteId;
 
   roots(): readonly ValueDemand[];
   controlDependencies(output: ValueId): readonly ValueDemand[] | undefined;

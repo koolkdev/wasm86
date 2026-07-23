@@ -1,9 +1,9 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { CellRef } from "#compiler/refs/cell.js";
+import { CellRef } from "#compiler/ir/cell.js";
 import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
 import type { PrefixEffect } from "#core/decoder/model/types.js";
 import { segmentRegisterIndex } from "#core/segments.js";
-import type { RegionBuilder, SwitchControlArm } from "#ir/region-builder.js";
+import type { RegionBuilder, SwitchControlArm } from "#compiler/ir/builder/region.js";
 import { InstructionByteStream } from "./stream.js";
 
 export type SegmentOverrideState = Readonly<{

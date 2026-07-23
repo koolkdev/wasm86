@@ -1,16 +1,18 @@
 import { assert } from "#common/assert.js";
+import { u32 } from "#common/numeric.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { CallTarget } from "#compiler/ir/invocation.js";
 import type { ResourceEffect, ResourceRef } from "#compiler/ir/resource.js";
-import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/program/function-type.js";
+import { ProgramBuilder } from "#compiler/program/builder.js";
+import type { Program } from "#compiler/program/program.js";
+import { functionType } from "#compiler/ir/function.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
 import {
   functionExportRef,
-  functionRef,
   type FunctionExportRef
-} from "#compiler/program/refs.js";
+} from "#compiler/program/exports.js";
+import { functionRef } from "#compiler/ir/refs.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
@@ -22,13 +24,12 @@ import { staticOperandBinding } from "#core/instruction/static-binding.js";
 import type { InstructionTerminals } from "#core/instruction/terminal.js";
 import { exceptionExit } from "#core/exits.js";
 import { mapCpuException, type CpuException } from "#core/exceptions.js";
-import { u32 } from "#core/numeric.js";
 import type { StateAccess } from "#core/state/access.js";
 import { coreStateFields } from "#core/state/layout.js";
 import { buildExit } from "#cpu/exit.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import type { ExecutionModel } from "#execution/model.js";
-import type { FunctionBuilder } from "#ir/function.js";
+import type { FunctionBuilder } from "#compiler/ir/builder/function.js";
 import type { JitDecodedBlock } from "./decode-block.js";
 
 const jitBlockType = functionType([], ["i64"]);

@@ -1,60 +1,55 @@
 import {
   deepStrictEqual,
-  strictEqual,
-  throws
+  strictEqual
 } from "node:assert";
 import { test } from "node:test";
 
-import {
-  wasmBranchHint,
-  WasmFunctionBodyEncoder
-} from "#compiler/encoder/function-body.js";
-import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import {
   wasmCodeFunctionCount,
   wasmDefinedFunctionCount
 } from "#compiler/encoder/tests/body-opcodes.js";
+import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 const importModuleName = "host";
 const importFunctionName = "increment";
 
 test("function imports prefix defined indexes and direct calls", async () => {
-  const module = new WasmModuleEncoder();
-  const typeIndex = module.addFunctionType({
-    params: [wasmValueType.i32],
-    results: [wasmValueType.i32]
+  const bytes = encodeTestModule({
+    functionTypes: [{
+      params: [wasmValueType.i32],
+      results: [wasmValueType.i32]
+    }],
+    functionImports: [{
+      moduleName: importModuleName,
+      name: importFunctionName,
+      typeIndex: 0
+    }],
+    functions: [
+      {
+        typeIndex: 0,
+        body: new WasmFunctionBodyEncoder(1)
+          .localGet(0)
+          .callFunction(0)
+          .i32Const(1)
+          .i32Add()
+          .finish()
+      },
+      {
+        typeIndex: 0,
+        body: new WasmFunctionBodyEncoder(1)
+          .localGet(0)
+          .returnCallFunction(0)
+          .finish()
+      }
+    ],
+    functionExports: [
+      { name: "ordinary", functionIndex: 1 },
+      { name: "returned", functionIndex: 2 }
+    ]
   });
-  const importedIndex = module.importFunction(
-    importModuleName,
-    importFunctionName,
-    typeIndex
-  );
-  const ordinaryIndex = module.addFunction(
-    typeIndex,
-    new WasmFunctionBodyEncoder(1)
-      .localGet(0)
-      .callFunction(importedIndex)
-      .i32Const(1)
-      .i32Add()
-      .finish()
-  );
-  const returnedIndex = module.addFunction(
-    typeIndex,
-    new WasmFunctionBodyEncoder(1)
-      .localGet(0)
-      .returnCallFunction(importedIndex)
-      .finish()
-  );
-
-  strictEqual(importedIndex, 0);
-  strictEqual(ordinaryIndex, 1);
-  strictEqual(returnedIndex, 2);
-
-  module.exportFunction("ordinary", ordinaryIndex);
-  module.exportFunction("returned", returnedIndex);
-
-  const compiled = new WebAssembly.Module(module.encode());
+  const compiled = new WebAssembly.Module(bytes);
 
   deepStrictEqual(WebAssembly.Module.imports(compiled), [{
     module: importModuleName,
@@ -74,46 +69,19 @@ test("function imports prefix defined indexes and direct calls", async () => {
   strictEqual(returned(41), 42);
 });
 
-test("function imports cannot be added after a definition", () => {
-  const module = new WasmModuleEncoder();
-  const typeIndex = module.addFunctionType({ params: [], results: [] });
-  const body = new WasmFunctionBodyEncoder().finish();
-
-  strictEqual(module.addFunction(typeIndex, body), 0);
-  throws(
-    () => module.importFunction(importModuleName, importFunctionName, typeIndex + 1),
-    /unknown Wasm function type index/
-  );
-  throws(
-    () => module.importFunction(importModuleName, importFunctionName, typeIndex),
-    /cannot import a Wasm function after adding a defined function/
-  );
-  strictEqual(module.addFunction(typeIndex, body), 1);
-});
-
-test("invalid function imports do not reserve an index", () => {
-  const module = new WasmModuleEncoder();
-  const typeIndex = module.addFunctionType({ params: [], results: [] });
-
-  throws(
-    () => module.importFunction(importModuleName, "invalid", typeIndex + 1),
-    /unknown Wasm function type index/
-  );
-  strictEqual(
-    module.importFunction(importModuleName, importFunctionName, typeIndex),
-    0
-  );
-});
-
 test("function and code sections contain definitions only", () => {
-  const module = new WasmModuleEncoder();
-  const typeIndex = module.addFunctionType({ params: [], results: [] });
-
-  module.importFunction(importModuleName, importFunctionName, typeIndex);
-  module.addFunction(typeIndex, new WasmFunctionBodyEncoder().finish());
-  module.addFunction(typeIndex, new WasmFunctionBodyEncoder().finish());
-
-  const bytes = module.encode();
+  const bytes = encodeTestModule({
+    functionTypes: [{ params: [], results: [] }],
+    functionImports: [{
+      moduleName: importModuleName,
+      name: importFunctionName,
+      typeIndex: 0
+    }],
+    functions: [
+      { typeIndex: 0, body: new WasmFunctionBodyEncoder().finish() },
+      { typeIndex: 0, body: new WasmFunctionBodyEncoder().finish() }
+    ]
+  });
 
   strictEqual(wasmDefinedFunctionCount(bytes), 2);
   strictEqual(wasmCodeFunctionCount(bytes), 2);
@@ -121,31 +89,28 @@ test("function and code sections contain definitions only", () => {
 });
 
 test("branch hints use imported-function-prefixed indexes", () => {
-  const module = new WasmModuleEncoder();
-  const typeIndex = module.addFunctionType({ params: [], results: [] });
+  const bytes = encodeTestModule({
+    functionTypes: [{ params: [], results: [] }],
+    functionImports: [{
+      moduleName: importModuleName,
+      name: importFunctionName,
+      typeIndex: 0
+    }],
+    functions: [
+      { typeIndex: 0, body: new WasmFunctionBodyEncoder().finish() },
+      {
+        typeIndex: 0,
+        body: new WasmFunctionBodyEncoder()
+          .i32Const(1)
+          .ifBlock({ hint: "likely" })
+          .endBlock()
+          .finish()
+      }
+    ]
+  });
+  const compiled = new WebAssembly.Module(bytes);
 
-  strictEqual(
-    module.importFunction(importModuleName, importFunctionName, typeIndex),
-    0
-  );
-  strictEqual(
-    module.addFunction(typeIndex, new WasmFunctionBodyEncoder().finish()),
-    1
-  );
-  const hintedIndex = module.addFunction(
-    typeIndex,
-    new WasmFunctionBodyEncoder()
-      .i32Const(1)
-      .ifBlock({ hint: wasmBranchHint.likely })
-      .endBlock()
-      .finish()
-  );
-
-  strictEqual(hintedIndex, 2);
-
-  const compiled = new WebAssembly.Module(module.encode());
-
-  deepStrictEqual(branchHintFunctionIndices(compiled), [hintedIndex]);
+  deepStrictEqual(branchHintFunctionIndices(compiled), [2]);
 });
 
 function exportedFunction(

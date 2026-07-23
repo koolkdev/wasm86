@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { OperandWidth } from "#core/types.js";
+import type { IntegerWidth } from "./types.js";
 import { binaryValue, type BinaryOperator } from "./binary.js";
 import type { ValueBuilder } from "./builder.js";
 import {
@@ -308,7 +308,7 @@ export class ValueTable implements ValueBuilder {
 
   // Compares in the width's domain: signed predicates sign-extend operands,
   // while unsigned/equality predicates mask them.
-  compare(width: OperandWidth, operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
+  compare(width: IntegerWidth, operator: CompareOperator, a: ValueId, b: ValueId): ValueId {
     const signed = compareIsSigned(operator);
     const left = this.widthAdjusted(width, a, signed);
     const right = this.widthAdjusted(width, b, signed);
@@ -329,25 +329,25 @@ export class ValueTable implements ValueBuilder {
     return this.#create(selectValue, { condition, whenTrue, whenFalse });
   }
 
-  truncate(width: OperandWidth, value: ValueId): ValueId {
+  truncate(width: IntegerWidth, value: ValueId): ValueId {
     return this.#create(truncateValue, { inputType: "i32", width, value });
   }
 
-  truncate64(width: OperandWidth, value: ValueId): ValueId {
+  truncate64(width: IntegerWidth, value: ValueId): ValueId {
     return this.#create(truncateValue, { inputType: "i64", width, value });
   }
 
-  extend(width: OperandWidth, value: ValueId, signed: boolean): ValueId {
+  extend(width: IntegerWidth, value: ValueId, signed: boolean): ValueId {
     return this.#create(extendValue, { resultType: "i32", width, value, signed });
   }
 
   // The value seen through a width-limited access: sign-extended when
   // signed, masked otherwise.
-  widthAdjusted(width: OperandWidth, value: ValueId, signed: boolean): ValueId {
+  widthAdjusted(width: IntegerWidth, value: ValueId, signed: boolean): ValueId {
     return signed ? this.extend(width, value, true) : this.truncate(width, value);
   }
 
-  extend64(width: OperandWidth, value: ValueId, signed: boolean): ValueId {
+  extend64(width: IntegerWidth, value: ValueId, signed: boolean): ValueId {
     return this.#create(extendValue, { resultType: "i64", width, value, signed });
   }
 

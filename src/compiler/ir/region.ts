@@ -1,0 +1,28 @@
+import type { Operation } from "#compiler/ir/operations/index.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
+import type { Control } from "#compiler/ir/controls/index.js";
+
+export type RegionNode = Operation | Control;
+
+// `result` is the fallthrough value a body delivers when its owning control
+// declares an output; escaping bodies carry none.
+export type Region = Readonly<{
+  nodes: readonly RegionNode[];
+  result?: ValueId;
+}>;
+
+// A control completes its owner when every selectable path escapes. A
+// result-bearing body instead falls through to its control's join.
+export function nodeCompletes(node: RegionNode): boolean {
+  return node.completes({ regionCompletes });
+}
+
+export function regionCompletes(body: Region): boolean {
+  return regionFinal(body) !== undefined;
+}
+
+export function regionFinal(body: Region): RegionNode | undefined {
+  const last = body.nodes[body.nodes.length - 1];
+
+  return last !== undefined && nodeCompletes(last) ? last : undefined;
+}

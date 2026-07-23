@@ -1,4 +1,4 @@
-import { i32 } from "#core/numeric.js";
+import { i32 } from "#common/numeric.js";
 import type {
   BinaryBoundsCase,
   BinaryDefinition,

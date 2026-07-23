@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import { Invocation } from "#compiler/ir/invocation.js";
-import type { ValueUseEmitter } from "#ir/node.js";
+import type { ValueUseEmitter } from "#compiler/ir/node.js";
 import {
   operationResult,
   OperationBase,
@@ -51,7 +51,7 @@ export class CallOperation extends OperationBase {
 
   emit(target: OperationEmitTarget, values: ValueUseEmitter): void {
     this.invocation.emitInputs(values);
-    this.invocation.target.emitCall(target);
+    target.emitCall(this.invocation.target);
   }
 }
 

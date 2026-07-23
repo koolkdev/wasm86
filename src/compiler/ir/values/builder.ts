@@ -1,4 +1,4 @@
-import type { OperandWidth } from "#core/types.js";
+import type { IntegerWidth } from "./types.js";
 import type { BinaryOperator } from "./binary.js";
 import type { CompareOperator } from "./comparison.js";
 import type { ValueId } from "./types.js";
@@ -10,11 +10,11 @@ export interface ValueBuilder {
   binary(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId;
   unary(operator: UnaryOperator, value: ValueId): ValueId;
   select(condition: ValueId, whenTrue: ValueId, whenFalse: ValueId): ValueId;
-  truncate(width: OperandWidth, value: ValueId): ValueId;
-  extend(width: OperandWidth, value: ValueId, signed: boolean): ValueId;
-  compare(width: OperandWidth, operator: CompareOperator, a: ValueId, b: ValueId): ValueId;
+  truncate(width: IntegerWidth, value: ValueId): ValueId;
+  extend(width: IntegerWidth, value: ValueId, signed: boolean): ValueId;
+  compare(width: IntegerWidth, operator: CompareOperator, a: ValueId, b: ValueId): ValueId;
   binary64(operator: BinaryOperator, a: ValueId, b: ValueId): ValueId;
   compare64(operator: CompareOperator, a: ValueId, b: ValueId): ValueId;
-  truncate64(width: OperandWidth, value: ValueId): ValueId;
-  extend64(width: OperandWidth, value: ValueId, signed: boolean): ValueId;
+  truncate64(width: IntegerWidth, value: ValueId): ValueId;
+  extend64(width: IntegerWidth, value: ValueId, signed: boolean): ValueId;
 }

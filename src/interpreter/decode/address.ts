@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { CellRef } from "#compiler/refs/cell.js";
+import { CellRef } from "#compiler/ir/cell.js";
 import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
 import type {
   AddressBase,
@@ -10,7 +10,7 @@ import { reg32Index } from "#core/registers.js";
 import { segmentRegisterIndex } from "#core/segments.js";
 import type { StateAccess } from "#core/state/access.js";
 import type { SegmentRegister } from "#core/types.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { SegmentOverrideState } from "./prefixes.js";
 import { InstructionByteStream } from "./stream.js";
 

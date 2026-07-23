@@ -1,4 +1,4 @@
-import { wasmPageByteLength } from "#compiler/program/pages.js";
+import { wasmPageByteLength } from "#compiler/program/limits.js";
 
 // Flat guest accesses are limited to the first Wasm page.
 // Guest memory must contain at least that page.

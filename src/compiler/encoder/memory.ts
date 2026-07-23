@@ -33,18 +33,6 @@ export function encodeMemoryImmediate(immediate: WasmMemoryImmediate): number[] 
   ];
 }
 
-export function validateMemoryLimits(limits: WasmMemoryLimits): void {
-  validateU32(limits.minPages, "memory minimum pages");
-
-  if (limits.maxPages !== undefined) {
-    validateU32(limits.maxPages, "memory maximum pages");
-
-    if (limits.maxPages < limits.minPages) {
-      throw new RangeError("memory maximum pages must be greater than or equal to minimum pages");
-    }
-  }
-}
-
 function validateU32(value: number, label: string): void {
   if (!Number.isInteger(value) || value < 0 || value > 0xffff_ffff) {
     throw new RangeError(`${label} out of range: ${value}`);

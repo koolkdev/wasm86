@@ -42,11 +42,12 @@ import {
   returnControl,
   type SwitchControl
 } from "#compiler/ir/controls/index.js";
-import type { BodyNode, Body, IrBlock } from "#ir/block.js";
-import type { IrFunction } from "#ir/function.js";
-import { validateIrFunction } from "#ir/validate.js";
+import type { RegionNode, Region } from "#compiler/ir/region.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { IrFunction } from "#compiler/ir/function.js";
+import { validateIrFunction } from "#compiler/ir/validate.js";
 import { Invocation } from "#compiler/ir/invocation.js";
-import { functionType } from "#compiler/program/function-type.js";
+import { functionType } from "#compiler/ir/function.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import { ValueTable, type ValueNode } from "#compiler/ir/values/table.js";
 import { valueId } from "#compiler/ir/values/id.js";
@@ -96,12 +97,12 @@ import {
   memoryReadOperation,
   memoryWriteOperation,
   resolvedStatusFlag
-} from "#ir/tests/storage-op-helpers.js";
+} from "#test/support/storage-operations.js";
 import type {
   MemoryReadOperation,
   MemoryWriteOperation,
   StatusFlagCallOperation
-} from "#ir/tests/storage-op-helpers.js";
+} from "#test/support/storage-operations.js";
 import {
   dynamicGprRead,
   dynamicGprWrite,
@@ -119,10 +120,10 @@ import {
   type StateReadOperation,
   type StateWriteOperation
 } from "./state-operations.js";
-import { RegionBuilder } from "#ir/region-builder.js";
+import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { InstructionTerminals } from "../terminal.js";
 
-function outputOf(node: BodyNode): ValueId {
+function outputOf(node: RegionNode): ValueId {
   const output = node.outputs[0];
 
   ok(output !== undefined, `${node.kind} node has no output`);
@@ -175,12 +176,12 @@ function writeDsMemory(
 
 // Every instruction advances the instruction-count field; the dedicated tests at the
 // end cover that bookkeeping, the shape tests assert around it.
-function isInstructionCountNode(values: ValueTable, node: BodyNode): boolean {
+function isInstructionCountNode(values: ValueTable, node: RegionNode): boolean {
   return readsStateChannel(values, node, instructionCountField) ||
     writesStateChannel(values, node, instructionCountField);
 }
 
-function entryNodes(block: IrBlock): readonly BodyNode[] {
+function entryNodes(block: FunctionGraph): readonly RegionNode[] {
   const final = block.body.nodes.at(-1);
   const termination = testTermination(final);
   const dispatchTarget = termination?.kind === "dispatch"
@@ -195,7 +196,7 @@ function entryNodes(block: IrBlock): readonly BodyNode[] {
   );
 }
 
-function rawEntryNodes(block: IrBlock): readonly BodyNode[] {
+function rawEntryNodes(block: FunctionGraph): readonly RegionNode[] {
   return block.body.nodes;
 }
 
@@ -261,12 +262,12 @@ type TestTermination = Readonly<
 >;
 
 type TerminatingBodyView = Readonly<{
-  nodes: readonly BodyNode[];
+  nodes: readonly RegionNode[];
   flushes: readonly StateWriteOperation[];
   terminator: TestTermination;
 }>;
 
-function testTermination(node: BodyNode | undefined): TestTermination | undefined {
+function testTermination(node: RegionNode | undefined): TestTermination | undefined {
   if (node?.kind !== "return") {
     return undefined;
   }
@@ -285,10 +286,10 @@ function testTermination(node: BodyNode | undefined): TestTermination | undefine
   return result === undefined ? undefined : { kind: "exit", result };
 }
 
-function nestedBodies(block: IrBlock): readonly Body[] {
-  const bodies: Body[] = [];
+function nestedBodies(block: FunctionGraph): readonly Region[] {
+  const bodies: Region[] = [];
 
-  function collect(body: Body): void {
+  function collect(body: Region): void {
     for (const node of body.nodes) {
       for (const nested of node.nestedBodies) {
         bodies.push(nested.body);
@@ -301,7 +302,7 @@ function nestedBodies(block: IrBlock): readonly Body[] {
   return bodies;
 }
 
-function nestedBodyView(block: IrBlock, index: number): TerminatingBodyView {
+function nestedBodyView(block: FunctionGraph, index: number): TerminatingBodyView {
   const body = nestedBodies(block).filter(
     (nested) => testTermination(nested.nodes.at(-1)) !== undefined
   )[index - 1];
@@ -321,18 +322,18 @@ function nestedBodyView(block: IrBlock, index: number): TerminatingBodyView {
   };
 }
 
-function nestedBodyFlushes(block: IrBlock, index: number): StateWriteOperation[] {
+function nestedBodyFlushes(block: FunctionGraph, index: number): StateWriteOperation[] {
   return nestedBodyView(block, index).flushes.filter(
     (flush) => !isInstructionCountNode(block.values, flush)
   );
 }
 
-function nestedBodyWriteFlushes(block: IrBlock, index: number): StateWriteOperation[] {
+function nestedBodyWriteFlushes(block: FunctionGraph, index: number): StateWriteOperation[] {
   return nestedBodyFlushes(block, index);
 }
 
 function memoryGuard(
-  block: IrBlock,
+  block: FunctionGraph,
   faultBodyIndex: number,
   _address: ValueId,
   _byteLength: number,
@@ -355,7 +356,7 @@ function memoryGuard(
   })];
 }
 
-function dispatchReturn(targetEip: ValueId): BodyNode {
+function dispatchReturn(targetEip: ValueId): RegionNode {
   return returnControl.create({
     source: {
       kind: "invocation",
@@ -367,7 +368,7 @@ function dispatchReturn(targetEip: ValueId): BodyNode {
   });
 }
 
-function returnTrap(values: ValueTable, vector: ValueId): BodyNode {
+function returnTrap(values: ValueTable, vector: ValueId): RegionNode {
   return exitReturn(trapExit(values, vector));
 }
 
@@ -382,7 +383,7 @@ function returnSegmentLoad(
   values: ValueTable,
   segment: ValueId,
   selector: ValueId
-): BodyNode {
+): RegionNode {
   return exitReturn({
     kind: "exit",
     result: buildExit(values, segmentExit(segment, selector))
@@ -405,7 +406,7 @@ function exceptionExit(
 function returnException(
   values: ValueTable,
   exception: CpuException<ValueId>
-): BodyNode {
+): RegionNode {
   return exitReturn(exceptionExit(values, exception));
 }
 
@@ -421,7 +422,7 @@ function pageFaultStop(
   return exceptionExit(values, pageFault(payload, errorCode));
 }
 
-function exitReturn(termination: TestTermination): BodyNode {
+function exitReturn(termination: TestTermination): RegionNode {
   ok(termination.kind === "exit", "exit return requires an exit result");
   return returnControl.create({
     source: { kind: "values", values: [termination.result] }
@@ -583,17 +584,17 @@ function valueNodeProperties(node: ValueNode): unknown {
   }
 }
 
-function stateWrites(block: IrBlock): StateWriteOperation[] {
+function stateWrites(block: FunctionGraph): StateWriteOperation[] {
   return entryNodes(block).filter(isStateWrite);
 }
 
-function stateReads(nodes: readonly BodyNode[]): StateReadOperation[] {
+function stateReads(nodes: readonly RegionNode[]): StateReadOperation[] {
   return nodes.filter(isStateRead);
 }
 
 function stateReadFor(
-  block: IrBlock,
-  nodes: readonly BodyNode[],
+  block: FunctionGraph,
+  nodes: readonly RegionNode[],
   channel: InstructionStateChannel
 ): StateReadOperation | undefined {
   return nodes.find((node): node is StateReadOperation =>
@@ -602,7 +603,7 @@ function stateReadFor(
 }
 
 function stateWriteFor(
-  block: IrBlock,
+  block: FunctionGraph,
   writes: readonly StateWriteOperation[],
   channel: InstructionStateChannel
 ): StateWriteOperation | undefined {
@@ -613,7 +614,7 @@ function stateWriteFor(
 
 function stateReadFlag(
   values: ValueTable,
-  node: BodyNode
+  node: RegionNode
 ): X86Flag | undefined {
   return x86Flags.find((flag) =>
     readsStateChannel(values, node, flagStateFields.concrete[flag])
@@ -622,28 +623,28 @@ function stateReadFlag(
 
 function stateWriteFlag(
   values: ValueTable,
-  node: BodyNode
+  node: RegionNode
 ): X86Flag | undefined {
   return x86Flags.find((flag) =>
     writesStateChannel(values, node, flagStateFields.concrete[flag])
   );
 }
 
-function ifNode(block: IrBlock): IfControl {
+function ifNode(block: FunctionGraph): IfControl {
   const node = entryNodes(block).find((entry): entry is IfControl => entry.kind === "if");
 
   ok(node !== undefined, "expected if control");
   return node;
 }
 
-function switchNode(block: IrBlock): SwitchControl {
+function switchNode(block: FunctionGraph): SwitchControl {
   const node = entryNodes(block).find((entry): entry is SwitchControl => entry.kind === "switch");
 
   ok(node !== undefined, "expected switch control");
   return node;
 }
 
-function nodeKinds(block: IrBlock): ValueNode["kind"][] {
+function nodeKinds(block: FunctionGraph): ValueNode["kind"][] {
   const kinds: ValueNode["kind"][] = [];
 
   for (let rawId = 0; rawId < block.values.size(); rawId += 1) {
@@ -653,11 +654,11 @@ function nodeKinds(block: IrBlock): ValueNode["kind"][] {
   return kinds;
 }
 
-function writtenFlags(block: IrBlock): X86Flag[] {
+function writtenFlags(block: FunctionGraph): X86Flag[] {
   return flagWriteEntries(block).map((write) => write.flag);
 }
 
-function flagWriteEntries(block: IrBlock): ReadonlyArray<Readonly<{ flag: X86Flag; value: ValueId }>> {
+function flagWriteEntries(block: FunctionGraph): ReadonlyArray<Readonly<{ flag: X86Flag; value: ValueId }>> {
   return stateWrites(block).flatMap((write) => {
     const flag = stateWriteFlag(block.values, write);
 
@@ -667,14 +668,14 @@ function flagWriteEntries(block: IrBlock): ReadonlyArray<Readonly<{ flag: X86Fla
   });
 }
 
-function flagWriteValue(block: IrBlock, flag: X86StatusFlag): ValueId {
+function flagWriteValue(block: FunctionGraph, flag: X86StatusFlag): ValueId {
   const writes = flagWriteEntries(block).filter((write) => write.flag === flag);
 
   strictEqual(writes.length, 1, `expected exactly one ${flag} write`);
   return writes[0]!.value;
 }
 
-function statusFlagCallFor(block: IrBlock, flag: X86StatusFlag): StatusFlagCallOperation {
+function statusFlagCallFor(block: FunctionGraph, flag: X86StatusFlag): StatusFlagCallOperation {
   const operation = entryNodes(block).find(
     (node): node is StatusFlagCallOperation =>
       isStatusFlagCall(node) && resolvedStatusFlag(node) === flag
@@ -684,11 +685,11 @@ function statusFlagCallFor(block: IrBlock, flag: X86StatusFlag): StatusFlagCallO
   return operation;
 }
 
-function resolvedStatusFlags(nodes: readonly BodyNode[]): readonly X86StatusFlag[] {
+function resolvedStatusFlags(nodes: readonly RegionNode[]): readonly X86StatusFlag[] {
   return nodes.filter(isStatusFlagCall).map(resolvedStatusFlag);
 }
 
-function assertResolvedStatusFlag(block: IrBlock, id: ValueId, flag: X86StatusFlag): void {
+function assertResolvedStatusFlag(block: FunctionGraph, id: ValueId, flag: X86StatusFlag): void {
   strictEqual(outputOf(statusFlagCallFor(block, flag)), id);
   deepStrictEqual(block.values.node(id), { kind: "nodeOutput", type: "i32" });
 }
@@ -4123,13 +4124,13 @@ test("a fault edge restores a runtime eip", () => {
 
 // The memDynamicBase address: the in-block base register read plus the
 // pre-summed offset parameter.
-function dynamicAddress(block: IrBlock, baseRead: StateReadOperation): ValueId {
+function dynamicAddress(block: FunctionGraph, baseRead: StateReadOperation): ValueId {
   const v = block.values;
 
   return v.binary("add", outputOf(baseRead), v.parameter(1, "i32"));
 }
 
-function dynamicBaseRead(block: IrBlock): StateReadOperation {
+function dynamicBaseRead(block: FunctionGraph): StateReadOperation {
   const v = block.values;
   const baseIndex = v.parameter(0, "i32");
   const expected = dynamicGprRead(v, valueId(0), baseIndex, 32);
@@ -4144,7 +4145,7 @@ function dynamicBaseRead(block: IrBlock): StateReadOperation {
 }
 
 function dynamicSegmentBaseRead(
-  block: IrBlock,
+  block: FunctionGraph,
   index: ValueId
 ): StateReadOperation {
   const expected = dynamicSegmentRead(block.values, valueId(0), index, "base");
@@ -4509,7 +4510,7 @@ test("a signed runtime immediate sign-extends instead of masking", () => {
   });
 });
 
-function instructionCountRead(block: IrBlock): StateReadOperation {
+function instructionCountRead(block: FunctionGraph): StateReadOperation {
   const read = stateReadFor(block, rawEntryNodes(block), instructionCountField);
 
   ok(read !== undefined, "expected an instruction-count read");

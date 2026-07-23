@@ -5,7 +5,7 @@ import {
   WasmFunctionBodyEncoder,
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
-import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 const importNamespace = "wasm86";
@@ -45,13 +45,6 @@ test("call_indirect_invokes_imported_table_target", async () => {
   strictEqual(result, forwardedResult);
 });
 
-test("table_import_index_is_stable", () => {
-  const module = new WasmModuleEncoder();
-  const tableIndex = module.importTable(importNamespace, tableImportName, { minElements: 1 });
-
-  strictEqual(tableIndex, 0);
-});
-
 test("table_import_uses_funcref", () => {
   const imports = WebAssembly.Module.imports(new WebAssembly.Module(encodeIndirectCallModule(returnCallIndirectEntryBody)));
 
@@ -79,24 +72,30 @@ async function instantiateIndirectCallModule(
 function encodeIndirectCallModule(
   entryBody: (blockType: number, tableIndex: number) => EncodedWasmFunctionBody
 ): Uint8Array<ArrayBuffer> {
-  const module = new WasmModuleEncoder();
-  const tableIndex = module.importTable(importNamespace, tableImportName, { minElements: 1 });
-  const blockType = module.addFunctionType({
-    params: [wasmValueType.i32],
-    results: [wasmValueType.i64]
+  return encodeTestModule({
+    functionTypes: [{
+      params: [wasmValueType.i32],
+      results: [wasmValueType.i64]
+    }],
+    tableImports: [{
+      moduleName: importNamespace,
+      name: tableImportName,
+      limits: { minElements: 1 }
+    }],
+    functions: [
+      {
+        typeIndex: 0,
+        body: new WasmFunctionBodyEncoder(1)
+          .i64Const(forwardedResult)
+          .finish()
+      },
+      { typeIndex: 0, body: entryBody(0, 0) }
+    ],
+    functionExports: [
+      { name: targetExportName, functionIndex: 0 },
+      { name: entryExportName, functionIndex: 1 }
+    ]
   });
-  const targetIndex = module.addFunction(
-    blockType,
-    new WasmFunctionBodyEncoder(1)
-      .i64Const(forwardedResult)
-      .finish()
-  );
-  const entryIndex = module.addFunction(blockType, entryBody(blockType, tableIndex));
-
-  module.exportFunction(targetExportName, targetIndex);
-  module.exportFunction(entryExportName, entryIndex);
-
-  return module.encode();
 }
 
 function returnCallIndirectEntryBody(blockType: number, tableIndex: number): EncodedWasmFunctionBody {

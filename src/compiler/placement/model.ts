@@ -1,5 +1,5 @@
 import type { SiteId } from "#compiler/analysis/model.js";
-import type { CellRef } from "#compiler/refs/cell.js";
+import type { CellRef } from "#compiler/ir/cell.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
 
 export type ValuePlacement =

@@ -1,14 +1,13 @@
 import type { StorageEffects } from "#compiler/ir/effects.js";
-import type {
-  CallTargetReferences,
-  DirectFunctionTarget,
-  InvocationEmitTarget
-} from "#compiler/ir/invocation.js";
-import type { FunctionBuilder } from "#ir/function.js";
-import { functionRef, type FunctionRef } from "./refs.js";
-import type { FunctionType } from "./function-type.js";
+import type { FunctionBuilder } from "#compiler/ir/builder/function.js";
+import type { DirectCallTarget } from "#compiler/ir/invocation.js";
+import type { FunctionType } from "#compiler/ir/function.js";
+import { functionRef, type FunctionRef } from "#compiler/ir/refs.js";
 
-export type BuildFunction = (fn: FunctionBuilder, self: FunctionDefinition) => void;
+export type BuildFunction = (
+  fn: FunctionBuilder,
+  self: FunctionDefinition
+) => void;
 
 export type FunctionDefinitionOptions = Readonly<{
   ref: FunctionRef;
@@ -18,7 +17,8 @@ export type FunctionDefinitionOptions = Readonly<{
   build: BuildFunction;
 }>;
 
-export class FunctionDefinition implements DirectFunctionTarget {
+export class FunctionDefinition implements DirectCallTarget {
+  readonly kind = "direct";
   readonly ref: FunctionRef;
   readonly type: FunctionType;
   readonly effects: StorageEffects;
@@ -38,22 +38,6 @@ export class FunctionDefinition implements DirectFunctionTarget {
 
   isAvailableTo(owner: object): boolean {
     return this.#owner === undefined || this.#owner === owner;
-  }
-
-  get targetInputs(): readonly [] {
-    return [];
-  }
-
-  get references(): CallTargetReferences {
-    return { functions: [this], types: [], tables: [] };
-  }
-
-  emitCall(context: InvocationEmitTarget): void {
-    context.body.callFunction(context.bindings.functionIndex(this.ref));
-  }
-
-  emitReturnCall(context: InvocationEmitTarget): void {
-    context.body.returnCallFunction(context.bindings.functionIndex(this.ref));
   }
 
   build(fn: FunctionBuilder): void {

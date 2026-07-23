@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { ResourceWriteArgs } from "#compiler/ir/operations/resource.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { ResourceEffect } from "#compiler/ir/resource.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
 import {
@@ -19,7 +19,7 @@ import { GprState } from "./gpr.js";
 import { InstructionCountState } from "./instruction-count.js";
 import { SegmentState } from "./segments.js";
 import type { StateWriteObserver, StateWriteObserverCheckpoint } from "./write-log.js";
-import { covers, mayAlias } from "#ir/aliasing.js";
+import { covers, mayAlias } from "#compiler/ir/effects.js";
 
 type InstructionStateSnapshot = Readonly<{
   gpr: ReturnType<GprState["snapshot"]>;

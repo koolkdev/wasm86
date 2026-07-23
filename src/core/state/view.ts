@@ -1,4 +1,4 @@
-import { u32 } from "#core/numeric.js";
+import { u32 } from "#common/numeric.js";
 import { widthMask, type RegisterAlias, type Reg32, type SegmentRegister } from "#core/types.js";
 
 export interface CoreStateView {

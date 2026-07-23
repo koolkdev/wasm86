@@ -8,13 +8,13 @@ import type {
   ValueType,
   WidthBounds
 } from "#compiler/ir/values/types.js";
-import type { CellRef } from "#compiler/refs/cell.js";
+import type { CellRef } from "#compiler/ir/cell.js";
 import type {
-  BodyCompletionContext,
-  BodyNodeBase,
+  RegionCompletionContext,
+  RegionNodeBase,
   ValueUseEmitter
-} from "#ir/node.js";
-import type { Body } from "#ir/block.js";
+} from "#compiler/ir/node.js";
+import type { Region } from "#compiler/ir/region.js";
 
 // i64 results structurally carry no i32 width bounds.
 export type OperationResult =
@@ -34,6 +34,7 @@ export function operationResult(type: ValueType): OperationResult {
 // occurrence's direct `emit` function uses only the capabilities it needs.
 export type OperationEmitTarget = InvocationEmitTarget & Readonly<{
   cellLocal: (cell: CellRef) => number;
+  resourceIndex: (resource: ResourceRef) => number;
 }>;
 
 export type OperationOutputAllocator = (result: OperationResult) => ValueId;
@@ -50,7 +51,7 @@ type OperationFacts = Readonly<{
 // retains result-producing work; declared writes retain observable work.
 // Volatile reads or architectural traps require an effects/liveness model
 // extension before they can become operation kinds.
-export abstract class OperationBase implements BodyNodeBase {
+export abstract class OperationBase implements RegionNodeBase {
   readonly category = "operation";
   // Repeated values are repeated semantic uses and remain repeated entries.
   readonly inputs: readonly ValueInput[];
@@ -80,11 +81,11 @@ export abstract class OperationBase implements BodyNodeBase {
     this.referencedResources = referencedResources;
   }
 
-  completes(_context: BodyCompletionContext): false {
+  completes(_context: RegionCompletionContext): false {
     return false;
   }
 
-  mapBodies(_map: (body: Body) => Body): this {
+  mapBodies(_map: (body: Region) => Region): this {
     return this;
   }
 

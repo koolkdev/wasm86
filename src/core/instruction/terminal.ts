@@ -9,7 +9,7 @@ import {
   resourceWrite,
   type ResourceWriteArgs
 } from "#compiler/ir/operations/resource.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { StatePathKind } from "./state/pending-buffer.js";
 import type { InstructionState } from "./state/state.js";
 import type { BoundStateAccess } from "#core/state/access.js";

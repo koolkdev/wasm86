@@ -1,14 +1,14 @@
 import { assert } from "#common/assert.js";
-import type { BodyAnalysis } from "#compiler/analysis/model.js";
+import type { FunctionAnalysis } from "#compiler/analysis/model.js";
 import { valueId } from "#compiler/ir/values/id.js";
-import type { IrBlock } from "#ir/block.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
 import { planValueAnchors } from "./anchors.js";
 import { planLocals } from "./locals.js";
 import type { PlacementPlan, ValuePlacement } from "./model.js";
 
 export function planPlacement(
-  block: IrBlock,
-  analysis: BodyAnalysis
+  block: FunctionGraph,
+  analysis: FunctionAnalysis
 ): PlacementPlan {
   const placements = planValueAnchors(block, analysis);
   const locals = planLocals(block, analysis, placements);

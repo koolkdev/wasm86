@@ -1,8 +1,8 @@
 import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { BodyNode } from "#ir/block.js";
-import { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionNode } from "#compiler/ir/region.js";
+import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { InstructionState } from "../state/state.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import {
@@ -25,13 +25,13 @@ import {
   resolvedStatusFlag,
   statusFlagCallOperation,
   type StatusFlagCallOperation
-} from "#ir/tests/storage-op-helpers.js";
+} from "#test/support/storage-operations.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import {
   cpuStateAccess,
   cpuStatusFlagResolvers
 } from "#test/support/execution-model.js";
-import { covers } from "#ir/aliasing.js";
+import { covers } from "#compiler/ir/effects.js";
 import {
   stateEffect,
   stateWriteValue,
@@ -42,7 +42,7 @@ import {
 
 type Harness = Readonly<{
   values: ValueTable;
-  nodes: BodyNode[];
+  nodes: RegionNode[];
   pending: Readonly<{
     beginInstructionBoundary(): void;
     flushesForPath(path: "fault" | "completed"): readonly StateWriteOperation[];
@@ -58,7 +58,7 @@ type TestStatusFlags = Readonly<{
   resetToInputs(): void;
 }>;
 
-function stateWriteOperations(nodes: readonly BodyNode[]): readonly StateWriteOperation[] {
+function stateWriteOperations(nodes: readonly RegionNode[]): readonly StateWriteOperation[] {
   return nodes.filter(isStateWrite);
 }
 
@@ -118,7 +118,7 @@ function assertAdjustedOperand(
 function createHarness(): Harness {
   const values = new ValueTable();
   const body = new RegionBuilder(values);
-  const nodes = body.build().nodes as BodyNode[];
+  const nodes = body.build().nodes as RegionNode[];
   const state = new InstructionState(
     cpuStateAccess,
     cpuStatusFlagResolvers,
@@ -187,23 +187,23 @@ function assertFullExplicitFlush(
   strictEqual(nodes.length, x86StatusFlags.length + 1);
 }
 
-function resolverCall(nodes: readonly BodyNode[], flag: X86StatusFlag): StatusFlagCallOperation | undefined {
+function resolverCall(nodes: readonly RegionNode[], flag: X86StatusFlag): StatusFlagCallOperation | undefined {
   return nodes.find(
     (node): node is StatusFlagCallOperation =>
       isStatusFlagCall(node) && resolvedStatusFlag(node) === flag
   );
 }
 
-function resolvedFlagValue(nodes: readonly BodyNode[], flag: X86StatusFlag): ValueId | undefined {
+function resolvedFlagValue(nodes: readonly RegionNode[], flag: X86StatusFlag): ValueId | undefined {
   return resolverCall(nodes, flag)?.outputs[0];
 }
 
-function resolverCalls(nodes: readonly BodyNode[]): readonly StatusFlagCallOperation[] {
+function resolverCalls(nodes: readonly RegionNode[]): readonly StatusFlagCallOperation[] {
   return nodes.filter(isStatusFlagCall);
 }
 
 function stateReadFields(
-  nodes: readonly BodyNode[],
+  nodes: readonly RegionNode[],
   values: ValueTable
 ): readonly FlagStateField[] {
   const candidates: readonly FlagStateField[] = [
@@ -241,8 +241,8 @@ function assertResolverCall(
   deepStrictEqual(control, statusFlagCallOperation(output, flag));
 }
 
-function switchControls(nodes: readonly BodyNode[]): Extract<BodyNode, { kind: "switch" }>[] {
-  return nodes.filter((node): node is Extract<BodyNode, { kind: "switch" }> => node.kind === "switch");
+function switchControls(nodes: readonly RegionNode[]): Extract<RegionNode, { kind: "switch" }>[] {
+  return nodes.filter((node): node is Extract<RegionNode, { kind: "switch" }> => node.kind === "switch");
 }
 
 test("new status flags start with no dirty pending entries", () => {

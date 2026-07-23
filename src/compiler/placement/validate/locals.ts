@@ -1,9 +1,9 @@
 import { assert } from "#common/assert.js";
-import type { BodyAnalysis, SiteId } from "#compiler/analysis/model.js";
-import type { CellRef } from "#compiler/refs/cell.js";
+import type { FunctionAnalysis, SiteId } from "#compiler/analysis/model.js";
+import type { CellRef } from "#compiler/ir/cell.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
-import type { IrBlock } from "#ir/block.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
 import type { PlacementPlan } from "../model.js";
 import type { PlacementProof } from "./uses.js";
 
@@ -15,8 +15,8 @@ type LocalClaim = Readonly<{
 }>;
 
 export function validatePlacementLocals(
-  block: IrBlock,
-  analysis: BodyAnalysis,
+  block: FunctionGraph,
+  analysis: FunctionAnalysis,
   plan: PlacementPlan,
   proof: PlacementProof
 ): void {
@@ -46,7 +46,7 @@ export function validatePlacementLocals(
       if (nested.scope.kind !== "loop") {
         continue;
       }
-      const end = analysis.bodyEndSite(nested.body);
+      const end = analysis.regionEndSite(nested.body);
 
       for (const input of nested.scope.inputs) {
         const placement = plan.values[input];
@@ -108,7 +108,7 @@ export function validatePlacementLocals(
 // access, held through any loop an access crosses into. The lifetime is
 // recomputed here independently of the planner's ranges.
 function claimCellLocals(
-  analysis: BodyAnalysis,
+  analysis: FunctionAnalysis,
   plan: PlacementPlan,
   claim: (
     local: number,
@@ -162,7 +162,7 @@ function claimCellLocals(
 }
 
 function cellLifetimeEnd(
-  analysis: BodyAnalysis,
+  analysis: FunctionAnalysis,
   seed: SiteId,
   accesses: readonly SiteId[],
   owner: string
@@ -177,12 +177,12 @@ function cellLifetimeEnd(
 
     assert(accessSite !== undefined, `${owner} has unknown access site ${access}`);
     end = access > end ? access : end;
-    const path = analysis.path(seedSite.body, accessSite.body);
+    const path = analysis.path(seedSite.region, accessSite.region);
 
     assert(path !== undefined, `${owner} access leaves its seed scope`);
     for (const step of path) {
-      if (analysis.isLoopBody(step.body)) {
-        const loopEnd = analysis.bodyEndSite(step.body);
+      if (analysis.isLoopRegion(step.region)) {
+        const loopEnd = analysis.regionEndSite(step.region);
 
         end = loopEnd > end ? loopEnd : end;
       }
@@ -192,7 +192,7 @@ function cellLifetimeEnd(
 }
 
 function valueLifetimeEnd(
-  analysis: BodyAnalysis,
+  analysis: FunctionAnalysis,
   proof: PlacementProof,
   value: ValueId,
   anchor: SiteId
@@ -207,12 +207,12 @@ function valueLifetimeEnd(
 
     assert(demandSite !== undefined, `value ${value} has unknown demand ${demand.consumedAt}`);
     end = demand.consumedAt > end ? demand.consumedAt : end;
-    const path = analysis.path(anchorSite.body, demandSite.body);
+    const path = analysis.path(anchorSite.region, demandSite.region);
 
     assert(path !== undefined, `value ${value} demand leaves its anchor scope`);
     for (const step of path) {
-      if (analysis.isLoopBody(step.body)) {
-        const loopEnd = analysis.bodyEndSite(step.body);
+      if (analysis.isLoopRegion(step.region)) {
+        const loopEnd = analysis.regionEndSite(step.region);
 
         end = loopEnd > end ? loopEnd : end;
       }

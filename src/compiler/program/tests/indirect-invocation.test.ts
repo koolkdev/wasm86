@@ -7,17 +7,15 @@ import {
   resourceRef,
   type ResourceEffect
 } from "#compiler/ir/resource.js";
-import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
-import { compileProgram } from "#compiler/program/compile.js";
-import { createModuleBindings } from "#compiler/program/bindings.js";
-import { functionType } from "#compiler/program/function-type.js";
-import {
-  functionExportRef,
-  functionRef,
-  tableRef
-} from "#compiler/program/refs.js";
+import { ProgramBuilder } from "#compiler/program/builder.js";
+import type { Program } from "#compiler/program/program.js";
+import { compileProgram } from "#compiler/compile.js";
+import { createModuleBindings } from "#compiler/module/bindings.js";
+import { functionType } from "#compiler/ir/function.js";
+import { functionExportRef } from "#compiler/program/exports.js";
+import { functionRef, tableRef } from "#compiler/ir/refs.js";
 import { createProgramResources } from "#compiler/program/resources.js";
-import { emitFunction } from "#wasm/emit/action.js";
+import { emitFunction } from "#compiler/emit/function.js";
 
 const noEffects = { reads: [], writes: [] } as const;
 
@@ -257,7 +255,7 @@ test("defined functions bind ordinary and returning indirect invocations", async
   deepStrictEqual(closed.functionTypes, [type]);
   strictEqual(closed.functionTypes[0], type);
   for (const fn of [ordinaryFunction, returningFunction]) {
-    deepStrictEqual(fn.directTargets, []);
+    deepStrictEqual(fn.directFunctions, []);
     deepStrictEqual(fn.indirectTypes, [type]);
     deepStrictEqual(fn.tables, [table]);
   }

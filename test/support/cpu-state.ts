@@ -1,6 +1,7 @@
 import { strictEqual } from "node:assert";
 
 import { assert } from "#common/assert.js";
+import { u32 } from "#common/numeric.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
 import {
   flagStateFields,
@@ -10,7 +11,6 @@ import { x86StatusFlags, x86Flags, type X86Flag, type X86StatusFlag } from "#cor
 import type { SegmentStateField } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
 import { registerAlias } from "#core/registers.js";
-import { u32 } from "#core/numeric.js";
 import { reg32, segmentRegisters, type SegmentRegister } from "#core/types.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import {

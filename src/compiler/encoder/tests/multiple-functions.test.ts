@@ -1,14 +1,14 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { programImportModuleName } from "#compiler/program/imports.js";
 import {
   WasmFunctionBodyEncoder,
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
-import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
+const importModuleName = "wasm86";
 const entryExportName = "entry";
 const cpuStateMemoryName = "cpuState";
 const guestMemoryName = "guest";
@@ -33,29 +33,11 @@ test("exported_entry_calls_internal_function", async () => {
   strictEqual(result, forwardedResult);
 });
 
-test("function_indexes_are_stable", () => {
-  const module = new WasmModuleEncoder();
-  const blockType = addBlockFunctionType(module);
-  const helperIndex = module.addFunction(blockType, helperBody());
-  const entryIndex = module.addFunction(blockType, entryBody(helperIndex));
-
-  strictEqual(helperIndex, 0);
-  strictEqual(entryIndex, 1);
-});
-
-test("structurally equal function types share an index", () => {
-  const module = new WasmModuleEncoder();
-  const first = addBlockFunctionType(module);
-  const second = addBlockFunctionType(module);
-
-  strictEqual(second, first);
-});
-
 test("cpu_state_memory_import_still_memory_0", () => {
   const imports = WebAssembly.Module.imports(new WebAssembly.Module(encodeTwoFunctionModule()));
 
   deepStrictEqual(imports[0], {
-    module: programImportModuleName,
+    module: importModuleName,
     name: cpuStateMemoryName,
     kind: "memory"
   });
@@ -65,7 +47,7 @@ test("guest_memory_import_still_memory_1", () => {
   const imports = WebAssembly.Module.imports(new WebAssembly.Module(encodeTwoFunctionModule()));
 
   deepStrictEqual(imports[1], {
-    module: programImportModuleName,
+    module: importModuleName,
     name: guestMemoryName,
     kind: "memory"
   });
@@ -76,7 +58,7 @@ async function instantiateTwoFunctionModule(): Promise<WebAssembly.Instance> {
   const cpuStateMemory = new WebAssembly.Memory({ initial: 1 });
   const guestMemory = new WebAssembly.Memory({ initial: 1 });
   const instance = await WebAssembly.instantiate(module, {
-    [programImportModuleName]: {
+    [importModuleName]: {
       [cpuStateMemoryName]: cpuStateMemory,
       [guestMemoryName]: guestMemory
     }
@@ -86,26 +68,28 @@ async function instantiateTwoFunctionModule(): Promise<WebAssembly.Instance> {
 }
 
 function encodeTwoFunctionModule(): Uint8Array<ArrayBuffer> {
-  const module = new WasmModuleEncoder();
-  const cpuStateMemoryIndex = module.importMemory(programImportModuleName, cpuStateMemoryName, { minPages: 1 });
-  const guestMemoryIndex = module.importMemory(programImportModuleName, guestMemoryName, { minPages: 1 });
-
-  strictEqual(cpuStateMemoryIndex, 0);
-  strictEqual(guestMemoryIndex, 1);
-
-  const blockType = addBlockFunctionType(module);
-  const helperIndex = module.addFunction(blockType, helperBody());
-  const entryIndex = module.addFunction(blockType, entryBody(helperIndex));
-
-  module.exportFunction(entryExportName, entryIndex);
-
-  return module.encode();
-}
-
-function addBlockFunctionType(module: WasmModuleEncoder): number {
-  return module.addFunctionType({
-    params: [wasmValueType.i32],
-    results: [wasmValueType.i64]
+  return encodeTestModule({
+    functionTypes: [{
+      params: [wasmValueType.i32],
+      results: [wasmValueType.i64]
+    }],
+    memoryImports: [
+      {
+        moduleName: importModuleName,
+        name: cpuStateMemoryName,
+        limits: { minPages: 1 }
+      },
+      {
+        moduleName: importModuleName,
+        name: guestMemoryName,
+        limits: { minPages: 1 }
+      }
+    ],
+    functions: [
+      { typeIndex: 0, body: helperBody() },
+      { typeIndex: 0, body: entryBody(0) }
+    ],
+    functionExports: [{ name: entryExportName, functionIndex: 1 }]
   });
 }
 

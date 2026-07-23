@@ -8,7 +8,7 @@ import type {
   BoundStateAccess,
   StateAccess
 } from "#core/state/access.js";
-import { covers, mayAlias } from "#ir/aliasing.js";
+import { covers, mayAlias } from "#compiler/ir/effects.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
 import type { StateWriteObserver } from "./write-log.js";

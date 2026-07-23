@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { BodyAnalysis } from "#compiler/analysis/model.js";
+import type { FunctionAnalysis } from "#compiler/analysis/model.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { PlacementPlan } from "./model.js";
@@ -10,7 +10,7 @@ export type PlacementIndex = Readonly<{
 }>;
 
 export function indexPlacement(
-  analysis: BodyAnalysis,
+  analysis: FunctionAnalysis,
   plan: PlacementPlan
 ): PlacementIndex {
   const captures = new Array<ValueId[] | undefined>(analysis.sites().length);

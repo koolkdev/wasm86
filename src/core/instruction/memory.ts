@@ -1,4 +1,4 @@
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type {
   LinearRange,
   MemoryAccess,

@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { wasmPageByteLength } from "#compiler/program/pages.js";
+import { wasmPageByteLength } from "#compiler/program/limits.js";
 import { createMachine } from "#machine/machine.js";
 
 test("machine exposes memory for caller initialization", () => {

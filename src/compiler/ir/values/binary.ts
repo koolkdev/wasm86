@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import {
   binaryArithmetic,
   type BinaryArithmeticOperator
@@ -46,8 +46,8 @@ export type BinaryDefinition = Readonly<{
   fold(value: BinaryFoldCase): ValueId | undefined;
   bounds: WidthBounds | ((value: BinaryBoundsCase) => WidthBounds);
   mayTrap?: (value: BinaryTrapCase) => boolean;
-  emitI32(body: WasmFunctionBodyEncoder): void;
-  emitI64(body: WasmFunctionBodyEncoder): void;
+  emitI32(body: WasmInstructionWriter): void;
+  emitI64(body: WasmInstructionWriter): void;
 }>;
 
 export type BinaryOperator = BinaryArithmeticOperator | BinaryBitwiseOperator;

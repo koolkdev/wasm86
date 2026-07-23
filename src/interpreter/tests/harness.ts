@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
-import { instantiateCompiledProgram } from "#compiler/program/instance.js";
+import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import type { RunStop } from "#cpu/cpu.js";
 import { decodeExit } from "#cpu/exit.js";
 import {

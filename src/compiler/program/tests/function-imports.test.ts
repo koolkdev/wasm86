@@ -19,14 +19,11 @@ import {
   wasmDefinedFunctionCount
 } from "#compiler/encoder/tests/body-opcodes.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { compileProgram } from "#compiler/program/compile.js";
-import { functionType } from "#compiler/program/function-type.js";
-import { instantiateCompiledProgram } from "#compiler/program/instance.js";
-import {
-  functionExportRef,
-  functionRef,
-  tableRef
-} from "#compiler/program/refs.js";
+import { compileProgram } from "#compiler/compile.js";
+import { functionType } from "#compiler/ir/function.js";
+import { instantiateCompiledProgram } from "#compiler/instantiate.js";
+import { functionExportRef } from "#compiler/program/exports.js";
+import { functionRef, tableRef } from "#compiler/ir/refs.js";
 import { createProgramResources } from "#compiler/program/resources.js";
 
 const noEffects = { reads: [], writes: [] } as const;

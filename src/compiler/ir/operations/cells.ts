@@ -1,6 +1,6 @@
-import type { CellRef } from "#compiler/refs/cell.js";
+import type { CellRef } from "#compiler/ir/cell.js";
 import type { ValueId, ValueInput } from "#compiler/ir/values/types.js";
-import type { ValueUseEmitter } from "#ir/node.js";
+import type { ValueUseEmitter } from "#compiler/ir/node.js";
 import {
   operationResult,
   OperationBase,

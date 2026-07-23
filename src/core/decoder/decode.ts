@@ -4,7 +4,7 @@ import {
   invalidOpcode,
   type CpuException
 } from "#core/exceptions.js";
-import { u32 } from "#core/numeric.js";
+import { u32 } from "#common/numeric.js";
 import { registerAliasByIndex } from "#core/registers.js";
 import type {
   EffectiveAddress,

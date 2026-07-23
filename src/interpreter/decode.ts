@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { CellRef } from "#compiler/refs/cell.js";
+import { CellRef } from "#compiler/ir/cell.js";
 import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
 import type {
   DecodeCandidate,
@@ -16,7 +16,7 @@ import type { InstructionSpec } from "#core/isa/spec.js";
 import type { OperandBinding } from "#core/instruction/bindings.js";
 import type { BuildExit } from "#core/instruction/terminal.js";
 import type { StateAccess } from "#core/state/access.js";
-import type { RegionBuilder, SwitchControlArm } from "#ir/region-builder.js";
+import type { RegionBuilder, SwitchControlArm } from "#compiler/ir/builder/region.js";
 import type { MemoryAccessConstruction } from "#memory/access.js";
 import { ModRmAddressDecoder } from "./decode/address.js";
 import {

@@ -2,9 +2,9 @@ import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ResourceEffect, ResourceRef } from "#compiler/ir/resource.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ProgramBuilder } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/program/function-type.js";
+import { functionType } from "#compiler/ir/function.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef } from "#compiler/program/refs.js";
+import { functionRef } from "#compiler/ir/refs.js";
 import type { ExecutionModel } from "#execution/model.js";
 import {
   createInstructionConstruction,
@@ -17,8 +17,8 @@ import {
   instructionCountField,
   instructionLimitField
 } from "#cpu/instruction-count.js";
-import type { FunctionBuilder } from "#ir/function.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { FunctionBuilder } from "#compiler/ir/builder/function.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { buildDecodeAndDispatch } from "./decode.js";
 import { instructionLimitExit } from "./exits.js";
 import { buildInterpreterInstruction } from "./instruction.js";

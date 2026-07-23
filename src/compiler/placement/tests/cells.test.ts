@@ -11,21 +11,21 @@ import {
   loopControl,
   returnControl
 } from "#compiler/ir/controls/index.js";
-import { CellRef } from "#compiler/refs/cell.js";
+import { CellRef } from "#compiler/ir/cell.js";
 import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { placeFunction } from "#compiler/placement/place.js";
 import { validatePlacement } from "#compiler/placement/validate.js";
-import { functionType } from "#compiler/program/function-type.js";
+import { functionType } from "#compiler/ir/function.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
-import type { Body, BodyNode, IrBlock } from "#ir/block.js";
-import type { IrFunction } from "#ir/function.js";
+import type { Region, RegionNode } from "#compiler/ir/region.js";
+import type { FunctionGraph, IrFunction } from "#compiler/ir/function.js";
 import {
   compilerTestValues,
   resourceReadNode,
   resourceWriteNode
-} from "#ir/tests/storage-op-helpers.js";
+} from "#test/support/storage-operations.js";
 
 function write(
   cell: CellRef,
@@ -42,8 +42,8 @@ function read(
   return cellRead.create({ cell }, () => output);
 }
 
-function functionBlock(block: IrBlock): IrFunction {
-  (block.body.nodes as BodyNode[]).push(returnControl.create({
+function functionBlock(block: FunctionGraph): IrFunction {
+  (block.body.nodes as RegionNode[]).push(returnControl.create({
     source: { kind: "values", values: [] }
   }));
   const parameters = Array.from(
@@ -69,7 +69,7 @@ function functionBlock(block: IrBlock): IrFunction {
   };
 }
 
-function place(block: IrBlock) {
+function place(block: FunctionGraph) {
   return placeFunction(functionBlock(block));
 }
 
@@ -77,7 +77,7 @@ test("a referenced cell receives one typed local", () => {
   const values = compilerTestValues();
   const cell = new CellRef("i32");
   const output = values.addNodeOutput();
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -97,7 +97,7 @@ test("a referenced cell receives one typed local", () => {
 test("cell locals are allocated when a cell has only writes", () => {
   const values = compilerTestValues();
   const cell = new CellRef("i32");
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -116,7 +116,7 @@ test("distinct cells receive distinct locals with their scalar types", () => {
   const values = compilerTestValues();
   const narrow = new CellRef("i32");
   const wide = new CellRef("i64");
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -140,17 +140,17 @@ test("nested branch and loop accesses share the declaring cell's local", () => {
   const values = compilerTestValues();
   const cell = new CellRef("i32");
   const output = values.addNodeOutput();
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       write(cell, values.const(3), "update"),
       read(cell, output),
       resourceWriteNode(values, 0, output)
     ]
   };
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [loopControl.create({ carried: [], body: loopBody })]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -170,7 +170,7 @@ test("a cell never shares a local with an overlapping value temporary", () => {
   const cell = new CellRef("i32");
   const snapshot = values.addNodeOutput();
   const output = values.addNodeOutput();
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -213,7 +213,7 @@ test("placement validation rejects overlapping, mistyped, and stale cell locals"
   const second = new CellRef("i32");
   const firstOut = values.addNodeOutput();
   const secondOut = values.addNodeOutput();
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -268,7 +268,7 @@ test("cells with disjoint lifetimes pool one local", () => {
   const second = new CellRef("i32");
   const firstOut = values.addNodeOutput();
   const secondOut = values.addNodeOutput();
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -293,7 +293,7 @@ test("a loop-crossing cell stays live through the whole loop", () => {
   const inner = new CellRef("i32");
   const outerOut = values.addNodeOutput();
   const innerOut = values.addNodeOutput();
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       read(outer, outerOut),
       resourceWriteNode(values, 0, outerOut),
@@ -302,7 +302,7 @@ test("a loop-crossing cell stays live through the whole loop", () => {
       resourceWriteNode(values, 1, innerOut)
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [

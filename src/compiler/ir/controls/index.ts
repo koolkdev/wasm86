@@ -16,11 +16,11 @@ export {
   switchControl
 };
 export type {
+  BranchHint,
   ControlBase,
   ControlEmitTarget
 } from "./definition.js";
 export type {
-  BranchHint,
   IfControl,
   IfControlArgs
 } from "./if.js";

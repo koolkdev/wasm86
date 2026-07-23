@@ -1,12 +1,13 @@
-import { ProgramBuilder, type Program } from "#compiler/program/builder.js";
+import { ProgramBuilder } from "#compiler/program/builder.js";
+import type { Program } from "#compiler/program/program.js";
 import {
   compileProgram,
   type CompiledProgram
-} from "#compiler/program/compile.js";
+} from "#compiler/compile.js";
 import {
   functionExportRef,
   type FunctionExportRef
-} from "#compiler/program/refs.js";
+} from "#compiler/program/exports.js";
 import type { ExecutionModel } from "#execution/model.js";
 import { defineInterpreterRun } from "./run.js";
 

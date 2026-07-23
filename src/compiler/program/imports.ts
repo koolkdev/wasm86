@@ -1,11 +1,7 @@
 import type { StorageEffects } from "#compiler/ir/effects.js";
-import type {
-  CallTargetReferences,
-  DirectFunctionTarget,
-  InvocationEmitTarget
-} from "#compiler/ir/invocation.js";
-import type { FunctionType } from "./function-type.js";
-import type { FunctionRef } from "./refs.js";
+import type { DirectCallTarget } from "#compiler/ir/invocation.js";
+import type { FunctionType } from "#compiler/ir/function.js";
+import type { FunctionRef } from "#compiler/ir/refs.js";
 
 export const programImportModuleName = "wasm86";
 
@@ -17,7 +13,8 @@ export type FunctionImportDeclaration = Readonly<{
   name: string;
 }>;
 
-export class FunctionImport implements DirectFunctionTarget {
+export class FunctionImport implements DirectCallTarget {
+  readonly kind = "direct";
   readonly ref: FunctionRef;
   readonly type: FunctionType;
   readonly effects: StorageEffects;
@@ -41,19 +38,4 @@ export class FunctionImport implements DirectFunctionTarget {
     return this.#owner === owner;
   }
 
-  get targetInputs(): readonly [] {
-    return [];
-  }
-
-  get references(): CallTargetReferences {
-    return { functions: [this], types: [], tables: [] };
-  }
-
-  emitCall(context: InvocationEmitTarget): void {
-    context.body.callFunction(context.bindings.functionIndex(this.ref));
-  }
-
-  emitReturnCall(context: InvocationEmitTarget): void {
-    context.body.returnCallFunction(context.bindings.functionIndex(this.ref));
-  }
 }

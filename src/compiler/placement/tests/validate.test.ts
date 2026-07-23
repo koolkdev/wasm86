@@ -1,7 +1,7 @@
 import { doesNotThrow, throws } from "node:assert";
 import { test } from "node:test";
 
-import { analyzeBody } from "#compiler/analysis/analyze.js";
+import { analyzeFunction as runFunctionAnalysis } from "#compiler/analysis/analyze.js";
 import {
   ifControl,
   loopContinueControl,
@@ -15,17 +15,17 @@ import type {
 } from "#compiler/placement/model.js";
 import { planPlacement } from "#compiler/placement/plan.js";
 import { validatePlacement } from "#compiler/placement/validate.js";
-import { functionType } from "#compiler/program/function-type.js";
-import type { Body, BodyNode, IrBlock } from "#ir/block.js";
-import type { IrFunction } from "#ir/function.js";
+import { functionType } from "#compiler/ir/function.js";
+import type { Region, RegionNode } from "#compiler/ir/region.js";
+import type { FunctionGraph, IrFunction } from "#compiler/ir/function.js";
 import {
   compilerTestValues,
   resourceReadNode,
   resourceWriteNode
-} from "#ir/tests/storage-op-helpers.js";
+} from "#test/support/storage-operations.js";
 
-function functionBlock(block: IrBlock): IrFunction {
-  (block.body.nodes as BodyNode[]).push(returnControl.create({
+function functionBlock(block: FunctionGraph): IrFunction {
+  (block.body.nodes as RegionNode[]).push(returnControl.create({
     source: { kind: "values", values: [] }
   }));
   const parameters = Array.from(
@@ -51,8 +51,8 @@ function functionBlock(block: IrBlock): IrFunction {
   };
 }
 
-function analyzeFunction(block: IrBlock) {
-  return analyzeBody(functionBlock(block));
+function analyzeFunction(block: FunctionGraph) {
+  return runFunctionAnalysis(functionBlock(block));
 }
 
 test("accepts condition-frontier and earlier-frontier captures", () => {
@@ -63,13 +63,13 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
     values.parameter(1, "i32")
   );
   const adjusted = values.binary("add", quotient, values.const(1));
-  const firstThen: Body = {
+  const firstThen: Region = {
     nodes: [resourceWriteNode(values, 0, adjusted)]
   };
-  const firstElse: Body = {
+  const firstElse: Region = {
     nodes: [resourceWriteNode(values, 1, adjusted)]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [ifControl.create({
@@ -96,13 +96,13 @@ test("accepts condition-frontier and earlier-frontier captures", () => {
     laterValues.const(1)
   );
   const condition = laterValues.parameter(2, "i32");
-  const laterThen: Body = {
+  const laterThen: Region = {
     nodes: [resourceWriteNode(laterValues, 0, laterAdjusted)]
   };
-  const laterElse: Body = {
+  const laterElse: Region = {
     nodes: [resourceWriteNode(laterValues, 1, laterAdjusted)]
   };
-  const laterBlock: IrBlock = {
+  const laterBlock: FunctionGraph = {
     values: laterValues,
     body: {
       nodes: [
@@ -129,13 +129,13 @@ test("rejects a raw trapping value hoisted above sibling arms", () => {
     values.parameter(1, "i32"),
     values.parameter(2, "i32")
   );
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [resourceWriteNode(values, 0, quotient)]
   };
-  const elseBody: Body = {
+  const elseBody: Region = {
     nodes: [resourceWriteNode(values, 1, quotient)]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [ifControl.create({ condition, thenBody, elseBody })]
@@ -165,9 +165,9 @@ test("rejects at-use placement without a direct demand", () => {
   const values = compilerTestValues();
   const condition = values.parameter(0, "i32");
   const quotient = values.binary("div_u", values.parameter(1, "i32"), values.parameter(2, "i32"));
-  const thenBody: Body = { nodes: [resourceWriteNode(values, 0, quotient)] };
-  const elseBody: Body = { nodes: [resourceWriteNode(values, 1, quotient)] };
-  const block: IrBlock = {
+  const thenBody: Region = { nodes: [resourceWriteNode(values, 0, quotient)] };
+  const elseBody: Region = { nodes: [resourceWriteNode(values, 1, quotient)] };
+  const block: FunctionGraph = {
     values,
     body: { nodes: [ifControl.create({ condition, thenBody, elseBody })] }
   };
@@ -192,7 +192,7 @@ test("rejects at-use placement without a direct demand", () => {
 test("rejects a producer anchor before its authored definition", () => {
   const values = compilerTestValues();
   const output = values.addNodeOutput();
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -226,13 +226,13 @@ test("rejects an anchor that does not dominate every selected use", () => {
   const values = compilerTestValues();
   const condition = values.parameter(0, "i32");
   const output = values.addNodeOutput();
-  const thenBody: Body = {
+  const thenBody: Region = {
     nodes: [resourceWriteNode(values, 0, output)]
   };
-  const elseBody: Body = {
+  const elseBody: Region = {
     nodes: [resourceWriteNode(values, 1, output)]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -263,7 +263,7 @@ test("rejects an anchor that does not dominate every selected use", () => {
 test("rejects producer movement across an alias but accepts a live snapshot", () => {
   const values = compilerTestValues();
   const output = values.addNodeOutput();
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -299,7 +299,7 @@ test("rejects overlapping value lifetimes assigned to one local", () => {
   const values = compilerTestValues();
   const first = values.addNodeOutput();
   const second = values.addNodeOutput();
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -328,7 +328,7 @@ test("keeps an outer capture live through repeated loop uses", () => {
   const values = compilerTestValues();
   const outer = values.addNodeOutput();
   const inner = values.addNodeOutput();
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       resourceWriteNode(values, 1, outer),
       resourceReadNode(values, inner, 2),
@@ -337,7 +337,7 @@ test("keeps an outer capture live through repeated loop uses", () => {
       loopContinueControl.create({ updates: [] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [
@@ -364,13 +364,13 @@ test("rejects hoisting a loop-dependent recipe to the preheader", () => {
   const values = compilerTestValues();
   const loopInput = values.addLoopInput();
   const current = values.binary("add", loopInput, values.const(1));
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       resourceWriteNode(values, 0, current),
       loopContinueControl.create({ updates: [loopInput] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({
@@ -402,13 +402,13 @@ test("rejects hoisting a loop-dependent recipe to the preheader", () => {
 test("accepts leaving a loop-invariant recipe at its use", () => {
   const values = compilerTestValues();
   const invariant = values.binary("add", values.parameter(0, "i32"), values.const(1));
-  const loopBody: Body = {
+  const loopBody: Region = {
     nodes: [
       resourceWriteNode(values, 0, invariant),
       loopContinueControl.create({ updates: [] })
     ]
   };
-  const block: IrBlock = {
+  const block: FunctionGraph = {
     values,
     body: {
       nodes: [loopControl.create({ carried: [], body: loopBody })]

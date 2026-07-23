@@ -1,10 +1,10 @@
 import { assert } from "#common/assert.js";
+import { u32 } from "#common/numeric.js";
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
-import { instantiateCompiledProgram } from "#compiler/program/instance.js";
+import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { SegmentRegister } from "#core/types.js";
-import { u32 } from "#core/numeric.js";
 import type { CompiledInterpreter } from "#interpreter/program.js";
 import { decodeExit } from "./exit.js";
 import { createCpuStateHostView } from "./host-view.js";

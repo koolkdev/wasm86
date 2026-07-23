@@ -16,7 +16,7 @@ import { programImportModuleName } from "#compiler/program/imports.js";
 import {
   type PageFault
 } from "#core/exceptions.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import {
   createFlatGuestMemoryReader,
   flatMemoryOperand,

@@ -2,12 +2,10 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { compileProgram } from "#compiler/program/compile.js";
-import { functionType } from "#compiler/program/function-type.js";
-import {
-  functionExportRef,
-  functionRef
-} from "#compiler/program/refs.js";
+import { compileProgram } from "#compiler/compile.js";
+import { functionType } from "#compiler/ir/function.js";
+import { functionExportRef } from "#compiler/program/exports.js";
+import { functionRef } from "#compiler/ir/refs.js";
 import {
   PageFaultErrorCode,
   pageFault

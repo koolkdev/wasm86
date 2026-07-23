@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { encodeMemoryImmediate } from "#compiler/encoder/memory.js";
-import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 const importNamespace = "wasm86";
@@ -38,15 +38,6 @@ test("guest memory is index 1", async () => {
   strictEqual(new DataView(state.buffer).getUint32(4, true), 0);
 });
 
-test("memory import order is stable", () => {
-  const module = new WasmModuleEncoder();
-  const cpuStateMemoryIndex = module.importMemory(importNamespace, cpuStateImportName, { minPages: 1 });
-  const guestMemoryIndex = module.importMemory(importNamespace, guestImportName, { minPages: 1 });
-
-  strictEqual(cpuStateMemoryIndex, 0);
-  strictEqual(guestMemoryIndex, 1);
-});
-
 test("indexed memory immediate encodes memory 1", () => {
   strictEqual(
     bytesToHex(
@@ -75,64 +66,67 @@ async function instantiateImportedMemoryTestModule(
 }
 
 function encodeImportedMemoryTestModule(): Uint8Array<ArrayBuffer> {
-  const module = new WasmModuleEncoder();
-  const cpuStateMemoryIndex = module.importMemory(importNamespace, cpuStateImportName, { minPages: 1 });
-  const guestMemoryIndex = module.importMemory(importNamespace, guestImportName, { minPages: 1 });
-
-  const storeCpuStateType = module.addFunctionType({
-    params: [wasmValueType.i32],
-    results: []
+  return encodeTestModule({
+    functionTypes: [
+      { params: [wasmValueType.i32], results: [] },
+      { params: [wasmValueType.i32, wasmValueType.i32], results: [] },
+      { params: [wasmValueType.i32], results: [wasmValueType.i32] }
+    ],
+    memoryImports: [
+      {
+        moduleName: importNamespace,
+        name: cpuStateImportName,
+        limits: { minPages: 1 }
+      },
+      {
+        moduleName: importNamespace,
+        name: guestImportName,
+        limits: { minPages: 1 }
+      }
+    ],
+    functions: [
+      {
+        typeIndex: 0,
+        body: new WasmFunctionBodyEncoder()
+          .localGet(0)
+          .i32Const(0x1234_5678)
+          .i32Store({
+            align: 2,
+            memoryIndex: 0,
+            offset: 0
+          })
+          .finish()
+      },
+      {
+        typeIndex: 1,
+        body: new WasmFunctionBodyEncoder()
+          .localGet(0)
+          .localGet(1)
+          .i32Store({
+            align: 2,
+            memoryIndex: 1,
+            offset: 0
+          })
+          .finish()
+      },
+      {
+        typeIndex: 2,
+        body: new WasmFunctionBodyEncoder()
+          .localGet(0)
+          .i32Load({
+            align: 2,
+            memoryIndex: 1,
+            offset: 0
+          })
+          .finish()
+      }
+    ],
+    functionExports: [
+      { name: "storeCpuState", functionIndex: 0 },
+      { name: "storeGuest", functionIndex: 1 },
+      { name: "loadGuest", functionIndex: 2 }
+    ]
   });
-  const storeGuestType = module.addFunctionType({
-    params: [wasmValueType.i32, wasmValueType.i32],
-    results: []
-  });
-  const loadGuestType = module.addFunctionType({
-    params: [wasmValueType.i32],
-    results: [wasmValueType.i32]
-  });
-
-  const storeCpuState = module.addFunction(
-    storeCpuStateType,
-    new WasmFunctionBodyEncoder()
-      .localGet(0)
-      .i32Const(0x1234_5678)
-      .i32Store({
-        align: 2,
-        memoryIndex: cpuStateMemoryIndex,
-        offset: 0
-      })
-      .finish()
-  );
-  const storeGuest = module.addFunction(
-    storeGuestType,
-    new WasmFunctionBodyEncoder()
-      .localGet(0)
-      .localGet(1)
-      .i32Store({
-        align: 2,
-        memoryIndex: guestMemoryIndex,
-        offset: 0
-      })
-      .finish()
-  );
-  const loadGuest = module.addFunction(
-    loadGuestType,
-    new WasmFunctionBodyEncoder()
-      .localGet(0)
-      .i32Load({
-        align: 2,
-        memoryIndex: guestMemoryIndex,
-        offset: 0
-      })
-      .finish()
-  );
-
-  module.exportFunction("storeCpuState", storeCpuState);
-  module.exportFunction("storeGuest", storeGuest);
-  module.exportFunction("loadGuest", loadGuest);
-
-  return module.encode();
 }
 
 function readExportedFunction(instance: WebAssembly.Instance, name: string): (...args: number[]) => unknown {

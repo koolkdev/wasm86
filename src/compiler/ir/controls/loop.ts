@@ -1,11 +1,11 @@
 import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { Body } from "#ir/block.js";
+import type { Region } from "#compiler/ir/region.js";
 import type {
-  BodyCompletionContext,
-  NestedBody,
+  RegionCompletionContext,
+  NestedRegion,
   ValueUseEmitter
-} from "#ir/node.js";
+} from "#compiler/ir/node.js";
 import {
   ControlBase,
   TerminalControlBase,
@@ -23,19 +23,19 @@ export type LoopCarriedCell = Readonly<{
 // rewrites the carried cells and takes the back edge.
 export type LoopControlArgs = Readonly<{
   carried: readonly LoopCarriedCell[];
-  body: Body;
+  body: Region;
 }>;
 
 export class LoopControl extends ControlBase {
   static readonly kind = "loop";
   readonly kind = LoopControl.kind;
   readonly operands: readonly ValueId[];
-  readonly nestedBodies: readonly [NestedBody];
+  readonly nestedBodies: readonly [NestedRegion];
   readonly outputs: readonly [] = [];
 
   private constructor(
     readonly carried: readonly LoopCarriedCell[],
-    readonly body: Body
+    readonly body: Region
   ) {
     super();
     this.operands = carried.map((cell) => cell.seed);
@@ -55,11 +55,11 @@ export class LoopControl extends ControlBase {
     return new LoopControl(carried, body);
   }
 
-  completes(_context: BodyCompletionContext): false {
+  completes(_context: RegionCompletionContext): false {
     return false;
   }
 
-  mapBodies(map: (body: Body) => Body): LoopControl {
+  mapBodies(map: (body: Region) => Region): LoopControl {
     return LoopControl.create({ carried: this.carried, body: map(this.body) });
   }
 

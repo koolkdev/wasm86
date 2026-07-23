@@ -1,28 +1,23 @@
 import { assert } from "#common/assert.js";
-import {
-  wasmBranchHint,
-  type WasmBranchHint
-} from "#compiler/encoder/function-body.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { Body } from "#ir/block.js";
+import type { Region } from "#compiler/ir/region.js";
 import type {
-  BodyCompletionContext,
-  NestedBody,
+  RegionCompletionContext,
+  NestedRegion,
   ValueUseEmitter
-} from "#ir/node.js";
+} from "#compiler/ir/node.js";
 import {
   ControlBase,
+  type BranchHint,
   type ControlEmitTarget
 } from "./definition.js";
-
-export type BranchHint = "unlikely" | "likely";
 
 export type IfControlArgs = Readonly<{
   condition: ValueId;
   hint?: BranchHint;
   output?: ValueId;
-  thenBody: Body;
-  elseBody?: Body;
+  thenBody: Region;
+  elseBody?: Region;
 }>;
 
 export class IfControl extends ControlBase {
@@ -31,10 +26,10 @@ export class IfControl extends ControlBase {
   readonly condition: ValueId;
   declare readonly hint?: BranchHint;
   declare readonly output?: ValueId;
-  readonly thenBody: Body;
-  declare readonly elseBody?: Body;
+  readonly thenBody: Region;
+  declare readonly elseBody?: Region;
   readonly operands: readonly [ValueId];
-  readonly nestedBodies: readonly NestedBody[];
+  readonly nestedBodies: readonly NestedRegion[];
   readonly outputs: readonly ValueId[];
 
   private constructor({
@@ -68,11 +63,11 @@ export class IfControl extends ControlBase {
     return new IfControl(args);
   }
 
-  completes(context: BodyCompletionContext): boolean {
+  completes(context: RegionCompletionContext): boolean {
     return ifCompletes(this.thenBody, this.elseBody, context);
   }
 
-  mapBodies(map: (body: Body) => Body): IfControl {
+  mapBodies(map: (body: Region) => Region): IfControl {
     return IfControl.create({
       condition: this.condition,
       ...(this.hint === undefined ? {} : { hint: this.hint }),
@@ -96,7 +91,7 @@ export class IfControl extends ControlBase {
 
     values.emitUse(condition);
     target.emitCaptures();
-    target.body.ifBlock({ hint: wasmHint(hint) });
+    target.body.ifBlock({ hint });
     target.withNestedControl(() => {
       target.emitBody(thenBody, outputLocal);
 
@@ -121,26 +116,15 @@ export class IfControl extends ControlBase {
 export const ifControl = IfControl;
 
 function ifCompletes(
-  thenBody: Body,
-  elseBody: Body | undefined,
-  context: BodyCompletionContext
+  thenBody: Region,
+  elseBody: Region | undefined,
+  context: RegionCompletionContext
 ): boolean {
   return elseBody !== undefined &&
-    context.bodyCompletes(thenBody) &&
-    context.bodyCompletes(elseBody);
+    context.regionCompletes(thenBody) &&
+    context.regionCompletes(elseBody);
 }
 
-function nestedBody(body: Body, role: string): NestedBody {
+function nestedBody(body: Region, role: string): NestedRegion {
   return { body, role, scope: { kind: "ordinary" } };
-}
-
-function wasmHint(hint: BranchHint | undefined): WasmBranchHint | undefined {
-  switch (hint) {
-    case undefined:
-      return undefined;
-    case "unlikely":
-      return wasmBranchHint.unlikely;
-    case "likely":
-      return wasmBranchHint.likely;
-  }
 }

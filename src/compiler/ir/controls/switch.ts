@@ -1,10 +1,10 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { Body } from "#ir/block.js";
+import type { Region } from "#compiler/ir/region.js";
 import type {
-  BodyCompletionContext,
-  NestedBody,
+  RegionCompletionContext,
+  NestedRegion,
   ValueUseEmitter
-} from "#ir/node.js";
+} from "#compiler/ir/node.js";
 import {
   ControlBase,
   type ControlEmitTarget
@@ -13,7 +13,7 @@ import {
 export type SwitchCase = Readonly<{
   // Every match routes to this one body without repeating it.
   matches: readonly number[];
-  body: Body;
+  body: Region;
 }>;
 
 // Matches lower to a dense br_table, so they stay byte-sized.
@@ -27,7 +27,7 @@ export type SwitchControlArgs = Readonly<{
   selector: ValueId;
   output?: ValueId;
   cases: readonly SwitchCase[];
-  defaultBody: Body;
+  defaultBody: Region;
 }>;
 
 export class SwitchControl extends ControlBase {
@@ -36,9 +36,9 @@ export class SwitchControl extends ControlBase {
   readonly selector: ValueId;
   declare readonly output?: ValueId;
   readonly cases: readonly SwitchCase[];
-  readonly defaultBody: Body;
+  readonly defaultBody: Region;
   readonly operands: readonly [ValueId];
-  readonly nestedBodies: readonly NestedBody[];
+  readonly nestedBodies: readonly NestedRegion[];
   readonly outputs: readonly ValueId[];
 
   private constructor({
@@ -56,7 +56,7 @@ export class SwitchControl extends ControlBase {
     this.defaultBody = defaultBody;
     this.operands = [selector];
     this.nestedBodies = [
-      ...cases.map((entry, index): NestedBody => ({
+      ...cases.map((entry, index): NestedRegion => ({
         body: entry.body,
         role: `case[${index}]`,
         scope: { kind: "ordinary" }
@@ -74,12 +74,12 @@ export class SwitchControl extends ControlBase {
     return new SwitchControl(args);
   }
 
-  completes(context: BodyCompletionContext): boolean {
-    return this.cases.every((entry) => context.bodyCompletes(entry.body)) &&
-      context.bodyCompletes(this.defaultBody);
+  completes(context: RegionCompletionContext): boolean {
+    return this.cases.every((entry) => context.regionCompletes(entry.body)) &&
+      context.regionCompletes(this.defaultBody);
   }
 
-  mapBodies(map: (body: Body) => Body): SwitchControl {
+  mapBodies(map: (body: Region) => Region): SwitchControl {
     return SwitchControl.create({
       selector: this.selector,
       ...(this.output === undefined ? {} : { output: this.output }),

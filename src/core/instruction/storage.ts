@@ -32,7 +32,7 @@ import type {
   OperandWidth,
   RegName
 } from "#core/types.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type {
   MemoryAccessConstruction
 } from "#memory/access.js";

@@ -7,7 +7,7 @@ import { test } from "node:test";
 
 import type { Operation } from "#compiler/ir/operations/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { RegionBuilder } from "#ir/region-builder.js";
+import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import {
   PageFaultErrorCode,
   pageFault

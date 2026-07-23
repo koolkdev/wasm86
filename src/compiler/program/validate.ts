@@ -1,36 +1,37 @@
 import { assert } from "#common/assert.js";
-import type { BodyAnalysis } from "#compiler/analysis/model.js";
-import type { DirectFunctionTarget } from "#compiler/ir/invocation.js";
+import type { FunctionAnalysis } from "#compiler/analysis/model.js";
 import type {
   StorageAccess,
   StorageEffects
 } from "#compiler/ir/effects.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
-import { covers } from "#ir/aliasing.js";
-import { validateDeclaredStorageEffects } from "#ir/validate/effects.js";
-import type { FunctionType } from "./function-type.js";
-import { FunctionDefinition } from "./functions.js";
+import { covers } from "#compiler/ir/effects.js";
+import { validateDeclaredStorageEffects } from "#compiler/ir/validate/effects.js";
+import type { FunctionType } from "#compiler/ir/function.js";
+import { FunctionDefinition } from "#compiler/program/functions.js";
+import { maximumWasmTableElements } from "./limits.js";
 import { FunctionImport } from "./imports.js";
-import type { LinkProgramOptions } from "./link.js";
+import type { FunctionExport } from "./exports.js";
 import type {
   FunctionDeclaration,
-  FunctionExport,
   Program,
+  ProgramDeclarations,
   ProgramFunction
-} from "./model.js";
-import type { FunctionRef, TableRef } from "./refs.js";
+} from "./program.js";
+import type { FunctionRef, TableRef } from "#compiler/ir/refs.js";
 
 type Declaration = Readonly<{
   ref: Readonly<{ kind: string; id: string }>;
 }>;
 
 export function validateProgramDeclarations(
-  declarations: LinkProgramOptions
+  declarations: ProgramDeclarations
 ): void {
   validateDeclarations(declarations.tables);
   validateDeclarations(declarations.functions);
   validateDeclarations(declarations.exports);
+  validateTableLimits(declarations.tables);
   validateExportNames(declarations.exports);
   validateExternalImportNames(
     declarations.resources.memoryImports,
@@ -60,8 +61,33 @@ export function validateProgramDeclarations(
   }
 }
 
+function validateTableLimits(
+  tables: ProgramDeclarations["tables"]
+): void {
+  for (const table of tables) {
+    assert(
+      Number.isInteger(table.limits.minElements) &&
+        table.limits.minElements >= 0 &&
+        table.limits.minElements <= maximumWasmTableElements,
+      `table ${table.ref.id} minimum elements out of range: ${table.limits.minElements}`
+    );
+    if (table.limits.maxElements !== undefined) {
+      assert(
+        Number.isInteger(table.limits.maxElements) &&
+          table.limits.maxElements >= 0 &&
+          table.limits.maxElements <= maximumWasmTableElements,
+        `table ${table.ref.id} maximum elements out of range: ${table.limits.maxElements}`
+      );
+      assert(
+        table.limits.maxElements >= table.limits.minElements,
+        `table ${table.ref.id} maximum elements are below its minimum`
+      );
+    }
+  }
+}
+
 export function validateProgramFunctionDeclaration(
-  declarations: LinkProgramOptions,
+  declarations: ProgramDeclarations,
   knownFunctions: readonly FunctionDeclaration[],
   definition: FunctionDefinition
 ): void {
@@ -81,7 +107,7 @@ export function validateProgramFunctionDeclaration(
 }
 
 function validateFunctionDefinitionDeclaration(
-  declarations: LinkProgramOptions,
+  declarations: ProgramDeclarations,
   definition: FunctionDefinition
 ): void {
   assert(
@@ -99,7 +125,7 @@ function validateFunctionDefinitionDeclaration(
 }
 
 function validateFunctionImportDeclaration(
-  declarations: LinkProgramOptions,
+  declarations: ProgramDeclarations,
   imported: FunctionImport
 ): void {
   assert(
@@ -117,7 +143,7 @@ function validateFunctionImportDeclaration(
 }
 
 function validateFunctionResourceEffect(
-  declarations: LinkProgramOptions,
+  declarations: ProgramDeclarations,
   functionId: string,
   access: StorageAccess
 ): void {
@@ -327,37 +353,28 @@ function validateKnownDirectTargets(
   fn: ProgramFunction,
   functions: ReadonlyMap<FunctionRef, ProgramFunction | FunctionImport>
 ): void {
-  for (const target of fn.directTargets) {
-    const linked = functions.get(target.ref);
+  for (const ref of fn.directFunctions) {
+    const linked = functions.get(ref);
 
     assert(
       linked !== undefined,
-      `unknown program function ${target.ref.id} called by function ${fn.ref.id}`
+      `unknown program function ${ref.id} called by function ${fn.ref.id}`
     );
-    if (target instanceof FunctionImport) {
-      assert(
-        linked === target,
-        `function ${target.ref.id} call target does not match its linked import`
-      );
-    } else {
-      assert(
-        target instanceof FunctionDefinition &&
-          !(linked instanceof FunctionImport) &&
-          linked.type === target.type &&
-          linked.effects === target.effects,
-        `function ${target.ref.id} call target does not match its linked definition`
-      );
-    }
   }
 }
 
 function validateRequiredFunctionImports(program: Program): void {
   const required = new Set<FunctionImport>();
+  const imports = new Map(
+    program.functionImports.map((imported) => [imported.ref, imported])
+  );
 
   for (const fn of program.functions) {
-    for (const target of fn.directTargets) {
-      if (target instanceof FunctionImport) {
-        required.add(target);
+    for (const ref of fn.directFunctions) {
+      const imported = imports.get(ref);
+
+      if (imported !== undefined) {
+        required.add(imported);
       }
     }
   }
@@ -377,29 +394,32 @@ function validateProgramFunction(fn: ProgramFunction): void {
   const { placement } = fn;
 
   assert(
-    placement.block === fn.body,
+    placement.function === fn.body,
     "function placement belongs to another body"
   );
 
   const invocations = placement.analysis.invocations()
     .filter((site) => placement.analysis.invocationMustExecute(site))
     .map((site) => site.invocation);
-  const directTargets: DirectFunctionTarget[] = [];
+  const directFunctions: FunctionRef[] = [];
   const indirectTypes: FunctionType[] = [];
   const tables: TableRef[] = [];
 
   for (const invocation of invocations) {
-    const references = invocation.target.references;
+    const { target } = invocation;
 
-    directTargets.push(...references.functions);
-    indirectTypes.push(...references.types);
-    tables.push(...references.tables);
+    if (target.kind === "direct") {
+      directFunctions.push(target.ref);
+    } else {
+      indirectTypes.push(target.type);
+      tables.push(target.table);
+    }
   }
   const resources = resourcesUsedBy(placement.analysis);
 
   assert(
-    sameIdentitySequence(fn.directTargets, unique(directTargets)),
-    `function ${fn.ref.id} direct targets do not match its live invocations`
+    sameIdentitySequence(fn.directFunctions, unique(directFunctions)),
+    `function ${fn.ref.id} direct functions do not match its live invocations`
   );
   assert(
     sameIdentitySequence(fn.indirectTypes, unique(indirectTypes)),
@@ -416,7 +436,7 @@ function validateProgramFunction(fn: ProgramFunction): void {
   validateDeclaredEffects(fn, placement.analysis);
 }
 
-function resourcesUsedBy(analysis: BodyAnalysis): readonly ResourceRef[] {
+function resourcesUsedBy(analysis: FunctionAnalysis): readonly ResourceRef[] {
   const resources: ResourceRef[] = [];
 
   for (const { operation } of analysis.operations()) {
@@ -430,7 +450,7 @@ function resourcesUsedBy(analysis: BodyAnalysis): readonly ResourceRef[] {
 
 function validateDeclaredEffects(
   fn: ProgramFunction,
-  analysis: BodyAnalysis
+  analysis: FunctionAnalysis
 ): void {
   const actual = inferEffects(analysis);
 
@@ -438,12 +458,12 @@ function validateDeclaredEffects(
   assertEffectsCovered(fn, "write", actual.writes, fn.effects.writes);
 }
 
-function inferEffects(analysis: BodyAnalysis): StorageEffects {
+function inferEffects(analysis: FunctionAnalysis): StorageEffects {
   const reads = new Set<StorageAccess>();
   const writes = new Set<StorageAccess>();
 
   for (const site of analysis.sites()) {
-    if (site.kind === "bodyEnd") {
+    if (site.kind === "regionEnd") {
       continue;
     }
     const node = site.node;

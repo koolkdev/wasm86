@@ -1,5 +1,5 @@
-import type { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import type { OperandWidth } from "#core/types.js";
+import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
+import type { IntegerWidth } from "./types.js";
 import type {
   ValueId,
   ValueInput,
@@ -27,7 +27,7 @@ export type ValueTrapContext = Readonly<{
 
 type ValueExtension = Readonly<{
   resultType: ValueType;
-  width: OperandWidth;
+  width: IntegerWidth;
   value: ValueId;
 }>;
 
@@ -35,14 +35,14 @@ export type ValueFoldContext = ValueBoundsContext & ValueTrapContext & Readonly<
   constant(value: number): ValueId;
   unreachable(type: ValueType): ValueId;
   extension(id: ValueId): ValueExtension | undefined;
-  truncate(width: OperandWidth, value: ValueId): ValueId;
+  truncate(width: IntegerWidth, value: ValueId): ValueId;
   eqz(value: ValueId): ValueId;
 }>;
 
 // Definitions emit only the value's own instruction or leaf realization.
 // Operand evaluation is owned by the table from the stored `inputs` list.
 export type ValueEmitTarget = Readonly<{
-  body: WasmFunctionBodyEncoder;
+  body: WasmInstructionWriter;
   emitNodeOutput(id: ValueId): void;
   emitParameter(index: number): void;
   emitLoopInput(id: ValueId): void;

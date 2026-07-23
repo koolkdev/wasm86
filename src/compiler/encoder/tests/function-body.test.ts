@@ -15,3 +15,20 @@ test("encoded body bytes and branch hints are defensive snapshots", () => {
   deepStrictEqual(body.bytes, originalBytes);
   deepStrictEqual(body.branchHints, []);
 });
+
+test("descriptive branch hints are encoded in function metadata", () => {
+  const body = new WasmFunctionBodyEncoder()
+    .i32Const(1)
+    .ifBlock({ hint: "unlikely" })
+    .endBlock()
+    .block()
+    .i32Const(1)
+    .brIf(0, "likely")
+    .endBlock()
+    .finish();
+
+  deepStrictEqual(
+    body.branchHints.map((hint) => hint.value),
+    [0, 1]
+  );
+});

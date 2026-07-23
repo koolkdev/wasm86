@@ -36,11 +36,14 @@ import type {
   ValueId
 } from "#compiler/ir/values/types.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
-import { CellRef } from "#compiler/refs/cell.js";
-import { functionType } from "#compiler/program/function-type.js";
+import { CellRef } from "#compiler/ir/cell.js";
+import { functionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import { createModuleBindings } from "#compiler/program/bindings.js";
-import { functionRef, tableRef } from "#compiler/program/refs.js";
+import {
+  createModuleBindings,
+  type ModuleBindings
+} from "#compiler/module/bindings.js";
+import { functionRef, tableRef } from "#compiler/ir/refs.js";
 
 test("operation owners atomically construct complete occurrences", () => {
   const address = valueId(1);
@@ -127,7 +130,7 @@ test("operation owners normalize only declared fields and expose direct facts", 
   deepStrictEqual(operation.operands, [address]);
   deepStrictEqual(operation.outputs, [output]);
   deepStrictEqual(operation.nestedBodies, []);
-  strictEqual(operation.completes({ bodyCompletes: () => true }), false);
+  strictEqual(operation.completes({ regionCompletes: () => true }), false);
   strictEqual(operation.mapBodies(() => ({ nodes: [] })), operation);
   deepStrictEqual(operation.directEffects, {
     reads: [operation.effect],
@@ -296,22 +299,11 @@ test("call targets are structurally polymorphic", () => {
   const type = functionType([], []);
   const effects = { reads: [], writes: [] } as const;
   const target = {
+    kind: "indirect",
+    table,
     type,
     effects,
-    targetInputs: [{ value: elementIndex, type: "i32" }] as const,
-    references: { functions: [], types: [type], tables: [table] },
-    emitCall(context) {
-      context.body.callIndirect(
-        context.bindings.typeIndex(type),
-        context.bindings.tableIndex(table)
-      );
-    },
-    emitReturnCall(context) {
-      context.body.returnCallIndirect(
-        context.bindings.typeIndex(type),
-        context.bindings.tableIndex(table)
-      );
-    }
+    elementIndex: { value: elementIndex, type: "i32" }
   } satisfies CallTarget;
   const invocation = Invocation.create({ target, arguments: [] });
 
@@ -319,11 +311,8 @@ test("call targets are structurally polymorphic", () => {
   deepStrictEqual(invocation.inputs, [
     { value: elementIndex, type: "i32" }
   ]);
-  deepStrictEqual(target.references, {
-    functions: [],
-    types: [type],
-    tables: [table]
-  });
+  strictEqual(target.table, table);
+  deepStrictEqual(target.elementIndex, { value: elementIndex, type: "i32" });
 });
 
 test("indirect invocations own their selector, effects, and emission", () => {
@@ -347,16 +336,15 @@ test("indirect invocations own their selector, effects, and emission", () => {
   const body = new WasmFunctionBodyEncoder();
   const uses: ValueId[] = [];
 
-  operation.emit({
+  operation.emit(boundOperationTarget(
     body,
-    cellLocal: () => 0,
-    bindings: createModuleBindings({
+    createModuleBindings({
       functions: new Map(),
       types: new Map([[type, 8]]),
       tables: new Map([[table, 9]]),
       resources: new Map()
     })
-  }, {
+  ), {
     emitUse(value) {
       uses.push(value);
       body.i32Const(value);
@@ -371,14 +359,8 @@ test("indirect invocations own their selector, effects, and emission", () => {
   strictEqual(invocation.target, target);
   strictEqual(target.type, type);
   strictEqual(target.effects, effects);
-  deepStrictEqual(target.targetInputs, [
-    { value: elementIndex, type: "i32" }
-  ]);
-  deepStrictEqual(target.references, {
-    functions: [],
-    types: [type],
-    tables: [table]
-  });
+  deepStrictEqual(target.elementIndex, { value: elementIndex, type: "i32" });
+  strictEqual(target.table, table);
   deepStrictEqual(operation.operands, [argument, elementIndex]);
   deepStrictEqual(operation.outputs, [output]);
   deepStrictEqual(uses, [argument, elementIndex]);
@@ -407,19 +389,19 @@ test("resource and cell emission call their definition-specific target services"
   const output = valueId(62);
   const cell = new CellRef("i32");
   const body = new WasmFunctionBodyEncoder();
-  const target: OperationEmitTarget = {
+  const target = boundOperationTarget(
     body,
-    cellLocal(candidate) {
-      strictEqual(candidate, cell);
-      return 2;
-    },
-    bindings: createModuleBindings({
+    createModuleBindings({
       functions: new Map(),
       types: new Map(),
       tables: new Map(),
       resources: new Map([[resource, 3]])
-    })
-  };
+    }),
+    (candidate) => {
+      strictEqual(candidate, cell);
+      return 2;
+    }
+  );
   const uses: ValueId[] = [];
   const values = {
     emitUse(id: ValueId) {
@@ -452,10 +434,9 @@ function operationTarget(
   body: WasmFunctionBodyEncoder,
   expectedFunction?: FunctionDefinition
 ): OperationEmitTarget {
-  return {
+  return boundOperationTarget(
     body,
-    cellLocal: () => 0,
-    bindings: createModuleBindings({
+    createModuleBindings({
       functions: expectedFunction === undefined
         ? new Map()
         : new Map([[expectedFunction.ref, 7]]),
@@ -463,7 +444,46 @@ function operationTarget(
       tables: new Map(),
       resources: new Map()
     })
+  );
+}
+
+function boundOperationTarget(
+  body: WasmFunctionBodyEncoder,
+  bindings: ModuleBindings,
+  cellLocal: OperationEmitTarget["cellLocal"] = () => 0
+): OperationEmitTarget {
+  return {
+    body,
+    cellLocal,
+    resourceIndex: (resource) => bindings.resourceIndex(resource),
+    emitCall: (target) => emitCall(body, bindings, target, false),
+    emitReturnCall: (target) => emitCall(body, bindings, target, true)
   };
+}
+
+function emitCall(
+  body: WasmFunctionBodyEncoder,
+  bindings: ModuleBindings,
+  target: CallTarget,
+  tail: boolean
+): void {
+  switch (target.kind) {
+    case "direct": {
+      const index = bindings.functionIndex(target.ref);
+
+      tail ? body.returnCallFunction(index) : body.callFunction(index);
+      return;
+    }
+    case "indirect": {
+      const typeIndex = bindings.typeIndex(target.type);
+      const tableIndex = bindings.tableIndex(target.table);
+
+      tail
+        ? body.returnCallIndirect(typeIndex, tableIndex)
+        : body.callIndirect(typeIndex, tableIndex);
+      return;
+    }
+  }
 }
 
 function functionDefinition(

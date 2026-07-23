@@ -1,15 +1,15 @@
 import { match, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { programImportModuleName } from "#compiler/program/imports.js";
 import {
   WasmFunctionBodyEncoder,
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
-import { WasmModuleEncoder } from "#compiler/encoder/module.js";
+import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 const entryExportName = "entry";
+const importModuleName = "wasm86";
 const cpuStateMemoryName = "cpuState";
 const guestMemoryName = "guest";
 const cpuStatePtr = 32;
@@ -75,7 +75,7 @@ async function instantiateReturnCallModule(
   const guestMemory = new WebAssembly.Memory({ initial: 1 });
 
   return WebAssembly.instantiate(module, {
-    [programImportModuleName]: {
+    [importModuleName]: {
       [cpuStateMemoryName]: cpuStateMemory,
       [guestMemoryName]: guestMemory
     }
@@ -83,45 +83,51 @@ async function instantiateReturnCallModule(
 }
 
 function encodeReturnCallModule(targetBody: EncodedWasmFunctionBody): Uint8Array<ArrayBuffer> {
-  const module = moduleWithMemories();
-  const blockType = addBlockFunctionType(module);
-  const targetIndex = module.addFunction(blockType, targetBody);
-  const entryIndex = module.addFunction(blockType, returnCallEntryBody(targetIndex));
-
-  module.exportFunction(entryExportName, entryIndex);
-
-  return module.encode();
+  return encodeTestModule({
+    functionTypes: [{
+      params: [wasmValueType.i32],
+      results: [wasmValueType.i64]
+    }],
+    memoryImports: moduleMemoryImports(),
+    functions: [
+      { typeIndex: 0, body: targetBody },
+      { typeIndex: 0, body: returnCallEntryBody(0) }
+    ],
+    functionExports: [{ name: entryExportName, functionIndex: 1 }]
+  });
 }
 
 function encodeMismatchedReturnCallModule(): Uint8Array<ArrayBuffer> {
-  const module = moduleWithMemories();
-  const entryType = addBlockFunctionType(module);
-  const targetType = module.addFunctionType({
-    params: [wasmValueType.i32],
-    results: [wasmValueType.i32]
+  return encodeTestModule({
+    functionTypes: [
+      { params: [wasmValueType.i32], results: [wasmValueType.i64] },
+      { params: [wasmValueType.i32], results: [wasmValueType.i32] }
+    ],
+    memoryImports: moduleMemoryImports(),
+    functions: [
+      {
+        typeIndex: 1,
+        body: new WasmFunctionBodyEncoder(1).i32Const(1).finish()
+      },
+      { typeIndex: 0, body: returnCallEntryBody(0) }
+    ],
+    functionExports: [{ name: entryExportName, functionIndex: 1 }]
   });
-  const targetIndex = module.addFunction(targetType, new WasmFunctionBodyEncoder(1).i32Const(1).finish());
-  const entryIndex = module.addFunction(entryType, returnCallEntryBody(targetIndex));
-
-  module.exportFunction(entryExportName, entryIndex);
-
-  return module.encode();
 }
 
-function moduleWithMemories(): WasmModuleEncoder {
-  const module = new WasmModuleEncoder();
-
-  module.importMemory(programImportModuleName, cpuStateMemoryName, { minPages: 1 });
-  module.importMemory(programImportModuleName, guestMemoryName, { minPages: 1 });
-
-  return module;
-}
-
-function addBlockFunctionType(module: WasmModuleEncoder): number {
-  return module.addFunctionType({
-    params: [wasmValueType.i32],
-    results: [wasmValueType.i64]
-  });
+function moduleMemoryImports() {
+  return [
+    {
+      moduleName: importModuleName,
+      name: cpuStateMemoryName,
+      limits: { minPages: 1 }
+    },
+    {
+      moduleName: importModuleName,
+      name: guestMemoryName,
+      limits: { minPages: 1 }
+    }
+  ];
 }
 
 function returnCallEntryBody(targetFunctionIndex: number): EncodedWasmFunctionBody {

@@ -10,8 +10,8 @@ import {
   type BranchHint
 } from "#compiler/ir/controls/index.js";
 import { resourceWrite } from "#compiler/ir/operations/resource.js";
-import { bodyCompletes, type Body } from "#ir/block.js";
-import { RegionBuilder } from "#ir/region-builder.js";
+import { regionCompletes, type Region } from "#compiler/ir/region.js";
+import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { type InstructionStateChannel } from "./state/channels.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { LoopSemanticsBuilderImpl } from "./loop.js";
@@ -202,7 +202,7 @@ export class ControlEmitter {
 
       return this.#scopes.enter(parentScope, "arm", child, (scope) => {
         scope.run(() => emitBody(this.#bindScope(scope), child.values));
-        const completes = bodyCompletes(child.build());
+        const completes = regionCompletes(child.build());
 
         if (completes) {
           return { region: child, outcome: "completes" };
@@ -234,7 +234,7 @@ export class ControlEmitter {
   #buildImplicitElse(
     parentScope: SemanticRegionScope,
     channels: readonly InstructionStateChannel[]
-  ): Body | undefined {
+  ): Region | undefined {
     const region = parentScope.region.child();
 
     if (!this.#flushDirtyChannelsInto(region, channels)) {

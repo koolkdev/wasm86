@@ -1,9 +1,9 @@
 import { assert } from "#common/assert.js";
-import type { BodyAnalysis, SiteId } from "#compiler/analysis/model.js";
-import type { CellRef } from "#compiler/refs/cell.js";
+import type { FunctionAnalysis, SiteId } from "#compiler/analysis/model.js";
+import type { CellRef } from "#compiler/ir/cell.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
-import type { IrBlock } from "#ir/block.js";
+import type { FunctionGraph } from "#compiler/ir/function.js";
 import type { PlannedValue } from "./anchors.js";
 
 export type PlannedLocals = Readonly<{
@@ -22,8 +22,8 @@ type LocalClaim = {
 };
 
 export function planLocals(
-  block: IrBlock,
-  analysis: BodyAnalysis,
+  block: FunctionGraph,
+  analysis: FunctionAnalysis,
   placements: readonly (PlannedValue | undefined)[]
 ): PlannedLocals {
   const valueLocals = new Array<number | undefined>(block.values.size()).fill(undefined);
@@ -59,7 +59,7 @@ export function planLocals(
       if (nested.scope.kind !== "loop") {
         continue;
       }
-      const end = analysis.bodyEndSite(nested.body);
+      const end = analysis.regionEndSite(nested.body);
 
       for (const input of nested.scope.inputs) {
         assert(
@@ -104,7 +104,7 @@ export function planLocals(
 // access crosses into: the back edge makes the stored value live for the whole
 // loop. Seed dominance (IR-validated) makes the seed the range start.
 function cellLifetimes(
-  analysis: BodyAnalysis
+  analysis: FunctionAnalysis
 ): Map<CellRef, { start: SiteId; end: SiteId }> {
   const seeds = new Map<CellRef, SiteId>();
   const accesses: { cell: CellRef; site: SiteId }[] = [];
@@ -139,9 +139,9 @@ function cellLifetimes(
 
 // A value captured outside a loop is not recomputed at the back edge. Keep
 // its local through the repeated region even when its last static use appears
-// early in the loop body's one emission walk.
+// early in the loop region's one emission walk.
 function localLifetimeEnd(
-  analysis: BodyAnalysis,
+  analysis: FunctionAnalysis,
   placement: Pick<PlannedValue, "anchor" | "lastDemand">
 ): SiteId {
   const anchor = analysis.sites()[placement.anchor];
@@ -149,14 +149,14 @@ function localLifetimeEnd(
 
   assert(anchor !== undefined, `unknown local anchor ${placement.anchor}`);
   assert(demand !== undefined, `unknown local demand ${placement.lastDemand}`);
-  const path = analysis.path(anchor.body, demand.body);
+  const path = analysis.path(anchor.region, demand.region);
 
   assert(path !== undefined, "local demand leaves its anchor scope");
   let end = placement.lastDemand;
 
   for (const step of path) {
-    if (analysis.isLoopBody(step.body)) {
-      const loopEnd = analysis.bodyEndSite(step.body);
+    if (analysis.isLoopRegion(step.region)) {
+      const loopEnd = analysis.regionEndSite(step.region);
 
       if (loopEnd > end) {
         end = loopEnd;

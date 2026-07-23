@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { CellRef } from "#compiler/refs/cell.js";
+import { CellRef } from "#compiler/ir/cell.js";
 import type {
   DecodeOperand,
   InstructionForm,
@@ -22,7 +22,7 @@ import {
 } from "#core/instruction/bindings.js";
 import { registerAliasByIndex } from "#core/registers.js";
 import { segmentRegisterIndex } from "#core/segments.js";
-import type { RegionBuilder } from "#ir/region-builder.js";
+import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type {
   DecodedMemoryAddress
 } from "./address.js";
