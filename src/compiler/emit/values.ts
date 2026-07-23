@@ -10,6 +10,7 @@ import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { PlacementIndex } from "#compiler/placement/index.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
 import type { ModuleBindings } from "#compiler/module/bindings.js";
+import type { WasmLocalResolver } from "#compiler/encoder/function-body.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
 import { emitOperation } from "./operations.js";
@@ -25,7 +26,7 @@ export class ValueEmitter {
   readonly #analysis: FunctionAnalysis;
   readonly #plan: PlacementPlan;
   readonly #captures: PlacementIndex["captures"];
-  readonly #locals: readonly number[];
+  readonly #resolveLocal: WasmLocalResolver;
   readonly #realized: Uint8Array;
   readonly #sites: SiteId[] = [];
 
@@ -35,14 +36,9 @@ export class ValueEmitter {
     analysis: FunctionAnalysis;
     plan: PlacementPlan;
     index: PlacementIndex;
-    // Physical plan local -> the Wasm local allocated for this function.
-    locals: readonly number[];
+    resolveLocal: WasmLocalResolver;
     bindings: ModuleBindings;
   }>) {
-    assert(
-      context.locals.length === context.plan.localTypes.length,
-      "placement local table does not match its plan"
-    );
     assert(
       context.index.captures.length === context.analysis.sites().length,
       "placement capture index does not match its sites"
@@ -53,7 +49,7 @@ export class ValueEmitter {
     this.#analysis = context.analysis;
     this.#plan = context.plan;
     this.#captures = context.index.captures;
-    this.#locals = context.locals;
+    this.#resolveLocal = context.resolveLocal;
     this.#realized = new Uint8Array(context.values.size());
   }
 
@@ -113,7 +109,7 @@ export class ValueEmitter {
     this.#emitSource(value);
 
     if (placement.local !== undefined) {
-      this.#body.localTee(this.#local(placement.local));
+      this.#body.localTee(this.#resolveLocal(placement.local));
     }
     this.#realized[value] = 1;
   }
@@ -139,22 +135,14 @@ export class ValueEmitter {
     const local = this.#plan.values[value]?.local;
 
     assert(local !== undefined, `value ${value} has no planned local`);
-    return this.#local(local);
+    return this.#resolveLocal(local);
   }
 
   variableLocal(variable: VariableRef): number {
     const local = this.#plan.variableLocals.get(variable);
 
     assert(local !== undefined, "variable has no planned local");
-    return this.#local(local);
-  }
-
-  #local(local: number): number {
-    assert(Number.isInteger(local) && local >= 0, `invalid placement local ${local}`);
-    const wasmLocal = this.#locals[local];
-
-    assert(wasmLocal !== undefined, `placement local ${local} is not allocated`);
-    return wasmLocal;
+    return this.#resolveLocal(local);
   }
 
   assertComplete(): void {

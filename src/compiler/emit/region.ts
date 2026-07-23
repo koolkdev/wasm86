@@ -6,6 +6,7 @@ import {
 } from "#compiler/ir/region.js";
 import type { ModuleBindings } from "#compiler/module/bindings.js";
 import type { FunctionPlacement } from "#compiler/placement/place.js";
+import type { WasmLocalResolver } from "#compiler/encoder/function-body.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import { createControlEmitter } from "./controls.js";
 import { emitOperation } from "./operations.js";
@@ -15,14 +16,14 @@ export type RegionEmitContext = Readonly<{
   body: WasmInstructionWriter;
   bindings: ModuleBindings;
   placement: FunctionPlacement;
-  locals: readonly number[];
+  resolveLocal: WasmLocalResolver;
 }>;
 
 export function emitFunctionRegions(
   fn: IrFunction,
   context: RegionEmitContext
 ): void {
-  const { body, bindings, placement, locals } = context;
+  const { body, bindings, placement, resolveLocal } = context;
   const { analysis, plan, index } = placement;
   const valueEmitter = new ValueEmitter({
     body,
@@ -30,7 +31,7 @@ export function emitFunctionRegions(
     analysis,
     plan,
     index,
-    locals,
+    resolveLocal,
     bindings
   });
   const emitControl = createControlEmitter({

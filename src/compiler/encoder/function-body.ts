@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import { ByteSink } from "./byte-sink.js";
 import {
   type WasmBranchHint,
@@ -7,108 +8,121 @@ import { encodeI32Leb128, encodeI64Leb128 } from "./leb128.js";
 import { encodeMemoryImmediate, type WasmMemoryImmediate } from "./memory.js";
 import { wasmBlockType, wasmOpcode, type WasmValueType } from "./types.js";
 
+const maximumWasmIndex = 0xffff_ffff;
+const wasmIndexSpaceSize = 0x1_0000_0000;
+
 export type EncodedBranchHint = Readonly<{
   offset: number;
   value: 0 | 1;
 }>;
 
-declare const encodedBodyBrand: unique symbol;
-
 export type EncodedWasmFunctionBody = Readonly<{
-  [encodedBodyBrand]: true;
   bytes: Uint8Array<ArrayBuffer>;
   branchHints: readonly EncodedBranchHint[];
 }>;
 
-class EncodedFunctionBody implements EncodedWasmFunctionBody {
-  declare readonly [encodedBodyBrand]: true;
-  readonly #bytes: Uint8Array<ArrayBuffer>;
-  readonly #branchHints: readonly EncodedBranchHint[];
+export type WasmFunctionBodyLayout = Readonly<{
+  // Parameters are declared by the function type but share the body's local
+  // index space, so their count determines where declared locals begin.
+  parameterCount: number;
+  localTypes: readonly WasmValueType[];
+}>;
 
-  constructor(
-    bytes: Uint8Array<ArrayBuffer>,
-    branchHints: readonly EncodedBranchHint[]
-  ) {
-    this.#bytes = bytes.slice();
-    this.#branchHints = branchHints.map((hint) => ({ ...hint }));
-  }
+// Maps a zero-based declared-local position into the function's local index space.
+export type WasmLocalResolver = (local: number) => number;
 
-  get bytes(): Uint8Array<ArrayBuffer> {
-    return this.#bytes.slice();
+export function encodeWasmFunctionBody(
+  layout: WasmFunctionBodyLayout,
+  emit: (
+    writer: WasmInstructionWriter,
+    resolveLocal: WasmLocalResolver
+  ) => void
+): EncodedWasmFunctionBody {
+  const { parameterCount, localTypes } = layout;
+
+  assert(
+    Number.isInteger(parameterCount) &&
+      parameterCount >= 0 &&
+      parameterCount <= maximumWasmIndex,
+    `Wasm function parameter count out of range: ${parameterCount}`
+  );
+  assert(
+    parameterCount + localTypes.length <= wasmIndexSpaceSize,
+    "Wasm function parameter and local counts exceed the local index space"
+  );
+
+  const body = new ByteSink();
+
+  body.writeBytes(localDeclarations(localTypes));
+
+  const writer = new FunctionBodyInstructionWriter(body);
+
+  emit(writer, (local) => {
+    assert(
+      Number.isInteger(local) && local >= 0 && local < localTypes.length,
+      `Wasm function local out of range: ${local}`
+    );
+    return parameterCount + local;
+  });
+  body.writeByte(wasmOpcode.end);
+
+  return {
+    bytes: body.toBytes(),
+    branchHints: [...writer.branchHints]
+  };
+}
+
+class FunctionBodyInstructionWriter implements WasmInstructionWriter {
+  readonly #body: ByteSink;
+  readonly #branchHints: EncodedBranchHint[] = [];
+
+  constructor(body: ByteSink) {
+    this.#body = body;
   }
 
   get branchHints(): readonly EncodedBranchHint[] {
-    return this.#branchHints.map((hint) => ({ ...hint }));
-  }
-}
-
-type InstructionBranchHint = Readonly<{
-  instructionOffset: number;
-  value: 0 | 1;
-}>;
-
-export class WasmFunctionBodyEncoder implements WasmInstructionWriter {
-  readonly #instructions = new ByteSink();
-  readonly #locals: WasmValueType[] = [];
-  readonly #branchHints: InstructionBranchHint[] = [];
-  readonly #paramCount: number;
-  #finished = false;
-
-  constructor(paramCount = 0) {
-    if (!Number.isInteger(paramCount) || paramCount < 0) {
-      throw new RangeError(`Wasm function parameter count out of range: ${paramCount}`);
-    }
-
-    this.#paramCount = paramCount;
-  }
-
-  addLocal(type: WasmValueType): number {
-    this.#assertOpen("cannot add local after function body is finished");
-
-    const index = this.#paramCount + this.#locals.length;
-    this.#locals.push(type);
-    return index;
+    return this.#branchHints;
   }
 
   localGet(index: number): this {
     this.#writeInstruction(wasmOpcode.localGet);
-    this.#instructions.writeU32(index);
+    this.#body.writeU32(index);
     return this;
   }
 
   localSet(index: number): this {
     this.#writeInstruction(wasmOpcode.localSet);
-    this.#instructions.writeU32(index);
+    this.#body.writeU32(index);
     return this;
   }
 
   localTee(index: number): this {
     this.#writeInstruction(wasmOpcode.localTee);
-    this.#instructions.writeU32(index);
+    this.#body.writeU32(index);
     return this;
   }
 
   globalGet(index: number): this {
     this.#writeInstruction(wasmOpcode.globalGet);
-    this.#instructions.writeU32(index);
+    this.#body.writeU32(index);
     return this;
   }
 
   globalSet(index: number): this {
     this.#writeInstruction(wasmOpcode.globalSet);
-    this.#instructions.writeU32(index);
+    this.#body.writeU32(index);
     return this;
   }
 
   block(result?: WasmValueType): this {
     this.#writeInstruction(wasmOpcode.block);
-    this.#instructions.writeByte(result ?? wasmBlockType.empty);
+    this.#body.writeByte(result ?? wasmBlockType.empty);
     return this;
   }
 
   loop(): this {
     this.#writeInstruction(wasmOpcode.loop);
-    this.#instructions.writeByte(wasmBlockType.empty);
+    this.#body.writeByte(wasmBlockType.empty);
     return this;
   }
 
@@ -117,16 +131,13 @@ export class WasmFunctionBodyEncoder implements WasmInstructionWriter {
     result?: WasmValueType | undefined;
   }> = {}): this {
     const { hint, result } = options;
-
-    if (hint !== undefined) {
-      this.#branchHints.push({
-        instructionOffset: this.#instructions.byteLength,
-        value: encodeBranchHint(hint)
-      });
-    }
+    const offset = this.#body.byteLength;
 
     this.#writeInstruction(wasmOpcode.if);
-    this.#instructions.writeByte(result ?? wasmBlockType.empty);
+    this.#body.writeByte(result ?? wasmBlockType.empty);
+    if (hint !== undefined) {
+      this.#branchHints.push({ offset, value: encodeBranchHint(hint) });
+    }
     return this;
   }
 
@@ -137,32 +148,30 @@ export class WasmFunctionBodyEncoder implements WasmInstructionWriter {
 
   br(labelDepth: number): this {
     this.#writeInstruction(wasmOpcode.br);
-    this.#instructions.writeU32(labelDepth);
+    this.#body.writeU32(labelDepth);
     return this;
   }
 
   brIf(labelDepth: number, hint?: WasmBranchHint): this {
-    if (hint !== undefined) {
-      this.#branchHints.push({
-        instructionOffset: this.#instructions.byteLength,
-        value: encodeBranchHint(hint)
-      });
-    }
+    const offset = this.#body.byteLength;
 
     this.#writeInstruction(wasmOpcode.brIf);
-    this.#instructions.writeU32(labelDepth);
+    this.#body.writeU32(labelDepth);
+    if (hint !== undefined) {
+      this.#branchHints.push({ offset, value: encodeBranchHint(hint) });
+    }
     return this;
   }
 
   brTable(labelDepths: readonly number[], defaultLabelDepth: number): this {
     this.#writeInstruction(wasmOpcode.brTable);
-    this.#instructions.writeVecLength(labelDepths.length);
+    this.#body.writeVecLength(labelDepths.length);
 
     for (const labelDepth of labelDepths) {
-      this.#instructions.writeU32(labelDepth);
+      this.#body.writeU32(labelDepth);
     }
 
-    this.#instructions.writeU32(defaultLabelDepth);
+    this.#body.writeU32(defaultLabelDepth);
     return this;
   }
 
@@ -188,39 +197,39 @@ export class WasmFunctionBodyEncoder implements WasmInstructionWriter {
 
   callFunction(functionIndex: number): this {
     this.#writeInstruction(wasmOpcode.call);
-    this.#instructions.writeU32(functionIndex);
+    this.#body.writeU32(functionIndex);
     return this;
   }
 
   callIndirect(typeIndex: number, tableIndex: number): this {
     this.#writeInstruction(wasmOpcode.callIndirect);
-    this.#instructions.writeU32(typeIndex);
-    this.#instructions.writeU32(tableIndex);
+    this.#body.writeU32(typeIndex);
+    this.#body.writeU32(tableIndex);
     return this;
   }
 
   returnCallFunction(functionIndex: number): this {
     this.#writeInstruction(wasmOpcode.returnCall);
-    this.#instructions.writeU32(functionIndex);
+    this.#body.writeU32(functionIndex);
     return this;
   }
 
   returnCallIndirect(typeIndex: number, tableIndex: number): this {
     this.#writeInstruction(wasmOpcode.returnCallIndirect);
-    this.#instructions.writeU32(typeIndex);
-    this.#instructions.writeU32(tableIndex);
+    this.#body.writeU32(typeIndex);
+    this.#body.writeU32(tableIndex);
     return this;
   }
 
   i32Const(value: number): this {
     this.#writeInstruction(wasmOpcode.i32Const);
-    this.#instructions.writeBytes(encodeI32Leb128(value));
+    this.#body.writeBytes(encodeI32Leb128(value));
     return this;
   }
 
   i64Const(value: bigint): this {
     this.#writeInstruction(wasmOpcode.i64Const);
-    this.#instructions.writeBytes(encodeI64Leb128(value));
+    this.#body.writeBytes(encodeI64Leb128(value));
     return this;
   }
 
@@ -421,7 +430,7 @@ export class WasmFunctionBodyEncoder implements WasmInstructionWriter {
 
   memorySize(memoryIndex: number): this {
     this.#writeInstruction(wasmOpcode.memorySize);
-    this.#instructions.writeU32(memoryIndex);
+    this.#body.writeU32(memoryIndex);
     return this;
   }
 
@@ -590,39 +599,13 @@ export class WasmFunctionBodyEncoder implements WasmInstructionWriter {
     return this;
   }
 
-  finish(): EncodedWasmFunctionBody {
-    this.#writeInstruction(wasmOpcode.end);
-    this.#finished = true;
-
-    const body = new ByteSink();
-    const locals = localDeclarations(this.#locals);
-
-    body.writeBytes(locals);
-    body.writeBytes(this.#instructions.toBytes());
-    return new EncodedFunctionBody(
-      body.toBytes(),
-      this.#branchHints.map((hint) => ({
-        offset: locals.byteLength + hint.instructionOffset,
-        value: hint.value
-      }))
-    );
-  }
-
   #writeMemoryInstruction(opcode: number, immediate: WasmMemoryImmediate): void {
     this.#writeInstruction(opcode);
-    this.#instructions.writeBytes(encodeMemoryImmediate(immediate));
+    this.#body.writeBytes(encodeMemoryImmediate(immediate));
   }
 
   #writeInstruction(opcode: number): void {
-    this.#assertOpen("cannot write after function body is finished");
-
-    this.#instructions.writeByte(opcode);
-  }
-
-  #assertOpen(message: string): void {
-    if (this.#finished) {
-      throw new Error(message);
-    }
+    this.#body.writeByte(opcode);
   }
 }
 

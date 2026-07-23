@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
-  WasmFunctionBodyEncoder,
+  encodeWasmFunctionBody,
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
 import { encodeTestModule } from "#compiler/encoder/tests/module-fixture.js";
@@ -75,9 +75,12 @@ function encodeIndirectCallModule(
     functions: [
       {
         typeIndex: 0,
-        body: new WasmFunctionBodyEncoder(1)
-          .i64Const(forwardedResult)
-          .finish()
+        body: encodeWasmFunctionBody({
+          parameterCount: 1,
+          localTypes: []
+        }, (writer) => {
+          writer.i64Const(forwardedResult);
+        })
       },
       { typeIndex: 0, body: entryBody(0, 0) }
     ],
@@ -89,19 +92,25 @@ function encodeIndirectCallModule(
 }
 
 function returnCallIndirectEntryBody(blockType: number, tableIndex: number): EncodedWasmFunctionBody {
-  return new WasmFunctionBodyEncoder(1)
-    .localGet(0)
-    .i32Const(0)
-    .returnCallIndirect(blockType, tableIndex)
-    .finish();
+  return encodeWasmFunctionBody({
+    parameterCount: 1,
+    localTypes: []
+  }, (writer) => {
+    writer.localGet(0);
+    writer.i32Const(0);
+    writer.returnCallIndirect(blockType, tableIndex);
+  });
 }
 
 function callIndirectEntryBody(blockType: number, tableIndex: number): EncodedWasmFunctionBody {
-  return new WasmFunctionBodyEncoder(1)
-    .localGet(0)
-    .i32Const(0)
-    .callIndirect(blockType, tableIndex)
-    .finish();
+  return encodeWasmFunctionBody({
+    parameterCount: 1,
+    localTypes: []
+  }, (writer) => {
+    writer.localGet(0);
+    writer.i32Const(0);
+    writer.callIndirect(blockType, tableIndex);
+  });
 }
 
 function exportedFunction(instance: WebAssembly.Instance, name: string): (...args: number[]) => unknown {

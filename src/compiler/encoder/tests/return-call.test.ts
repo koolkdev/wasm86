@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
-  WasmFunctionBodyEncoder,
+  encodeWasmFunctionBody,
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
 import { encodeTestModule } from "#compiler/encoder/tests/module-fixture.js";
@@ -93,30 +93,39 @@ function moduleMemoryImports() {
 }
 
 function returnCallEntryBody(targetFunctionIndex: number): EncodedWasmFunctionBody {
-  return new WasmFunctionBodyEncoder(1)
-    .localGet(0)
-    .returnCallFunction(targetFunctionIndex)
-    .finish();
+  return encodeWasmFunctionBody({
+    parameterCount: 1,
+    localTypes: []
+  }, (writer) => {
+    writer.localGet(0);
+    writer.returnCallFunction(targetFunctionIndex);
+  });
 }
 
 function constantTargetBody(result: bigint): EncodedWasmFunctionBody {
-  return new WasmFunctionBodyEncoder(1)
-    .i64Const(result)
-    .finish();
+  return encodeWasmFunctionBody({
+    parameterCount: 1,
+    localTypes: []
+  }, (writer) => {
+    writer.i64Const(result);
+  });
 }
 
 function statePayloadTargetBody(): EncodedWasmFunctionBody {
-  return new WasmFunctionBodyEncoder(1)
-    .localGet(0)
-    .i32Load({
+  return encodeWasmFunctionBody({
+    parameterCount: 1,
+    localTypes: []
+  }, (writer) => {
+    writer.localGet(0);
+    writer.i32Load({
       align: u32Align,
       memoryIndex: 0,
       offset: statePayloadOffset
-    })
-    .i64ExtendI32U()
-    .i64Const(statePayloadPrefix)
-    .i64Or()
-    .finish();
+    });
+    writer.i64ExtendI32U();
+    writer.i64Const(statePayloadPrefix);
+    writer.i64Or();
+  });
 }
 
 function exportedFunction(instance: WebAssembly.Instance, name: string): (cpuStatePtr: number) => unknown {

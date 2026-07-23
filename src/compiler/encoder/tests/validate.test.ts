@@ -1,7 +1,7 @@
 import { throws } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { encodeWasmFunctionBody } from "#compiler/encoder/function-body.js";
 import { createTestModuleDescription } from "#compiler/encoder/tests/module-fixture.js";
 import { validateModuleDescription } from "#compiler/encoder/validate.js";
 
@@ -10,7 +10,10 @@ test("rejects a defined function with an unresolved type index", () => {
     () => validateModuleDescription(createTestModuleDescription({
       functions: [{
         typeIndex: 0,
-        body: new WasmFunctionBodyEncoder().finish()
+        body: encodeWasmFunctionBody({
+          parameterCount: 0,
+          localTypes: []
+        }, () => {})
       }]
     })),
     /unknown Wasm function type index/

@@ -1,7 +1,7 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { encodeWasmFunctionBody } from "#compiler/encoder/function-body.js";
 import { encodeTestModule } from "#compiler/encoder/tests/module-fixture.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
@@ -14,11 +14,22 @@ test("a mutable i32 global initializes and round-trips through set/get", async (
     functions: [
       {
         typeIndex: 0,
-        body: new WasmFunctionBodyEncoder().globalGet(0).finish()
+        body: encodeWasmFunctionBody({
+          parameterCount: 0,
+          localTypes: []
+        }, (writer) => {
+          writer.globalGet(0);
+        })
       },
       {
         typeIndex: 1,
-        body: new WasmFunctionBodyEncoder(1).localGet(0).globalSet(0).finish()
+        body: encodeWasmFunctionBody({
+          parameterCount: 1,
+          localTypes: []
+        }, (writer) => {
+          writer.localGet(0);
+          writer.globalSet(0);
+        })
       }
     ],
     globals: [{ type: wasmValueType.i32, mutable: true, initialValue: 7 }],
@@ -42,7 +53,12 @@ test("an i64 global keeps its full-width initial value", async () => {
     functionTypes: [{ params: [], results: [wasmValueType.i64] }],
     functions: [{
       typeIndex: 0,
-      body: new WasmFunctionBodyEncoder().globalGet(0).finish()
+      body: encodeWasmFunctionBody({
+        parameterCount: 0,
+        localTypes: []
+      }, (writer) => {
+        writer.globalGet(0);
+      })
     }],
     globals: [{ type: wasmValueType.i64, mutable: false, initialValue: expected }],
     functionExports: [{ name: "get", functionIndex: 0 }]

@@ -1,7 +1,7 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
+import { encodeWasmFunctionBody } from "#compiler/encoder/function-body.js";
 import { encodeTestModule } from "#compiler/encoder/tests/module-fixture.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
@@ -73,38 +73,47 @@ function encodeImportedMemoryTestModule(): Uint8Array<ArrayBuffer> {
     functions: [
       {
         typeIndex: 0,
-        body: new WasmFunctionBodyEncoder()
-          .localGet(0)
-          .i32Const(0x1234_5678)
-          .i32Store({
+        body: encodeWasmFunctionBody({
+          parameterCount: 1,
+          localTypes: []
+        }, (writer) => {
+          writer.localGet(0);
+          writer.i32Const(0x1234_5678);
+          writer.i32Store({
             align: 2,
             memoryIndex: 0,
             offset: 0
-          })
-          .finish()
+          });
+        })
       },
       {
         typeIndex: 1,
-        body: new WasmFunctionBodyEncoder()
-          .localGet(0)
-          .localGet(1)
-          .i32Store({
+        body: encodeWasmFunctionBody({
+          parameterCount: 2,
+          localTypes: []
+        }, (writer) => {
+          writer.localGet(0);
+          writer.localGet(1);
+          writer.i32Store({
             align: 2,
             memoryIndex: 1,
             offset: 0
-          })
-          .finish()
+          });
+        })
       },
       {
         typeIndex: 2,
-        body: new WasmFunctionBodyEncoder()
-          .localGet(0)
-          .i32Load({
+        body: encodeWasmFunctionBody({
+          parameterCount: 1,
+          localTypes: []
+        }, (writer) => {
+          writer.localGet(0);
+          writer.i32Load({
             align: 2,
             memoryIndex: 1,
             offset: 0
-          })
-          .finish()
+          });
+        })
       }
     ],
     functionExports: [
