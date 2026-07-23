@@ -7,12 +7,9 @@ import { test } from "node:test";
 
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import {
-  compileJitArtifact,
   compileJitFromMemory,
   type CompiledJitArtifact
 } from "#jit/compile.js";
-import { snapshotInstructionBytes } from "#jit/instruction-snapshot.js";
-import { jitSnapshotRequestByteLength } from "#jit/policy.js";
 import { decodeExit } from "#cpu/exit.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import { writeBackingBytes } from "#memory/bytes.js";
@@ -24,27 +21,65 @@ import { testExecutionModel } from "#test/support/execution-model.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 
 const startEip = 0x1000;
+const instructionLimitExit = 0x0007_0000_0000_0000n;
 
-test("compiling a captured snapshot ignores later guest mutation", () => {
+test("a completed block commits its final state before fallthrough dispatch", () => {
   const memories = createTestWasmMemories();
-  const policy = { instructionLimit: 2 } as const;
-
-  writeBackingBytes(memories.guestMemory, startEip, [0xcc]);
-  const snapshot = snapshotInstructionBytes(
-    testExecutionModel.guestMemory.createReader(memories.guestMemory),
-    {
-      linearStart: startEip,
-      byteLength: jitSnapshotRequestByteLength(policy)
-    }
+  const artifact = compileFromMemory(
+    memories.guestMemory,
+    startEip,
+    { instructionLimit: 2 },
+    [
+      0x83, 0xc0, 0x01, // add eax, 1
+      0x83, 0xc0, 0x01  // add eax, 1
+    ]
   );
+  const imported = artifact.program.functionImports[0];
+  const dispatchTargets: number[] = [];
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
 
-  writeBackingBytes(memories.guestMemory, startEip, [0xcd, 0x2e]);
-  const artifact = compileJitArtifact({
-    snapshot,
-    policy,
-    model: testExecutionModel
+  ok(imported !== undefined, "fallthrough block has no dispatch import");
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: new Map([
+      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
+      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+    ]),
+    functions: new Map([[
+      imported.ref,
+      (targetEip: number): bigint => {
+        dispatchTargets.push(targetEip >>> 0);
+        return instructionLimitExit;
+      }
+    ]])
   });
+  const entry = instance.functionExports.get(artifact.entry);
 
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, eax: 7 });
+  ok(typeof entry === "function", "compiled JIT entry export is not callable");
+  const encodedExit: unknown = entry();
+
+  ok(typeof encodedExit === "bigint", "JIT entry did not return an encoded exit");
+  deepStrictEqual(decodeExit(encodedExit), { kind: "instructionLimit" });
+  deepStrictEqual(dispatchTargets, [startEip + 6]);
+  const state = readWasmCpuStateSnapshot(stateView);
+
+  strictEqual(state.eax, 9);
+  strictEqual(state.eip, startEip + 6);
+  strictEqual(state.instructionCount, 2);
+});
+
+test("a mid-block data fault reports the faulting eip after committing earlier state", () => {
+  const faultAddress = 0xff_0000;
+  const memories = createTestWasmMemories();
+  const artifact = compileFromMemory(
+    memories.guestMemory,
+    startEip,
+    { instructionLimit: 2 },
+    [
+      0x40,                               // inc eax
+      0x8b, 0x05, 0x00, 0x00, 0xff, 0x00 // mov eax, [0xff0000]
+    ]
+  );
   const stateView = new DataView(memories.cpuStateMemory.buffer);
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: new Map([
@@ -55,12 +90,20 @@ test("compiling a captured snapshot ignores later guest mutation", () => {
   });
   const entry = instance.functionExports.get(artifact.entry);
 
-  writeWasmCpuStateSnapshot(stateView, { eip: startEip });
-  ok(typeof entry === "function", "missing exact JIT entry export");
+  writeWasmCpuStateSnapshot(stateView, { eip: startEip, eax: 5 });
+  ok(typeof entry === "function", "compiled JIT entry export is not callable");
   const encodedExit: unknown = entry();
 
   ok(typeof encodedExit === "bigint", "JIT entry did not return an encoded exit");
-  deepStrictEqual(decodeExit(encodedExit), { kind: "hostTrap", vector: 3 });
+  deepStrictEqual(decodeExit(encodedExit), {
+    kind: "cpuException",
+    exception: { kind: "PF", linearAddress: faultAddress, errorCode: 0 }
+  });
+  const state = readWasmCpuStateSnapshot(stateView);
+
+  strictEqual(state.eax, 6);
+  strictEqual(state.eip, startEip + 1);
+  strictEqual(state.instructionCount, 1);
 });
 
 test("an inaccessible block start compiles its exact Memory exception", () => {
@@ -172,75 +215,20 @@ test("a terminal one-byte instruction at the final backing byte does not consume
   strictEqual(state.instructionCount, 1);
 });
 
-test("fifteen admitted prefix bytes compile GP without reading a forbidden boundary", () => {
-  const memories = createTestWasmMemories();
-  const bytes = new Array<number>(15).fill(0x66);
-  const start = guestMemoryMinimumByteLength - bytes.length;
-
-  writeBackingBytes(memories.guestMemory, start, bytes);
-  const artifact = compileFromMemory(
-    memories.guestMemory,
-    start,
-    { instructionLimit: 1 }
-  );
-
-  const instance = instantiateCompiledProgram(artifact.program, {
-    memories: new Map([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
-    ]),
-    functions: new Map()
-  });
-  const entry = instance.functionExports.get(artifact.entry);
-
-  ok(typeof entry === "function", "missing exact JIT entry export");
-  const encodedExit: unknown = entry();
-
-  ok(typeof encodedExit === "bigint", "JIT entry did not return an encoded exit");
-  deepStrictEqual(decodeExit(encodedExit), {
-    kind: "cpuException",
-    exception: { kind: "GP", errorCode: 0 }
-  });
-});
-
-test("an unavailable earlier permitted byte compiles the boundary fault instead of GP", () => {
-  const memories = createTestWasmMemories();
-  const bytes = new Array<number>(14).fill(0x66);
-  const start = guestMemoryMinimumByteLength - bytes.length;
-
-  writeBackingBytes(memories.guestMemory, start, bytes);
-  const artifact = compileFromMemory(
-    memories.guestMemory,
-    start,
-    { instructionLimit: 1 }
-  );
-  const exception = {
-    kind: "PF",
-    linearAddress: guestMemoryMinimumByteLength,
-    errorCode: 16
-  };
-
-  const instance = instantiateCompiledProgram(artifact.program, {
-    memories: new Map([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
-    ]),
-    functions: new Map()
-  });
-  const entry = instance.functionExports.get(artifact.entry);
-
-  ok(typeof entry === "function", "missing exact JIT entry export");
-  const encodedExit: unknown = entry();
-
-  ok(typeof encodedExit === "bigint", "JIT entry did not return an encoded exit");
-  deepStrictEqual(decodeExit(encodedExit), { kind: "cpuException", exception });
-});
-
 function compileFromMemory(
   memory: WebAssembly.Memory,
   start: number,
-  policy: Readonly<{ instructionLimit: number }>
+  policy: Readonly<{ instructionLimit: number }>,
+  bytes?: readonly number[]
 ): CompiledJitArtifact {
+  if (bytes !== undefined) {
+    const firstFailingAddress = writeBackingBytes(memory, start, bytes);
+
+    ok(
+      firstFailingAddress === undefined,
+      `JIT source bytes exceed guest memory at 0x${firstFailingAddress?.toString(16)}`
+    );
+  }
   return compileJitFromMemory({
     memory,
     start,

@@ -43,7 +43,7 @@ function place(block: FunctionGraph, parameterCount = 0) {
   return placeFunction(completedPlacementFunction(block, parameterCount));
 }
 
-test("a referenced cell receives one typed local", () => {
+test("placement assigns one typed local to a referenced cell", () => {
   const values = compilerTestValues();
   const cell = new CellRef("i32");
   const output = values.addNodeOutput();

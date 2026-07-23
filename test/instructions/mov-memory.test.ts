@@ -4,7 +4,7 @@ import { test } from "node:test";
 import {
   runCompiledInstructions,
   type CompiledInstructionCompletion
-} from "#test/harness/compiled-instruction.js";
+} from "#test/instructions/harness/compiled-instruction.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
   createWasmCpuArchitecturalStateSnapshot,

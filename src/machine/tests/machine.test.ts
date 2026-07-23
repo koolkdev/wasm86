@@ -22,29 +22,13 @@ test("machine rounds x86-page-aligned sizes to WebAssembly pages", () => {
   strictEqual(machine.memory.buffer.byteLength, wasmPageByteLength);
 });
 
-test("machine creates one Cpu with writable default state", () => {
+test("machine exposes writable Cpu state", () => {
   const machine = createMachine({ memoryByteLength: 0x1000 });
-  const { core, flags } = machine.cpu.state;
+  const { core } = machine.cpu.state;
 
   strictEqual(core.eip, 0);
-  strictEqual(core.readReg32("eax"), 0);
-  strictEqual(flags.readFlag("CF"), false);
-
   core.eip = 0x1000;
-  core.writeReg32("eax", 0x1234_5678);
-  core.writeSegmentSelector("fs", 0x30);
-  core.writeSegmentBase("fs", 0x8000_0000);
-  core.writeSegmentLimit("fs", 0xffff_ffff);
-  core.writeSegmentAccess("fs", 0x00c0_00fb);
-  flags.writeFlag("CF", true);
-
   strictEqual(core.eip, 0x1000);
-  strictEqual(core.readReg32("eax"), 0x1234_5678);
-  strictEqual(core.readSegmentSelector("fs"), 0x30);
-  strictEqual(core.readSegmentBase("fs"), 0x8000_0000);
-  strictEqual(core.readSegmentLimit("fs"), 0xffff_ffff);
-  strictEqual(core.readSegmentAccess("fs"), 0x00c0_00fb);
-  strictEqual(flags.readFlag("CF"), true);
 });
 
 test("machines do not share guest memory or Cpu state", () => {

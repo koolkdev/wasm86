@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
+import { encodeTestModule } from "#compiler/encoder/tests/module-fixture.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 test("a mutable i32 global initializes and round-trips through set/get", async () => {

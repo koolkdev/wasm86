@@ -5,7 +5,7 @@ import {
   WasmFunctionBodyEncoder,
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
-import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
+import { encodeTestModule } from "#compiler/encoder/tests/module-fixture.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 const entryExportName = "entry";

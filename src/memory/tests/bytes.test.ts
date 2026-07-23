@@ -12,6 +12,8 @@ test("reads and writes backing bytes at bounds", () => {
   strictEqual(readBackingByte(memory, 0), 0x12);
   strictEqual(readBackingByte(memory, last), 0x34);
   strictEqual(readBackingByte(memory, last + 1), undefined);
+  strictEqual(readBackingByte(memory, -1), undefined);
+  strictEqual(readBackingByte(memory, 1.5), undefined);
   strictEqual(writeBackingBytes(memory, last + 1, [0x56]), last + 1);
 });
 

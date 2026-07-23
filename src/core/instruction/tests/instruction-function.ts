@@ -10,7 +10,7 @@ import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/ir/refs.js";
 import { FunctionBuilder } from "#compiler/ir/builder/function.js";
 import type { IrFunction } from "#compiler/ir/function.js";
-import { testInstructionConstruction } from "./execution-model.js";
+import { testInstructionConstruction } from "#test/support/execution-model.js";
 
 const instructionFunctionType = functionType([], ["i64"]);
 const dispatchFunctionType = functionType(["i32"], ["i64"]);

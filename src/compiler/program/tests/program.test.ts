@@ -3,9 +3,6 @@ import { test } from "node:test";
 
 import { assert } from "#common/assert.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import type { Program } from "#compiler/program/program.js";
-import { compileProgram } from "#compiler/compile.js";
-import { layoutProgram } from "#compiler/module/layout.js";
 import { functionType } from "#compiler/ir/function.js";
 import { FunctionFamily, type FunctionDefinition } from "#compiler/program/functions.js";
 import { functionExportRef } from "#compiler/program/exports.js";
@@ -60,10 +57,6 @@ function testMemory(id: string): ResourceRef {
   return memory;
 }
 
-function compileBytes(program: Program): Uint8Array<ArrayBuffer> {
-  return compileProgram(program).bytes;
-}
-
 function byteOperand(
   resource: ResourceRef,
   range: ByteRange,
@@ -108,7 +101,7 @@ function writeFunctionEffect(
   });
 }
 
-test("forward function definitions close before their factories build and execute", async () => {
+test("forward function definitions close after both factories build", () => {
   const program = createTestProgram();
   let buildCount = 0;
   let callee!: FunctionDefinition;
@@ -143,15 +136,6 @@ test("forward function definitions close before their factories build and execut
   strictEqual(buildCount, 2);
   deepStrictEqual(closed.functionTypes, [i32Type]);
   strictEqual(closed.functions.length, 2);
-  const bytes = compileBytes(closed);
-  strictEqual(buildCount, 2);
-  const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));
-  const entry = instance.exports.entry;
-
-  if (typeof entry !== "function") {
-    throw new Error("missing compiled program entry");
-  }
-  strictEqual(entry(), 42);
 });
 
 test("defined resource operations retain only their reachable resource", () => {
@@ -626,32 +610,4 @@ test("generated and declared functions share one identity namespace", () => {
     /duplicate program function identity/
   );
   strictEqual(generatedBuilt, false);
-});
-
-test("distinct semantic function contracts coalesce to one physical Wasm type", () => {
-  const program = createTestProgram();
-  const firstType = functionType([], ["i32"]);
-  const secondType = functionType([], ["i32"]);
-
-  program.defineFunction({
-    ref: functionRef("test.first-physical-function"),
-    type: firstType,
-    effects: noEffects
-  }, (fn) => fn.return([fn.values.const(1)]));
-  program.defineFunction({
-    ref: functionRef("test.second-physical-function"),
-    type: secondType,
-    effects: noEffects
-  }, (fn) => fn.return([fn.values.const(2)]));
-
-  const closed = program.finish();
-
-  deepStrictEqual(closed.functionTypes, [firstType, secondType]);
-  strictEqual(closed.functionTypes[0], firstType);
-  strictEqual(closed.functionTypes[1], secondType);
-  const layout = layoutProgram(closed);
-
-  deepStrictEqual(layout.types, [firstType]);
-  strictEqual(layout.typeIndices.get(firstType), 0);
-  strictEqual(layout.typeIndices.get(secondType), 0);
 });

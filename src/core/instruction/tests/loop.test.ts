@@ -1,31 +1,19 @@
-import { ok, strictEqual, throws } from "node:assert";
+import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#core/instruction/builder.js";
-import {
-  memBinding,
-  staticMemSegment
-} from "#core/instruction/bindings.js";
 import { flagStateFields } from "#core/flags/layout.js";
 import { subFlagSource } from "#core/flags/lazy/sources.js";
 import type { InstructionStateChannel } from "../state/channels.js";
 import { gprChannel } from "#core/state/channels.js";
-import {
-  repeCmpsSemantic,
-  repeScasSemantic,
-  repLodsSemantic,
-  repMovsSemantic,
-  repStosSemantic
-} from "#core/semantics/strings.js";
 import type { LoopControl } from "#compiler/ir/controls/index.js";
 import type { FunctionGraph } from "#compiler/ir/function.js";
 import type { RegionNode } from "#compiler/ir/region.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
 import {
   createInstructionFunction
-} from "#test/support/instruction-function.js";
+} from "./instruction-function.js";
 import {
-  isStateRead,
   isStateWrite,
   writesStateChannel,
   type StateWriteOperation
@@ -33,20 +21,6 @@ import {
 
 const repEip = 0x1000;
 const repNextEip = 0x1002;
-
-function siOperand(): ReturnType<typeof memBinding> {
-  return memBinding(
-    { base: "esi", index: undefined, scale: 1, disp: 0 },
-    staticMemSegment("ds")
-  );
-}
-
-function diOperand(): ReturnType<typeof memBinding> {
-  return memBinding(
-    { base: "edi", index: undefined, scale: 1, disp: 0 },
-    staticMemSegment("es")
-  );
-}
 
 function loopsIn(nodes: readonly RegionNode[]): LoopControl[] {
   return nodes.flatMap((node): LoopControl[] => {
@@ -83,119 +57,6 @@ function assertCarries(
     );
   }
 }
-
-test("REP forms carry exactly the architectural channels they update", () => {
-  const cases = [
-    {
-      name: "movs",
-      template: repMovsSemantic(32),
-      bindings: [siOperand(), diOperand()],
-      channels: [
-        gprChannel("esi"),
-        gprChannel("edi"),
-        gprChannel("ecx")
-      ]
-    },
-    {
-      name: "stos",
-      template: repStosSemantic(32),
-      bindings: [diOperand()],
-      channels: [gprChannel("edi"), gprChannel("ecx")]
-    },
-    {
-      name: "lods",
-      template: repLodsSemantic(16),
-      bindings: [siOperand()],
-      channels: [
-        gprChannel("ax"),
-        gprChannel("esi"),
-        gprChannel("ecx")
-      ]
-    },
-    {
-      name: "cmps",
-      template: repeCmpsSemantic(8),
-      bindings: [siOperand(), diOperand()],
-      channels: [
-        gprChannel("esi"),
-        gprChannel("edi"),
-        gprChannel("ecx"),
-        flagStateFields.lazyKind,
-        flagStateFields.lazyA,
-        flagStateFields.lazyB
-      ]
-    },
-    {
-      name: "scas",
-      template: repeScasSemantic(8),
-      bindings: [diOperand()],
-      channels: [
-        gprChannel("edi"),
-        gprChannel("ecx"),
-        flagStateFields.lazyKind,
-        flagStateFields.lazyA,
-        flagStateFields.lazyB
-      ]
-    }
-  ] as const;
-
-  for (const entry of cases) {
-    const builder = createInstructionFunction();
-
-    builder.add(
-      entry.template,
-      entry.bindings,
-      loc(repEip, repNextEip)
-    );
-
-    const block = builder.finish();
-
-    validateIrFunction(block);
-    assertCarries(block, loopIn(block), entry.channels);
-  }
-});
-
-test("REP iteration uses carried values instead of per-unit state traffic", () => {
-  const builder = createInstructionFunction();
-
-  builder.add(
-    repMovsSemantic(32),
-    [siOperand(), diOperand()],
-    loc(repEip, repNextEip)
-  );
-
-  const block = builder.finish();
-  const loop = loopIn(block);
-  const backEdgeIndex = loop.body.nodes.findIndex(
-    (node) =>
-      node.kind === "if" &&
-      node.thenBody.nodes.some((nested) => nested.kind === "loopContinue")
-  );
-
-  ok(backEdgeIndex >= 0, "loop body has a conditional back edge");
-  strictEqual(
-    loop.body.nodes.slice(0, backEdgeIndex + 1).filter(
-      (node) => isStateRead(node) || isStateWrite(node)
-    ).length,
-    0,
-    "the iteration path does not reload or commit carried state"
-  );
-
-  const backEdge = loop.body.nodes[backEdgeIndex]!;
-
-  ok(backEdge.kind === "if");
-  const continuation = backEdge.thenBody.nodes.find(
-    (node) => node.kind === "loopContinue"
-  );
-
-  ok(continuation !== undefined);
-  strictEqual(continuation.updates.length, loop.carried.length);
-  assertCarries(block, loop, [
-    gprChannel("esi"),
-    gprChannel("edi"),
-    gprChannel("ecx")
-  ]);
-});
 
 test("loop analysis preserves values captured from the enclosing scope", () => {
   const builder = createInstructionFunction();

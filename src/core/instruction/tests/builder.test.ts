@@ -34,7 +34,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   createInstructionFunction,
   testInstructionDispatch
-} from "#test/support/instruction-function.js";
+} from "./instruction-function.js";
 import {
   testInstructionConstruction
 } from "#test/support/execution-model.js";

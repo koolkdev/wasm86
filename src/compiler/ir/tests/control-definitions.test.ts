@@ -22,7 +22,7 @@ import { functionRef } from "#compiler/ir/refs.js";
 import { CellRef } from "#compiler/ir/cell.js";
 import type { Region } from "#compiler/ir/region.js";
 
-test("if controls expose their condition, outputs, and nested bodies", () => {
+test("if control definitions expose their condition, outputs, and nested bodies", () => {
   const values = new ValueTable();
   const condition = values.parameter(0, "i32");
   const output = values.addNodeOutput();

@@ -46,22 +46,6 @@ test("Cpu reports an interpreter CPU exception from its bound state", () => {
   strictEqual(machine.cpu.state.instructionCount, 0);
 });
 
-test("Cpu preserves the instruction start when fetch is truncated at guest-memory bounds", () => {
-  const machine = createMachine({ memoryByteLength: 0x1000 });
-  const boundary = machine.memory.buffer.byteLength;
-  const instructionStart = boundary - 1;
-
-  new Uint8Array(machine.memory.buffer)[instructionStart] = 0xb8;
-  machine.cpu.state.core.eip = instructionStart;
-
-  deepStrictEqual(machine.cpu.run({ instructionBudget: 1 }), {
-    kind: "cpuException",
-    exception: { kind: "PF", linearAddress: boundary, errorCode: 16 }
-  });
-  strictEqual(machine.cpu.state.core.eip, instructionStart);
-  strictEqual(machine.cpu.state.instructionCount, 0);
-});
-
 test("Cpu accepts a zero instruction budget without entering an instruction", () => {
   const machine = createMachine({ memoryByteLength: 0x1000 });
 

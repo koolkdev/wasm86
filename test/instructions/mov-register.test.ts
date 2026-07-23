@@ -6,7 +6,7 @@ import {
   createWasmCpuArchitecturalStateSnapshot,
   type WasmCpuArchitecturalStateInit
 } from "#test/support/cpu-state.js";
-import { runCompiledInstructions } from "#test/harness/compiled-instruction.js";
+import { runCompiledInstructions } from "#test/instructions/harness/compiled-instruction.js";
 
 const allFlagsSet = {
   CF: 1,

@@ -2,11 +2,11 @@ import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
-import { runCompiledInstructions } from "#test/harness/compiled-instruction.js";
+import { runCompiledInstructions } from "#test/instructions/harness/compiled-instruction.js";
 import {
   assertInstructionCase,
   type InstructionCase
-} from "#test/harness/instruction-case.js";
+} from "#test/instructions/harness/instruction-case.js";
 import { startAddress } from "#test/support/addresses.js";
 import { createWasmCpuArchitecturalStateSnapshot } from "#test/support/cpu-state.js";
 

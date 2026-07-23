@@ -97,6 +97,15 @@ test("Cpu state host view resolves lazy status flags without changing their owne
   deepStrictEqual(snapshot(memory), before);
 });
 
+test("Cpu state host view rejects an invalid lazy-flags record", () => {
+  const { state } = createState({ lazyFlagsKind: 0xff });
+
+  throws(
+    () => state.flags.readFlag("CF"),
+    /invalid lazy-flags kind byte/
+  );
+});
+
 test("Cpu state host writes materialize lazy status flags before replacing one", () => {
   const backing = {
     CF: 0,

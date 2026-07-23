@@ -4,7 +4,7 @@ import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   assertInstructionCase,
   type InstructionCase
-} from "#test/harness/instruction-case.js";
+} from "#test/instructions/harness/instruction-case.js";
 
 const sourceAddress = 0x100;
 const destinationAddress = 0x200;

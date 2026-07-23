@@ -2,8 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { encodeMemoryImmediate } from "#compiler/encoder/memory.js";
-import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
+import { encodeTestModule } from "#compiler/encoder/tests/module-fixture.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 const importNamespace = "wasm86";
@@ -36,19 +35,6 @@ test("guest memory is index 1", async () => {
   strictEqual(new DataView(guest.buffer).getUint32(4, true), 0x1234_5678);
   strictEqual(loadGuest(4), 0x1234_5678);
   strictEqual(new DataView(state.buffer).getUint32(4, true), 0);
-});
-
-test("indexed memory immediate encodes memory 1", () => {
-  strictEqual(
-    bytesToHex(
-      encodeMemoryImmediate({
-        align: 2,
-        memoryIndex: 1,
-        offset: 0
-      })
-    ),
-    "42 01 00"
-  );
 });
 
 async function instantiateImportedMemoryTestModule(
@@ -137,8 +123,4 @@ function readExportedFunction(instance: WebAssembly.Instance, name: string): (..
   }
 
   return value as (...args: number[]) => unknown;
-}
-
-function bytesToHex(bytes: readonly number[]): string {
-  return bytes.map((byte) => byte.toString(16).padStart(2, "0")).join(" ");
 }

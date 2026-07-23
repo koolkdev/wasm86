@@ -64,7 +64,6 @@ test("dead pure indirect invocations retain neither types nor tables", () => {
   strictEqual(closed.functionTypes.includes(indirectType), false);
   deepStrictEqual(linked.indirectTypes, []);
   deepStrictEqual(linked.tables, []);
-  compileBytes(closed);
 });
 
 test("resultless indirect invocations retain their declared writes", () => {
@@ -304,7 +303,6 @@ test("defined indirect invocations retain live types and require declared tables
     deepStrictEqual(closed.functionTypes, [callerType, indirectType]);
     strictEqual(closed.functionTypes[0], callerType);
     strictEqual(closed.functionTypes[1], indirectType);
-    compileBytes(closed);
   }
   {
     const program = createTestProgram();

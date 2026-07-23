@@ -4,7 +4,7 @@ import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import {
   assertInstructionCase,
   type InstructionCase
-} from "#test/harness/instruction-case.js";
+} from "#test/instructions/harness/instruction-case.js";
 import { startAddress } from "#test/support/addresses.js";
 
 const preservedState = {

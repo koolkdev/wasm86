@@ -1,7 +1,7 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { runCompiledInstructions } from "#test/harness/compiled-instruction.js";
+import { runCompiledInstructions } from "#test/instructions/harness/compiled-instruction.js";
 import { startAddress } from "#test/support/addresses.js";
 import {
   createWasmCpuArchitecturalStateSnapshot

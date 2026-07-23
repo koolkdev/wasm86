@@ -2,12 +2,12 @@ import { throws } from "node:assert";
 import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { testModuleDescription } from "#compiler/encoder/tests/module-description.js";
+import { createTestModuleDescription } from "#compiler/encoder/tests/module-fixture.js";
 import { validateModuleDescription } from "#compiler/encoder/validate.js";
 
 test("rejects a defined function with an unresolved type index", () => {
   throws(
-    () => validateModuleDescription(testModuleDescription({
+    () => validateModuleDescription(createTestModuleDescription({
       functions: [{
         typeIndex: 0,
         body: new WasmFunctionBodyEncoder().finish()
@@ -19,7 +19,7 @@ test("rejects a defined function with an unresolved type index", () => {
 
 test("rejects a function import with an unresolved type index", () => {
   throws(
-    () => validateModuleDescription(testModuleDescription({
+    () => validateModuleDescription(createTestModuleDescription({
       functionImports: [{
         moduleName: "host",
         name: "callback",
@@ -32,7 +32,7 @@ test("rejects a function import with an unresolved type index", () => {
 
 test("rejects a function export with an unresolved function index", () => {
   throws(
-    () => validateModuleDescription(testModuleDescription({
+    () => validateModuleDescription(createTestModuleDescription({
       functionExports: [{ name: "missing", functionIndex: 0 }]
     })),
     /unknown Wasm function index/
@@ -41,7 +41,7 @@ test("rejects a function export with an unresolved function index", () => {
 
 test("rejects invalid memory and table limits", () => {
   throws(
-    () => validateModuleDescription(testModuleDescription({
+    () => validateModuleDescription(createTestModuleDescription({
       memoryImports: [{
         moduleName: "host",
         name: "memory",
@@ -51,7 +51,7 @@ test("rejects invalid memory and table limits", () => {
     /memory maximum pages/
   );
   throws(
-    () => validateModuleDescription(testModuleDescription({
+    () => validateModuleDescription(createTestModuleDescription({
       tableImports: [{
         moduleName: "host",
         name: "table",

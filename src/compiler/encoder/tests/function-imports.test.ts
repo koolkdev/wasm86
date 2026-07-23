@@ -5,7 +5,7 @@ import {
 import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
-import { encodeTestModule } from "#compiler/encoder/tests/module-description.js";
+import { encodeTestModule } from "#compiler/encoder/tests/module-fixture.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 const importModuleName = "host";
@@ -86,8 +86,25 @@ test("branch hints use imported-function-prefixed indexes", () => {
     ]
   });
   const compiled = new WebAssembly.Module(bytes);
+  const sections = WebAssembly.Module.customSections(
+    compiled,
+    "metadata.code.branch_hint"
+  );
 
-  deepStrictEqual(branchHintFunctionIndices(compiled), [2]);
+  strictEqual(sections.length, 1);
+  const section = sections[0];
+
+  if (section === undefined) {
+    throw new Error("missing branch-hint section");
+  }
+  deepStrictEqual([...new Uint8Array(section)], [
+    0x01,
+    0x02,
+    0x01,
+    0x03,
+    0x01,
+    0x01
+  ]);
 });
 
 function exportedFunction(
@@ -100,70 +117,4 @@ function exportedFunction(
     throw new Error(`expected exported function '${name}'`);
   }
   return value as (...args: number[]) => unknown;
-}
-
-function branchHintFunctionIndices(module: WebAssembly.Module): readonly number[] {
-  const sections = WebAssembly.Module.customSections(
-    module,
-    "metadata.code.branch_hint"
-  );
-
-  if (sections.length !== 1) {
-    throw new Error(`expected one branch-hint section, got ${sections.length}`);
-  }
-  const section = sections[0];
-
-  if (section === undefined) {
-    throw new Error("missing branch-hint section");
-  }
-  const bytes = new Uint8Array(section);
-  const entryCount = readU32Leb128(bytes, 0);
-  const indices: number[] = [];
-  let offset = entryCount.nextOffset;
-
-  for (let entry = 0; entry < entryCount.value; entry += 1) {
-    const functionIndex = readU32Leb128(bytes, offset);
-    const hintCount = readU32Leb128(bytes, functionIndex.nextOffset);
-
-    indices.push(functionIndex.value);
-    offset = hintCount.nextOffset;
-
-    for (let hint = 0; hint < hintCount.value; hint += 1) {
-      const instructionOffset = readU32Leb128(bytes, offset);
-      const attributeCount = readU32Leb128(bytes, instructionOffset.nextOffset);
-
-      offset = attributeCount.nextOffset;
-      for (let attribute = 0; attribute < attributeCount.value; attribute += 1) {
-        offset = readU32Leb128(bytes, offset).nextOffset;
-      }
-    }
-  }
-
-  if (offset !== bytes.length) {
-    throw new Error("unexpected trailing branch-hint section data");
-  }
-  return indices;
-}
-
-function readU32Leb128(
-  bytes: Uint8Array<ArrayBufferLike>,
-  offset: number
-): Readonly<{ value: number; nextOffset: number }> {
-  let value = 0;
-  let shift = 0;
-
-  while (true) {
-    const byte = bytes[offset];
-
-    if (byte === undefined) {
-      throw new Error("unexpected end of branch-hint section");
-    }
-    value |= (byte & 0x7f) << shift;
-    offset += 1;
-
-    if ((byte & 0x80) === 0) {
-      return { value: value >>> 0, nextOffset: offset };
-    }
-    shift += 7;
-  }
 }

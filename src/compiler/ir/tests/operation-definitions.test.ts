@@ -25,7 +25,7 @@ import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef, tableRef } from "#compiler/ir/refs.js";
 
-test("resource operations expose their byte range, operands, and direct effects", () => {
+test("resource operation definitions expose byte ranges, operands, and direct effects", () => {
   const values = new ValueTable();
   const resource = resourceRef("test.resource");
   const origin = new DynamicByteOriginRef();

@@ -1,5 +1,3 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
-
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import type { RunStop } from "#cpu/cpu.js";
@@ -11,9 +9,7 @@ import {
 import { compileInterpreterProgram } from "#interpreter/program.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import {
-  readWasmCpuStateField,
   readWasmCpuStateSnapshot,
-  wasmCpuStateFields,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { testExecutionModel } from "#test/support/execution-model.js";
@@ -25,13 +21,13 @@ type InterpreterHarness = Readonly<{
   runFor(instructionBudget: number): RunStop;
 }>;
 
-export type ExecutedInstruction = Readonly<{
+type ExecutedInstruction = Readonly<{
   exit: RunStop;
   state: WasmCpuStateSnapshot;
   guestView: DataView;
 }>;
 
-export type GuestMemoryBytes = Readonly<{
+type GuestMemoryBytes = Readonly<{
   address: number;
   bytes: readonly number[];
 }>;
@@ -40,7 +36,7 @@ let compiledInterpreter:
   | ReturnType<typeof compileInterpreterProgram>
   | undefined;
 
-export async function instantiateInterpreter(): Promise<InterpreterHarness> {
+export function instantiateInterpreter(): InterpreterHarness {
   compiledInterpreter ??= compileInterpreterProgram(testExecutionModel);
   const guestMemory = new WebAssembly.Memory({
     initial: testExecutionModel.guestMemory.memoryImport.limits.minPages
@@ -86,30 +82,21 @@ export async function instantiateInterpreter(): Promise<InterpreterHarness> {
   };
 }
 
-export async function executeInstruction(
+export function executeInstruction(
   bytes: readonly number[],
   initialState: WasmCpuStateSnapshot,
   memory: readonly GuestMemoryBytes[] = []
-): Promise<ExecutedInstruction> {
-  return executeProgram(bytes, initialState, 1, memory);
-}
+): ExecutedInstruction {
+  const interpreter = instantiateInterpreter();
 
-export async function executeProgram(
-  bytes: readonly number[],
-  initialState: WasmCpuStateSnapshot,
-  instructionBudget: number,
-  memory: readonly GuestMemoryBytes[] = []
-): Promise<ExecutedInstruction> {
-  const interpreter = await instantiateInterpreter();
-
-  writeInterpreterState(interpreter.stateView, initialState);
+  writeWasmCpuStateSnapshot(interpreter.stateView, initialState);
   writeGuestBytes(interpreter.guestView, initialState.eip, bytes);
   for (const entry of memory) {
     writeGuestBytes(interpreter.guestView, entry.address, entry.bytes);
   }
 
-  const exit = interpreter.runFor(instructionBudget);
-  const state = readInterpreterState(interpreter.stateView);
+  const exit = interpreter.runFor(1);
+  const state = readWasmCpuStateSnapshot(interpreter.stateView);
 
   return { exit, state, guestView: interpreter.guestView };
 }
@@ -122,43 +109,4 @@ export function writeGuestBytes(
   for (let index = 0; index < bytes.length; index += 1) {
     view.setUint8(address + index, bytes[index] ?? 0);
   }
-}
-
-export function writeInterpreterState(
-  view: DataView,
-  state: WasmCpuStateSnapshot
-): void {
-  writeWasmCpuStateSnapshot(view, state);
-}
-
-export function readInterpreterState(view: DataView): WasmCpuStateSnapshot {
-  return readWasmCpuStateSnapshot(view);
-}
-
-export function assertInterpreterStateEquals(
-  view: DataView,
-  state: WasmCpuStateSnapshot
-): void {
-  const expectedView = new DataView(new ArrayBuffer(view.byteLength));
-
-  writeWasmCpuStateSnapshot(expectedView, state);
-  for (const field of wasmCpuStateFields) {
-    strictEqual(
-      readWasmCpuStateField(view, field),
-      readWasmCpuStateField(expectedView, field)
-    );
-  }
-}
-
-export function assertSingleInstructionExit(exit: RunStop): void {
-  deepStrictEqual(exit, { kind: "instructionLimit" });
-}
-
-export function assertCompletedInstruction(
-  state: WasmCpuStateSnapshot,
-  expectedEip: number,
-  expectedInstructionCount: number
-): void {
-  strictEqual(state.eip, expectedEip);
-  strictEqual(state.instructionCount, expectedInstructionCount);
 }

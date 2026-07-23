@@ -134,6 +134,44 @@ test("a conditional side transfer dispatches only when taken", () => {
   strictEqual(notTakenState.eip, aEip + 6);
 });
 
+test("an indirect jump preserves the full u32 dispatch target", () => {
+  const targetEip = 0xf000_4000;
+  const memories = createTestWasmMemories();
+
+  writeSource(memories.guestMemory, aEip, [0xff, 0xe0]); // jmp eax
+  const artifact = compileJitFromMemory({
+    memory: memories.guestMemory,
+    start: aEip,
+    policy: { instructionLimit: 1 },
+    model: testExecutionModel
+  });
+  const imported = artifact.program.functionImports[0];
+
+  ok(imported !== undefined, "compiled JIT artifact has no dispatch import");
+  const dispatchTargets: number[] = [];
+  const instance = instantiateCompiledProgram(artifact.program, {
+    memories: new Map([
+      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
+      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+    ]),
+    functions: new Map([[
+      imported.ref,
+      recordDispatches(dispatchTargets)
+    ]])
+  });
+  const entry = instance.functionExports.get(artifact.entry);
+
+  ok(typeof entry === "function", "compiled JIT entry export is not callable");
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
+
+  writeWasmCpuStateSnapshot(stateView, { eip: aEip, eax: targetEip });
+  const encoded: unknown = entry();
+
+  ok(typeof encoded === "bigint", "compiled JIT entry must return i64");
+  deepStrictEqual(decodeExit(encoded), { kind: "instructionLimit" });
+  deepStrictEqual(dispatchTargets, [targetEip]);
+});
+
 function writeSource(
   memory: WebAssembly.Memory,
   eip: number,

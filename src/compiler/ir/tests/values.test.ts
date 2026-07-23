@@ -109,9 +109,11 @@ test("nonconstant division reports whether it can trap", () => {
   const dividend = values.parameter(0, "i32");
   const dynamic = values.binary("div_u", dividend, values.parameter(1, "i32"));
   const safe = values.binary("div_u", dividend, values.const(17));
+  const signedOverflow = values.binary("div_s", dividend, values.const(-1));
 
   strictEqual(values.mayTrap(dynamic), true);
   strictEqual(values.mayTrap(safe), false);
+  strictEqual(values.mayTrap(signedOverflow), true);
 });
 
 test("typed operations reject operands from the wrong scalar universe", () => {

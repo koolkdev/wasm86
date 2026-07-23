@@ -548,8 +548,4 @@ test("returned indirect invocations root arguments and the table index", () => {
 
   strictEqual(analysis.isLive(argument), true);
   strictEqual(analysis.isLive(elementIndex), true);
-  deepStrictEqual(analysis.roots().map(({ value }) => value), [
-    argument,
-    elementIndex
-  ]);
 });

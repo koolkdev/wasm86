@@ -1,7 +1,7 @@
 import { test } from "node:test";
 
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
-import { assertInstructionCase } from "#test/harness/instruction-case.js";
+import { assertInstructionCase } from "#test/instructions/harness/instruction-case.js";
 import { startAddress } from "#test/support/addresses.js";
 
 const allUserFlagsSet = {

@@ -3,7 +3,7 @@ import {
   type WasmModuleDescription
 } from "#compiler/encoder/module.js";
 
-export function testModuleDescription(
+export function createTestModuleDescription(
   overrides: Partial<WasmModuleDescription>
 ): WasmModuleDescription {
   return {
@@ -21,5 +21,5 @@ export function testModuleDescription(
 export function encodeTestModule(
   overrides: Partial<WasmModuleDescription>
 ): Uint8Array<ArrayBuffer> {
-  return encodeWasmModule(testModuleDescription(overrides));
+  return encodeWasmModule(createTestModuleDescription(overrides));
 }

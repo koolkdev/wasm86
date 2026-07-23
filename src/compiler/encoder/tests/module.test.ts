@@ -3,11 +3,11 @@ import { test } from "node:test";
 
 import { WasmFunctionBodyEncoder } from "#compiler/encoder/function-body.js";
 import { encodeWasmModule } from "#compiler/encoder/module.js";
-import { testModuleDescription } from "#compiler/encoder/tests/module-description.js";
+import { createTestModuleDescription } from "#compiler/encoder/tests/module-fixture.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 test("ordered module description uses declared numeric positions", async () => {
-  const bytes = encodeWasmModule(testModuleDescription({
+  const bytes = encodeWasmModule(createTestModuleDescription({
     functionTypes: [
       { params: [], results: [] },
       { params: [], results: [wasmValueType.i32] }
