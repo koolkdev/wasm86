@@ -327,12 +327,29 @@ const immediateCases: readonly RegisterAluCase[] = [
     expectedFlags: flags("PF", "SF")
   },
   {
+    name: "OR AX, sign-extended grouped imm8",
+    bytes: [0x66, 0x83, 0xc8, 0x80],
+    initialEax: 0x1234_0000,
+    ebx: 0,
+    expectedEax: 0x1234_ff80,
+    expectedFlags: flags("SF")
+  },
+  {
     name: "SBB AX, imm16",
     bytes: [0x66, 0x1d, 0x01, 0x00],
     initialEax: 0x1234_0001,
     ebx: 0,
     initialCf: 1,
     expectedEax: 0x1234_ffff,
+    expectedFlags: flags("CF", "PF", "AF", "SF")
+  },
+  {
+    name: "SBB AL, grouped imm8",
+    bytes: [0x80, 0xd8, 0x00],
+    initialEax: 0x1234_5600,
+    ebx: 0,
+    initialCf: 1,
+    expectedEax: 0x1234_56ff,
     expectedFlags: flags("CF", "PF", "AF", "SF")
   },
   {

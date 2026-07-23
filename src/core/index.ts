@@ -1,11 +1,11 @@
 import { defineIsa } from "./isa/dsl.js";
-import { ADC, ADD, AND, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR } from "./isa/definitions/alu.js";
+import { ADC, ADD, AND, CMP, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR } from "./isa/definitions/alu.js";
 import { AAA, AAD, AAM, AAS, DAA, DAS } from "./isa/definitions/bcd-ascii.js";
 import { BSF, BSR, BT, BTC, BTR, BTS } from "./isa/definitions/bits.js";
 import { BSWAP } from "./isa/definitions/byte-swap.js";
 import { CMPXCHG, CMPXCHG8B, XADD } from "./isa/definitions/compare-exchange.js";
 import { CALL, ENTER, JCC, JECXZ, JMP, LOOP, LOOPE, LOOPNE, RET } from "./isa/definitions/control.js";
-import { CMP, TEST } from "./isa/definitions/cmp-test.js";
+import { TEST } from "./isa/definitions/test.js";
 import { DIV, IDIV } from "./isa/definitions/div.js";
 import { CLC, CLD, CMC, LAHF, SAHF, STC, STD, XLAT } from "./isa/definitions/flags.js";
 import { LEA } from "./isa/definitions/lea.js";
