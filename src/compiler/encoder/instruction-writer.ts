@@ -1,112 +1,56 @@
-import type { WasmMemoryImmediate } from "./memory.js";
-import type { WasmValueType } from "./types.js";
+import type { ByteSink } from "./byte-sink.js";
+import {
+  type WasmBranchHint,
+  type WasmInstruction
+} from "./instructions.js";
 
-export type WasmBranchHint = "unlikely" | "likely";
+type EncodedBranchHint = Readonly<{
+  offset: number;
+  value: 0 | 1;
+}>;
 
-export interface WasmInstructionWriter {
-  localGet(index: number): this;
-  localSet(index: number): this;
-  localTee(index: number): this;
-  globalGet(index: number): this;
-  globalSet(index: number): this;
+export type WasmInstructionWriter = Readonly<{
+  write: <Args extends readonly unknown[]>(
+    instruction: WasmInstruction<Args>,
+    ...args: Args
+  ) => void;
+}>;
 
-  block(result?: WasmValueType): this;
-  loop(): this;
-  ifBlock(options?: Readonly<{
-    hint?: WasmBranchHint | undefined;
-    result?: WasmValueType | undefined;
-  }>): this;
-  elseBlock(): this;
-  br(labelDepth: number): this;
-  brIf(labelDepth: number, hint?: WasmBranchHint): this;
-  brTable(labelDepths: readonly number[], defaultLabelDepth: number): this;
-  returnFromFunction(): this;
-  unreachable(): this;
-  endBlock(): this;
+export function createWasmInstructionWriter(
+  body: ByteSink
+): Readonly<{
+  writer: WasmInstructionWriter;
+  branchHints: readonly EncodedBranchHint[];
+}> {
+  const branchHints: EncodedBranchHint[] = [];
+  const writer: WasmInstructionWriter = {
+    write<Args extends readonly unknown[]>(
+      instruction: WasmInstruction<Args>,
+      ...args: Args
+    ): void {
+      const instructionOffset = body.byteLength;
 
-  select(): this;
-  drop(): this;
-  callFunction(functionIndex: number): this;
-  callIndirect(typeIndex: number, tableIndex: number): this;
-  returnCallFunction(functionIndex: number): this;
-  returnCallIndirect(typeIndex: number, tableIndex: number): this;
+      body.writeByte(instruction.opcode);
+      instruction.encodeImmediate(body, ...args);
 
-  i32Const(value: number): this;
-  i64Const(value: bigint): this;
+      const branchHint = instruction.branchHint?.(...args);
+      if (branchHint !== undefined) {
+        branchHints.push({
+          offset: instructionOffset,
+          value: encodeBranchHint(branchHint)
+        });
+      }
+    }
+  };
 
-  i32Eqz(): this;
-  i32Eq(): this;
-  i32Ne(): this;
-  i32LtS(): this;
-  i32LtU(): this;
-  i32GtS(): this;
-  i32GtU(): this;
-  i32LeS(): this;
-  i32LeU(): this;
-  i32GeS(): this;
-  i32GeU(): this;
-  i32Clz(): this;
-  i32Ctz(): this;
-  i32Popcnt(): this;
-  i32Add(): this;
-  i32Sub(): this;
-  i32Mul(): this;
-  i32DivS(): this;
-  i32DivU(): this;
-  i32RemS(): this;
-  i32RemU(): this;
-  i32And(): this;
-  i32Or(): this;
-  i32Xor(): this;
-  i32Shl(): this;
-  i32ShrS(): this;
-  i32ShrU(): this;
-  i32Rotl(): this;
-  i32Rotr(): this;
-  i32Extend8S(): this;
-  i32Extend16S(): this;
+  return { writer, branchHints };
+}
 
-  i32Load(immediate: WasmMemoryImmediate): this;
-  i32Load8S(immediate: WasmMemoryImmediate): this;
-  i32Load8U(immediate: WasmMemoryImmediate): this;
-  i32Load16S(immediate: WasmMemoryImmediate): this;
-  i32Load16U(immediate: WasmMemoryImmediate): this;
-  i32Store(immediate: WasmMemoryImmediate): this;
-  i32Store8(immediate: WasmMemoryImmediate): this;
-  i32Store16(immediate: WasmMemoryImmediate): this;
-  memorySize(memoryIndex: number): this;
-
-  i64Eqz(): this;
-  i64Eq(): this;
-  i64Ne(): this;
-  i64LtS(): this;
-  i64LtU(): this;
-  i64GtS(): this;
-  i64GtU(): this;
-  i64LeS(): this;
-  i64LeU(): this;
-  i64GeS(): this;
-  i64GeU(): this;
-  i64Clz(): this;
-  i64Ctz(): this;
-  i64Popcnt(): this;
-  i64Add(): this;
-  i64Sub(): this;
-  i64Mul(): this;
-  i64DivS(): this;
-  i64DivU(): this;
-  i64RemS(): this;
-  i64RemU(): this;
-  i64And(): this;
-  i64Or(): this;
-  i64Xor(): this;
-  i64Shl(): this;
-  i64ShrS(): this;
-  i64ShrU(): this;
-  i64Rotl(): this;
-  i64Rotr(): this;
-
-  i32WrapI64(): this;
-  i64ExtendI32S(): this;
-  i64ExtendI32U(): this;
+function encodeBranchHint(hint: WasmBranchHint): 0 | 1 {
+  switch (hint) {
+    case "unlikely":
+      return 0;
+    case "likely":
+      return 1;
+  }
 }

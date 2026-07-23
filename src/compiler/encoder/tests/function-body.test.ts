@@ -2,6 +2,7 @@ import { deepStrictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { encodeWasmFunctionBody } from "#compiler/encoder/function-body.js";
+import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 test("descriptive branch hints are encoded in function metadata", () => {
@@ -9,13 +10,13 @@ test("descriptive branch hints are encoded in function metadata", () => {
     parameterCount: 0,
     localTypes: [wasmValueType.i32]
   }, (writer) => {
-    writer.i32Const(1);
-    writer.ifBlock({ hint: "unlikely" });
-    writer.endBlock();
-    writer.block();
-    writer.i32Const(1);
-    writer.brIf(0, "likely");
-    writer.endBlock();
+    writer.write(wasmInstruction.i32.const, 1);
+    writer.write(wasmInstruction.control.if, { hint: "unlikely" });
+    writer.write(wasmInstruction.control.end);
+    writer.write(wasmInstruction.control.block);
+    writer.write(wasmInstruction.i32.const, 1);
+    writer.write(wasmInstruction.control.brIf, 0, "likely");
+    writer.write(wasmInstruction.control.end);
   });
 
   deepStrictEqual(
@@ -32,12 +33,12 @@ test("declared locals follow parameters in the Wasm local index space", () => {
     parameterCount: 2,
     localTypes: [wasmValueType.i32, wasmValueType.i64]
   }, (writer, resolveLocal) => {
-    writer.i32Const(7);
-    writer.localSet(resolveLocal(0));
-    writer.i64Const(9n);
-    writer.localSet(resolveLocal(1));
-    writer.localGet(resolveLocal(0));
-    writer.drop();
+    writer.write(wasmInstruction.i32.const, 7);
+    writer.write(wasmInstruction.local.set, resolveLocal(0));
+    writer.write(wasmInstruction.i64.const, 9n);
+    writer.write(wasmInstruction.local.set, resolveLocal(1));
+    writer.write(wasmInstruction.local.get, resolveLocal(0));
+    writer.write(wasmInstruction.parametric.drop);
   });
 
   deepStrictEqual([...body.bytes], [
@@ -83,19 +84,19 @@ test("br_table encodes its label vector and default depth", () => {
     parameterCount: 1,
     localTypes: []
   }, (writer) => {
-    writer.block();
-    writer.block();
-    writer.block();
-    writer.localGet(0);
-    writer.brTable([1, 0], 2);
-    writer.endBlock();
-    writer.i32Const(20);
-    writer.returnFromFunction();
-    writer.endBlock();
-    writer.i32Const(10);
-    writer.returnFromFunction();
-    writer.endBlock();
-    writer.i32Const(30);
+    writer.write(wasmInstruction.control.block);
+    writer.write(wasmInstruction.control.block);
+    writer.write(wasmInstruction.control.block);
+    writer.write(wasmInstruction.local.get, 0);
+    writer.write(wasmInstruction.control.brTable, [1, 0], 2);
+    writer.write(wasmInstruction.control.end);
+    writer.write(wasmInstruction.i32.const, 20);
+    writer.write(wasmInstruction.control.return);
+    writer.write(wasmInstruction.control.end);
+    writer.write(wasmInstruction.i32.const, 10);
+    writer.write(wasmInstruction.control.return);
+    writer.write(wasmInstruction.control.end);
+    writer.write(wasmInstruction.i32.const, 30);
   });
 
   deepStrictEqual([...body.bytes], [
@@ -124,24 +125,39 @@ test("narrow memory and sign-extension instructions use their Wasm encodings", (
   }, (writer, resolveLocal) => {
     const valueLocal = resolveLocal(0);
 
-    writer.localGet(0);
-    writer.i32Load8S({ align: 0, memoryIndex: 0, offset: 0 });
-    writer.i32Extend8S();
-    writer.localSet(valueLocal);
-    writer.localGet(0);
-    writer.i32Load16U({ align: 1, memoryIndex: 0, offset: 0 });
-    writer.i32Extend16S();
-    writer.localSet(valueLocal);
-    writer.localGet(0);
-    writer.i32Load16S({ align: 1, memoryIndex: 0, offset: 0 });
-    writer.localSet(valueLocal);
-    writer.localGet(0);
-    writer.localGet(1);
-    writer.i32Store8({ align: 0, memoryIndex: 0, offset: 0 });
-    writer.localGet(0);
-    writer.localGet(1);
-    writer.i32Store16({ align: 1, memoryIndex: 0, offset: 0 });
-    writer.localGet(valueLocal);
+    writer.write(wasmInstruction.local.get, 0);
+    writer.write(
+      wasmInstruction.i32.load8S,
+      { align: 0, memoryIndex: 0, offset: 0 }
+    );
+    writer.write(wasmInstruction.i32.extend8S);
+    writer.write(wasmInstruction.local.set, valueLocal);
+    writer.write(wasmInstruction.local.get, 0);
+    writer.write(
+      wasmInstruction.i32.load16U,
+      { align: 1, memoryIndex: 0, offset: 0 }
+    );
+    writer.write(wasmInstruction.i32.extend16S);
+    writer.write(wasmInstruction.local.set, valueLocal);
+    writer.write(wasmInstruction.local.get, 0);
+    writer.write(
+      wasmInstruction.i32.load16S,
+      { align: 1, memoryIndex: 0, offset: 0 }
+    );
+    writer.write(wasmInstruction.local.set, valueLocal);
+    writer.write(wasmInstruction.local.get, 0);
+    writer.write(wasmInstruction.local.get, 1);
+    writer.write(
+      wasmInstruction.i32.store8,
+      { align: 0, memoryIndex: 0, offset: 0 }
+    );
+    writer.write(wasmInstruction.local.get, 0);
+    writer.write(wasmInstruction.local.get, 1);
+    writer.write(
+      wasmInstruction.i32.store16,
+      { align: 1, memoryIndex: 0, offset: 0 }
+    );
+    writer.write(wasmInstruction.local.get, valueLocal);
   });
 
   deepStrictEqual([...body.bytes], [

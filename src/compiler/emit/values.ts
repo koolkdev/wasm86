@@ -11,6 +11,7 @@ import type { PlacementIndex } from "#compiler/placement/index.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
 import type { ModuleBindings } from "#compiler/module/bindings.js";
 import type { WasmLocalResolver } from "#compiler/encoder/function-body.js";
+import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import { wasmValueType, type WasmValueType } from "#compiler/encoder/types.js";
 import { emitOperation } from "./operations.js";
@@ -97,7 +98,7 @@ export class ValueEmitter {
 
     assert(placement !== undefined, `value ${value} has no placement`);
     if (this.#realized[value] !== 0) {
-      this.#body.localGet(this.valueLocal(value));
+      this.#body.write(wasmInstruction.local.get, this.valueLocal(value));
       return;
     }
 
@@ -109,7 +110,10 @@ export class ValueEmitter {
     this.#emitSource(value);
 
     if (placement.local !== undefined) {
-      this.#body.localTee(this.#resolveLocal(placement.local));
+      this.#body.write(
+        wasmInstruction.local.tee,
+        this.#resolveLocal(placement.local)
+      );
     }
     this.#realized[value] = 1;
   }
@@ -180,7 +184,7 @@ export class ValueEmitter {
     );
     assert(this.#realized[value] === 0, `value ${value} was realized twice`);
     this.#emitSource(value);
-    this.#body.localSet(this.valueLocal(value));
+    this.#body.write(wasmInstruction.local.set, this.valueLocal(value));
     this.#realized[value] = 1;
   }
 
@@ -213,7 +217,7 @@ export class ValueEmitter {
       return;
     }
     if (node.kind === "loopInput") {
-      this.#body.localGet(this.valueLocal(value));
+      this.#body.write(wasmInstruction.local.get, this.valueLocal(value));
       return;
     }
     emitValueNode(this.#body, node);

@@ -5,6 +5,7 @@ import {
   encodeWasmFunctionBody,
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
+import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import { encodeTestModule } from "#compiler/encoder/tests/module-fixture.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
@@ -79,7 +80,7 @@ function encodeIndirectCallModule(
           parameterCount: 1,
           localTypes: []
         }, (writer) => {
-          writer.i64Const(forwardedResult);
+          writer.write(wasmInstruction.i64.const, forwardedResult);
         })
       },
       { typeIndex: 0, body: entryBody(0, 0) }
@@ -96,9 +97,13 @@ function returnCallIndirectEntryBody(blockType: number, tableIndex: number): Enc
     parameterCount: 1,
     localTypes: []
   }, (writer) => {
-    writer.localGet(0);
-    writer.i32Const(0);
-    writer.returnCallIndirect(blockType, tableIndex);
+    writer.write(wasmInstruction.local.get, 0);
+    writer.write(wasmInstruction.i32.const, 0);
+    writer.write(
+      wasmInstruction.returnCall.indirect,
+      blockType,
+      tableIndex
+    );
   });
 }
 
@@ -107,9 +112,9 @@ function callIndirectEntryBody(blockType: number, tableIndex: number): EncodedWa
     parameterCount: 1,
     localTypes: []
   }, (writer) => {
-    writer.localGet(0);
-    writer.i32Const(0);
-    writer.callIndirect(blockType, tableIndex);
+    writer.write(wasmInstruction.local.get, 0);
+    writer.write(wasmInstruction.i32.const, 0);
+    writer.write(wasmInstruction.call.indirect, blockType, tableIndex);
   });
 }
 

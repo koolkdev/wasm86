@@ -1,3 +1,4 @@
+import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import type { WasmMemoryImmediate } from "#compiler/encoder/memory.js";
 import type { CallTarget } from "#compiler/ir/invocation.js";
@@ -25,10 +26,16 @@ export function emitOperation(
       emitCall(body, bindings, operation.invocation.target);
       return;
     case "variable.read":
-      body.localGet(values.variableLocal(operation.variable));
+      body.write(
+        wasmInstruction.local.get,
+        values.variableLocal(operation.variable)
+      );
       return;
     case "variable.write":
-      body.localSet(values.variableLocal(operation.variable));
+      body.write(
+        wasmInstruction.local.set,
+        values.variableLocal(operation.variable)
+      );
       return;
     case "resource.read":
       emitResourceRead(body, bindings, operation);
@@ -53,16 +60,16 @@ function emitResourceRead(
   switch (operation.width) {
     case 8:
       operation.signed
-        ? body.i32Load8S(immediate)
-        : body.i32Load8U(immediate);
+        ? body.write(wasmInstruction.i32.load8S, immediate)
+        : body.write(wasmInstruction.i32.load8U, immediate);
       return;
     case 16:
       operation.signed
-        ? body.i32Load16S(immediate)
-        : body.i32Load16U(immediate);
+        ? body.write(wasmInstruction.i32.load16S, immediate)
+        : body.write(wasmInstruction.i32.load16U, immediate);
       return;
     case 32:
-      body.i32Load(immediate);
+      body.write(wasmInstruction.i32.load, immediate);
       return;
   }
 }
@@ -80,13 +87,13 @@ function emitResourceWrite(
 
   switch (operation.width) {
     case 8:
-      body.i32Store8(immediate);
+      body.write(wasmInstruction.i32.store8, immediate);
       return;
     case 16:
-      body.i32Store16(immediate);
+      body.write(wasmInstruction.i32.store16, immediate);
       return;
     case 32:
-      body.i32Store(immediate);
+      body.write(wasmInstruction.i32.store, immediate);
       return;
   }
 }
@@ -98,10 +105,14 @@ function emitCall(
 ): void {
   switch (target.kind) {
     case "direct":
-      body.callFunction(bindings.functionIndex(target.ref));
+      body.write(
+        wasmInstruction.call.direct,
+        bindings.functionIndex(target.ref)
+      );
       return;
     case "indirect":
-      body.callIndirect(
+      body.write(
+        wasmInstruction.call.indirect,
         bindings.typeIndex(target.type),
         bindings.tableIndex(target.table)
       );

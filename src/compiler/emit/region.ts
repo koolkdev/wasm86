@@ -7,6 +7,7 @@ import {
 import type { ModuleBindings } from "#compiler/module/bindings.js";
 import type { FunctionPlacement } from "#compiler/placement/place.js";
 import type { WasmLocalResolver } from "#compiler/encoder/function-body.js";
+import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import { createControlEmitter } from "./controls.js";
 import { emitOperation } from "./operations.js";
@@ -66,7 +67,7 @@ export function emitFunctionRegions(
     ) {
       emitOperation(body, bindings, valueEmitter, node);
       for (const _output of node.outputs) {
-        body.drop();
+        body.write(wasmInstruction.parametric.drop);
       }
     }
   }
@@ -85,7 +86,7 @@ export function emitFunctionRegions(
         }
         if (resultLocal !== undefined) {
           valueEmitter.emitUse(result);
-          body.localSet(resultLocal);
+          body.write(wasmInstruction.local.set, resultLocal);
         } else if (fn.values.isUnreachable(result)) {
           valueEmitter.emitUse(result);
         }

@@ -2,6 +2,7 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { encodeWasmFunctionBody } from "#compiler/encoder/function-body.js";
+import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import { encodeWasmModule } from "#compiler/encoder/module.js";
 import { createTestModuleDescription } from "#compiler/encoder/tests/module-fixture.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
@@ -18,7 +19,7 @@ test("ordered module description uses declared numeric positions", async () => {
         parameterCount: 0,
         localTypes: []
       }, (writer) => {
-        writer.i32Const(42);
+        writer.write(wasmInstruction.i32.const, 42);
       })
     }],
     functionExports: [{ name: "answer", functionIndex: 0 }]

@@ -5,6 +5,7 @@ import {
   encodeWasmFunctionBody,
   type EncodedWasmFunctionBody
 } from "#compiler/encoder/function-body.js";
+import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import { encodeTestModule } from "#compiler/encoder/tests/module-fixture.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
 
@@ -97,8 +98,8 @@ function returnCallEntryBody(targetFunctionIndex: number): EncodedWasmFunctionBo
     parameterCount: 1,
     localTypes: []
   }, (writer) => {
-    writer.localGet(0);
-    writer.returnCallFunction(targetFunctionIndex);
+    writer.write(wasmInstruction.local.get, 0);
+    writer.write(wasmInstruction.returnCall.direct, targetFunctionIndex);
   });
 }
 
@@ -107,7 +108,7 @@ function constantTargetBody(result: bigint): EncodedWasmFunctionBody {
     parameterCount: 1,
     localTypes: []
   }, (writer) => {
-    writer.i64Const(result);
+    writer.write(wasmInstruction.i64.const, result);
   });
 }
 
@@ -116,15 +117,15 @@ function statePayloadTargetBody(): EncodedWasmFunctionBody {
     parameterCount: 1,
     localTypes: []
   }, (writer) => {
-    writer.localGet(0);
-    writer.i32Load({
+    writer.write(wasmInstruction.local.get, 0);
+    writer.write(wasmInstruction.i32.load, {
       align: u32Align,
       memoryIndex: 0,
       offset: statePayloadOffset
     });
-    writer.i64ExtendI32U();
-    writer.i64Const(statePayloadPrefix);
-    writer.i64Or();
+    writer.write(wasmInstruction.i64.extendI32U);
+    writer.write(wasmInstruction.i64.const, statePayloadPrefix);
+    writer.write(wasmInstruction.i64.or);
   });
 }
 

@@ -1,4 +1,5 @@
 import { assert } from "#common/assert.js";
+import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 
 // Tracks structured labels while one symbolic function is emitted.
@@ -41,7 +42,7 @@ export function createFunctionFrame({
       const mark = loopMarks[loopMarks.length - 1];
 
       assert(mark !== undefined, "continue emitted outside a loop body");
-      body.br(inlineControlDepth - mark);
+      body.write(wasmInstruction.control.br, inlineControlDepth - mark);
     }
   };
 }

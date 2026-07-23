@@ -12,6 +12,7 @@ import { regionCompletes, type Region } from "#compiler/ir/region.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ModuleBindings } from "#compiler/module/bindings.js";
 import type { PlacementPlan } from "#compiler/placement/model.js";
+import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
 import { createFunctionFrame } from "./frame.js";
 import type { ValueEmitter } from "./values.js";
@@ -57,18 +58,18 @@ export function createControlEmitter({
     withControlOutput(control.output, (outputLocal) => {
       valueEmitter.emitUse(control.condition);
       valueEmitter.emitCaptures();
-      body.ifBlock({ hint: control.hint });
+      body.write(wasmInstruction.control.if, { hint: control.hint });
       frame.withNestedControl(() => {
         emitBody(control.thenBody, outputLocal);
 
         if (control.elseBody !== undefined) {
-          body.elseBlock();
+          body.write(wasmInstruction.control.else);
           emitBody(control.elseBody, outputLocal);
         } else {
           assert(control.output === undefined, "value-producing if has no else body");
         }
       });
-      body.endBlock();
+      body.write(wasmInstruction.control.end);
     });
 
     sealJoin(control);
@@ -80,28 +81,32 @@ export function createControlEmitter({
 
       // Open order: join, default, case n-1 .. case 0.
       for (let index = 0; index <= caseCount + 1; index += 1) {
-        body.block();
+        body.write(wasmInstruction.control.block);
       }
 
       valueEmitter.emitUse(control.selector);
       valueEmitter.emitCaptures();
-      body.brTable(switchLabelDepths(control.cases), caseCount);
+      body.write(
+        wasmInstruction.control.brTable,
+        switchLabelDepths(control.cases),
+        caseCount
+      );
 
       control.cases.forEach((entry, index) => {
-        body.endBlock();
+        body.write(wasmInstruction.control.end);
         frame.withNestedControl(
           () => emitBody(entry.body, outputLocal),
           caseCount - index + 1
         );
-        body.br(caseCount - index);
+        body.write(wasmInstruction.control.br, caseCount - index);
       });
 
-      body.endBlock();
+      body.write(wasmInstruction.control.end);
       frame.withNestedControl(
         () => emitBody(control.defaultBody, outputLocal),
         1
       );
-      body.endBlock();
+      body.write(wasmInstruction.control.end);
     });
 
     sealJoin(control);
@@ -112,19 +117,19 @@ export function createControlEmitter({
       const local = valueEmitter.valueLocal(value.loopInput);
 
       valueEmitter.emitUse(value.seed);
-      body.localSet(local);
+      body.write(wasmInstruction.local.set, local);
       return local;
     });
 
     valueEmitter.emitCaptures();
-    body.loop();
+    body.write(wasmInstruction.control.loop);
     loopLocals.push(carriedLocals);
     try {
       frame.withLoopBody(() => emitBody(control.body));
     } finally {
       assert(loopLocals.pop() === carriedLocals, "loop local stack changed");
     }
-    body.endBlock();
+    body.write(wasmInstruction.control.end);
   }
 
   function emitLoopContinue(control: LoopContinueControl): void {
@@ -140,7 +145,7 @@ export function createControlEmitter({
       valueEmitter.emitUse(update);
     }
     for (let index = carriedLocals.length - 1; index >= 0; index -= 1) {
-      body.localSet(carriedLocals[index]!);
+      body.write(wasmInstruction.local.set, carriedLocals[index]!);
     }
     frame.emitLoopContinue();
   }
@@ -151,7 +156,7 @@ export function createControlEmitter({
         for (const value of control.source.values) {
           valueEmitter.emitUse(value);
         }
-        body.returnFromFunction();
+        body.write(wasmInstruction.control.return);
         return;
       case "invocation": {
         const { invocation } = control.source;
@@ -197,7 +202,7 @@ export function createControlEmitter({
 
     // Wasm cannot infer that every lowered arm exits through its nested
     // control flow, so make the structured join explicitly unreachable.
-    body.unreachable();
+    body.write(wasmInstruction.control.unreachable);
   }
 
   return emitControl;
@@ -228,10 +233,14 @@ function emitReturnCall(
 ): void {
   switch (target.kind) {
     case "direct":
-      body.returnCallFunction(bindings.functionIndex(target.ref));
+      body.write(
+        wasmInstruction.returnCall.direct,
+        bindings.functionIndex(target.ref)
+      );
       return;
     case "indirect":
-      body.returnCallIndirect(
+      body.write(
+        wasmInstruction.returnCall.indirect,
         bindings.typeIndex(target.type),
         bindings.tableIndex(target.table)
       );
