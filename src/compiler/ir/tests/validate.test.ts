@@ -1,7 +1,7 @@
 import { doesNotThrow, throws } from "node:assert";
 import { test } from "node:test";
 
-import { CellRef } from "#compiler/ir/cell.js";
+import { VariableRef } from "#compiler/ir/variable.js";
 import {
   ifControl,
   loopContinueControl,
@@ -16,7 +16,7 @@ import {
   type IrFunction
 } from "#compiler/ir/function.js";
 import { Invocation } from "#compiler/ir/invocation.js";
-import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
+import { variableRead, variableWrite } from "#compiler/ir/operations/variables.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
 import {
   resourceRead,
@@ -96,8 +96,8 @@ function validateFunctionBlock(
   });
 }
 
-function cellReadNode(output: ValueId, cell: CellRef): RegionNode {
-  return cellRead.create({ cell }, () => output);
+function variableReadNode(output: ValueId, variable: VariableRef): RegionNode {
+  return variableRead.create({ variable }, () => output);
 }
 
 function resourceOperand(
@@ -640,20 +640,20 @@ test("switch matches must be unique and within the dense-table range", () => {
   );
 });
 
-test("a seeded cell can be used in a nested descendant", () => {
+test("a seeded variable can be used in a nested descendant", () => {
   const values = new ValueTable();
-  const cell = new CellRef("i32");
+  const variable = new VariableRef("i32");
   const seed = values.const(7);
   const output = values.addNodeOutput();
   const body = entryBlock(values, [
-    cellWrite.create({
-      cell,
+    variableWrite.create({
+      variable,
       value: seed,
       initialization: "seed"
     }),
     ifControl.create({
       condition: values.const(1),
-      thenBody: { nodes: [cellReadNode(output, cell)] }
+      thenBody: { nodes: [variableReadNode(output, variable)] }
     }),
     exitReturn(values)
   ]);
@@ -661,13 +661,13 @@ test("a seeded cell can be used in a nested descendant", () => {
   doesNotThrow(() => validateFunctionBlock(body));
 });
 
-test("a cell read must follow its seed", () => {
+test("a variable read must follow its seed", () => {
   const values = new ValueTable();
-  const cell = new CellRef("i32");
+  const variable = new VariableRef("i32");
   const seed = values.const(7);
-  const read = cellReadNode(values.addNodeOutput(), cell);
-  const seedNode = cellWrite.create({
-    cell,
+  const read = variableReadNode(values.addNodeOutput(), variable);
+  const seedNode = variableWrite.create({
+    variable,
     value: seed,
     initialization: "seed"
   });
@@ -681,17 +681,17 @@ test("a cell read must follow its seed", () => {
   );
 });
 
-test("a cell has one seed in a function graph", () => {
+test("a variable has one seed in a function graph", () => {
   const values = new ValueTable();
-  const cell = new CellRef("i32");
+  const variable = new VariableRef("i32");
   const seed = values.const(7);
-  const first = cellWrite.create({
-    cell,
+  const first = variableWrite.create({
+    variable,
     value: seed,
     initialization: "seed"
   });
-  const second = cellWrite.create({
-    cell,
+  const second = variableWrite.create({
+    variable,
     value: seed,
     initialization: "seed"
   });
@@ -701,36 +701,36 @@ test("a cell has one seed in a function graph", () => {
       validateFunctionBlock(
         entryBlock(values, [first, second, exitReturn(values)])
       ),
-    /seeds the same cell more than once/
+    /seeds the same variable more than once/
   );
 });
 
-test("a cell access must have a seed in the same function graph", () => {
+test("a variable access must have a seed in the same function graph", () => {
   const values = new ValueTable();
-  const cell = new CellRef("i32");
+  const variable = new VariableRef("i32");
 
   throws(
     () =>
       validateFunctionBlock(
         entryBlock(values, [
-          cellReadNode(values.addNodeOutput(), cell),
+          variableReadNode(values.addNodeOutput(), variable),
           exitReturn(values)
         ])
       ),
-    /cell with no seed/
+    /variable with no seed/
   );
 });
 
-test("a cell cannot escape its declaring body", () => {
+test("a variable cannot escape its declaring body", () => {
   const values = new ValueTable();
-  const cell = new CellRef("i32");
+  const variable = new VariableRef("i32");
   const seed = values.const(7);
   const branch = ifControl.create({
     condition: values.const(1),
     thenBody: {
       nodes: [
-        cellWrite.create({
-          cell,
+        variableWrite.create({
+          variable,
           value: seed,
           initialization: "seed"
         })
@@ -743,7 +743,7 @@ test("a cell cannot escape its declaring body", () => {
       validateFunctionBlock(
         entryBlock(values, [
           branch,
-          cellReadNode(values.addNodeOutput(), cell),
+          variableReadNode(values.addNodeOutput(), variable),
           exitReturn(values)
         ])
       ),

@@ -188,7 +188,7 @@ export class ScopedInstructionStorage {
       this.#region.values.valueType(seed) === "i32",
       "semantic var seed must be i32"
     );
-    return this.#region.cell(seed) as SemanticVar;
+    return this.#region.variable(seed) as SemanticVar;
   }
 
   address(operandRef: OperandRef): Value {
@@ -317,7 +317,7 @@ export class ScopedInstructionStorage {
     const options = signed ? { signed: true } as const : {};
 
     switch (storage.kind) {
-      case "cell":
+      case "variable":
         return this.#region.read(storage);
       case "reg":
         return this.#state.gpr.read(
@@ -385,7 +385,7 @@ export class ScopedInstructionStorage {
     width: OperandWidth
   ): void {
     switch (storage.kind) {
-      case "cell":
+      case "variable":
         this.#region.write(storage, value);
         return;
       case "reg":

@@ -6,7 +6,7 @@ import {
   Invocation
 } from "#compiler/ir/invocation.js";
 import { callOperation } from "#compiler/ir/operations/call.js";
-import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
+import { variableRead, variableWrite } from "#compiler/ir/operations/variables.js";
 import {
   resourceRead,
   resourceWrite
@@ -18,7 +18,7 @@ import {
   type ResourceByteOperand,
   type ResourceRef
 } from "#compiler/ir/resource.js";
-import { CellRef } from "#compiler/ir/cell.js";
+import { VariableRef } from "#compiler/ir/variable.js";
 import { functionType } from "#compiler/ir/function.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
@@ -118,21 +118,21 @@ test("resource read modes define their result bounds", () => {
   );
 });
 
-test("cell operations retain cell type, initialization, and effects", () => {
+test("variable operations retain variable type, initialization, and effects", () => {
   const values = new ValueTable();
-  const cell = new CellRef("i32");
-  const wide = new CellRef("i64");
+  const variable = new VariableRef("i32");
+  const wide = new VariableRef("i64");
   const stored = values.parameter(0, "i32");
   const wideStored = values.parameter(1, "i64");
-  const read = cellRead.create({ cell }, () => values.addNodeOutput());
-  const wideRead = cellRead.create({ cell: wide }, () => values.addNodeOutput64());
-  const write = cellWrite.create({
-    cell,
+  const read = variableRead.create({ variable }, () => values.addNodeOutput());
+  const wideRead = variableRead.create({ variable: wide }, () => values.addNodeOutput64());
+  const write = variableWrite.create({
+    variable,
     value: stored,
     initialization: "seed"
   });
-  const wideWrite = cellWrite.create({
-    cell: wide,
+  const wideWrite = variableWrite.create({
+    variable: wide,
     value: wideStored,
     initialization: "update"
   });
@@ -140,12 +140,12 @@ test("cell operations retain cell type, initialization, and effects", () => {
   deepStrictEqual(read.results, [{ type: "i32" }]);
   deepStrictEqual(wideRead.results, [{ type: "i64" }]);
   deepStrictEqual(read.directEffects, {
-    reads: [{ space: "cell", cell }],
+    reads: [{ space: "variable", variable }],
     writes: []
   });
   deepStrictEqual(write.directEffects, {
     reads: [],
-    writes: [{ space: "cell", cell }]
+    writes: [{ space: "variable", variable }]
   });
   strictEqual(write.initialization, "seed");
   deepStrictEqual(wideWrite.inputs, [{ value: wideStored, type: "i64" }]);

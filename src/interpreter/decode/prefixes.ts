@@ -1,5 +1,5 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { CellRef } from "#compiler/ir/cell.js";
+import { VariableRef } from "#compiler/ir/variable.js";
 import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
 import type { PrefixEffect } from "#core/decoder/model/types.js";
 import { segmentRegisterIndex } from "#core/segments.js";
@@ -7,25 +7,25 @@ import type { RegionBuilder, SwitchControlArm } from "#compiler/ir/builder/regio
 import { InstructionByteStream } from "./stream.js";
 
 export type SegmentOverrideState = Readonly<{
-  present: CellRef;
-  registerIndex: CellRef;
+  present: VariableRef;
+  registerIndex: VariableRef;
 }>;
 
 export class PrefixDecoder {
   readonly segmentOverride: SegmentOverrideState;
   readonly #stream: InstructionByteStream;
-  readonly #flags: CellRef;
-  readonly #firstOpcodeByte: CellRef;
+  readonly #flags: VariableRef;
+  readonly #firstOpcodeByte: VariableRef;
 
   constructor(region: RegionBuilder, stream: InstructionByteStream) {
     const zero = region.values.const(0);
 
     this.#stream = stream;
-    this.#flags = region.cell(zero);
-    this.#firstOpcodeByte = region.cell(zero);
+    this.#flags = region.variable(zero);
+    this.#firstOpcodeByte = region.variable(zero);
     this.segmentOverride = {
-      present: region.cell(zero),
-      registerIndex: region.cell(zero)
+      present: region.variable(zero),
+      registerIndex: region.variable(zero)
     };
   }
 

@@ -3,7 +3,7 @@ import type { CpuException } from "#core/exceptions.js";
 import type { SimpleFlagSource } from "#core/flags/lazy/sources.js";
 import type { X86Flag } from "#core/flags/definitions.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { CellRef } from "#compiler/ir/cell.js";
+import type { VariableRef } from "#compiler/ir/variable.js";
 import type {
   MemoryAccess,
   MemoryDataAccessIntent
@@ -133,7 +133,7 @@ export interface SemanticOps {
 
 export interface LoopSemanticsBuilder extends SemanticOps {}
 
-export type SemanticVar = CellRef<"i32">;
+export type SemanticVar = VariableRef<"i32">;
 export type LoopBody = (builder: LoopSemanticsBuilder, values: ValueBuilder) => ValueInput;
 export type IfBody<TBuilder extends SemanticOps = SemanticsBuilder> = (
   builder: TBuilder,

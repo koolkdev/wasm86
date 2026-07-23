@@ -19,7 +19,7 @@ import { ValueTable } from "#compiler/ir/values/table.js";
 import { functionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/ir/refs.js";
-import { CellRef } from "#compiler/ir/cell.js";
+import { VariableRef } from "#compiler/ir/variable.js";
 import type { Region } from "#compiler/ir/region.js";
 
 test("if control definitions expose their condition, outputs, and nested bodies", () => {
@@ -158,12 +158,12 @@ test("return controls snapshot their result list", () => {
 test("invocation returns expose their argument and callee effects", () => {
   const values = new ValueTable();
   const argument = values.parameter(0, "i32");
-  const cell = new CellRef("i32");
+  const variable = new VariableRef("i32");
   const target = new FunctionDefinition({
     ref: functionRef("test.controls.target"),
     type: functionType(["i32"], ["i32"]),
     effects: {
-      reads: [{ space: "cell", cell }],
+      reads: [{ space: "variable", variable }],
       writes: []
     },
     owner: undefined,

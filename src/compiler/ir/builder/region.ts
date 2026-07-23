@@ -1,12 +1,12 @@
 import { assert } from "#common/assert.js";
-import { CellRef } from "#compiler/ir/cell.js";
+import { VariableRef } from "#compiler/ir/variable.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import {
   IndirectCallTarget,
   Invocation,
   type CallTarget
 } from "#compiler/ir/invocation.js";
-import { cellRead, cellWrite } from "#compiler/ir/operations/cells.js";
+import { variableRead, variableWrite } from "#compiler/ir/operations/variables.js";
 import { callOperation } from "#compiler/ir/operations/call.js";
 import {
   ifControl,
@@ -15,7 +15,7 @@ import {
   returnControl,
   switchControl,
   type BranchHint,
-  type LoopCarriedCell
+  type LoopCarriedValue
 } from "#compiler/ir/controls/index.js";
 import type { Region, RegionNode } from "../region.js";
 import {
@@ -79,19 +79,27 @@ export class RegionBuilder {
     return new RegionBuilder(this.values.childScope(), sink, this.#functionResults);
   }
 
-  cell(seed: ValueId): CellRef {
-    const cell = new CellRef(this.values.valueType(seed));
+  variable(seed: ValueId): VariableRef {
+    const variable = new VariableRef(this.values.valueType(seed));
 
-    this.operation(cellWrite, { cell, value: seed, initialization: "seed" });
-    return cell;
+    this.operation(variableWrite, {
+      variable,
+      value: seed,
+      initialization: "seed"
+    });
+    return variable;
   }
 
-  read(cell: CellRef): ValueId {
-    return this.operation(cellRead, { cell });
+  read(variable: VariableRef): ValueId {
+    return this.operation(variableRead, { variable });
   }
 
-  write(cell: CellRef, value: ValueId): void {
-    this.operation(cellWrite, { cell, value, initialization: "update" });
+  write(variable: VariableRef, value: ValueId): void {
+    this.operation(variableWrite, {
+      variable,
+      value,
+      initialization: "update"
+    });
   }
 
   operation<
@@ -257,7 +265,7 @@ export class RegionBuilder {
     }));
   }
 
-  loop(carried: readonly LoopCarriedCell[], bodyBuild: BuildBody): void {
+  loop(carried: readonly LoopCarriedValue[], bodyBuild: BuildBody): void {
     this.#emit(loopControl.create({ carried, body: this.#childBody(bodyBuild) }));
   }
 

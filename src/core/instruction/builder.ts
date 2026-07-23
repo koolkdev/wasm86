@@ -280,7 +280,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     );
   }
 
-  // Opens a loop: body-written channels become loop-carried cells living in
+  // Opens a loop: body-written channels become loop-carried values held in
   // locals while the body runs. The loop itself falls through; instruction
   // completion remains with the surrounding semantic template.
   loop(scope: SemanticRegionScope, body: LoopBody): void {

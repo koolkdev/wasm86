@@ -13,8 +13,8 @@ import type { Invocation } from "#compiler/ir/invocation.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
 import type {
   CallOperation,
-  CellReadOperation,
-  CellWriteOperation,
+  VariableReadOperation,
+  VariableWriteOperation,
   Operation
 } from "#compiler/ir/operations/index.js";
 import { valueId } from "#compiler/ir/values/id.js";
@@ -25,7 +25,7 @@ import type {
   ValueType,
   WidthBounds
 } from "#compiler/ir/values/types.js";
-import type { CellRef } from "#compiler/ir/cell.js";
+import type { VariableRef } from "#compiler/ir/variable.js";
 import {
   regionCompletes,
   type Region,
@@ -80,7 +80,7 @@ class IrValidator {
   readonly #regionOwners = new Map<Region, RegionOwner | null>();
   readonly #producers = new Map<ValueId, RegionNodeSite>();
   readonly #loopInputs = new Map<ValueId, Region>();
-  readonly #cellSeeds = new Map<CellRef, RegionNodeSite>();
+  readonly #variableSeeds = new Map<VariableRef, RegionNodeSite>();
   readonly #function: FunctionValidation;
   readonly #parameterValues = new Set<ValueId>();
 
@@ -119,7 +119,7 @@ class IrValidator {
     if (node.category === "operation") {
       this.#validateOperationDeclaration(node, site.path);
       this.#indexOperationOutputs(node, site);
-      this.#indexCellDefinition(node, site);
+      this.#indexVariableDefinition(node, site);
       return;
     }
 
@@ -181,9 +181,9 @@ class IrValidator {
       case "call":
         this.#validateCallDeclaration(operation, path);
         return;
-      case "cell.read":
-      case "cell.write":
-        validateCellOperation(operation, path);
+      case "variable.read":
+      case "variable.write":
+        validateVariableOperation(operation, path);
         return;
       case "resource.read":
       case "resource.write":
@@ -366,21 +366,21 @@ class IrValidator {
     });
   }
 
-  // The seed write is the cell's declaration: the body holding it is the
-  // cell's lexical scope, so scoping needs no identity beyond this site.
-  #indexCellDefinition(operation: Operation, site: RegionNodeSite): void {
+  // The seed write is the variable's declaration: the body holding it is the
+  // variable's lexical scope, so scoping needs no identity beyond this site.
+  #indexVariableDefinition(operation: Operation, site: RegionNodeSite): void {
     if (
-      operation.kind !== "cell.write" ||
+      operation.kind !== "variable.write" ||
       operation.initialization !== "seed"
     ) {
       return;
     }
 
     assert(
-      !this.#cellSeeds.has(operation.cell),
-      `${site.path} seeds the same cell more than once`
+      !this.#variableSeeds.has(operation.variable),
+      `${site.path} seeds the same variable more than once`
     );
-    this.#cellSeeds.set(operation.cell, site);
+    this.#variableSeeds.set(operation.variable, site);
   }
 
   #recordProducer(output: ValueId, site: RegionNodeSite): void {
@@ -410,7 +410,7 @@ class IrValidator {
       );
       assert(
         !this.#loopInputs.has(input),
-        `${site.path} reuses loop input ${input} across carried cells or loops`
+        `${site.path} reuses loop input ${input} across carried values or loops`
       );
       this.#loopInputs.set(input, nested.body);
     }
@@ -499,7 +499,7 @@ class IrValidator {
   ): void {
     if (node.category === "operation") {
       this.#validateOperationInputs(node, site);
-      this.#validateCellAccess(node, site);
+      this.#validateVariableAccess(node, site);
       return;
     }
 
@@ -545,25 +545,34 @@ class IrValidator {
     }
   }
 
-  #validateCellAccess(operation: Operation, site: RegionNodeSite): void {
-    if (operation.kind !== "cell.read" && operation.kind !== "cell.write") {
+  #validateVariableAccess(operation: Operation, site: RegionNodeSite): void {
+    if (
+      operation.kind !== "variable.read" &&
+      operation.kind !== "variable.write"
+    ) {
       return;
     }
 
-    const seed = this.#cellSeeds.get(operation.cell);
+    const seed = this.#variableSeeds.get(operation.variable);
 
-    assert(seed !== undefined, `${site.path} uses a cell with no seed in this root`);
-    if (operation.kind === "cell.write" && operation.initialization === "seed") {
+    assert(
+      seed !== undefined,
+      `${site.path} uses a variable with no seed in this root`
+    );
+    if (
+      operation.kind === "variable.write" &&
+      operation.initialization === "seed"
+    ) {
       return;
     }
-    this.#assertCellSeedDominates(seed, site);
+    this.#assertVariableSeedDominates(seed, site);
   }
 
-  #assertCellSeedDominates(seed: RegionNodeSite, use: RegionNodeSite): void {
+  #assertVariableSeedDominates(seed: RegionNodeSite, use: RegionNodeSite): void {
     if (seed.body === use.body) {
       assert(
         seed.nodeIndex < use.nodeIndex,
-        `${use.path} reads or writes a cell before its seed`
+        `${use.path} reads or writes a variable before its seed`
       );
       return;
     }
@@ -573,12 +582,12 @@ class IrValidator {
 
       assert(
         owner !== undefined && owner !== null,
-        `${use.path} uses a cell outside its declaring body or descendants`
+        `${use.path} uses a variable outside its declaring body or descendants`
       );
       if (owner.body === seed.body) {
         assert(
           seed.nodeIndex < owner.nodeIndex,
-          `${use.path} reads or writes a cell before its seed`
+          `${use.path} reads or writes a variable before its seed`
         );
         return;
       }
@@ -596,7 +605,7 @@ class IrValidator {
     assert(loop !== undefined, `${site.path} has a loopContinue outside any loop body`);
     assert(
       updates.length === loop.inputs.length,
-      `${site.path} loopContinue updates do not align with the enclosing loop's carried cells`
+      `${site.path} loopContinue updates do not align with the enclosing loop's carried values`
     );
     for (const [index, update] of updates.entries()) {
       const input = loop.inputs[index];
@@ -828,17 +837,17 @@ function validateOperationResult(result: OperationResult, path: string): void {
   }
 }
 
-function validateCellOperation(
-  operation: CellReadOperation | CellWriteOperation,
+function validateVariableOperation(
+  operation: VariableReadOperation | VariableWriteOperation,
   path: string
 ): void {
   assert(
     operation.referencedResources.length === 0,
-    `${path} cell operation must not require resource bindings`
+    `${path} variable operation must not require resource bindings`
   );
 
   switch (operation.kind) {
-    case "cell.read": {
+    case "variable.read": {
       const result = operation.results[0];
 
       assert(operation.inputs.length === 0, `${path} must not have inputs`);
@@ -847,53 +856,59 @@ function validateCellOperation(
         `${path} must have exactly one result`
       );
       assert(
-        result.type === operation.cell.type,
-        `${path} result type must match its cell`
+        result.type === operation.variable.type,
+        `${path} result type must match its variable`
       );
       assert(
         result.type !== "i32" || result.bounds === undefined,
-        `${path} result must not refine its cell value bounds`
+        `${path} result must not refine its variable value bounds`
       );
       assert(
         operation.directEffects.reads.length === 1 &&
-          isCellAccess(operation.directEffects.reads[0], operation.cell) &&
+          isVariableAccess(
+            operation.directEffects.reads[0],
+            operation.variable
+          ) &&
           operation.directEffects.writes.length === 0,
-        `${path} effects must read its exact cell and write nothing`
+        `${path} effects must read its exact variable and write nothing`
       );
       return;
     }
-    case "cell.write": {
+    case "variable.write": {
       const input = operation.inputs[0];
 
       assert(
         operation.initialization === "seed" ||
           operation.initialization === "update",
-        `${path} has an invalid cell-write initialization`
+        `${path} has an invalid variable-write initialization`
       );
       assert(
         operation.inputs.length === 1 &&
           input !== undefined &&
           input.value === operation.value &&
-          input.type === operation.cell.type,
-        `${path} must have exactly its cell-typed value input`
+          input.type === operation.variable.type,
+        `${path} must have exactly its variable-typed value input`
       );
       assert(operation.results.length === 0, `${path} must not have results`);
       assert(
         operation.directEffects.reads.length === 0 &&
           operation.directEffects.writes.length === 1 &&
-          isCellAccess(operation.directEffects.writes[0], operation.cell),
-        `${path} effects must write its exact cell and read nothing`
+          isVariableAccess(
+            operation.directEffects.writes[0],
+            operation.variable
+          ),
+        `${path} effects must write its exact variable and read nothing`
       );
       return;
     }
   }
 }
 
-function isCellAccess(
+function isVariableAccess(
   access: StorageAccess | undefined,
-  cell: CellRef
+  variable: VariableRef
 ): boolean {
-  return access?.space === "cell" && access.cell === cell;
+  return access?.space === "variable" && access.variable === variable;
 }
 
 function validateIfControlShape(
@@ -1003,7 +1018,7 @@ function validateLoopControlShape(
   for (const [index, carried] of control.carried.entries()) {
     assert(
       block.values.valueType(carried.seed) === block.values.valueType(carried.loopInput),
-      `${path} carried cell ${index} seed and input types do not match`
+      `${path} carried value ${index} seed and input types do not match`
     );
   }
   assertNoDirectEffects(directEffects, path);

@@ -485,7 +485,7 @@ function addExternalEffects(
   target: Set<StorageAccess>
 ): void {
   for (const effect of effects) {
-    if (effect.space !== "cell") {
+    if (effect.space !== "variable") {
       target.add(effect);
     }
   }

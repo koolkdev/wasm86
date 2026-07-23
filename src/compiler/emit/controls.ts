@@ -30,7 +30,7 @@ export function createControlEmitter({
   emitBody: (body: Region, resultLocal?: number) => void;
 }>): (control: Control) => void {
   const frame = createFunctionFrame({ body });
-  // The innermost open loop's actual Wasm locals, aligned with its cells.
+  // The innermost open loop's Wasm locals, aligned with its carried values.
   const loopLocals: (readonly number[])[] = [];
 
   function emitControl(control: Control): void {
@@ -108,10 +108,10 @@ export function createControlEmitter({
   }
 
   function emitLoop(control: LoopControl): void {
-    const carriedLocals = control.carried.map((cell) => {
-      const local = valueEmitter.valueLocal(cell.loopInput);
+    const carriedLocals = control.carried.map((value) => {
+      const local = valueEmitter.valueLocal(value.loopInput);
 
-      valueEmitter.emitUse(cell.seed);
+      valueEmitter.emitUse(value.seed);
       body.localSet(local);
       return local;
     });
@@ -133,9 +133,9 @@ export function createControlEmitter({
     assert(carriedLocals !== undefined, "loopContinue control outside any loop body");
     assert(
       control.updates.length === carriedLocals.length,
-      "loopContinue updates do not align with the loop's cells"
+      "loopContinue updates do not align with the loop's carried values"
     );
-    // Compute every update before overwriting any carried cell.
+    // Compute every update before overwriting any carried local.
     for (const update of control.updates) {
       valueEmitter.emitUse(update);
     }

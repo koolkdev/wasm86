@@ -1,15 +1,15 @@
 import type { CallOperation } from "./call.js";
 import type {
-  CellReadOperation,
-  CellWriteOperation
-} from "./cells.js";
+  VariableReadOperation,
+  VariableWriteOperation
+} from "./variables.js";
 import type {
   ResourceReadOperation,
   ResourceWriteOperation
 } from "./resource.js";
 
 export { callOperation } from "./call.js";
-export { cellRead, cellWrite } from "./cells.js";
+export { variableRead, variableWrite } from "./variables.js";
 export { resourceRead, resourceWrite } from "./resource.js";
 
 export type {
@@ -17,10 +17,10 @@ export type {
   CallOperationArgs
 } from "./call.js";
 export type {
-  CellReadOperation,
-  CellWriteInitialization,
-  CellWriteOperation
-} from "./cells.js";
+  VariableReadOperation,
+  VariableWriteInitialization,
+  VariableWriteOperation
+} from "./variables.js";
 export type {
   OperationBase,
   OperationFactory,
@@ -35,7 +35,7 @@ export type {
 
 export type Operation =
   | CallOperation
-  | CellReadOperation
-  | CellWriteOperation
+  | VariableReadOperation
+  | VariableWriteOperation
   | ResourceReadOperation
   | ResourceWriteOperation;

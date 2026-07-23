@@ -229,39 +229,39 @@ test("call and returnCall share indirect target normalization", () => {
   );
 });
 
-test("cell APIs seed typed cells and preserve lexical access in child bodies", () => {
+test("variable APIs seed typed variables and preserve lexical access in child bodies", () => {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
   const seed = values.const64(7n);
-  const cell = builder.cell(seed);
+  const variable = builder.variable(seed);
   const condition = values.parameter(0, "i32");
   let read!: ValueId;
 
   builder.if(condition, (child) => {
-    child.write(cell, child.values.const64(8n));
-    read = child.read(cell);
+    child.write(variable, child.values.const64(8n));
+    read = child.read(variable);
   });
 
   const block = voidFunction(values, builder, [condition]);
   const seedOperation = block.body.nodes[0];
   const branch = block.body.nodes[1];
 
-  strictEqual(cell.type, "i64");
+  strictEqual(variable.type, "i64");
   strictEqual(values.valueType(read), "i64");
-  ok(seedOperation?.kind === "cell.write");
+  ok(seedOperation?.kind === "variable.write");
   strictEqual(seedOperation.initialization, "seed");
   ok(branch?.kind === "if");
-  strictEqual(branch.thenBody.nodes[0]?.kind, "cell.write");
-  strictEqual(branch.thenBody.nodes[1]?.kind, "cell.read");
+  strictEqual(branch.thenBody.nodes[0]?.kind, "variable.write");
+  strictEqual(branch.thenBody.nodes[1]?.kind, "variable.read");
   doesNotThrow(() => validateIrFunction(block));
 });
 
-test("validation rejects writes whose value type differs from the cell", () => {
+test("validation rejects writes whose value type differs from the variable", () => {
   const values = new ValueTable();
   const builder = new RegionBuilder(values);
-  const cell = builder.cell(values.const(1));
+  const variable = builder.variable(values.const(1));
 
-  builder.write(cell, values.const64(2n));
+  builder.write(variable, values.const64(2n));
 
   throws(
     () => validateIrFunction(voidFunction(values, builder)),
@@ -269,12 +269,12 @@ test("validation rejects writes whose value type differs from the cell", () => {
   );
 });
 
-test("validation rejects a cell access transplanted away from its seed", () => {
+test("validation rejects a variable access transplanted away from its seed", () => {
   const values = new ValueTable();
   const source = new RegionBuilder(values);
-  const cell = source.cell(values.const(1));
+  const variable = source.variable(values.const(1));
 
-  source.read(cell);
+  source.read(variable);
 
   const sourceNodes = source.build().nodes;
   const target = new RegionBuilder(values);
@@ -284,18 +284,18 @@ test("validation rejects a cell access transplanted away from its seed", () => {
 
   throws(
     () => validateIrFunction(voidFunction(values, target)),
-    /uses a cell with no seed in this root/
+    /uses a variable with no seed in this root/
   );
 });
 
-test("a transplanted seed carries its cell's scope with it", () => {
+test("a transplanted seed carries its variable's scope with it", () => {
   // Scope is where the seed is: relocating the whole seed+use sequence into
   // another root is structurally sound, with no stale metadata to desync.
   const values = new ValueTable();
   const source = new RegionBuilder(values);
-  const cell = source.cell(values.const(1));
+  const variable = source.variable(values.const(1));
 
-  source.read(cell);
+  source.read(variable);
 
   const target = new RegionBuilder(values);
 

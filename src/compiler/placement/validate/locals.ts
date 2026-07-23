@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { FunctionAnalysis, SiteId } from "#compiler/analysis/model.js";
-import type { CellRef } from "#compiler/ir/cell.js";
+import type { VariableRef } from "#compiler/ir/variable.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { FunctionGraph } from "#compiler/ir/function.js";
@@ -83,7 +83,7 @@ export function validatePlacementLocals(
     );
   }
 
-  claimCellLocals(analysis, plan, claim);
+  claimVariableLocals(analysis, plan, claim);
 
   for (let left = 0; left < claims.length; left += 1) {
     const a = claims[left]!;
@@ -104,10 +104,10 @@ export function validatePlacementLocals(
   }
 }
 
-// Cells claim through the same lifetime proof as value locals: seed to last
+// Variables claim through the same lifetime proof as value locals: seed to last
 // access, held through any loop an access crosses into. The lifetime is
 // recomputed here independently of the planner's ranges.
-function claimCellLocals(
+function claimVariableLocals(
   analysis: FunctionAnalysis,
   plan: PlacementPlan,
   claim: (
@@ -118,50 +118,56 @@ function claimCellLocals(
     owner: string
   ) => void
 ): void {
-  const seeds = new Map<CellRef, SiteId>();
-  const accesses = new Map<CellRef, SiteId[]>();
+  const seeds = new Map<VariableRef, SiteId>();
+  const accesses = new Map<VariableRef, SiteId[]>();
 
   for (const { operation, site } of analysis.operations()) {
-    if (operation.kind !== "cell.read" && operation.kind !== "cell.write") {
+    if (
+      operation.kind !== "variable.read" &&
+      operation.kind !== "variable.write"
+    ) {
       continue;
     }
-    const sites = accesses.get(operation.cell);
+    const sites = accesses.get(operation.variable);
 
     if (sites === undefined) {
-      accesses.set(operation.cell, [site]);
+      accesses.set(operation.variable, [site]);
     } else {
       sites.push(site);
     }
-    if (operation.kind === "cell.write" && operation.initialization === "seed") {
-      seeds.set(operation.cell, site);
+    if (
+      operation.kind === "variable.write" &&
+      operation.initialization === "seed"
+    ) {
+      seeds.set(operation.variable, site);
     }
   }
 
-  for (const cell of plan.cellLocals.keys()) {
-    assert(accesses.has(cell), "cell local has no referenced cell");
+  for (const variable of plan.variableLocals.keys()) {
+    assert(accesses.has(variable), "variable local has no referenced variable");
   }
 
   let index = 0;
 
-  for (const [cell, sites] of accesses) {
-    const owner = `cell ${index}`;
-    const local = plan.cellLocals.get(cell);
-    const seed = seeds.get(cell);
+  for (const [variable, sites] of accesses) {
+    const owner = `variable ${index}`;
+    const local = plan.variableLocals.get(variable);
+    const seed = seeds.get(variable);
 
     index += 1;
-    assert(local !== undefined, "referenced cell has no local");
+    assert(local !== undefined, "referenced variable has no local");
     assert(seed !== undefined, `${owner} has no seed in this block`);
     claim(
       local,
-      cell.type,
+      variable.type,
       seed,
-      cellLifetimeEnd(analysis, seed, sites, owner),
+      variableLifetimeEnd(analysis, seed, sites, owner),
       owner
     );
   }
 }
 
-function cellLifetimeEnd(
+function variableLifetimeEnd(
   analysis: FunctionAnalysis,
   seed: SiteId,
   accesses: readonly SiteId[],

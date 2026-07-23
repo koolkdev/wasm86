@@ -1,5 +1,5 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { CellRef } from "#compiler/ir/cell.js";
+import { VariableRef } from "#compiler/ir/variable.js";
 import type { EncodedValue } from "#core/decoder/model/types.js";
 import { exceptionExit } from "#core/exits.js";
 import type { BuildExit } from "#core/instruction/terminal.js";
@@ -9,7 +9,7 @@ import type { MemoryAccessConstruction } from "#memory/access.js";
 
 export class InstructionByteStream {
   readonly #instructionStart: ValueId;
-  readonly #cursor: CellRef;
+  readonly #cursor: VariableRef;
   readonly #memory: MemoryAccessConstruction;
   readonly #buildExit: BuildExit;
 
@@ -20,7 +20,7 @@ export class InstructionByteStream {
     buildExit: BuildExit
   ) {
     this.#instructionStart = instructionStart;
-    this.#cursor = region.cell(region.values.const(0));
+    this.#cursor = region.variable(region.values.const(0));
     this.#memory = memory;
     this.#buildExit = buildExit;
   }

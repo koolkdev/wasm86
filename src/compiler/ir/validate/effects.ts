@@ -31,7 +31,7 @@ function validateDeclaredAccesses(
     );
 
     switch (access.space) {
-      case "cell":
+      case "variable":
         break;
       case "resource":
         validateResourceEffect(

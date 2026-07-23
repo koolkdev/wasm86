@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { FunctionAnalysis, SiteId } from "#compiler/analysis/model.js";
-import type { CellRef } from "#compiler/ir/cell.js";
+import type { VariableRef } from "#compiler/ir/variable.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
 import type { FunctionGraph } from "#compiler/ir/function.js";
@@ -8,7 +8,7 @@ import type { PlannedValue } from "./anchors.js";
 
 export type PlannedLocals = Readonly<{
   valueLocals: readonly (number | undefined)[];
-  cellLocals: ReadonlyMap<CellRef, number>;
+  variableLocals: ReadonlyMap<VariableRef, number>;
   localTypes: readonly ValueType[];
 }>;
 
@@ -27,7 +27,7 @@ export function planLocals(
   placements: readonly (PlannedValue | undefined)[]
 ): PlannedLocals {
   const valueLocals = new Array<number | undefined>(block.values.size()).fill(undefined);
-  const cellLocals = new Map<CellRef, number>();
+  const variableLocals = new Map<VariableRef, number>();
   const claims: LocalClaim[] = [];
   let order = 0;
 
@@ -78,58 +78,63 @@ export function planLocals(
     }
   }
 
-  // Cells join the same pooled interval allocation as value temporaries, so
-  // disjoint-lifetime cells share locals instead of accumulating one slot per
-  // cell across a block. A future IR optimization may still remove or fold
-  // accesses before placement without adding cell policy to emission.
-  for (const [cell, lifetime] of cellLifetimes(analysis)) {
+  // Variables join the same pooled interval allocation as value temporaries.
+  // Disjoint-lifetime variables share locals instead of accumulating one slot
+  // per variable across a block.
+  for (const [variable, lifetime] of variableLifetimes(analysis)) {
     claims.push({
-      type: cell.type,
+      type: variable.type,
       start: lifetime.start,
       end: lifetime.end,
       order: order++,
       local: -1,
-      assign(local) { cellLocals.set(cell, local); }
+      assign(local) { variableLocals.set(variable, local); }
     });
   }
 
   return {
     valueLocals,
-    cellLocals,
+    variableLocals,
     localTypes: allocateLocals(claims)
   };
 }
 
-// A cell is live from its seed to its last access, widened across any loop an
-// access crosses into: the back edge makes the stored value live for the whole
-// loop. Seed dominance (IR-validated) makes the seed the range start.
-function cellLifetimes(
+// A variable is live from its seed to its last access, widened across any loop
+// an access crosses into: the back edge makes the stored value live for the
+// whole loop. Seed dominance (IR-validated) makes the seed the range start.
+function variableLifetimes(
   analysis: FunctionAnalysis
-): Map<CellRef, { start: SiteId; end: SiteId }> {
-  const seeds = new Map<CellRef, SiteId>();
-  const accesses: { cell: CellRef; site: SiteId }[] = [];
+): Map<VariableRef, { start: SiteId; end: SiteId }> {
+  const seeds = new Map<VariableRef, SiteId>();
+  const accesses: { variable: VariableRef; site: SiteId }[] = [];
 
   for (const { operation, site } of analysis.operations()) {
-    if (operation.kind !== "cell.read" && operation.kind !== "cell.write") {
+    if (
+      operation.kind !== "variable.read" &&
+      operation.kind !== "variable.write"
+    ) {
       continue;
     }
-    accesses.push({ cell: operation.cell, site });
-    if (operation.kind === "cell.write" && operation.initialization === "seed") {
-      seeds.set(operation.cell, site);
+    accesses.push({ variable: operation.variable, site });
+    if (
+      operation.kind === "variable.write" &&
+      operation.initialization === "seed"
+    ) {
+      seeds.set(operation.variable, site);
     }
   }
 
-  const lifetimes = new Map<CellRef, { start: SiteId; end: SiteId }>();
+  const lifetimes = new Map<VariableRef, { start: SiteId; end: SiteId }>();
 
-  for (const { cell, site } of accesses) {
-    const seed = seeds.get(cell);
+  for (const { variable, site } of accesses) {
+    const seed = seeds.get(variable);
 
-    assert(seed !== undefined, "cell access has no seed in this block");
+    assert(seed !== undefined, "variable access has no seed in this block");
     const end = localLifetimeEnd(analysis, { anchor: seed, lastDemand: site });
-    const lifetime = lifetimes.get(cell);
+    const lifetime = lifetimes.get(variable);
 
     if (lifetime === undefined) {
-      lifetimes.set(cell, { start: seed, end });
+      lifetimes.set(variable, { start: seed, end });
     } else if (end > lifetime.end) {
       lifetime.end = end;
     }

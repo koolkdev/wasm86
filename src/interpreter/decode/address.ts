@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { CellRef } from "#compiler/ir/cell.js";
+import { VariableRef } from "#compiler/ir/variable.js";
 import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
 import type {
   AddressBase,
@@ -69,10 +69,10 @@ export class ModRmAddressDecoder {
   readonly #stateAccess: StateAccess;
   readonly #segmentOverride: SegmentOverrideState;
   readonly #unreachable: (region: RegionBuilder) => void;
-  readonly #addressKind: CellRef;
-  readonly #baseRegisterIndex: CellRef;
-  readonly #offset: CellRef;
-  readonly #segmentIndex: CellRef;
+  readonly #addressKind: VariableRef;
+  readonly #baseRegisterIndex: VariableRef;
+  readonly #offset: VariableRef;
+  readonly #segmentIndex: VariableRef;
 
   constructor(region: RegionBuilder, options: ModRmAddressDecoderOptions) {
     const invalid = region.values.const(-1);
@@ -81,10 +81,10 @@ export class ModRmAddressDecoder {
     this.#stateAccess = options.stateAccess;
     this.#segmentOverride = options.segmentOverride;
     this.#unreachable = options.unreachable;
-    this.#addressKind = region.cell(region.values.const(invalidAddressKind));
-    this.#baseRegisterIndex = region.cell(invalid);
-    this.#offset = region.cell(invalid);
-    this.#segmentIndex = region.cell(invalid);
+    this.#addressKind = region.variable(region.values.const(invalidAddressKind));
+    this.#baseRegisterIndex = region.variable(invalid);
+    this.#offset = region.variable(invalid);
+    this.#segmentIndex = region.variable(invalid);
   }
 
   decode(region: RegionBuilder, modRmByte: ValueId): void {

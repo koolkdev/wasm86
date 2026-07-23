@@ -9,17 +9,17 @@ import {
   TerminalControlBase
 } from "./definition.js";
 
-// One loop-carried local, seeded at loop entry and read inside the body through
+// One loop-carried value, seeded at loop entry and read inside the body through
 // its scoped `loopInput` value.
-export type LoopCarriedCell = Readonly<{
+export type LoopCarriedValue = Readonly<{
   seed: ValueId;
   loopInput: ValueId;
 }>;
 
 // Runs its body until the body falls through. A loopContinue inside the body
-// rewrites the carried cells and takes the back edge.
+// rewrites the carried values and takes the back edge.
 export type LoopControlArgs = Readonly<{
-  carried: readonly LoopCarriedCell[];
+  carried: readonly LoopCarriedValue[];
   body: Region;
 }>;
 
@@ -31,18 +31,18 @@ export class LoopControl extends ControlBase {
   readonly outputs: readonly [] = [];
 
   private constructor(
-    readonly carried: readonly LoopCarriedCell[],
+    readonly carried: readonly LoopCarriedValue[],
     readonly body: Region
   ) {
     super();
-    this.operands = carried.map((cell) => cell.seed);
+    this.operands = carried.map((value) => value.seed);
     this.nestedBodies = [
       {
         body,
         role: "body",
         scope: {
           kind: "loop",
-          inputs: carried.map((cell) => cell.loopInput)
+          inputs: carried.map((value) => value.loopInput)
         }
       }
     ];

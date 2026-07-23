@@ -28,7 +28,7 @@ export type {
   LoopContinueControlArgs
 } from "./loop.js";
 export type {
-  LoopCarriedCell,
+  LoopCarriedValue,
   LoopControl,
   LoopControlArgs
 } from "./loop.js";

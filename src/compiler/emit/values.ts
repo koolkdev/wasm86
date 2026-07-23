@@ -4,7 +4,7 @@ import type {
   RegionSite,
   SiteId
 } from "#compiler/analysis/model.js";
-import type { CellRef } from "#compiler/ir/cell.js";
+import type { VariableRef } from "#compiler/ir/variable.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { PlacementIndex } from "#compiler/placement/index.js";
@@ -142,10 +142,10 @@ export class ValueEmitter {
     return this.#local(local);
   }
 
-  cellLocal(cell: CellRef): number {
-    const local = this.#plan.cellLocals.get(cell);
+  variableLocal(variable: VariableRef): number {
+    const local = this.#plan.variableLocals.get(variable);
 
-    assert(local !== undefined, "cell has no planned local");
+    assert(local !== undefined, "variable has no planned local");
     return this.#local(local);
   }
 

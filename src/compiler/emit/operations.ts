@@ -24,11 +24,11 @@ export function emitOperation(
     case "call":
       emitCall(body, bindings, operation.invocation.target);
       return;
-    case "cell.read":
-      body.localGet(values.cellLocal(operation.cell));
+    case "variable.read":
+      body.localGet(values.variableLocal(operation.variable));
       return;
-    case "cell.write":
-      body.localSet(values.cellLocal(operation.cell));
+    case "variable.write":
+      body.localSet(values.variableLocal(operation.variable));
       return;
     case "resource.read":
       emitResourceRead(body, bindings, operation);

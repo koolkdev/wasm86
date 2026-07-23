@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { CellRef } from "#compiler/ir/cell.js";
+import { VariableRef } from "#compiler/ir/variable.js";
 import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
 import type {
   DecodeCandidate,
@@ -71,8 +71,8 @@ class InterpreterDecoder {
   readonly #options: InterpreterDecodeOptions;
   readonly #stream: InstructionByteStream;
   readonly #prefixes: PrefixDecoder;
-  readonly #memoryFormOrdinal: CellRef;
-  readonly #modRmByte: CellRef;
+  readonly #memoryFormOrdinal: VariableRef;
+  readonly #modRmByte: VariableRef;
   readonly #address: ModRmAddressDecoder;
   readonly #operands: OperandDecoder;
 
@@ -93,8 +93,8 @@ class InterpreterDecoder {
       options.buildExit
     );
     this.#prefixes = new PrefixDecoder(region, this.#stream);
-    this.#memoryFormOrdinal = region.cell(invalidFormOrdinal);
-    this.#modRmByte = region.cell(region.values.const(0x100));
+    this.#memoryFormOrdinal = region.variable(invalidFormOrdinal);
+    this.#modRmByte = region.variable(region.values.const(0x100));
     this.#operands = new OperandDecoder({
       instructionStart,
       stream: this.#stream,

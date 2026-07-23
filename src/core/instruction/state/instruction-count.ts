@@ -8,8 +8,8 @@ type InstructionCountStateSnapshot = Readonly<{
   completed: number;
 }>;
 
-// Folds a run of increments into one add: the count cell holds `base +
-// completed`. Anything that changes the cell outside increment() re-anchors the
+// Folds a run of increments into one add: the count field holds `base +
+// completed`. Anything that changes the field outside increment() re-anchors the
 // fold via #rebase, so a stale base is never reused.
 export class InstructionCountState {
   readonly #state: StateFieldTracker;

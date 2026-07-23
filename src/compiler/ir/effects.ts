@@ -1,8 +1,8 @@
-import type { CellRef } from "#compiler/ir/cell.js";
+import type { VariableRef } from "#compiler/ir/variable.js";
 import type { ByteRange, ResourceEffect } from "./resource.js";
 
 export type StorageAccess =
-  | Readonly<{ space: "cell"; cell: CellRef }>
+  | Readonly<{ space: "variable"; variable: VariableRef }>
   | ResourceEffect;
 
 export type StorageEffects = Readonly<{
@@ -12,13 +12,13 @@ export type StorageEffects = Readonly<{
 
 export const noStorageEffects: StorageEffects = { reads: [], writes: [] };
 
-// Cells alias only their own opaque identity. Resource accesses use their
+// Variables alias only their own opaque identity. Resource accesses use their
 // resource identity plus the region-owned byte-range algebra. Distinct
 // storage spaces never alias.
 export function mayAlias(a: StorageAccess, b: StorageAccess): boolean {
   switch (a.space) {
-    case "cell":
-      return b.space === "cell" && a.cell === b.cell;
+    case "variable":
+      return b.space === "variable" && a.variable === b.variable;
     case "resource":
       return b.space === "resource" && resourceEffectsMayAlias(a, b);
   }
@@ -27,8 +27,9 @@ export function mayAlias(a: StorageAccess, b: StorageAccess): boolean {
 // Is every location in `covered` also in `covering`?
 export function covers(covering: StorageAccess, covered: StorageAccess): boolean {
   switch (covering.space) {
-    case "cell":
-      return covered.space === "cell" && covering.cell === covered.cell;
+    case "variable":
+      return covered.space === "variable" &&
+        covering.variable === covered.variable;
     case "resource":
       return covered.space === "resource" && resourceEffectCovers(covering, covered);
   }

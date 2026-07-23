@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { CellRef } from "#compiler/ir/cell.js";
+import { VariableRef } from "#compiler/ir/variable.js";
 import type {
   DecodeOperand,
   InstructionForm,
@@ -38,14 +38,14 @@ type OperandDecoderOptions = Readonly<{
   instructionStart: ValueId;
   stream: InstructionByteStream;
   segmentOverride: SegmentOverrideState;
-  modRmByte: CellRef;
+  modRmByte: VariableRef;
 }>;
 
 export class OperandDecoder {
   readonly #instructionStart: ValueId;
   readonly #stream: InstructionByteStream;
   readonly #segmentOverride: SegmentOverrideState;
-  readonly #modRmByte: CellRef;
+  readonly #modRmByte: VariableRef;
 
   constructor(options: OperandDecoderOptions) {
     this.#instructionStart = options.instructionStart;

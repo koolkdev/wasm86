@@ -1,5 +1,5 @@
 import type { SiteId } from "#compiler/analysis/model.js";
-import type { CellRef } from "#compiler/ir/cell.js";
+import type { VariableRef } from "#compiler/ir/variable.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
 
 export type ValuePlacement =
@@ -28,7 +28,7 @@ export type PlacementPlan = Readonly<{
   values: readonly (ValuePlacement | undefined)[];
   // Physical plan local -> value type.
   localTypes: readonly ValueType[];
-  // Cells own dedicated physical plan locals; they never share storage with
-  // value temporaries or expose numbering outside placement.
-  cellLocals: ReadonlyMap<CellRef, number>;
+  // Variables have their own mapping into the pooled physical locals. They
+  // never overlap a live value temporary assigned to the same local.
+  variableLocals: ReadonlyMap<VariableRef, number>;
 }>;
