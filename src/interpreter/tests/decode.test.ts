@@ -52,6 +52,18 @@ test("the generated decoder binds ModRM and grouped register forms", () => {
       bytes: [0xc7, 0xc0, 0x78, 0x56, 0x34, 0x12],
       initial: { eax: 0, ebx: 0 },
       expectedEax: 0x1234_5678
+    },
+    {
+      name: "88 binds high-byte ModRM registers",
+      bytes: [0x88, 0xcc],
+      initial: { eax: 0x1122_3344, ecx: 0xaaaa_aa5a },
+      expectedEax: 0x1122_5a44
+    },
+    {
+      name: "8C binds a segment-register source",
+      bytes: [0x8c, 0xe0],
+      initial: { eax: 0xffff_ffff, fsSelector: 0x2468 },
+      expectedEax: 0x2468
     }
   ] as const;
 
@@ -88,6 +100,46 @@ test("the generated decoder binds a SIB index, scale, and displacement", () => {
   strictEqual(state.ecx, 2);
   strictEqual(state.eip, startAddress + 7);
   strictEqual(state.instructionCount, 8);
+});
+
+test("a dynamic ESP base is read after POP increments the stack pointer", () => {
+  const popped = 0x1234_5678;
+  const { exit, state, guestView } = executeInstruction(
+    [0x8f, 0x04, 0x24],
+    createWasmCpuStateSnapshot({
+      esp: 0x100,
+      eip: startAddress,
+      instructionCount: 7
+    }),
+    [{
+      address: 0x100,
+      bytes: [0x78, 0x56, 0x34, 0x12, 0, 0, 0, 0]
+    }]
+  );
+
+  deepStrictEqual(exit, { kind: "instructionLimit" });
+  strictEqual(state.esp, 0x104);
+  strictEqual(state.eip, startAddress + 3);
+  strictEqual(state.instructionCount, 8);
+  strictEqual(guestView.getUint32(0x100, true), popped);
+  strictEqual(guestView.getUint32(0x104, true), popped);
+});
+
+test("the generated decoder binds a segment-register destination", () => {
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0xaaaa_1357,
+    dsSelector: 0x3333,
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const { exit, state } = executeInstruction([0x8e, 0xd8], initialState);
+
+  deepStrictEqual(exit, {
+    kind: "segmentLoad",
+    segment: "ds",
+    selector: 0x1357
+  });
+  deepStrictEqual(state, initialState);
 });
 
 test("the generated decoder composes repeated operand-size prefixes", () => {

@@ -2,9 +2,8 @@ import { assert } from "#common/assert.js";
 import type { MemRef, SegmentRef } from "#core/semantics/refs.js";
 import type { SegmentRegister } from "#core/types.js";
 import type {
-  EffectiveAddressTerms,
-  MemDynamicBaseOperandBinding,
-  MemSegmentBinding,
+  EffectiveAddressComponents,
+  MemAddressSource,
   OperandBinding
 } from "./bindings.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -72,34 +71,27 @@ export class OperandResolver {
   }
 
   isMemory(index: number): boolean {
-    const binding = this.binding(index);
-
-    return binding.kind === "mem" ||
-      binding.kind === "memOffset" ||
-      binding.kind === "memDynamicBase";
+    return this.binding(index).kind === "mem";
   }
 
   segment(index: number): SegmentRef {
     const binding = this.binding(index);
 
-    switch (binding.kind) {
-      case "segment":
-        return { kind: "static", reg: binding.reg };
-      case "segmentDynamic":
-        return {
-          kind: "dynamic",
-          index: binding.index
-        };
-      default:
-        assert(false, `${binding.kind} operand is not a segment register`);
-    }
+    assert(
+      binding.kind === "segment",
+      `${binding.kind} operand is not a segment register`
+    );
+    return binding.selection;
   }
 
   operandUsesDynamicGpr(index: number): boolean {
     const binding = this.binding(index);
 
-    return binding.kind === "regDynamic" ||
-      binding.kind === "memDynamicBase";
+    return binding.kind === "reg"
+      ? binding.selection.kind === "dynamic"
+      : binding.kind === "mem" &&
+          binding.address.kind === "dynamic" &&
+          binding.address.baseRegisterIndex !== undefined;
   }
 }
 
@@ -165,67 +157,64 @@ export class ScopedOperandResolver {
 
   #bindingAddress(binding: OperandBinding): ValueId {
     assert(
-      binding.kind === "mem" ||
-        binding.kind === "memOffset" ||
-        binding.kind === "memDynamicBase",
+      binding.kind === "mem",
       `address of a ${binding.kind} operand binding`
     );
 
-    switch (binding.kind) {
-      case "mem":
-        return this.#effectiveAddress(binding.address);
-      case "memOffset":
-        return binding.offset;
-      case "memDynamicBase":
-        return this.#dynamicBaseAddress(binding);
+    switch (binding.address.kind) {
+      case "static":
+        return this.#effectiveAddress(binding.address.components);
+      case "dynamic":
+        return this.#dynamicAddress(binding.address);
     }
   }
 
   #bindingMemoryReference(index: number, binding: OperandBinding): MemRef {
     assert(
-      binding.kind === "mem" ||
-        binding.kind === "memOffset" ||
-        binding.kind === "memDynamicBase",
+      binding.kind === "mem",
       `memory reference of a ${binding.kind} operand binding`
     );
-
-    switch (binding.kind) {
-      case "mem":
-      case "memOffset":
-      case "memDynamicBase":
-        return this.#memReference(binding.segment, this.address(index));
-    }
+    return {
+      segment: binding.segment,
+      offset: this.address(index)
+    };
   }
 
-  #dynamicBaseAddress(binding: MemDynamicBaseOperandBinding): ValueId {
+  #dynamicAddress(
+    address: Extract<MemAddressSource, { kind: "dynamic" }>
+  ): ValueId {
+    if (address.baseRegisterIndex === undefined) {
+      return address.addend;
+    }
+
     const base = this.#state.gpr.readDynamic(
       this.#access,
-      binding.baseRegisterIndex,
+      address.baseRegisterIndex,
       32
     );
 
     return this.#access.values.binary(
       "add",
       base,
-      binding.offset
+      address.addend
     );
   }
 
-  #effectiveAddress(ea: EffectiveAddressTerms): ValueId {
+  #effectiveAddress(components: EffectiveAddressComponents): ValueId {
     let address: ValueId | undefined;
 
-    if (ea.base !== undefined) {
-      address = this.#state.gpr.read(this.#access, ea.base);
+    if (components.base !== undefined) {
+      address = this.#state.gpr.read(this.#access, components.base);
     }
 
-    if (ea.index !== undefined) {
-      const index = this.#state.gpr.read(this.#access, ea.index);
-      const scaled = ea.scale === 1
+    if (components.index !== undefined) {
+      const index = this.#state.gpr.read(this.#access, components.index);
+      const scaled = components.scale === 1
         ? index
         : this.#access.values.binary(
             "shl",
             index,
-            this.#access.values.const(scaleShift[ea.scale])
+            this.#access.values.const(scaleShift[components.scale])
           );
 
       address = address === undefined
@@ -234,15 +223,15 @@ export class ScopedOperandResolver {
     }
 
     if (address === undefined) {
-      return this.#access.values.const(ea.disp);
+      return this.#access.values.const(components.disp);
     }
 
-    return ea.disp === 0
+    return components.disp === 0
       ? address
       : this.#access.values.binary(
           "add",
           address,
-          this.#access.values.const(ea.disp)
+          this.#access.values.const(components.disp)
         );
   }
 
@@ -257,24 +246,6 @@ export class ScopedOperandResolver {
       this.#state.segments.readBase(this.#access, segment),
       offset
     );
-  }
-
-  #memReference(segment: MemSegmentBinding, offset: ValueId): MemRef {
-    switch (segment.kind) {
-      case "static":
-        return {
-          segment: { kind: "static", reg: segment.reg },
-          offset
-        };
-      case "dynamic":
-        return {
-          segment: {
-            kind: "dynamic",
-            index: segment.index
-          },
-          offset
-        };
-    }
   }
 
   #segmentLinearAddress(segment: SegmentRef, offset: ValueId): ValueId {

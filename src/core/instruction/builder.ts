@@ -29,7 +29,6 @@ import type {
 } from "#memory/access.js";
 import type {
   OperandBinding,
-  SegmentDynamicOperandBinding,
   SegmentOperandBinding
 } from "./bindings.js";
 import { ControlEmitter, type IfOutcome } from "./control.js";
@@ -471,7 +470,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
 
   #writeSegmentSelector(
     scope: SemanticRegionScope,
-    binding: SegmentOperandBinding | SegmentDynamicOperandBinding,
+    binding: SegmentOperandBinding,
     value: ValueInput,
     accessWidth: OperandWidth
   ): void {

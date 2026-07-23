@@ -1,5 +1,5 @@
 import { segmentRegisterIndex } from "#core/segments.js";
-import type { SegmentDynamicOperandBinding, SegmentOperandBinding } from "#core/instruction/bindings.js";
+import type { SegmentOperandBinding } from "#core/instruction/bindings.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { InstructionTerminator } from "./terminal.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
@@ -15,7 +15,7 @@ export function emitSegmentLoad(
   terminator: InstructionTerminator,
   region: RegionBuilder,
   access: BoundStateAccess,
-  binding: SegmentOperandBinding | SegmentDynamicOperandBinding,
+  binding: SegmentOperandBinding,
   selector: ValueId
 ): SegmentWriteOutcome {
   terminator.segmentLoad(
@@ -29,12 +29,12 @@ export function emitSegmentLoad(
 
 function segmentIndex(
   region: RegionBuilder,
-  binding: SegmentOperandBinding | SegmentDynamicOperandBinding
+  binding: SegmentOperandBinding
 ): ValueId {
-  switch (binding.kind) {
-    case "segment":
-      return region.values.const(segmentRegisterIndex(binding.reg));
-    case "segmentDynamic":
-      return binding.index;
+  switch (binding.selection.kind) {
+    case "static":
+      return region.values.const(segmentRegisterIndex(binding.selection.reg));
+    case "dynamic":
+      return binding.selection.index;
   }
 }

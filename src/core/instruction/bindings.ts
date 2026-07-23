@@ -5,145 +5,181 @@ import type {
   SegmentRegister
 } from "#core/types.js";
 
-export type EffectiveAddressTerms = Omit<EffectiveAddress, "segment">;
+export type EffectiveAddressComponents = Omit<EffectiveAddress, "segment">;
+
+export type RegBindingSelection =
+  | Readonly<{
+      kind: "static";
+      reg: RegName;
+    }>
+  | Readonly<{
+      kind: "dynamic";
+      index: ValueId;
+    }>;
 
 export type RegOperandBinding = Readonly<{
   kind: "reg";
-  reg: RegName;
+  selection: RegBindingSelection;
 }>;
-export type RegDynamicOperandBinding = Readonly<{
-  kind: "regDynamic";
-  index: ValueId;
-}>;
+
+export type SegmentBindingSelection =
+  | Readonly<{
+      kind: "static";
+      reg: SegmentRegister;
+    }>
+  | Readonly<{
+      kind: "dynamic";
+      index: ValueId;
+    }>;
+
 export type SegmentOperandBinding = Readonly<{
   kind: "segment";
-  reg: SegmentRegister;
+  selection: SegmentBindingSelection;
 }>;
-export type SegmentDynamicOperandBinding = Readonly<{
-  kind: "segmentDynamic";
-  index: ValueId;
-}>;
+
+export type ImmBindingSource =
+  | Readonly<{
+      kind: "static";
+      value: number;
+    }>
+  | Readonly<{
+      kind: "dynamic";
+      value: ValueId;
+    }>;
+
 export type ImmOperandBinding = Readonly<{
   kind: "imm";
-  value: number;
-}>;
-export type ImmDynamicOperandBinding = Readonly<{
-  kind: "immDynamic";
-  value: ValueId;
+  source: ImmBindingSource;
 }>;
 
-// Memory bindings keep offset calculation separate from segment selection.
-export type StaticMemSegmentBinding = Readonly<{
-  kind: "static";
-  reg: SegmentRegister;
-}>;
-export type DynamicMemSegmentBinding = Readonly<{
-  kind: "dynamic";
-  index: ValueId;
-}>;
-export type MemSegmentBinding =
-  | StaticMemSegmentBinding
-  | DynamicMemSegmentBinding;
+export type MemAddressSource =
+  | Readonly<{
+      // Register selections are static; their contents are read by the
+      // instruction.
+      kind: "static";
+      components: EffectiveAddressComponents;
+    }>
+  | Readonly<{
+      kind: "dynamic";
+      // When present, the selected base is deliberately read by the
+      // instruction.
+      baseRegisterIndex: ValueId | undefined;
+      // Without a base this is the complete offset; otherwise it is index + disp.
+      addend: ValueId;
+    }>;
 
-// All address registers are statically selected and read by the instruction.
 export type MemOperandBinding = Readonly<{
   kind: "mem";
-  address: EffectiveAddressTerms;
-  segment: MemSegmentBinding;
-}>;
-// Decode already computed the complete offset; no GPR read remains.
-export type MemOffsetOperandBinding = Readonly<{
-  kind: "memOffset";
-  offset: ValueId;
-  segment: MemSegmentBinding;
-}>;
-// The base register is selected dynamically and deliberately read inside the
-// instruction; offset contains the already-computed index and displacement.
-export type MemDynamicBaseOperandBinding = Readonly<{
-  kind: "memDynamicBase";
-  baseRegisterIndex: ValueId;
-  offset: ValueId;
-  segment: MemSegmentBinding;
+  address: MemAddressSource;
+  segment: SegmentBindingSelection;
 }>;
 
 export type OperandBinding =
   | RegOperandBinding
-  | RegDynamicOperandBinding
   | SegmentOperandBinding
-  | SegmentDynamicOperandBinding
   | ImmOperandBinding
-  | ImmDynamicOperandBinding
-  | MemOperandBinding
-  | MemOffsetOperandBinding
-  | MemDynamicBaseOperandBinding;
+  | MemOperandBinding;
 
 export function regBinding(reg: RegName): RegOperandBinding {
-  return { kind: "reg", reg };
+  return {
+    kind: "reg",
+    selection: { kind: "static", reg }
+  };
 }
 
 export function regDynamicBinding(
   index: ValueId
-): RegDynamicOperandBinding {
-  return { kind: "regDynamic", index };
+): RegOperandBinding {
+  return {
+    kind: "reg",
+    selection: { kind: "dynamic", index }
+  };
 }
 
 export function segmentBinding(
   reg: SegmentRegister
 ): SegmentOperandBinding {
-  return { kind: "segment", reg };
+  return {
+    kind: "segment",
+    selection: { kind: "static", reg }
+  };
 }
 
 export function segmentDynamicBinding(
   index: ValueId
-): SegmentDynamicOperandBinding {
-  return { kind: "segmentDynamic", index };
+): SegmentOperandBinding {
+  return {
+    kind: "segment",
+    selection: { kind: "dynamic", index }
+  };
 }
 
 export function immBinding(value: number): ImmOperandBinding {
-  return { kind: "imm", value };
+  return {
+    kind: "imm",
+    source: { kind: "static", value }
+  };
 }
 
 export function immDynamicBinding(
   value: ValueId
-): ImmDynamicOperandBinding {
-  return { kind: "immDynamic", value };
+): ImmOperandBinding {
+  return {
+    kind: "imm",
+    source: { kind: "dynamic", value }
+  };
 }
 
 export function memBinding(
-  address: EffectiveAddressTerms,
-  segment: MemSegmentBinding
+  components: EffectiveAddressComponents,
+  segment: SegmentBindingSelection
 ): MemOperandBinding {
-  return { kind: "mem", address, segment };
+  return {
+    kind: "mem",
+    address: { kind: "static", components },
+    segment
+  };
 }
 
 export function memOffsetBinding(
   offset: ValueId,
-  segment: MemSegmentBinding
-): MemOffsetOperandBinding {
-  return { kind: "memOffset", offset, segment };
+  segment: SegmentBindingSelection
+): MemOperandBinding {
+  return {
+    kind: "mem",
+    address: {
+      kind: "dynamic",
+      baseRegisterIndex: undefined,
+      addend: offset
+    },
+    segment
+  };
 }
 
 export function memDynamicBaseBinding(
   baseRegisterIndex: ValueId,
-  offset: ValueId,
-  segment: MemSegmentBinding
-): MemDynamicBaseOperandBinding {
+  addend: ValueId,
+  segment: SegmentBindingSelection
+): MemOperandBinding {
   return {
-    kind: "memDynamicBase",
-    baseRegisterIndex,
-    offset,
+    kind: "mem",
+    address: {
+      kind: "dynamic",
+      baseRegisterIndex,
+      addend
+    },
     segment
   };
 }
 
 export function staticMemSegment(
   reg: SegmentRegister
-): StaticMemSegmentBinding {
+): SegmentBindingSelection {
   return { kind: "static", reg };
 }
 
 export function dynamicMemSegment(
   index: ValueId
-): DynamicMemSegmentBinding {
+): SegmentBindingSelection {
   return { kind: "dynamic", index };
 }

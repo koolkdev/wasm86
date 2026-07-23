@@ -38,7 +38,6 @@ import type {
 } from "#memory/access.js";
 import type {
   OperandBinding,
-  SegmentDynamicOperandBinding,
   SegmentOperandBinding
 } from "./bindings.js";
 import { InstructionMemory } from "./memory.js";
@@ -51,7 +50,7 @@ import { InstructionState } from "./state/state.js";
 import type { StateWriteObserver } from "./state/write-log.js";
 
 type WriteSegmentSelector = (
-  binding: SegmentOperandBinding | SegmentDynamicOperandBinding,
+  binding: SegmentOperandBinding,
   value: ValueInput,
   width: OperandWidth
 ) => void;
@@ -236,7 +235,7 @@ export class ScopedInstructionStorage {
       const binding = this.#operands.binding(target.index);
 
       assert(
-        binding.kind !== "imm" && binding.kind !== "immDynamic",
+        binding.kind !== "imm",
         "an immediate operand is not writable"
       );
     }
@@ -330,49 +329,46 @@ export class ScopedInstructionStorage {
         const binding = this.#operands.binding(storage.index);
 
         switch (binding.kind) {
-          case "imm":
+          case "imm": {
+            const value = binding.source.kind === "static"
+              ? this.#region.values.const(binding.source.value)
+              : binding.source.value;
+
             return this.#region.values.widthAdjusted(
               width,
-              this.#region.values.const(binding.value),
+              value,
               signed
             );
-          case "immDynamic":
-            return this.#region.values.widthAdjusted(
-              width,
-              binding.value,
-              signed
-            );
+          }
           case "reg":
-            return this.#state.gpr.read(
-              this.#access,
-              binding.reg,
-              width,
-              options
-            );
+            return binding.selection.kind === "static"
+              ? this.#state.gpr.read(
+                  this.#access,
+                  binding.selection.reg,
+                  width,
+                  options
+                )
+              : this.#state.gpr.readDynamic(
+                  this.#access,
+                  binding.selection.index,
+                  width,
+                  options
+                );
           case "segment":
-            return this.#state.segments.readSelector(
-              this.#access,
-              binding.reg,
-              width,
-              options
-            );
-          case "regDynamic":
-            return this.#state.gpr.readDynamic(
-              this.#access,
-              binding.index,
-              width,
-              options
-            );
-          case "segmentDynamic":
-            return this.#state.segments.readDynamicSelector(
-              this.#access,
-              binding.index,
-              width,
-              options
-            );
+            return binding.selection.kind === "static"
+              ? this.#state.segments.readSelector(
+                  this.#access,
+                  binding.selection.reg,
+                  width,
+                  options
+                )
+              : this.#state.segments.readDynamicSelector(
+                  this.#access,
+                  binding.selection.index,
+                  width,
+                  options
+                );
           case "mem":
-          case "memOffset":
-          case "memDynamicBase":
             assert(false, "memory operand reached non-memory read");
         }
       }
@@ -396,26 +392,28 @@ export class ScopedInstructionStorage {
 
         switch (binding.kind) {
           case "reg":
-            this.#state.gpr.write(this.#access, binding.reg, value, width);
-            return;
-          case "segment":
-          case "segmentDynamic":
-            this.#writeSegmentSelector(binding, value, width);
-            return;
-          case "regDynamic":
+            if (binding.selection.kind === "static") {
+              this.#state.gpr.write(
+                this.#access,
+                binding.selection.reg,
+                value,
+                width
+              );
+              return;
+            }
             this.#state.gpr.writeDynamic(
               this.#access,
-              binding.index,
+              binding.selection.index,
               width,
               value
             );
             return;
+          case "segment":
+            this.#writeSegmentSelector(binding, value, width);
+            return;
           case "imm":
-          case "immDynamic":
             assert(false, "an immediate operand is not writable");
           case "mem":
-          case "memOffset":
-          case "memDynamicBase":
             assert(false, "memory operand reached non-memory write");
         }
       }

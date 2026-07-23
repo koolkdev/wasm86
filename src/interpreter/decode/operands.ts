@@ -17,8 +17,8 @@ import {
   segmentBinding,
   segmentDynamicBinding,
   staticMemSegment,
-  type MemSegmentBinding,
-  type OperandBinding
+  type OperandBinding,
+  type SegmentBindingSelection
 } from "#core/instruction/bindings.js";
 import { registerAliasByIndex } from "#core/registers.js";
 import { segmentRegisterIndex } from "#core/segments.js";
@@ -181,7 +181,7 @@ export class OperandDecoder {
   #segmentBinding(
     region: RegionBuilder,
     selection: SegmentSelection
-  ): MemSegmentBinding {
+  ): SegmentBindingSelection {
     switch (selection.kind) {
       case "fixed":
         return staticMemSegment(selection.segment);
