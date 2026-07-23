@@ -10,7 +10,7 @@ import {
   PageFaultErrorCode,
   pageFault
 } from "#core/exceptions.js";
-import { X86_32_CORE } from "#core/index.js";
+import { X86_32_CORE } from "#core/isa/x86-32.js";
 import {
   ByteArrayDecodeReader,
   decodeBytes,

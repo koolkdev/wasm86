@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { X86_32_CORE } from "#core/index.js";
+import { X86_32_CORE } from "#core/isa/x86-32.js";
 
 const instructionsById = new Map(
   X86_32_CORE.instructions.map((instruction) => [

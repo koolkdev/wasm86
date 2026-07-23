@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import { X86_32_CORE } from "#core/index.js";
+import { X86_32_CORE } from "#core/isa/x86-32.js";
 import type { InstructionSpec } from "#core/isa/spec.js";
 import {
   operandSizeOverridePrefixByte,
