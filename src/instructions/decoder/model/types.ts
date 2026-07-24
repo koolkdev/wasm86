@@ -1,5 +1,5 @@
 import type { InstructionSpec } from "#instructions/isa/spec.js";
-import type { RepeatPrefix } from "#instructions/prefixes.js";
+import type { RepeatPrefix } from "#instructions/isa/prefixes.js";
 import type {
   EffectiveAddress,
   MemoryOperandWidth,

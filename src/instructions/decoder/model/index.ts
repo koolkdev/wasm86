@@ -6,7 +6,7 @@ import {
   repnePrefixByte,
   repPrefixByte,
   segmentOverridePrefixSegments
-} from "#instructions/prefixes.js";
+} from "#instructions/isa/prefixes.js";
 import { deriveModRmFormSelection } from "./candidates.js";
 import type {
   DecodeCandidate,
