@@ -30,10 +30,6 @@ export class ByteSink {
   }
 
   writeName(name: string): void {
-    if (name.length === 0) {
-      throw new Error("Wasm name must not be empty");
-    }
-
     const bytes = new TextEncoder().encode(name);
     this.writeU32(bytes.length);
     this.writeBytes(bytes);

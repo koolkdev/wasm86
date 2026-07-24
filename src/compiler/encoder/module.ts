@@ -1,4 +1,3 @@
-import { buildDefinition } from "#build";
 import { ByteSink } from "./byte-sink.js";
 import type { EncodedWasmFunctionBody } from "./function-body.js";
 import { wasmInstruction } from "./instructions.js";
@@ -13,7 +12,6 @@ import {
   wasmVersion,
   type WasmFunctionType
 } from "./types.js";
-import { validateModuleDescription } from "./validate.js";
 
 export type WasmFunctionImport = Readonly<{
   moduleName: string;
@@ -67,10 +65,6 @@ export type WasmModuleDescription = Readonly<{
 export function encodeWasmModule(
   description: WasmModuleDescription
 ): Uint8Array<ArrayBuffer> {
-  if (buildDefinition.validation) {
-    validateModuleDescription(description);
-  }
-
   const module = new ByteSink();
 
   module.writeBytes(wasmMagic);
