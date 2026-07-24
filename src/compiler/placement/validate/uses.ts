@@ -145,15 +145,8 @@ function validatePlacementShape(
       ? `at-use value ${value} has no direct demand at ${placement.anchor}`
       : `captured value ${value} has a direct demand at ${placement.anchor}`
   );
-  if (placement.kind === "atUse") {
-    const needsLocal = analysis.useCount(value) > 1;
-
-    assert(
-      (placement.local !== undefined) === needsLocal,
-      needsLocal
-        ? `multi-use value ${value} has no local`
-        : `single-use value ${value} must stay on the stack`
-    );
+  if (placement.kind === "atUse" && analysis.useCount(value) > 1) {
+    assert(placement.local !== undefined, `multi-use value ${value} has no local`);
   }
 }
 

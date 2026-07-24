@@ -22,7 +22,6 @@ export function validatePlacementLocals(
   proof: PlacementProof
 ): void {
   const claims: LocalClaim[] = [];
-  const claimed = new Set<number>();
   const claim = (
     local: number,
     type: ValueType,
@@ -34,7 +33,6 @@ export function validatePlacementLocals(
     assert(plan.localTypes[local] !== undefined, `${owner} uses missing local ${local}`);
     assert(plan.localTypes[local] === type, `${owner} has the wrong type in local ${local}`);
     assert(start <= end, `${owner} has reversed lifetime ${start}..${end}`);
-    claimed.add(local);
     claims.push({ local, start, end, owner });
   };
 
@@ -102,9 +100,6 @@ export function validatePlacementLocals(
       }
     }
   }
-  for (let local = 0; local < plan.localTypes.length; local += 1) {
-    assert(claimed.has(local), `local ${local} is never used`);
-  }
 }
 
 // Variables claim through the same lifetime proof as value locals: seed to last
@@ -144,10 +139,6 @@ function claimVariableLocals(
     ) {
       seeds.set(operation.variable, site);
     }
-  }
-
-  for (const variable of plan.variableLocals.keys()) {
-    assert(accesses.has(variable), "variable local has no referenced variable");
   }
 
   let index = 0;

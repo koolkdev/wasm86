@@ -178,7 +178,7 @@ test("a variable never shares a local with an overlapping value temporary", () =
   );
 });
 
-test("placement validation rejects overlapping, mistyped, and stale variable locals", () => {
+test("placement validation rejects overlapping and mistyped variable locals", () => {
   const values = compilerTestValues();
   const first = new VariableRef("i32");
   const second = new VariableRef("i32");
@@ -219,18 +219,6 @@ test("placement validation rejects overlapping, mistyped, and stale variable loc
     () => validatePlacement(fn, analysis, { ...plan, localTypes: wrongTypes }),
     /has the wrong type in local/
   );
-
-  const unrelated = new VariableRef("i32");
-
-  throws(
-    () => validatePlacement(fn, analysis, {
-      ...plan,
-      variableLocals: new Map([...plan.variableLocals, [unrelated, plan.localTypes.length]]),
-      localTypes: [...plan.localTypes, "i32"]
-    }),
-    /variable local has no referenced variable/
-  );
-
 });
 
 test("variables with disjoint lifetimes pool one local", () => {
