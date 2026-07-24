@@ -23,7 +23,8 @@ import type { FunctionRef, TableRef } from "#compiler/ir/refs.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { MemoryImport, ProgramResources } from "./resources.js";
 import {
-  validateProgramFunctionDeclaration
+  validateDeclaredFunctionEffects,
+  validateFunctionEffectCoverage
 } from "./validate.js";
 
 type ReachableFunction = Readonly<{
@@ -37,6 +38,7 @@ type Declaration = Readonly<{ ref: Ref }>;
 export class DeclarationCollection<T extends Declaration> {
   readonly #ordered: T[] = [];
   readonly #byRef = new Map<T["ref"], T>();
+  readonly #byId = new Map<string, T>();
 
   add(declaration: T): void {
     const { ref } = declaration;
@@ -45,8 +47,13 @@ export class DeclarationCollection<T extends Declaration> {
       !this.#byRef.has(ref),
       `duplicate program ${ref.kind} declaration: ${ref.id}`
     );
+    assert(
+      !this.#byId.has(ref.id),
+      `duplicate program ${ref.kind} identity: ${ref.id}`
+    );
     this.#ordered.push(declaration);
     this.#byRef.set(ref, declaration);
+    this.#byId.set(ref.id, declaration);
   }
 
   get(ref: T["ref"]): T | undefined {
@@ -61,6 +68,8 @@ export class DeclarationCollection<T extends Declaration> {
 export function buildProgram(options: ProgramDeclarations): Program {
   const declaredImports = options.functions.filter(isFunctionImport);
   const roots = options.functions.filter(isFunctionDefinition);
+
+  validateExportTargets(options, roots);
   const declarations = collectFunctionDeclarations(options);
 
   const liveImports = new Set<FunctionImport>();
@@ -80,6 +89,11 @@ export function buildProgram(options: ProgramDeclarations): Program {
   );
   const memoryImports = collectMemoryImports(options.resources, functions);
 
+  if (buildDefinition.validation) {
+    for (const fn of functions) {
+      validateFunctionEffectCoverage(fn, fn.placement.analysis);
+    }
+  }
   const program: ProgramData = {
     functionTypes,
     memoryImports,
@@ -134,6 +148,7 @@ function createProgramFunctions(
 ): readonly ProgramFunction[] {
   return [...reachable].map(([definition, fn]): ProgramFunction => {
     const { body, placement } = fn;
+
     const invocations = liveInvocations(placement.analysis);
     const directFunctions: FunctionRef[] = [];
     const indirectTypes: FunctionType[] = [];
@@ -198,11 +213,7 @@ function declareFunction(
     return;
   }
   if (buildDefinition.validation) {
-    validateProgramFunctionDeclaration(
-      options,
-      declarations.all(),
-      definition
-    );
+    validateDeclaredFunctionEffects(options.resources, definition);
   }
   declarations.add(definition);
 }
@@ -214,6 +225,7 @@ function collectReachableFunctions(
   roots: readonly FunctionDefinition[]
 ): ReadonlyMap<FunctionDefinition, ReachableFunction> {
   const functions = new Map<FunctionDefinition, ReachableFunction>();
+  const tables = new Set(options.tables.map((table) => table.ref));
   const scheduled = new Set<FunctionDefinition>();
   const pending: FunctionDefinition[] = [];
   let next = 0;
@@ -232,12 +244,21 @@ function collectReachableFunctions(
       pending.push(definition);
     }
   };
-  const inspectInvocations = (analysis: FunctionAnalysis): void => {
+  const inspectInvocations = (
+    definition: FunctionDefinition,
+    analysis: FunctionAnalysis
+  ): void => {
     for (const site of analysis.invocations()) {
       const mustExecute = analysis.invocationMustExecute(site);
       const { target } = site.invocation;
 
       if (target.kind !== "direct") {
+        if (mustExecute) {
+          assert(
+            tables.has(target.table),
+            `unknown program table ${target.table.id} used by function ${definition.ref.id}`
+          );
+        }
         continue;
       }
       assert(
@@ -267,10 +288,24 @@ function collectReachableFunctions(
     const placement = placeFunction(body);
 
     functions.set(definition, { body, placement });
-    inspectInvocations(placement.analysis);
+    inspectInvocations(definition, placement.analysis);
   }
 
   return functions;
+}
+
+function validateExportTargets(
+  options: ProgramDeclarations,
+  definitions: readonly FunctionDefinition[]
+): void {
+  const functions = new Set(definitions.map((definition) => definition.ref));
+
+  for (const exported of options.exports) {
+    assert(
+      functions.has(exported.target),
+      `unknown program function ${exported.target.id} exported by ${exported.ref.id}`
+    );
+  }
 }
 
 function resourcesUsedBy(analysis: FunctionAnalysis): readonly ResourceRef[] {

@@ -187,15 +187,19 @@ test("declared resource effects must reference program resources", () => {
 test("program function identities must be unique", () => {
   const program = new ProgramBuilder(emptyResources);
 
-  for (let index = 0; index < 2; index += 1) {
-    program.defineFunction({
+  program.defineFunction({
+    ref: functionRef("test.same-function"),
+    type: voidType,
+    effects: noEffects
+  }, (fn) => fn.return([]));
+  throws(
+    () => program.defineFunction({
       ref: functionRef("test.same-function"),
       type: voidType,
       effects: noEffects
-    }, (fn) => fn.return([]));
-  }
-
-  throws(() => program.finish(), /duplicate program function identity/);
+    }, (fn) => fn.return([])),
+    /duplicate program function identity/
+  );
 });
 
 test("program export names must be unique", () => {
@@ -211,13 +215,14 @@ test("program export names must be unique", () => {
     name: "entry",
     target: fn.ref
   });
-  program.exportFunction({
-    ref: functionExportRef("test.second-export"),
-    name: "entry",
-    target: fn.ref
-  });
-
-  throws(() => program.finish(), /duplicate program export name/);
+  throws(
+    () => program.exportFunction({
+      ref: functionExportRef("test.second-export"),
+      name: "entry",
+      target: fn.ref
+    }),
+    /duplicate program export name/
+  );
 });
 
 test("program export targets use reference identity", () => {
@@ -243,25 +248,29 @@ test("program export targets use reference identity", () => {
 test("function imports require nonempty external names", () => {
   const emptyModule = new ProgramBuilder(emptyResources);
 
-  emptyModule.importFunction({
-    ref: functionRef("test.empty-import-module"),
-    type: voidType,
-    effects: noEffects,
-    moduleName: "",
-    name: "host"
-  });
-  throws(() => emptyModule.finish(), /empty external module name/);
+  throws(
+    () => emptyModule.importFunction({
+      ref: functionRef("test.empty-import-module"),
+      type: voidType,
+      effects: noEffects,
+      moduleName: "",
+      name: "host"
+    }),
+    /empty external module name/
+  );
 
   const emptyField = new ProgramBuilder(emptyResources);
 
-  emptyField.importFunction({
-    ref: functionRef("test.empty-import-field"),
-    type: voidType,
-    effects: noEffects,
-    moduleName: "host",
-    name: ""
-  });
-  throws(() => emptyField.finish(), /empty external field name/);
+  throws(
+    () => emptyField.importFunction({
+      ref: functionRef("test.empty-import-field"),
+      type: voidType,
+      effects: noEffects,
+      moduleName: "host",
+      name: ""
+    }),
+    /empty external field name/
+  );
 });
 
 test("function import external names must be unique", () => {
@@ -274,16 +283,14 @@ test("function import external names must be unique", () => {
     moduleName: "host",
     name: "shared"
   });
-  program.importFunction({
-    ref: functionRef("test.second-import"),
-    type: voidType,
-    effects: noEffects,
-    moduleName: "host",
-    name: "shared"
-  });
-
   throws(
-    () => program.finish(),
+    () => program.importFunction({
+      ref: functionRef("test.second-import"),
+      type: voidType,
+      effects: noEffects,
+      moduleName: "host",
+      name: "shared"
+    }),
     /duplicate .*external identity: host\.shared/
   );
 });
@@ -291,16 +298,14 @@ test("function import external names must be unique", () => {
 test("memory and function imports share one external-name namespace", () => {
   const program = new ProgramBuilder(effectResources);
 
-  program.importFunction({
-    ref: functionRef("test.cross-kind-import"),
-    type: voidType,
-    effects: noEffects,
-    moduleName: effectMemory.moduleName,
-    name: effectMemory.name
-  });
-
   throws(
-    () => program.finish(),
+    () => program.importFunction({
+      ref: functionRef("test.cross-kind-import"),
+      type: voidType,
+      effects: noEffects,
+      moduleName: effectMemory.moduleName,
+      name: effectMemory.name
+    }),
     /duplicate .*external identity: test\.effectMemory/
   );
 });
@@ -339,27 +344,25 @@ test("generated and declared functions share one identity namespace", () => {
 test("table limits must describe a valid Wasm table", () => {
   const negativeMinimum = new ProgramBuilder(emptyResources);
 
-  negativeMinimum.importTable({
-    ref: tableRef("test.negative-minimum"),
-    moduleName: "test",
-    name: "negativeMinimum",
-    limits: { minElements: -1 }
-  });
   throws(
-    () => negativeMinimum.finish(),
+    () => negativeMinimum.importTable({
+      ref: tableRef("test.negative-minimum"),
+      moduleName: "test",
+      name: "negativeMinimum",
+      limits: { minElements: -1 }
+    }),
     /minimum elements out of range/
   );
 
   const invertedRange = new ProgramBuilder(emptyResources);
 
-  invertedRange.importTable({
-    ref: tableRef("test.inverted-range"),
-    moduleName: "test",
-    name: "invertedRange",
-    limits: { minElements: 2, maxElements: 1 }
-  });
   throws(
-    () => invertedRange.finish(),
+    () => invertedRange.importTable({
+      ref: tableRef("test.inverted-range"),
+      moduleName: "test",
+      name: "invertedRange",
+      limits: { minElements: 2, maxElements: 1 }
+    }),
     /maximum elements are below its minimum/
   );
 });

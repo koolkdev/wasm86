@@ -30,42 +30,25 @@ function moduleDescription(
 ): WasmModuleDescription {
   return {
     functionTypes: layout.types.map(encodeFunctionType),
-    functionImports: program.functionImports.map((imported, index) => {
-      assertIndex(layout.functionIndices, imported.ref, index, "function import");
-      return {
-        moduleName: imported.moduleName,
-        name: imported.name,
-        typeIndex: requireTypeIndex(layout, imported.type)
-      };
-    }),
-    memoryImports: program.memoryImports.map((memory, index) => {
-      assertIndex(layout.memoryIndices, memory.ref, index, "memory import");
-      return {
-        moduleName: memory.moduleName,
-        name: memory.name,
-        limits: memory.limits
-      };
-    }),
-    tableImports: program.tables.map((table, index) => {
-      assertIndex(layout.tableIndices, table.ref, index, "table import");
-      return {
-        moduleName: table.moduleName,
-        name: table.name,
-        limits: table.limits
-      };
-    }),
-    functions: program.functions.map((fn, index) => {
-      assertIndex(
-        layout.functionIndices,
-        fn.ref,
-        program.functionImports.length + index,
-        "defined function"
-      );
-      return {
-        typeIndex: requireTypeIndex(layout, fn.type),
-        body: emitProgramFunction(layout, fn)
-      };
-    }),
+    functionImports: program.functionImports.map((imported) => ({
+      moduleName: imported.moduleName,
+      name: imported.name,
+      typeIndex: requireTypeIndex(layout, imported.type)
+    })),
+    memoryImports: program.memoryImports.map((memory) => ({
+      moduleName: memory.moduleName,
+      name: memory.name,
+      limits: memory.limits
+    })),
+    tableImports: program.tables.map((table) => ({
+      moduleName: table.moduleName,
+      name: table.name,
+      limits: table.limits
+    })),
+    functions: program.functions.map((fn) => ({
+      typeIndex: requireTypeIndex(layout, fn.type),
+      body: emitProgramFunction(layout, fn)
+    })),
     globals: [],
     functionExports: layout.functionExports.map((exported) => ({
       name: exported.name,
@@ -115,17 +98,6 @@ function encodeValueType(type: FunctionType["parameters"][number]): WasmValueTyp
 
 function requireTypeIndex(layout: ModuleLayout, type: FunctionType): number {
   return requireIndex(layout.typeIndices, type, "function type");
-}
-
-function assertIndex<Key>(
-  indices: ReadonlyMap<Key, number>,
-  key: Key,
-  expected: number,
-  label: string
-): void {
-  const actual = requireIndex(indices, key, label);
-
-  assert(actual === expected, `unexpected ${label} index: ${actual}`);
 }
 
 function requireIndex<Key>(
