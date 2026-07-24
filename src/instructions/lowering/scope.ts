@@ -11,6 +11,7 @@ export type SemanticScopeOutcome<T> =
 export class SemanticRegionScope {
   readonly region: RegionBuilder;
   readonly kind: SemanticScopeKind;
+  readonly insideLoop: boolean;
   readonly operands: OperandScope;
   readonly #parent: SemanticRegionScope | undefined;
   readonly #completion = Symbol("semanticScopeComplete");
@@ -25,6 +26,7 @@ export class SemanticRegionScope {
   ) {
     this.region = region;
     this.kind = kind;
+    this.insideLoop = kind === "loop" || (parent?.insideLoop ?? false);
     this.#parent = parent;
     this.operands = new OperandScope(parent?.operands);
     this.#wroteMemory = parent?.wroteMemory() ?? false;

@@ -14,8 +14,6 @@ import { regionCompletes, type Region } from "#compiler/ir/region.js";
 import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { type InstructionStateChannel } from "./state/channels.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { LoopSemanticsBuilderImpl } from "./loop.js";
-import type { OperandResolver } from "./operand-resolver.js";
 import type {
   SemanticRegionScope,
   SemanticScopeStack
@@ -44,20 +42,17 @@ export class ControlEmitter {
   readonly #writeLog: StateWriteLog;
   readonly #scopes: SemanticScopeStack;
   readonly #bindScope: (scope: SemanticRegionScope) => SemanticsBuilder;
-  readonly #operands: OperandResolver;
 
   constructor(
     state: InstructionState,
     writeLog: StateWriteLog,
     scopes: SemanticScopeStack,
-    bindScope: (scope: SemanticRegionScope) => SemanticsBuilder,
-    operands: OperandResolver
+    bindScope: (scope: SemanticRegionScope) => SemanticsBuilder
   ) {
     this.#state = state;
     this.#writeLog = writeLog;
     this.#scopes = scopes;
     this.#bindScope = bindScope;
-    this.#operands = operands;
   }
 
   if(
@@ -119,12 +114,9 @@ export class ControlEmitter {
     finish: (condition: ValueId) => T
   ): T {
     return this.#scopes.enter(parentScope, "loop", region, (scope) => {
-      const loopBuilder = new LoopSemanticsBuilderImpl({
-        host: this.#bindScope(scope),
-        state: this.#state,
-        operands: this.#operands
-      });
-      const outcome = scope.run(() => body(loopBuilder, region.values));
+      const outcome = scope.run(() => (
+        body(this.#bindScope(scope), region.values)
+      ));
 
       assert(outcome.kind === "fallthrough", "a loop body must not terminate the instruction");
       scope.commitMemoryWrites();

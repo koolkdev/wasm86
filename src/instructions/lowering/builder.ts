@@ -130,8 +130,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
       this.#storage.state,
       stateWriteLog,
       this.#scopes,
-      (scope) => this.#semantics(scope),
-      this.#storage.operands
+      (scope) => this.#semantics(scope)
     );
     this.#terminator = new InstructionTerminator(
       this.#storage.state,
@@ -321,7 +320,13 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
       writeSegmentSelector: (binding, value, width) =>
         this.#writeSegmentSelector(scope, binding, value, width)
     });
-    const semantics = new InstructionSemantics(this, scope, storage);
+    const semantics = new InstructionSemantics({
+      session: this,
+      scope,
+      storage,
+      state: this.#storage.state,
+      operands: this.#storage.operands
+    });
 
     this.#scopeStorage.set(scope, storage);
     this.#scopeSemantics.set(scope, semantics);
@@ -453,7 +458,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     assert(accessWidth === 16, `${accessWidth}-bit set to a segment selector`);
     assert(!scope.isTerminated(), "the semantic scope is already terminated");
     // Also what keeps segment reads hoistable out of loop bodies.
-    assert(scope.kind !== "loop", "a segment load inside a loop body is unsupported");
+    assert(!scope.insideLoop, "a segment load inside a loop body is unsupported");
     assert(scope.kind === "root", "a segment load inside a semantic if arm is unsupported");
 
     const outcome = emitSegmentLoad(

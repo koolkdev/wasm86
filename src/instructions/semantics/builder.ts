@@ -121,24 +121,33 @@ export interface SemanticOps {
   readFlag(flag: X86Flag): Value;
   writeStatusFlagsSource(source: SimpleFlagSource): void;
   condition(cc: ConditionCode): Value;
-  if(condition: ValueInput, thenBuild: IfBody, hint?: SemanticBranchHint): void;
-  ifElse(
-    condition: ValueInput,
-    thenBuild: IfBody,
-    elseBuild: IfBody,
-    hint?: SemanticBranchHint
-  ): void;
   cpuException(exception: CpuException<ValueInput>): void;
 }
 
-export interface LoopSemanticsBuilder extends SemanticOps {}
-
 export type SemanticVar = VariableRef<"i32">;
-export type LoopBody = (builder: LoopSemanticsBuilder, values: ValueBuilder) => ValueInput;
 export type IfBody<TBuilder extends SemanticOps = SemanticsBuilder> = (
   builder: TBuilder,
   values: ValueBuilder
 ) => void;
+
+export interface LoopSemanticsBuilder extends SemanticOps {
+  if(
+    condition: ValueInput,
+    thenBuild: IfBody<LoopSemanticsBuilder>,
+    hint?: SemanticBranchHint
+  ): void;
+  ifElse(
+    condition: ValueInput,
+    thenBuild: IfBody<LoopSemanticsBuilder>,
+    elseBuild: IfBody<LoopSemanticsBuilder>,
+    hint?: SemanticBranchHint
+  ): void;
+}
+
+export type LoopBody = (
+  builder: LoopSemanticsBuilder,
+  values: ValueBuilder
+) => ValueInput;
 
 export type SemanticTemplate = (
   builder: SemanticsBuilder,
@@ -153,6 +162,13 @@ export interface SemanticsBuilder extends SemanticOps {
   writeFlag(flag: X86Flag, value: ValueInput): void;
   addInstructionCount(amount: ValueInput): void;
 
+  if(condition: ValueInput, thenBuild: IfBody, hint?: SemanticBranchHint): void;
+  ifElse(
+    condition: ValueInput,
+    thenBuild: IfBody,
+    elseBuild: IfBody,
+    hint?: SemanticBranchHint
+  ): void;
   jump(target: TargetInput): void;
   loop(body: LoopBody): void;
   hostTrap(vector: ValueInput): void;

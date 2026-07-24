@@ -1,6 +1,10 @@
+import { assert } from "#common/assert.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
-import type { X86Flag } from "#core/flags/definitions.js";
+import {
+  isX86StatusFlag,
+  type X86Flag
+} from "#core/flags/definitions.js";
 import type { SimpleFlagSource } from "#core/flags/lazy/sources.js";
 import type {
   IfBody,
@@ -24,12 +28,13 @@ import type {
   ValueInput
 } from "#instructions/semantics/refs.js";
 import type { RegName } from "#core/types.js";
+import type { OperandResolver } from "./operand-resolver.js";
 import type { SemanticRegionScope } from "./scope.js";
+import type { InstructionState } from "./state/state.js";
 import type { ScopedInstructionStorage } from "./storage.js";
 
 // Lifecycle operations supplied by the instruction session. The semantic
-// facade adds no transaction policy of its own; it fixes these operations and
-// storage to one lexical scope.
+// facade fixes these operations and storage to one lexical scope.
 export interface InstructionSemanticsSession {
   assertActive(scope: SemanticRegionScope): void;
   currentEip(): Value;
@@ -62,21 +67,29 @@ export class InstructionSemantics implements SemanticsBuilder {
   readonly #session: InstructionSemanticsSession;
   readonly #scope: SemanticRegionScope;
   readonly #storage: ScopedInstructionStorage;
+  readonly #state: InstructionState;
+  readonly #operands: OperandResolver;
   readonly memory: SemanticMemoryOps;
 
-  constructor(
-    session: InstructionSemanticsSession,
-    scope: SemanticRegionScope,
-    storage: ScopedInstructionStorage
-  ) {
-    this.#session = session;
-    this.#scope = scope;
-    this.#storage = storage;
+  constructor(context: Readonly<{
+    session: InstructionSemanticsSession;
+    scope: SemanticRegionScope;
+    storage: ScopedInstructionStorage;
+    state: InstructionState;
+    operands: OperandResolver;
+  }>) {
+    this.#session = context.session;
+    this.#scope = context.scope;
+    this.#storage = context.storage;
+    this.#state = context.state;
+    this.#operands = context.operands;
     this.memory = {
       reference: (segment, offset) =>
         this.#active().memory.reference(segment, offset),
-      operand: (operandRef, addressOffset) =>
-        this.#active().memory.operand(operandRef, addressOffset),
+      operand: (operandRef, addressOffset) => {
+        this.#assertOperandSupported(operandRef);
+        return this.#active().memory.operand(operandRef, addressOffset);
+      },
       guard: (options) => this.#active().memory.guard(options),
       resolve: (options) => this.#active().memory.resolve(options),
       read: (reference, options) =>
@@ -103,6 +116,7 @@ export class InstructionSemantics implements SemanticsBuilder {
   }
 
   segment(operandRef: OperandInput): SegmentRef {
+    this.#assertOperandSupported(operandRef);
     return this.#active().segment(operandRef);
   }
 
@@ -115,6 +129,7 @@ export class InstructionSemantics implements SemanticsBuilder {
   }
 
   read(source: StorageInput, options: SemanticReadOptions): Value {
+    this.#assertStorageSupported(source);
     return this.#active().read(source, options);
   }
 
@@ -123,6 +138,7 @@ export class InstructionSemantics implements SemanticsBuilder {
     value: ValueInput,
     options: SemanticWriteOptions
   ): void {
+    this.#assertStorageSupported(target);
     this.#active().write(target, value, options);
   }
 
@@ -130,6 +146,7 @@ export class InstructionSemantics implements SemanticsBuilder {
     target: StorageInput,
     options: SemanticWriteOptions
   ): SemanticUpdate {
+    this.#assertStorageSupported(target);
     return this.#active().update(target, options);
   }
 
@@ -138,10 +155,17 @@ export class InstructionSemantics implements SemanticsBuilder {
   }
 
   address(operandRef: OperandInput): Value {
+    this.#assertOperandSupported(operandRef);
     return this.#active().address(operandRef);
   }
 
   readFlag(flag: X86Flag): Value {
+    assert(
+      !this.#scope.insideLoop ||
+        !isX86StatusFlag(flag) ||
+        !this.#state.statusFlags.isInputBacked(flag),
+      "input-backed status flag reads inside a loop body are unsupported"
+    );
     return this.#active().readFlag(flag);
   }
 
@@ -154,6 +178,11 @@ export class InstructionSemantics implements SemanticsBuilder {
   }
 
   condition(cc: ConditionCode): Value {
+    assert(
+      !this.#scope.insideLoop ||
+        !this.#state.statusFlags.conditionReadsInputFlags(cc),
+      "input-backed conditions inside a loop body are unsupported"
+    );
     return this.#active().condition(cc);
   }
 
@@ -199,5 +228,24 @@ export class InstructionSemantics implements SemanticsBuilder {
   #active(): ScopedInstructionStorage {
     this.#session.assertActive(this.#scope);
     return this.#storage;
+  }
+
+  #assertStorageSupported(storage: StorageInput): void {
+    if (!this.#scope.insideLoop || storage.kind !== "operand") {
+      return;
+    }
+
+    assert(
+      !this.#operands.operandUsesDynamicGpr(storage.index),
+      "dynamic register operands inside a loop body are unsupported"
+    );
+  }
+
+  #assertOperandSupported(operandRef: OperandInput): void {
+    assert(
+      !this.#scope.insideLoop ||
+        !this.#operands.operandUsesDynamicGpr(operandRef.index),
+      "dynamic register operands inside a loop body are unsupported"
+    );
   }
 }

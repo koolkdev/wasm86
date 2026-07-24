@@ -147,6 +147,28 @@ test("scratch analysis conservatively retains writes from a folded final arm", (
   assertCarries(block, loopIn(block), [gprChannel("ebx")]);
 });
 
+test("input-backed flag reads stay rejected in nested loop arms", () => {
+  throws(
+    () => buildInstructionFunction((builder) => {
+      builder.add(
+        (s) => {
+          s.loop((loop, values) => {
+            const condition = loop.read(loop.reg("eax"), { width: 32 });
+
+            loop.if(condition, (arm) => {
+              arm.readFlag("CF");
+            });
+            return values.const(0);
+          });
+        },
+        [],
+        loc(repEip, repNextEip)
+      );
+    }),
+    /input-backed status flag reads inside a loop body/
+  );
+});
+
 test("loop analysis derives register and lazy-flag carries", () => {
   {
     const block = buildInstructionFunction((builder) => {
