@@ -1,4 +1,4 @@
-import { emitModule } from "#compiler/emit/module.js";
+import { emitModule } from "#compiler/lowering/module.js";
 import type { FunctionRef } from "#compiler/ir/refs.js";
 import { layoutProgram } from "#compiler/module/layout.js";
 import type { FunctionExportRef } from "#compiler/program/exports.js";
