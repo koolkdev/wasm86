@@ -18,6 +18,10 @@ import {
   type PhysicalAccessOperations,
   type PhysicalAddressSpaceDefinition
 } from "./physical.js";
+import {
+  createVirtualStorageDefinition,
+  type VirtualStorageDefinition
+} from "./virtual/storage.js";
 
 export type LinearRange = Readonly<{
   start: ValueId;
@@ -95,6 +99,7 @@ export type BoundMemory = Readonly<{
 
 export type MemoryDefinition = Readonly<{
   physical: PhysicalAddressSpaceDefinition;
+  virtualStorage: VirtualStorageDefinition;
   resources: readonly MemoryImport[];
   access: MemoryAccessConstruction;
   effects: StorageEffects;
@@ -105,10 +110,12 @@ export type MemoryDefinition = Readonly<{
 
 export function createMemoryDefinition(): MemoryDefinition {
   const physical = createPhysicalAddressSpaceDefinition();
+  const virtualStorage = createVirtualStorageDefinition();
 
   return {
     physical,
-    resources: physical.resources,
+    virtualStorage,
+    resources: [...physical.resources, ...virtualStorage.resources],
     access: {
       bind: (region) => new FlatMemoryAccessBuilder(
         physical.access.bind(region),

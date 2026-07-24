@@ -12,6 +12,15 @@ test("execution model composes owner-provided definitions", () => {
       model.memory.physical.ramImport
     )
   );
+  ok(
+    model.resources.memoryImports.includes(
+      model.memory.virtualStorage.machineImport
+    )
+  );
+  strictEqual(
+    model.memory.virtualStorage.machineImport.ref,
+    model.memory.virtualStorage.machineResource
+  );
   strictEqual(model.cpuState.memoryImport.limits.minPages, 1);
   strictEqual(model.memory.physical.ramImport.limits.minPages, 1);
 });
@@ -29,6 +38,10 @@ test("execution models use distinct symbolic resource identities", () => {
   notStrictEqual(
     first.memory.physical.access,
     second.memory.physical.access
+  );
+  notStrictEqual(
+    first.memory.virtualStorage.machineResource,
+    second.memory.virtualStorage.machineResource
   );
   notStrictEqual(first.memory.access, second.memory.access);
   strictEqual(
