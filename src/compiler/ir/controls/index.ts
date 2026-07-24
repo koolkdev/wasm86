@@ -1,12 +1,16 @@
-import { ifControl, type IfControl } from "./if.js";
+import { ifControl } from "./if.js";
 import {
   loopContinueControl,
-  loopControl,
-  type LoopContinueControl,
-  type LoopControl
+  loopControl
 } from "./loop.js";
-import { returnControl, type ReturnControl } from "./return.js";
-import { switchControl, type SwitchControl } from "./switch.js";
+import { returnControl } from "./return.js";
+import { switchControl } from "./switch.js";
+import type {
+  ControlCompletionContext,
+  ControlDefinition,
+  DerivedControlDescription
+} from "./definition.js";
+import type { Region } from "../region.js";
 
 export {
   ifControl,
@@ -17,7 +21,10 @@ export {
 };
 export type {
   BranchHint,
-  ControlBase
+  ControlCompletionContext,
+  ControlDefinition,
+  ControlNodeBase,
+  DerivedControlDescription
 } from "./definition.js";
 export type {
   IfControl,
@@ -44,13 +51,84 @@ export {
   type SwitchControlArgs
 } from "./switch.js";
 
-export type StructuredControl =
-  | IfControl
-  | SwitchControl
-  | LoopControl;
+const declaredControlDefinitions = {
+  if: ifControl,
+  switch: switchControl,
+  loop: loopControl,
+  loopContinue: loopContinueControl,
+  return: returnControl
+} as const;
 
-export type TerminalControl =
-  | LoopContinueControl
-  | ReturnControl;
+type DeclaredControlDefinition = (
+  typeof declaredControlDefinitions
+)[keyof typeof declaredControlDefinitions];
 
-export type Control = StructuredControl | TerminalControl;
+type ControlDefinitions = {
+  [
+    Definition in DeclaredControlDefinition as Definition["kind"]
+  ]: Definition;
+};
+
+const controlDefinitions: ControlDefinitions = declaredControlDefinitions;
+
+type ControlKind = keyof ControlDefinitions;
+
+type ControlsByKind = {
+  [Kind in ControlKind]: ReturnType<
+    ControlDefinitions[Kind]["create"]
+  >;
+};
+
+export type Control = ControlsByKind[ControlKind];
+
+type ControlMechanisms = {
+  [Kind in ControlKind]: Pick<
+    ControlDefinition<unknown, ControlsByKind[Kind]>,
+    "describe" | "mapBodies" | "completes"
+  >;
+};
+
+const controlMechanisms: ControlMechanisms = controlDefinitions;
+
+export function describeControl(
+  control: Control
+): DerivedControlDescription {
+  return describeControlKind(control.kind, control);
+}
+
+export function mapControlBodies(
+  control: Control,
+  map: (body: Region) => Region
+): Control {
+  return mapControlBodiesKind(control.kind, control, map);
+}
+
+export function controlCompletes(
+  control: Control,
+  context: ControlCompletionContext
+): boolean {
+  return controlKindCompletes(control.kind, control, context);
+}
+
+function describeControlKind<Kind extends ControlKind>(
+  kind: Kind,
+  control: ControlsByKind[Kind]
+): DerivedControlDescription {
+  return controlMechanisms[kind].describe(control);
+}
+
+function mapControlBodiesKind<Kind extends ControlKind>(
+  kind: Kind,
+  control: ControlsByKind[Kind],
+  map: (body: Region) => Region
+): ControlsByKind[Kind] {
+  return controlMechanisms[kind].mapBodies(control, map);
+}
+
+function controlKindCompletes<Kind extends ControlKind>(
+  kind: Kind,
+  control: ControlsByKind[Kind],
+  context: ControlCompletionContext
+): boolean {
+  return controlMechanisms[kind].completes(control, context);
+}

@@ -1,6 +1,9 @@
 import { assert } from "#common/assert.js";
+import type {
+  StorageAccess,
+  StorageEffects
+} from "#compiler/ir/effects.js";
 import {
-  DynamicByteOriginRef,
   type ByteRange,
   type ResourceEffect,
   type ResourceReadMode
@@ -10,6 +13,14 @@ import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { WidthBounds } from "#compiler/ir/values/types.js";
 
 const resourceByteLength = 0x1_0000_0000;
+
+export function validateStorageEffectRanges(
+  effects: StorageEffects,
+  label: string
+): void {
+  validateAccessRanges(effects.reads, "read", label);
+  validateAccessRanges(effects.writes, "write", label);
+}
 
 export function validateResourceOperation(
   operation: ResourceOperation,
@@ -23,16 +34,11 @@ export function validateResourceOperation(
   const displacement = operand.address.displacement;
 
   assert(
-    width === 8 || width === 16 || width === 32,
-    `${label} width must be 8, 16, or 32, got ${String(width)}`
-  );
-  assert(
     Number.isInteger(displacement) &&
       displacement >= 0 &&
       displacement <= 0xffff_ffff,
     `${label} address displacement must be an unsigned 32-bit integer, got ${displacement}`
   );
-  validateResourceEffect(effect, label);
 
   if (effect.range.slice !== undefined) {
     const transferByteLength = width / 8;
@@ -52,17 +58,25 @@ export function validateResourceOperation(
   }
 }
 
-export function validateResourceEffect(effect: ResourceEffect, label: string): void {
-  assert(effect !== undefined && effect !== null, `${label} is missing its resource effect`);
-  assert(effect.space === "resource", `${label} effect must use resource space`);
-  assert(
-    effect.resource !== undefined &&
-      effect.resource.kind === "resource" &&
-      typeof effect.resource.id === "string" &&
-      effect.resource.id.length > 0,
-    `${label} effect has an invalid resource identity`
-  );
-  assert(effect.range !== undefined && effect.range !== null, `${label} is missing its byte range`);
+function validateAccessRanges(
+  accesses: readonly StorageAccess[],
+  direction: "read" | "write",
+  label: string
+): void {
+  for (const [index, access] of accesses.entries()) {
+    if (access.space === "resource") {
+      validateResourceEffectRange(
+        access,
+        `${label} ${direction} effect ${index}`
+      );
+    }
+  }
+}
+
+function validateResourceEffectRange(
+  effect: ResourceEffect,
+  label: string
+): void {
   validateByteRange(effect.range, label);
 }
 
@@ -71,23 +85,11 @@ function validateReadMode(
   width: 8 | 16 | 32,
   label: string
 ): void {
-  assert(
-    mode === undefined ||
-      (mode !== null &&
-        typeof mode === "object" &&
-        (mode.kind === "signed" || mode.kind === "unsigned")),
-    `${label} has an invalid read mode`
-  );
-
-  if (mode?.kind === "signed") {
-    assert(
-      width !== 32,
-      `${label} signed mode is valid only for a narrow read`
-    );
+  if (mode?.kind !== "unsigned") {
     return;
   }
 
-  const refinement = mode?.bounds;
+  const refinement = mode.bounds;
 
   if (refinement === undefined) {
     return;
@@ -119,27 +121,11 @@ function assertValidBounds(bounds: WidthBounds, label: string): void {
 }
 
 function validateByteRange(range: ByteRange, label: string): void {
-  assert(range.basis !== undefined && range.basis !== null, `${label} range is missing its basis`);
-
-  switch (range.basis.kind) {
-    case "resource":
-      break;
-    case "dynamic":
-      assert(
-        range.basis.origin instanceof DynamicByteOriginRef,
-        `${label} dynamic basis origin must be a DynamicByteOriginRef`
-      );
-      break;
-    default:
-      assert(false, `${label} range has an unknown basis`);
-  }
-
   const slice = range.slice;
 
   if (slice === undefined) {
     return;
   }
-  assert(slice !== null, `${label} range slice must be an object`);
   assert(
     Number.isInteger(slice.byteOffset) && slice.byteOffset >= 0,
     `${label} slice byte offset must be a non-negative integer, got ${slice.byteOffset}`

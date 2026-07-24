@@ -1,13 +1,17 @@
 import { assert } from "#common/assert.js";
-import type {
-  Control,
-  IfControl,
-  LoopContinueControl,
-  LoopControl,
-  ReturnControl,
-  SwitchControl
+import {
+  controlCompletes,
+  type Control,
+  type IfControl,
+  type LoopContinueControl,
+  type LoopControl,
+  type ReturnControl,
+  type SwitchControl
 } from "#compiler/ir/controls/index.js";
-import type { CallTarget } from "#compiler/ir/invocation.js";
+import {
+  invocationInputs,
+  type CallTarget
+} from "#compiler/ir/invocation.js";
 import { regionCompletes, type Region } from "#compiler/ir/region.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ModuleBindings } from "#compiler/module/bindings.js";
@@ -161,7 +165,7 @@ export function createControlEmitter({
       case "invocation": {
         const { invocation } = control.source;
 
-        for (const input of invocation.inputs) {
+        for (const input of invocationInputs(invocation)) {
           valueEmitter.emitUse(input.value);
         }
         emitReturnCall(body, bindings, invocation.target);
@@ -196,7 +200,7 @@ export function createControlEmitter({
   }
 
   function sealJoin(control: IfControl | SwitchControl): void {
-    if (!control.completes({ regionCompletes })) {
+    if (!controlCompletes(control, { regionCompletes })) {
       return;
     }
 

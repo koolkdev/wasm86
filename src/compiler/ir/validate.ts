@@ -1,24 +1,18 @@
 import { assert } from "#common/assert.js";
-import type { StorageEffects } from "#compiler/ir/effects.js";
 import {
-  maxSwitchMatch,
-  type Control,
-  type IfControl,
-  type SwitchControl
+  controlCompletes,
+  type Control
 } from "#compiler/ir/controls/index.js";
-import type { Invocation } from "#compiler/ir/invocation.js";
+import { invocationInputs } from "#compiler/ir/invocation.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
-import type {
-  CallOperation,
-  VariableReadOperation,
-  VariableWriteOperation,
-  Operation
+import {
+  describeOperation,
+  type Operation
 } from "#compiler/ir/operations/index.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import { unboundedWidthBounds } from "#compiler/ir/values/width-bounds.js";
 import type {
   ValueId,
-  ValueInput,
   ValueType,
   WidthBounds
 } from "#compiler/ir/values/types.js";
@@ -33,8 +27,10 @@ import {
   describeNode,
   type NestedRegion
 } from "./node.js";
-import { validateDeclaredStorageEffects } from "./validate/effects.js";
-import { validateResourceOperation } from "./validate/resource.js";
+import {
+  validateResourceOperation,
+  validateStorageEffectRanges
+} from "./validate/resource.js";
 
 type RegionNodeSite = Readonly<{
   body: Region;
@@ -116,6 +112,8 @@ class IrValidator {
   }
 
   #indexNodeDefinitions(node: RegionNode, site: RegionNodeSite): void {
+    validateStorageEffectRanges(describeNode(node).effects, site.path);
+
     if (node.category === "operation") {
       this.#validateOperationDeclaration(node, site.path);
       this.#indexOperationOutputs(node, site);
@@ -123,36 +121,28 @@ class IrValidator {
       return;
     }
 
-    this.#validateControlDeclaration(node, site.path);
+    this.#validateControlSemantics(node, site.path);
     this.#indexControlOutputs(node, site);
 
-    for (const nested of node.nestedBodies) {
+    for (const nested of describeNode(node).nestedBodies) {
       this.#indexScopedInputs(nested, site);
       this.#indexNestedBody(nested.body, site, `${site.path}.${nested.role}`);
     }
   }
 
   #validateOperationDeclaration(operation: Operation, path: string): void {
-    const { outputs, results } = describeNode(operation);
-
-    for (const [index, result] of results.entries()) {
-      const output = outputs[index];
-
-      assert(output !== undefined, `${path} has no output ${index}`);
+    for (const { output, result } of describeOperation(operation).productions) {
       assert(
         this.#block.values.valueType(output) === result.type,
-        `${path} output ${index} must be ${result.type}`
+        `${path} output ${output} must be ${result.type}`
       );
       assertOutputBounds(this.#block, operation.kind, output, result);
     }
 
     switch (operation.kind) {
       case "call":
-        this.#validateCallDeclaration(operation, path);
-        return;
       case "variable.read":
       case "variable.write":
-        validateVariableOperation(operation, path);
         return;
       case "resource.read":
       case "resource.write":
@@ -161,85 +151,17 @@ class IrValidator {
     }
   }
 
-  #validateCallDeclaration(call: CallOperation, path: string): void {
-    const invocation = call.invocation;
-    const resultTypes = invocation.target.type.results;
+  #validateControlSemantics(control: Control, path: string): void {
+    if (control.kind !== "loop") {
+      return;
+    }
 
-    validateInvocation(invocation, `${path} invocation`);
-
-    assert(
-      resultTypes.length <= 1,
-      `${path} target has ${resultTypes.length} results; multiple call results are not supported yet`
-    );
-    assert(
-      (call.output === undefined ? 0 : 1) === resultTypes.length,
-      `${path} output does not align with its target results`
-    );
-  }
-
-  #validateControlDeclaration(control: Control, path: string): void {
-    const operands = control.operands;
-    const outputs = control.outputs;
-    const nestedBodies = control.nestedBodies;
-    const directEffects = control.directEffects;
-
-    assert(Array.isArray(operands), `${path} operands must be an array`);
-    assert(Array.isArray(outputs), `${path} outputs must be an array`);
-    assert(Array.isArray(nestedBodies), `${path} nested bodies must be an array`);
-    assert(outputs.length <= 1, `${path} control has multiple join outputs`);
-    validateDeclaredStorageEffects(directEffects, path);
-
-    switch (control.kind) {
-      case "if":
-        validateIfControlShape(
-          control,
-          operands,
-          outputs,
-          nestedBodies,
-          directEffects,
-          path
-        );
-        return;
-      case "switch":
-        validateSwitchControlShape(
-          control,
-          operands,
-          outputs,
-          nestedBodies,
-          directEffects,
-          path
-        );
-        return;
-      case "loop":
-        validateLoopControlShape(
-          control,
-          operands,
-          outputs,
-          nestedBodies,
-          directEffects,
-          this.#block,
-          path
-        );
-        return;
-      case "loopContinue":
-        assertNoControlResults(outputs, nestedBodies, path);
-        assertSameValues(
-          operands,
-          control.updates,
-          `${path} operands do not match its updates`
-        );
-        assertNoDirectEffects(directEffects, path);
-        return;
-      case "return":
-        validateReturnControlShape(
-          control,
-          operands,
-          outputs,
-          nestedBodies,
-          directEffects,
-          path
-        );
-        return;
+    for (const [index, carried] of control.carried.entries()) {
+      assert(
+        this.#block.values.valueType(carried.seed) ===
+          this.#block.values.valueType(carried.loopInput),
+        `${path} carried value ${index} seed and input types do not match`
+      );
     }
   }
 
@@ -247,39 +169,17 @@ class IrValidator {
     operation: Operation,
     site: RegionNodeSite
   ): void {
-    const { inputs, outputs } = describeNode(operation);
+    const { outputs } = describeNode(operation);
 
     for (const output of outputs) {
-      for (const input of inputs) {
-        assert(
-          input.value < output,
-          `producer operand ${input.value} created after its output ${output}`
-        );
-      }
       this.#recordProducer(output, site);
     }
   }
 
   #indexControlOutputs(control: Control, site: RegionNodeSite): void {
-    const outputs = control.outputs;
-    const operands = control.operands;
-    const nestedBodies = control.nestedBodies;
+    const { outputs } = describeNode(control);
 
     for (const output of outputs) {
-      for (const operand of operands) {
-        assert(
-          operand < output,
-          `${control.kind} operand ${operand} created after its output ${output}`
-        );
-      }
-      for (const nested of nestedBodies) {
-        if (nested.scope.kind === "ordinary" && nested.body.result !== undefined) {
-          assert(
-            nested.body.result < output,
-            `${control.kind} result ${nested.body.result} created after its output ${output}`
-          );
-        }
-      }
       this.#recordProducer(output, site);
     }
   }
@@ -381,7 +281,7 @@ class IrValidator {
 
       if (
         node.category === "control" &&
-        node.completes({ regionCompletes })
+        controlCompletes(node, { regionCompletes })
       ) {
         assert(
           nodeIndex === body.nodes.length - 1,
@@ -444,7 +344,7 @@ class IrValidator {
       return;
     }
 
-    for (const operand of node.operands) {
+    for (const operand of describeNode(node).operands) {
       this.#validateValueUse(operand, site, `${site.path} operand ${operand}`);
     }
 
@@ -454,7 +354,6 @@ class IrValidator {
         return;
       case "switch":
         assertValueType(this.#block, node.selector, "i32", `${site.path} selector`);
-        validateSwitchCases(node, site.path);
         return;
       case "loop":
         return;
@@ -565,8 +464,6 @@ class IrValidator {
     context: RegionValidationContext
   ): void {
     const { nestedBodies, outputs } = describeNode(node);
-
-    assert(outputs.length <= 1, `${site.path} has multiple nested-body outputs`);
     const ownerOutput = outputs[0];
 
     for (const nested of nestedBodies) {
@@ -734,7 +631,7 @@ class IrValidator {
           targetResults.every((type, index) => type === fn.results[index]),
         `${path} invocation results do not match the enclosing function`
       );
-      for (const [index, input] of invocation.inputs.entries()) {
+      for (const [index, input] of invocationInputs(invocation).entries()) {
         const actual = this.#block.values.valueType(input.value);
 
         assert(
@@ -761,298 +658,6 @@ class IrValidator {
     }
   }
 
-}
-
-function validateVariableOperation(
-  operation: VariableReadOperation | VariableWriteOperation,
-  path: string
-): void {
-  if (operation.kind === "variable.write") {
-      assert(
-        operation.initialization === "seed" ||
-          operation.initialization === "update",
-        `${path} has an invalid variable-write initialization`
-      );
-  }
-}
-
-function validateIfControlShape(
-  control: IfControl,
-  operands: readonly ValueId[],
-  outputs: readonly ValueId[],
-  nestedBodies: readonly NestedRegion[],
-  directEffects: StorageEffects,
-  path: string
-): void {
-  assertSameValues(
-    operands,
-    [control.condition],
-    `${path} operands do not match its condition`
-  );
-  const expectedOutputs = control.output === undefined ? [] : [control.output];
-
-  assertSameValues(outputs, expectedOutputs, `${path} outputs do not match its output field`);
-  assert(
-    control.output === undefined || control.elseBody !== undefined,
-    `${path} value-producing if is missing its else body`
-  );
-  assert(
-    nestedBodies.length === (control.elseBody === undefined ? 1 : 2),
-    `${path} nested bodies do not match its branches`
-  );
-  assertOrdinaryBody(
-    nestedBodies[0],
-    control.thenBody,
-    "thenBody",
-    `${path}.thenBody`
-  );
-  if (control.elseBody !== undefined) {
-    assertOrdinaryBody(
-      nestedBodies[1],
-      control.elseBody,
-      "elseBody",
-      `${path}.elseBody`
-    );
-  }
-  assertNoDirectEffects(directEffects, path);
-}
-
-function validateSwitchControlShape(
-  control: SwitchControl,
-  operands: readonly ValueId[],
-  outputs: readonly ValueId[],
-  nestedBodies: readonly NestedRegion[],
-  directEffects: StorageEffects,
-  path: string
-): void {
-  assertSameValues(
-    operands,
-    [control.selector],
-    `${path} operands do not match its selector`
-  );
-  const expectedOutputs = control.output === undefined ? [] : [control.output];
-
-  assertSameValues(outputs, expectedOutputs, `${path} outputs do not match its output field`);
-  assert(
-    nestedBodies.length === control.cases.length + 1,
-    `${path} nested bodies do not match its cases and default`
-  );
-  for (const [index, entry] of control.cases.entries()) {
-    assertOrdinaryBody(
-      nestedBodies[index],
-      entry.body,
-      `case[${index}]`,
-      `${path}.case[${index}]`
-    );
-  }
-  assertOrdinaryBody(
-    nestedBodies[control.cases.length],
-    control.defaultBody,
-    "default",
-    `${path}.default`
-  );
-  assertNoDirectEffects(directEffects, path);
-}
-
-function validateLoopControlShape(
-  control: Extract<Control, { kind: "loop" }>,
-  operands: readonly ValueId[],
-  outputs: readonly ValueId[],
-  nestedBodies: readonly NestedRegion[],
-  directEffects: StorageEffects,
-  block: FunctionGraph,
-  path: string
-): void {
-  assertNoOutputs(outputs, path);
-  assertSameValues(
-    operands,
-    control.carried.map((entry) => entry.seed),
-    `${path} operands do not match its carried seeds`
-  );
-  assert(nestedBodies.length === 1, `${path} must have exactly one loop body`);
-  const nested = nestedBodies[0];
-
-  assert(nested !== undefined && nested.body === control.body, `${path} has the wrong loop body`);
-  assert(nested.role === "body", `${path} loop body has the wrong role`);
-  assert(nested.scope.kind === "loop", `${path} body must establish a loop scope`);
-  assertSameValues(
-    nested.scope.inputs,
-    control.carried.map((entry) => entry.loopInput),
-    `${path} loop scope does not match its carried inputs`
-  );
-  for (const [index, carried] of control.carried.entries()) {
-    assert(
-      block.values.valueType(carried.seed) === block.values.valueType(carried.loopInput),
-      `${path} carried value ${index} seed and input types do not match`
-    );
-  }
-  assertNoDirectEffects(directEffects, path);
-}
-
-function validateReturnControlShape(
-  control: Extract<Control, { kind: "return" }>,
-  operands: readonly ValueId[],
-  outputs: readonly ValueId[],
-  nestedBodies: readonly NestedRegion[],
-  directEffects: StorageEffects,
-  path: string
-): void {
-  assertNoControlResults(outputs, nestedBodies, path);
-  const source = control.source;
-
-  if (source.kind === "values") {
-    assertSameValues(
-      operands,
-      source.values,
-      `${path} operands do not match its return values`
-    );
-    assertNoDirectEffects(directEffects, path);
-  } else {
-    validateInvocation(source.invocation, `${path} invocation`);
-    assertSameValues(
-      operands,
-      source.invocation.inputs.map((input) => input.value),
-      `${path} operands do not match its invocation inputs`
-    );
-    assert(
-      directEffects === source.invocation.target.effects,
-      `${path} effects do not match its invocation`
-    );
-  }
-  assert(
-    control.completes({ regionCompletes }),
-    `${path} return must complete its body`
-  );
-}
-
-function validateInvocation(invocation: Invocation, path: string): void {
-  assert(invocation !== null && typeof invocation === "object", `${path} must be an object`);
-  assert(Array.isArray(invocation.arguments), `${path} arguments must be an array`);
-  assert(Array.isArray(invocation.inputs), `${path} inputs must be an array`);
-
-  const target = invocation.target;
-
-  assert(target !== null && typeof target === "object", `${path} target must be an object`);
-  assert(
-    target.kind === "direct" || target.kind === "indirect",
-    `${path} target must be direct or indirect`
-  );
-  const type = target.type;
-  const effects = target.effects;
-  const targetInputs: readonly ValueInput[] = target.kind === "direct"
-    ? []
-    : [target.elementIndex];
-
-  if (target.kind === "indirect") {
-    assert(
-      target.elementIndex.type === "i32",
-      `${path} table element index must be i32`
-    );
-  }
-  const expectedInputs: readonly ValueInput[] = [
-    ...invocation.arguments,
-    ...targetInputs
-  ];
-
-  assert(Array.isArray(type.parameters), `${path} parameters must be an array`);
-  assert(Array.isArray(type.results), `${path} results must be an array`);
-  validateDeclaredStorageEffects(effects, `${path} target`);
-  assert(
-    invocation.arguments.length === type.parameters.length,
-    `${path} passes ${invocation.arguments.length} arguments to ${type.parameters.length} parameters`
-  );
-  for (const [index, input] of invocation.arguments.entries()) {
-    const expected = type.parameters[index];
-
-    assert(expected !== undefined, `${path} target has no parameter ${index}`);
-    assert(
-      input.type === expected,
-      `${path} argument ${index} declares ${input.type}, expected ${expected}`
-    );
-  }
-  assertSameInputs(
-    invocation.inputs,
-    expectedInputs,
-    `${path} inputs do not match its target and arguments`
-  );
-}
-
-function assertNoControlResults(
-  outputs: readonly ValueId[],
-  nestedBodies: readonly NestedRegion[],
-  path: string
-): void {
-  assertNoOutputs(outputs, path);
-  assert(nestedBodies.length === 0, `${path} must not have nested bodies`);
-}
-
-function assertNoOutputs(outputs: readonly ValueId[], path: string): void {
-  assert(outputs.length === 0, `${path} must not have outputs`);
-}
-
-function assertOrdinaryBody(
-  nested: NestedRegion | undefined,
-  body: Region,
-  role: string,
-  path: string
-): void {
-  assert(nested !== undefined && nested.body === body, `${path} has the wrong body`);
-  assert(nested.role === role, `${path} has the wrong role`);
-  assert(nested.scope.kind === "ordinary", `${path} must have ordinary scope`);
-}
-
-function assertNoDirectEffects(effects: StorageEffects, path: string): void {
-  assert(
-    effects.reads.length === 0 && effects.writes.length === 0,
-    `${path} must not have direct effects`
-  );
-}
-
-function assertSameValues(
-  actual: readonly ValueId[],
-  expected: readonly ValueId[],
-  message: string
-): void {
-  assert(
-    actual.length === expected.length &&
-      actual.every((value, index) => value === expected[index]),
-    message
-  );
-}
-
-function assertSameInputs(
-  actual: readonly ValueInput[],
-  expected: readonly ValueInput[],
-  message: string
-): void {
-  assert(
-    actual.length === expected.length &&
-      actual.every((input, index) => {
-        const expectedInput = expected[index];
-
-        return expectedInput !== undefined &&
-          input.value === expectedInput.value &&
-          input.type === expectedInput.type;
-      }),
-    message
-  );
-}
-
-function validateSwitchCases(control: SwitchControl, path: string): void {
-  const seen = new Set<number>();
-
-  for (const entry of control.cases) {
-    assert(entry.matches.length > 0, `${path} has a case with no matches`);
-
-    for (const match of entry.matches) {
-      assert(
-        Number.isInteger(match) && match >= 0 && match <= maxSwitchMatch,
-        `${path} case match ${match} is not an integer in [0, ${maxSwitchMatch}]`
-      );
-      assert(!seen.has(match), `${path} has a duplicate case match ${match}`);
-      seen.add(match);
-    }
-  }
 }
 
 function assertValueType(

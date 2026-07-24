@@ -9,6 +9,11 @@ import {
   variableRead,
   variableWrite
 } from "./variables.js";
+import type {
+  DerivedOperationDescription,
+  OperationDefinition,
+  OperationProduction
+} from "./definition.js";
 
 export {
   callOperation,
@@ -42,14 +47,59 @@ export type {
   VariableWriteOperation
 } from "./variables.js";
 
-const operationDefinitions = [
-  callOperation,
-  variableRead,
-  variableWrite,
-  resourceRead,
-  resourceWrite
-] as const;
+const declaredOperationDefinitions = {
+  call: callOperation,
+  "variable.read": variableRead,
+  "variable.write": variableWrite,
+  "resource.read": resourceRead,
+  "resource.write": resourceWrite
+} as const;
 
-type AnyOperationDefinition = (typeof operationDefinitions)[number];
+type DeclaredOperationDefinition = (
+  typeof declaredOperationDefinitions
+)[keyof typeof declaredOperationDefinitions];
 
-export type Operation = ReturnType<AnyOperationDefinition["create"]>;
+type OperationDefinitions = {
+  [
+    Definition in DeclaredOperationDefinition as Definition["kind"]
+  ]: Definition;
+};
+
+const operationDefinitions: OperationDefinitions =
+  declaredOperationDefinitions;
+
+type OperationKind = keyof OperationDefinitions;
+
+type OperationsByKind = {
+  [Kind in OperationKind]: ReturnType<
+    OperationDefinitions[Kind]["create"]
+  >;
+};
+
+export type Operation = OperationsByKind[OperationKind];
+
+type OperationDescriptions = {
+  [Kind in OperationKind]: Pick<
+    OperationDefinition<
+      unknown,
+      OperationsByKind[Kind],
+      readonly OperationProduction[]
+    >,
+    "describe"
+  >;
+};
+
+const operationDescriptions: OperationDescriptions = operationDefinitions;
+
+export function describeOperation(
+  operation: Operation
+): DerivedOperationDescription {
+  return describeOperationKind(operation.kind, operation);
+}
+
+function describeOperationKind<Kind extends OperationKind>(
+  kind: Kind,
+  operation: OperationsByKind[Kind]
+): DerivedOperationDescription {
+  return operationDescriptions[kind].describe(operation);
+}

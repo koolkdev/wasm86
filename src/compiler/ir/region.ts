@@ -1,6 +1,9 @@
 import type { Operation } from "#compiler/ir/operations/index.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { Control } from "#compiler/ir/controls/index.js";
+import {
+  controlCompletes,
+  type Control
+} from "#compiler/ir/controls/index.js";
 
 export type RegionNode = Operation | Control;
 
@@ -15,5 +18,5 @@ export function regionCompletes(body: Region): boolean {
   const last = body.nodes[body.nodes.length - 1];
 
   return last?.category === "control" &&
-    last.completes({ regionCompletes });
+    controlCompletes(last, { regionCompletes });
 }

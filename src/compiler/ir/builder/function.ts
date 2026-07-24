@@ -1,6 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { FunctionType } from "#compiler/ir/function.js";
 import type { IrFunction } from "#compiler/ir/function.js";
+import { mapControlBodies } from "#compiler/ir/controls/index.js";
 import type { CallTarget } from "#compiler/ir/invocation.js";
 import type { Region } from "#compiler/ir/region.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -47,7 +48,7 @@ export function buildFunction(
 
 function snapshotRegion(region: Region): Region {
   const nodes = region.nodes.map((node) =>
-    node.category === "operation" ? node : node.mapBodies(snapshotRegion)
+    node.category === "operation" ? node : mapControlBodies(node, snapshotRegion)
   );
 
   return region.result === undefined

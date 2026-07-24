@@ -28,6 +28,7 @@ import { instructionCountField } from "#cpu/instruction-count.js";
 import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { FunctionGraph } from "#compiler/ir/function.js";
 import type { IfControl } from "#compiler/ir/controls/index.js";
+import { invocationInputs } from "#compiler/ir/invocation.js";
 import { describeNode } from "#compiler/ir/node.js";
 import type { Region, RegionNode } from "#compiler/ir/region.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
@@ -97,7 +98,7 @@ function dispatchTargets(block: FunctionGraph): ValueId[] {
       return [];
     }
 
-    const target = node.source.invocation.inputs[0]?.value;
+    const target = invocationInputs(node.source.invocation)[0]?.value;
 
     return target === undefined ? [] : [target];
   });

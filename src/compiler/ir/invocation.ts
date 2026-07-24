@@ -53,7 +53,6 @@ export type InvocationArgs = Readonly<{
 // A call's target and typed inputs, independent of how its results are consumed.
 export class Invocation {
   readonly arguments: readonly ValueInput[];
-  readonly inputs: readonly ValueInput[];
 
   private constructor(
     readonly target: CallTarget,
@@ -73,13 +72,17 @@ export class Invocation {
         `call target argument ${index} must be ${expected}, got ${input.type}`
       );
     }
-
-    this.inputs = target.kind === "direct"
-      ? this.arguments
-      : [...this.arguments, target.elementIndex];
   }
 
   static create({ target, arguments: inputs }: InvocationArgs): Invocation {
     return new Invocation(target, inputs);
   }
+}
+
+export function invocationInputs(
+  invocation: Invocation
+): readonly ValueInput[] {
+  return invocation.target.kind === "direct"
+    ? invocation.arguments
+    : [...invocation.arguments, invocation.target.elementIndex];
 }

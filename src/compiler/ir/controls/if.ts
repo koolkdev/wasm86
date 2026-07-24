@@ -1,12 +1,11 @@
-import type { ValueId } from "#compiler/ir/values/types.js";
+import { assert } from "#common/assert.js";
+import { noStorageEffects } from "#compiler/ir/effects.js";
 import type { Region } from "#compiler/ir/region.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type {
-  RegionCompletionContext,
-  NestedRegion
-} from "#compiler/ir/node.js";
-import {
-  ControlBase,
-  type BranchHint
+  BranchHint,
+  ControlDefinition,
+  ControlNodeBase
 } from "./definition.js";
 
 export type IfControlArgs = Readonly<{
@@ -17,76 +16,66 @@ export type IfControlArgs = Readonly<{
   elseBody?: Region;
 }>;
 
-export class IfControl extends ControlBase {
-  static readonly kind = "if";
-  readonly kind = IfControl.kind;
-  readonly condition: ValueId;
-  declare readonly hint?: BranchHint;
-  declare readonly output?: ValueId;
-  readonly thenBody: Region;
-  declare readonly elseBody?: Region;
-  readonly operands: readonly [ValueId];
-  readonly nestedBodies: readonly NestedRegion[];
-  readonly outputs: readonly ValueId[];
+export type IfControl = ControlNodeBase & Readonly<{
+  kind: "if";
+  condition: ValueId;
+  hint?: BranchHint;
+  output?: ValueId;
+  thenBody: Region;
+  elseBody?: Region;
+}>;
 
-  private constructor({
-    condition,
-    hint,
-    output,
-    thenBody,
-    elseBody
-  }: IfControlArgs) {
-    super();
-    this.condition = condition;
-    if (hint !== undefined) {
-      this.hint = hint;
-    }
-    if (output !== undefined) {
-      this.output = output;
-    }
-    this.thenBody = thenBody;
-    if (elseBody !== undefined) {
-      this.elseBody = elseBody;
-    }
-    this.operands = [condition];
-    const thenEntry = nestedBody(thenBody, "thenBody");
-    this.nestedBodies = elseBody === undefined
-      ? [thenEntry]
-      : [thenEntry, nestedBody(elseBody, "elseBody")];
-    this.outputs = output === undefined ? [] : [output];
-  }
+export const ifControl: ControlDefinition<IfControlArgs, IfControl> = {
+  kind: "if",
+  create: ({ condition, hint, output, thenBody, elseBody }) => {
+    assert(
+      output === undefined || elseBody !== undefined,
+      "value-producing if is missing its else body"
+    );
+    const control = {
+      category: "control" as const,
+      kind: "if" as const,
+      condition,
+      thenBody
+    };
 
-  static create(args: IfControlArgs): IfControl {
-    return new IfControl(args);
-  }
-
-  completes(context: RegionCompletionContext): boolean {
-    return ifCompletes(this.thenBody, this.elseBody, context);
-  }
-
-  mapBodies(map: (body: Region) => Region): IfControl {
-    return IfControl.create({
-      condition: this.condition,
-      ...(this.hint === undefined ? {} : { hint: this.hint }),
-      ...(this.output === undefined ? {} : { output: this.output }),
-      thenBody: map(this.thenBody),
-      ...(this.elseBody === undefined ? {} : { elseBody: map(this.elseBody) })
-    });
-  }
-}
-
-export const ifControl = IfControl;
-
-function ifCompletes(
-  thenBody: Region,
-  elseBody: Region | undefined,
-  context: RegionCompletionContext
-): boolean {
-  return elseBody !== undefined &&
-    context.regionCompletes(thenBody) &&
-    context.regionCompletes(elseBody);
-}
-
-function nestedBody(body: Region, role: string): NestedRegion {
-  return { body, role, scope: { kind: "ordinary" } };
-}
+    return {
+      ...control,
+      ...(hint === undefined ? {} : { hint }),
+      ...(output === undefined ? {} : { output }),
+      ...(elseBody === undefined ? {} : { elseBody })
+    };
+  },
+  describe: (control) => ({
+    operands: [control.condition],
+    outputs: control.output === undefined ? [] : [control.output],
+    nestedBodies: [
+      {
+        body: control.thenBody,
+        role: "thenBody",
+        scope: { kind: "ordinary" }
+      },
+      ...(control.elseBody === undefined
+        ? []
+        : [{
+            body: control.elseBody,
+            role: "elseBody",
+            scope: { kind: "ordinary" as const }
+          }])
+    ],
+    effects: noStorageEffects
+  }),
+  mapBodies: (control, map) => ifControl.create({
+    condition: control.condition,
+    ...(control.hint === undefined ? {} : { hint: control.hint }),
+    ...(control.output === undefined ? {} : { output: control.output }),
+    thenBody: map(control.thenBody),
+    ...(control.elseBody === undefined
+      ? {}
+      : { elseBody: map(control.elseBody) })
+  }),
+  completes: (control, context) =>
+    control.elseBody !== undefined &&
+    context.regionCompletes(control.thenBody) &&
+    context.regionCompletes(control.elseBody)
+};

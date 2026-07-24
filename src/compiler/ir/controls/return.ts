@@ -1,10 +1,13 @@
+import { noStorageEffects } from "#compiler/ir/effects.js";
 import {
-  noStorageEffects,
-  type StorageEffects
-} from "#compiler/ir/effects.js";
-import { Invocation } from "#compiler/ir/invocation.js";
+  Invocation,
+  invocationInputs
+} from "#compiler/ir/invocation.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import { TerminalControlBase } from "./definition.js";
+import type {
+  ControlDefinition,
+  ControlNodeBase
+} from "./definition.js";
 
 export type ReturnSource =
   | Readonly<{ kind: "values"; values: readonly ValueId[] }>
@@ -12,32 +15,37 @@ export type ReturnSource =
 
 export type ReturnControlArgs = Readonly<{ source: ReturnSource }>;
 
-export class ReturnControl extends TerminalControlBase {
-  static readonly kind = "return";
-  readonly kind = ReturnControl.kind;
-  readonly source: ReturnSource;
-  readonly operands: readonly ValueId[];
-  override readonly directEffects: StorageEffects;
+export type ReturnControl = ControlNodeBase & Readonly<{
+  kind: "return";
+  source: ReturnSource;
+}>;
 
-  private constructor(source: ReturnSource) {
-    super();
-    switch (source.kind) {
-      case "values":
-        this.source = { kind: "values", values: [...source.values] };
-        this.operands = this.source.values;
-        this.directEffects = noStorageEffects;
-        break;
-      case "invocation":
-        this.source = source;
-        this.operands = source.invocation.inputs.map((input) => input.value);
-        this.directEffects = source.invocation.target.effects;
-        break;
-    }
-  }
+export const returnControl: ControlDefinition<
+  ReturnControlArgs,
+  ReturnControl
+> = {
+  kind: "return",
+  create: ({ source }) => ({
+    category: "control",
+    kind: "return",
+    source: source.kind === "values"
+      ? { kind: "values", values: [...source.values] }
+      : source
+  }),
+  describe: (control) => {
+    const { source } = control;
 
-  static create({ source }: ReturnControlArgs): ReturnControl {
-    return new ReturnControl(source);
-  }
-}
-
-export const returnControl = ReturnControl;
+    return {
+      operands: source.kind === "values"
+        ? source.values
+        : invocationInputs(source.invocation).map((input) => input.value),
+      outputs: [],
+      nestedBodies: [],
+      effects: source.kind === "values"
+        ? noStorageEffects
+        : source.invocation.target.effects
+    };
+  },
+  mapBodies: (control) => control,
+  completes: () => true
+};

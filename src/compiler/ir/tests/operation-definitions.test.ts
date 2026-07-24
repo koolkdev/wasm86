@@ -3,7 +3,8 @@ import { test } from "node:test";
 
 import {
   IndirectCallTarget,
-  Invocation
+  Invocation,
+  invocationInputs
 } from "#compiler/ir/invocation.js";
 import { callOperation } from "#compiler/ir/operations/call.js";
 import { variableRead, variableWrite } from "#compiler/ir/operations/variables.js";
@@ -235,7 +236,7 @@ test("indirect invocations include the table selector in their inputs", () => {
     () => values.addNodeOutput()
   );
 
-  deepStrictEqual(invocation.inputs, [
+  deepStrictEqual(invocationInputs(invocation), [
     { value: argument, type: "i64" },
     { value: elementIndex, type: "i32" }
   ]);

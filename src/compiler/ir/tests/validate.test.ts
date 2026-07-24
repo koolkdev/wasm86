@@ -15,7 +15,10 @@ import {
   type FunctionGraph,
   type IrFunction
 } from "#compiler/ir/function.js";
-import { Invocation } from "#compiler/ir/invocation.js";
+import {
+  IndirectCallTarget,
+  Invocation
+} from "#compiler/ir/invocation.js";
 import { variableRead, variableWrite } from "#compiler/ir/operations/variables.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
 import {
@@ -24,7 +27,10 @@ import {
   type ResourceOperation
 } from "#compiler/ir/operations/resource.js";
 import type { Region, RegionNode } from "#compiler/ir/region.js";
-import { functionRef } from "#compiler/ir/refs.js";
+import {
+  functionRef,
+  tableRef
+} from "#compiler/ir/refs.js";
 import {
   DynamicByteOriginRef,
   resourceRef,
@@ -280,6 +286,42 @@ test("a returned invocation validates argument value types", () => {
   };
 
   throws(() => validateIrFunction(fn), /must be i64, got i32/);
+});
+
+test("an indirect invocation validates its declared resource ranges", () => {
+  const values = new ValueTable();
+  const elementIndex = values.const(0);
+  const target = IndirectCallTarget.create({
+    table: tableRef("validation.effect-table"),
+    type: functionType([], ["i64"]),
+    effects: {
+      reads: [{
+        space: "resource",
+        resource: validationResource,
+        range: {
+          basis: { kind: "resource" },
+          slice: { byteOffset: -1, byteLength: 1 }
+        }
+      }],
+      writes: []
+    },
+    elementIndex: { value: elementIndex, type: "i32" }
+  });
+
+  throws(
+    () =>
+      validateFunctionBlock(
+        entryBlock(values, [
+          returnControl.create({
+            source: {
+              kind: "invocation",
+              invocation: Invocation.create({ target, arguments: [] })
+            }
+          })
+        ])
+      ),
+    /byte offset/
+  );
 });
 
 test("a terminal control must be the final node in its body", () => {
@@ -601,42 +643,6 @@ test("a completing arm cannot also carry a result", () => {
         }))
       ),
     /carries a result but completes/
-  );
-});
-
-test("switch matches must be unique and within the dense-table range", () => {
-  throws(
-    () =>
-      validateFunctionBlock(
-        switchBlock({
-          cases: [
-            {
-              matches: [1],
-              body: { nodes: [], result: valueId(1) }
-            },
-            {
-              matches: [1],
-              body: { nodes: [], result: valueId(2) }
-            }
-          ]
-        })
-      ),
-    /duplicate case match/
-  );
-
-  throws(
-    () =>
-      validateFunctionBlock(
-        switchBlock({
-          cases: [
-            {
-              matches: [256],
-              body: { nodes: [], result: valueId(1) }
-            }
-          ]
-        })
-      ),
-    /not an integer/
   );
 });
 
@@ -1003,7 +1009,7 @@ test("a control output cannot depend on itself", () => {
       validateFunctionBlock(
         entryBlock(values, [selection, exitReturn(values)])
       ),
-    /created after its output/
+    /does not dominate/
   );
 });
 

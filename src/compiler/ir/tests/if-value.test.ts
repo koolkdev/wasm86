@@ -9,6 +9,7 @@ import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import { functionType } from "#compiler/ir/function.js";
+import { describeNode } from "#compiler/ir/node.js";
 import { compilerTestResourceEffect } from "#test/support/storage-operations.js";
 
 function readArgs(
@@ -57,7 +58,7 @@ test("ifValue joins its arm results into one output", () => {
   strictEqual(control.hint, "unlikely");
   strictEqual(control.thenBody.result, thenResult);
   strictEqual(control.elseBody.result, elseResult);
-  strictEqual(control.outputs[0], output);
+  deepStrictEqual(describeNode(control).outputs, [output]);
   deepStrictEqual(block.values.widthBounds(output), {
     unsignedBits: 32,
     signedBits: 16
@@ -113,22 +114,17 @@ test("validation rejects a control output narrower than an arm result", () => {
 });
 
 test("a value-producing if requires an else body and arm results", () => {
-  const missingElseFn = buildFunction(functionType([], []), (fn) => {
-    const condition = fn.values.const(1);
-    const result = fn.values.const(7);
-    const output = fn.values.addNodeOutput();
-    const missingElse = ifControl.create({
+  const values = new ValueTable();
+  const condition = values.const(1);
+  const result = values.const(7);
+  const output = values.addNodeOutput();
+
+  throws(
+    () => ifControl.create({
       condition,
       output,
       thenBody: { nodes: [], result }
-    });
-
-    fn.region.push(missingElse);
-    fn.return([]);
-  });
-
-  throws(
-    () => validateIrFunction(missingElseFn),
+    }),
     /value-producing if is missing its else body/
   );
 

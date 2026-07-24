@@ -1,5 +1,8 @@
 import { assert } from "#common/assert.js";
-import { Invocation } from "#compiler/ir/invocation.js";
+import {
+  Invocation,
+  invocationInputs
+} from "#compiler/ir/invocation.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   operationResult,
@@ -54,7 +57,7 @@ export const callOperation: OperationDefinition<
         }];
 
     return {
-      inputs: operation.invocation.inputs,
+      inputs: invocationInputs(operation.invocation),
       productions,
       effects: operation.invocation.target.effects
     };

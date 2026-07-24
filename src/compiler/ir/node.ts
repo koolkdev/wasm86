@@ -1,10 +1,9 @@
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import {
-  callOperation,
-  resourceRead,
-  resourceWrite,
-  variableRead,
-  variableWrite,
+  describeControl
+} from "#compiler/ir/controls/index.js";
+import {
+  describeOperation,
   type DerivedOperationDescription,
   type Operation,
   type OperationResult
@@ -24,10 +23,6 @@ export type NestedRegion = Readonly<{
   scope:
     | Readonly<{ kind: "ordinary" }>
     | Readonly<{ kind: "loop"; inputs: readonly ValueId[] }>;
-}>;
-
-export type RegionCompletionContext = Readonly<{
-  regionCompletes: (body: Region) => boolean;
 }>;
 
 export type NodeDescription = Readonly<{
@@ -54,31 +49,19 @@ export function describeNode(
 ): NodeDescription | OperationDescription {
   switch (node.category) {
     case "control":
-      return {
-        operands: node.operands,
-        outputs: node.outputs,
-        nestedBodies: node.nestedBodies,
-        effects: node.directEffects,
-        referencedResources: noReferencedResources
-      };
+      return controlDescription(describeControl(node));
     case "operation":
-      return describeOperationNode(node);
+      return operationDescription(describeOperation(node));
   }
 }
 
-function describeOperationNode(node: Operation): OperationDescription {
-  switch (node.kind) {
-    case "call":
-      return operationDescription(callOperation.describe(node));
-    case "variable.read":
-      return operationDescription(variableRead.describe(node));
-    case "variable.write":
-      return operationDescription(variableWrite.describe(node));
-    case "resource.read":
-      return operationDescription(resourceRead.describe(node));
-    case "resource.write":
-      return operationDescription(resourceWrite.describe(node));
-  }
+function controlDescription(
+  description: ReturnType<typeof describeControl>
+): NodeDescription {
+  return {
+    ...description,
+    referencedResources: noReferencedResources
+  };
 }
 
 function operationDescription(

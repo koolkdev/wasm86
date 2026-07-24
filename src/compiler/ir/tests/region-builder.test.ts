@@ -9,6 +9,8 @@ import { test } from "node:test";
 
 import type { RegionNode } from "#compiler/ir/region.js";
 import { buildFunction } from "#compiler/ir/builder/function.js";
+import { invocationInputs } from "#compiler/ir/invocation.js";
+import { describeNode } from "#compiler/ir/node.js";
 import {
   resourceRead,
   resourceWrite
@@ -169,7 +171,7 @@ test("call validates typed arguments and allocates its declared result", () => {
   ok(call?.kind === "call");
   strictEqual(call.invocation.target, target);
   deepStrictEqual(
-    call.invocation.inputs,
+    invocationInputs(call.invocation),
     args.map((value) => ({ value, type: "i32" as const }))
   );
   strictEqual(call.output, output);
@@ -210,15 +212,18 @@ test("call and returnCall share indirect target normalization", () => {
   const returnInvocation = returned.source.invocation;
 
   deepStrictEqual(callInvocation.arguments, [{ value: argument, type: "i64" }]);
-  deepStrictEqual(callInvocation.inputs, [
+  deepStrictEqual(invocationInputs(callInvocation), [
     { value: argument, type: "i64" },
     { value: elementIndex, type: "i32" }
   ]);
   strictEqual(callInvocation.target, target);
   strictEqual(returnInvocation.target, target);
   deepStrictEqual(target.elementIndex, { value: elementIndex, type: "i32" });
-  deepStrictEqual(returnInvocation.inputs, callInvocation.inputs);
-  deepStrictEqual(returned.operands, [argument, elementIndex]);
+  deepStrictEqual(
+    invocationInputs(returnInvocation),
+    invocationInputs(callInvocation)
+  );
+  deepStrictEqual(describeNode(returned).operands, [argument, elementIndex]);
   strictEqual(call.output, output);
   throws(
     () => builder.indirectTarget({
@@ -444,7 +449,7 @@ test("switch preserves arm results and derives one shared output", () => {
 
   ok(control?.kind === "switch");
   strictEqual(control.selector, selector);
-  deepStrictEqual(control.outputs, [output]);
+  deepStrictEqual(describeNode(control).outputs, [output]);
   deepStrictEqual(control.cases[0]?.matches, [3]);
   strictEqual(control.cases[0]?.body.result, armResult);
   const [call] = control.cases[0]?.body.nodes ?? [];
@@ -493,7 +498,7 @@ test("control-only switch shares one body across all matches in an arm", () => {
 
   ok(control?.kind === "switch");
   strictEqual(control.output, undefined);
-  deepStrictEqual(control.outputs, []);
+  deepStrictEqual(describeNode(control).outputs, []);
   deepStrictEqual(control.cases[0]?.matches, [1, 3, 5]);
   strictEqual(control.cases[0]?.body.nodes.length, 1);
   strictEqual(control.cases[0]?.body.result, undefined);

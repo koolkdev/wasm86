@@ -1,12 +1,9 @@
-import type { ValueId } from "#compiler/ir/values/types.js";
+import { noStorageEffects } from "#compiler/ir/effects.js";
 import type { Region } from "#compiler/ir/region.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type {
-  RegionCompletionContext,
-  NestedRegion
-} from "#compiler/ir/node.js";
-import {
-  ControlBase,
-  TerminalControlBase
+  ControlDefinition,
+  ControlNodeBase
 } from "./definition.js";
 
 // One loop-carried value, seeded at loop entry and read inside the body through
@@ -23,63 +20,65 @@ export type LoopControlArgs = Readonly<{
   body: Region;
 }>;
 
-export class LoopControl extends ControlBase {
-  static readonly kind = "loop";
-  readonly kind = LoopControl.kind;
-  readonly operands: readonly ValueId[];
-  readonly nestedBodies: readonly [NestedRegion];
-  readonly outputs: readonly [] = [];
+export type LoopControl = ControlNodeBase & Readonly<{
+  kind: "loop";
+  carried: readonly LoopCarriedValue[];
+  body: Region;
+}>;
 
-  private constructor(
-    readonly carried: readonly LoopCarriedValue[],
-    readonly body: Region
-  ) {
-    super();
-    this.operands = carried.map((value) => value.seed);
-    this.nestedBodies = [
-      {
-        body,
-        role: "body",
-        scope: {
-          kind: "loop",
-          inputs: carried.map((value) => value.loopInput)
-        }
+export const loopControl: ControlDefinition<LoopControlArgs, LoopControl> = {
+  kind: "loop",
+  create: ({ carried, body }) => ({
+    category: "control",
+    kind: "loop",
+    carried,
+    body
+  }),
+  describe: (control) => ({
+    operands: control.carried.map((value) => value.seed),
+    outputs: [],
+    nestedBodies: [{
+      body: control.body,
+      role: "body",
+      scope: {
+        kind: "loop",
+        inputs: control.carried.map((value) => value.loopInput)
       }
-    ];
-  }
-
-  static create({ carried, body }: LoopControlArgs): LoopControl {
-    return new LoopControl(carried, body);
-  }
-
-  completes(_context: RegionCompletionContext): false {
-    return false;
-  }
-
-  mapBodies(map: (body: Region) => Region): LoopControl {
-    return LoopControl.create({ carried: this.carried, body: map(this.body) });
-  }
-}
-
-export const loopControl = LoopControl;
+    }],
+    effects: noStorageEffects
+  }),
+  mapBodies: (control, map) => loopControl.create({
+    carried: control.carried,
+    body: map(control.body)
+  }),
+  completes: () => false
+};
 
 export type LoopContinueControlArgs = Readonly<{
   updates: readonly ValueId[];
 }>;
 
-export class LoopContinueControl extends TerminalControlBase {
-  static readonly kind = "loopContinue";
-  readonly kind = LoopContinueControl.kind;
-  readonly operands: readonly ValueId[];
+export type LoopContinueControl = ControlNodeBase & Readonly<{
+  kind: "loopContinue";
+  updates: readonly ValueId[];
+}>;
 
-  private constructor(readonly updates: readonly ValueId[]) {
-    super();
-    this.operands = updates;
-  }
-
-  static create({ updates }: LoopContinueControlArgs): LoopContinueControl {
-    return new LoopContinueControl(updates);
-  }
-}
-
-export const loopContinueControl = LoopContinueControl;
+export const loopContinueControl: ControlDefinition<
+  LoopContinueControlArgs,
+  LoopContinueControl
+> = {
+  kind: "loopContinue",
+  create: ({ updates }) => ({
+    category: "control",
+    kind: "loopContinue",
+    updates
+  }),
+  describe: (control) => ({
+    operands: control.updates,
+    outputs: [],
+    nestedBodies: [],
+    effects: noStorageEffects
+  }),
+  mapBodies: (control) => control,
+  completes: () => true
+};

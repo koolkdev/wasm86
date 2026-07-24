@@ -8,7 +8,7 @@ import { describeNode } from "#compiler/ir/node.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { ValueType } from "#compiler/ir/values/types.js";
 import { covers } from "#compiler/ir/effects.js";
-import { validateDeclaredStorageEffects } from "#compiler/ir/validate/effects.js";
+import { validateStorageEffectRanges } from "#compiler/ir/validate/resource.js";
 import type { FunctionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { maximumWasmTableElements } from "./limits.js";
@@ -116,7 +116,7 @@ function validateFunctionDefinitionDeclaration(
     `function ${definition.ref.id} belongs to another program`
   );
   validateFunctionType(definition.type);
-  validateDeclaredStorageEffects(
+  validateStorageEffectRanges(
     definition.effects,
     `function ${definition.ref.id} declared`
   );
@@ -134,7 +134,7 @@ function validateFunctionImportDeclaration(
     `function ${imported.ref.id} belongs to another program`
   );
   validateFunctionType(imported.type);
-  validateDeclaredStorageEffects(
+  validateStorageEffectRanges(
     imported.effects,
     `function import ${imported.ref.id} declared`
   );
