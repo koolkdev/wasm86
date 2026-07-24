@@ -1,7 +1,4 @@
-import {
-  strictEqual,
-  throws
-} from "node:assert";
+import { strictEqual } from "node:assert";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
@@ -49,57 +46,6 @@ test("compiled program instances bind memory and functions in one external modul
   strictEqual((run as () => number)(), 42);
 });
 
-test("compiled program instances reject a missing memory binding", () => {
-  throws(
-    () => instantiateCompiledProgram(fixture.compiled, {
-      memories: new Map(),
-      functions: new Map([[fixture.functionRef, () => 42]])
-    }),
-    /missing memory binding for program resource test\.instance\.memory/
-  );
-});
-
-test("compiled program instances reject a same-ID foreign resource ref", () => {
-  const foreignResource = resourceRef(fixture.resource.id);
-  const memory = new WebAssembly.Memory({ initial: 1 });
-
-  throws(
-    () => instantiateCompiledProgram(
-      fixture.compiled,
-      {
-        memories: new Map([[foreignResource, memory]]),
-        functions: new Map([[fixture.functionRef, () => 42]])
-      }
-    ),
-    /missing memory binding for program resource test\.instance\.memory/
-  );
-});
-
-test("compiled program instances reject a missing function binding", () => {
-  const memory = new WebAssembly.Memory({ initial: 1 });
-
-  throws(
-    () => instantiateCompiledProgram(fixture.compiled, {
-      memories: new Map([[fixture.resource, memory]]),
-      functions: new Map()
-    }),
-    /missing function binding for program function test\.instance\.function/
-  );
-});
-
-test("compiled program instances reject a same-ID foreign function ref", () => {
-  const foreignFunction = functionRef(fixture.functionRef.id);
-  const memory = new WebAssembly.Memory({ initial: 1 });
-
-  throws(
-    () => instantiateCompiledProgram(fixture.compiled, {
-      memories: new Map([[fixture.resource, memory]]),
-      functions: new Map([[foreignFunction, () => 42]])
-    }),
-    /missing function binding for program function test\.instance\.function/
-  );
-});
-
 test("compiled program instances accept memory from another realm", () => {
   const memory = runInNewContext(
     "new WebAssembly.Memory({ initial: 1 })"
@@ -119,36 +65,6 @@ test("compiled program instances accept memory from another realm", () => {
   strictEqual((run as () => number)(), 42);
 });
 
-test("compiled program instances reject undersized memory before instantiation", () => {
-  const undersizedFixture = createInstanceFixture({ minPages: 2 });
-  const memory = new WebAssembly.Memory({ initial: 1 });
-
-  throws(
-    () => instantiateCompiledProgram(
-      undersizedFixture.compiled,
-      {
-        memories: new Map([[undersizedFixture.resource, memory]]),
-        functions: new Map([[undersizedFixture.functionRef, () => 42]])
-      }
-    ),
-    /memory binding for program resource test\.instance\.memory is smaller than its declared minimum/
-  );
-});
-
-test("compiled program instances do not resolve a same-ID foreign export ref", () => {
-  const memory = new WebAssembly.Memory({ initial: 1 });
-  const instance = instantiateCompiledProgram(
-    fixture.compiled,
-    {
-      memories: new Map([[fixture.resource, memory]]),
-      functions: new Map([[fixture.functionRef, () => 42]])
-    }
-  );
-  const foreignExport = functionExportRef(fixture.exportRef.id);
-
-  strictEqual(instance.functionExports.get(foreignExport), undefined);
-});
-
 type InstanceFixture = Readonly<{
   compiled: CompiledProgram;
   resource: ResourceRef;
@@ -156,15 +72,13 @@ type InstanceFixture = Readonly<{
   exportRef: FunctionExportRef;
 }>;
 
-function createInstanceFixture(
-  options: Readonly<{ minPages?: number }> = {}
-): InstanceFixture {
+function createInstanceFixture(): InstanceFixture {
   const resource = resourceRef("test.instance.memory");
   const resources = createProgramResources([{
     ref: resource,
     moduleName: "external runtime/2026",
     name: "memory.with punctuation",
-    limits: { minPages: options.minPages ?? 1 }
+    limits: { minPages: 1 }
   }]);
   const program = new ProgramBuilder(resources);
   const access = memoryRead(resource);

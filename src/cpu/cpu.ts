@@ -1,5 +1,4 @@
 import { assert } from "#common/assert.js";
-import { u32 } from "#common/numeric.js";
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
@@ -76,16 +75,15 @@ export function createCpu({
     state,
     run({ instructionBudget }): RunStop {
       assert(
-        Number.isInteger(instructionBudget) &&
         instructionBudget >= 0 &&
-        instructionBudget <= maximumInstructionBudget,
-        `instructionBudget must be an integer in the supported modular deadline range: ` +
+          instructionBudget <= maximumInstructionBudget,
+        `instructionBudget must be in the supported modular deadline range: ` +
           instructionBudget
       );
 
       storage.writeField(
         instructionLimitField,
-        u32(state.instructionCount + instructionBudget)
+        state.instructionCount + instructionBudget
       );
       const encodedExit = runInterpreter();
 

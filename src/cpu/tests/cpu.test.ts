@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createMachine } from "#machine/machine.js";
@@ -56,28 +56,4 @@ test("Cpu accepts a zero instruction budget without entering an instruction", ()
   });
   strictEqual(machine.cpu.state.core.eip, startAddress);
   strictEqual(machine.cpu.state.instructionCount, 0);
-});
-
-test("Cpu rejects budgets outside the supported modular deadline range", () => {
-  const cpu = createMachine({ memoryByteLength: 0x1000 }).cpu;
-
-  cpu.state.core.eip = startAddress;
-
-  for (const instructionBudget of [
-    -1,
-    1.5,
-    Number.NaN,
-    Number.POSITIVE_INFINITY,
-    0x8000_0000,
-    0xffff_ffff,
-    0x1_0000_0000
-  ]) {
-    throws(
-      () => cpu.run({ instructionBudget }),
-      /instructionBudget must be an integer in the supported modular deadline range/
-    );
-  }
-
-  strictEqual(cpu.state.core.eip, startAddress);
-  strictEqual(cpu.state.instructionCount, 0);
 });

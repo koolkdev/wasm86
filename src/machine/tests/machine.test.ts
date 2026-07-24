@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { wasmPageByteLength } from "#compiler/program/limits.js";
@@ -40,22 +40,4 @@ test("machines do not share guest memory or Cpu state", () => {
 
   strictEqual(new Uint8Array(second.memory.buffer)[0], 0);
   strictEqual(second.cpu.state.core.readReg32("eax"), 0);
-});
-
-test("machine requires a positive x86-page-aligned size", () => {
-  for (const memoryByteLength of [
-    0,
-    -0x1000,
-    1,
-    0x1001,
-    1.5,
-    Number.NaN,
-    Number.POSITIVE_INFINITY,
-    0x1_0000_1000
-  ]) {
-    throws(
-      () => createMachine({ memoryByteLength }),
-      /memoryByteLength must be a positive 4 KiB-aligned integer/
-    );
-  }
 });

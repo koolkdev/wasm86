@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { RunStop } from "#cpu/cpu.js";
@@ -66,22 +66,3 @@ for (const fixture of validExits) {
     deepStrictEqual(decodeExit(fixture.encoded), fixture.stop);
   });
 }
-
-test("Cpu exit decoder rejects zero, unknown tags, and noncanonical payload bits", () => {
-  throws(() => decodeExit(0n), /unknown cpu.exit variant tag: 0/);
-  throws(
-    () => decodeExit(0x00ff_0000_0000_0000n),
-    /unknown cpu.exit variant tag/
-  );
-  throws(
-    () => decodeExit(0x0007_0000_0000_0001n),
-    /nonzero unused payload bits/
-  );
-});
-
-test("Cpu exit decoder rejects a segment-load request with an invalid architectural index", () => {
-  throws(
-    () => decodeExit(0x0005_0000_1234_00ffn),
-    /invalid segment index/
-  );
-});

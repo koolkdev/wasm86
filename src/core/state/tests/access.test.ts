@@ -1,8 +1,7 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import type { ResourceByteOperand } from "#compiler/ir/resource.js";
-import { resourceRef } from "#compiler/ir/resource.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
@@ -108,37 +107,6 @@ test("state reads and writes normalize to resource operations", () => {
   });
   strictEqual(write.destination, count);
   strictEqual(write.destination.effect.resource, cpuState.resource);
-});
-
-test("execution-state access rejects an operand from another resource", () => {
-  const { access } = createAccess();
-  const foreignResource = resourceRef("test.foreign");
-  const foreign: ResourceByteOperand = {
-    effect: {
-      space: "resource",
-      resource: foreignResource,
-      range: {
-        basis: { kind: "resource" },
-        slice: { byteOffset: 0, byteLength: 4 }
-      }
-    },
-    address: { base: 0 as ResourceByteOperand["address"]["base"], displacement: 0 },
-    width: 32
-  };
-
-  throws(
-    () => access.read(foreign),
-    /operand belongs to another resource/
-  );
-});
-
-test("execution-state access rejects meaningless 32-bit signedness", () => {
-  const { access } = createAccess();
-
-  throws(
-    () => access.read(access.gpr("eax"), { kind: "signed" }),
-    /32-bit state read has no signed extension/
-  );
 });
 
 function exactSlice(

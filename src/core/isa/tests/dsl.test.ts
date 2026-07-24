@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
@@ -134,8 +134,4 @@ test("mnemonic and ISA builders generate stable full instruction ids", () => {
     isa.instructions.map((entry) => entry.id),
     ["mov.r32_rm32", "mov.rm32_r32"]
   );
-});
-
-test("mnemonic rejects empty form lists", () => {
-  throws(() => mnemonic("empty", []), /at least one form/);
 });

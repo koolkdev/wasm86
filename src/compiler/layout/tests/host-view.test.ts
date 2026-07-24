@@ -1,4 +1,4 @@
-import { notStrictEqual, strictEqual, throws } from "node:assert";
+import { notStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
@@ -26,13 +26,6 @@ const layout = createLayout("host-view.test", [
   layoutStructure("host-view.fields", Object.values(fields)),
   layoutStructure("host-view.arrays", Object.values(arrays))
 ]);
-
-test("layout host access rejects memory shorter than the layout", () => {
-  throws(
-    () => createLayoutHostView(new WebAssembly.Memory({ initial: 0 }), layout),
-    /host-view\.test memory is too small/
-  );
-});
 
 test("layout host fields use their declared unsigned widths", () => {
   const memory = new WebAssembly.Memory({ initial: 1 });

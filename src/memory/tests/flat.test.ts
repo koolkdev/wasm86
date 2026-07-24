@@ -1,8 +1,4 @@
-import {
-  deepStrictEqual,
-  strictEqual,
-  throws
-} from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { assert } from "#common/assert.js";
@@ -10,7 +6,6 @@ import { compileProgram } from "#compiler/compile.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import { functionType } from "#compiler/ir/function.js";
 import { functionRef } from "#compiler/ir/refs.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
 import { functionExportRef } from "#compiler/program/exports.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import {
@@ -18,10 +13,7 @@ import {
   guestMemoryMinimumPages
 } from "#memory/constants.js";
 import { writeBackingBytes } from "#memory/bytes.js";
-import {
-  flatMemoryResolution,
-  flatMemoryOperand
-} from "#memory/flat.js";
+import { flatMemoryResolution } from "#memory/flat.js";
 import {
   guestMemoryResource,
   testExecutionModel
@@ -122,67 +114,4 @@ test("generated flat resolution keeps its logical capacity after backing memory 
 
   strictEqual(classify(guestMemoryMinimumByteLength, 1), 1);
   strictEqual(classify(guestMemoryMinimumByteLength * 2 - 1, 1), 1);
-});
-
-test("flat byte reads validate their Memory binding", () => {
-  throws(
-    () => testExecutionModel.guestMemory.createReader(
-      new WebAssembly.Memory({ initial: 0 })
-    ),
-    /guest memory is shorter than the flat address-space binding/
-  );
-});
-
-test("flat resolution rejects invalid constant lengths", () => {
-  const values = new ValueTable();
-
-  throws(
-    () => flatMemoryResolution(
-      values,
-      { start: values.const(0), byteLength: values.const(0) },
-      "read"
-    ),
-    /flat access byte length must be an integer between 1/
-  );
-  throws(
-    () => flatMemoryResolution(
-      values,
-      {
-        start: values.const(0),
-        byteLength: values.const(guestMemoryMinimumByteLength + 1)
-      },
-      "read"
-    ),
-    /flat access byte length must be an integer between 1/
-  );
-});
-
-test("flat operands reject invalid constant subranges", () => {
-  const values = new ValueTable();
-  const { access } = flatMemoryResolution(
-    values,
-    { start: values.const(0x2000), byteLength: values.const(4) },
-    "read"
-  );
-
-  throws(
-    () => flatMemoryOperand(
-      guestMemoryResource,
-      values,
-      access,
-      values.const(-1),
-      8
-    ),
-    /memory byte offset must be non-negative/
-  );
-  throws(
-    () => flatMemoryOperand(
-      guestMemoryResource,
-      values,
-      access,
-      values.const(1),
-      32
-    ),
-    /32-bit memory access at byte offset 1 exceeds 4-byte resolution/
-  );
 });

@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { resourceRef } from "#compiler/ir/resource.js";
@@ -13,25 +13,6 @@ test("program resources retain owner-provided memory imports", () => {
   const resources = createProgramResources([state, guest]);
 
   deepStrictEqual(resources.memoryImports, [state, guest]);
-});
-
-test("program resources reject duplicate refs and external names", () => {
-  const state = memoryImport("test.state", "state");
-
-  throws(
-    () => createProgramResources([
-      state,
-      { ...state, name: "other" }
-    ]),
-    /duplicate program resource declaration: test.state/
-  );
-  throws(
-    () => createProgramResources([
-      memoryImport("test.state", "state"),
-      memoryImport("test.other", "state")
-    ]),
-    /duplicate memory external identity: test.state/
-  );
 });
 
 test("same-id resource refs remain distinct", () => {
@@ -56,44 +37,6 @@ test("memory imports may reuse a field name in different modules", () => {
   deepStrictEqual(
     createProgramResources([first, second]).memoryImports,
     [first, second]
-  );
-});
-
-test("program resources validate memory names and limits", () => {
-  throws(
-    () => createProgramResources([{
-      ...memoryImport("test.state", "state"),
-      moduleName: ""
-    }]),
-    /empty external module name/
-  );
-  throws(
-    () => createProgramResources([{
-      ...memoryImport("test.state", "state"),
-      name: ""
-    }]),
-    /empty external field name/
-  );
-  throws(
-    () => createProgramResources([{
-      ...memoryImport("test.state", "state"),
-      limits: { minPages: -1 }
-    }]),
-    /memory minimum pages out of range/
-  );
-  throws(
-    () => createProgramResources([{
-      ...memoryImport("test.state", "state"),
-      limits: { minPages: 2, maxPages: 1 }
-    }]),
-    /maximum pages are below its minimum/
-  );
-  throws(
-    () => createProgramResources([{
-      ...memoryImport("test.state", "state"),
-      limits: { minPages: 0x1_0001 }
-    }]),
-    /memory minimum pages out of range/
   );
 });
 

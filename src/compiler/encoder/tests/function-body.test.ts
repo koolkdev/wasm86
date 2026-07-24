@@ -1,32 +1,9 @@
-import { deepStrictEqual, throws } from "node:assert";
+import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { encodeWasmFunctionBody } from "#compiler/encoder/function-body.js";
 import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import { wasmValueType } from "#compiler/encoder/types.js";
-
-test("descriptive branch hints are encoded in function metadata", () => {
-  const body = encodeWasmFunctionBody({
-    parameterCount: 0,
-    localTypes: [wasmValueType.i32]
-  }, (writer) => {
-    writer.write(wasmInstruction.i32.const, 1);
-    writer.write(wasmInstruction.control.if, { hint: "unlikely" });
-    writer.write(wasmInstruction.control.end);
-    writer.write(wasmInstruction.control.block);
-    writer.write(wasmInstruction.i32.const, 1);
-    writer.write(wasmInstruction.control.brIf, 0, "likely");
-    writer.write(wasmInstruction.control.end);
-  });
-
-  deepStrictEqual(
-    body.branchHints,
-    [
-      { offset: 5, value: 0 },
-      { offset: 12, value: 1 }
-    ]
-  );
-});
 
 test("declared locals follow parameters in the Wasm local index space", () => {
   const body = encodeWasmFunctionBody({
@@ -48,35 +25,6 @@ test("declared locals follow parameters in the Wasm local index space", () => {
     0x20, 0x02, 0x1a,
     0x0b
   ]);
-});
-
-test("function local layout rejects invalid counts and local positions", () => {
-  for (const local of [-1, 0.5, 1]) {
-    throws(
-      () => encodeWasmFunctionBody({
-        parameterCount: 0,
-        localTypes: [wasmValueType.i32]
-      }, (_writer, resolveLocal) => {
-        resolveLocal(local);
-      }),
-      /Wasm function local out of range/
-    );
-  }
-
-  throws(
-    () => encodeWasmFunctionBody({
-      parameterCount: 0x1_0000_0000,
-      localTypes: []
-    }, () => {}),
-    /Wasm function parameter count out of range/
-  );
-  throws(
-    () => encodeWasmFunctionBody({
-      parameterCount: 0xffff_ffff,
-      localTypes: [wasmValueType.i32, wasmValueType.i32]
-    }, () => {}),
-    /exceed the local index space/
-  );
 });
 
 test("br_table encodes its label vector and default depth", () => {

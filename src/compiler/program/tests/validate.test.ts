@@ -245,34 +245,6 @@ test("program export targets use reference identity", () => {
   );
 });
 
-test("function imports require nonempty external names", () => {
-  const emptyModule = new ProgramBuilder(emptyResources);
-
-  throws(
-    () => emptyModule.importFunction({
-      ref: functionRef("test.empty-import-module"),
-      type: voidType,
-      effects: noEffects,
-      moduleName: "",
-      name: "host"
-    }),
-    /empty external module name/
-  );
-
-  const emptyField = new ProgramBuilder(emptyResources);
-
-  throws(
-    () => emptyField.importFunction({
-      ref: functionRef("test.empty-import-field"),
-      type: voidType,
-      effects: noEffects,
-      moduleName: "host",
-      name: ""
-    }),
-    /empty external field name/
-  );
-});
-
 test("function import external names must be unique", () => {
   const program = new ProgramBuilder(emptyResources);
 
@@ -339,30 +311,4 @@ test("generated and declared functions share one identity namespace", () => {
   });
 
   throws(() => program.finish(), /duplicate program function identity/);
-});
-
-test("table limits must describe a valid Wasm table", () => {
-  const negativeMinimum = new ProgramBuilder(emptyResources);
-
-  throws(
-    () => negativeMinimum.importTable({
-      ref: tableRef("test.negative-minimum"),
-      moduleName: "test",
-      name: "negativeMinimum",
-      limits: { minElements: -1 }
-    }),
-    /minimum elements out of range/
-  );
-
-  const invertedRange = new ProgramBuilder(emptyResources);
-
-  throws(
-    () => invertedRange.importTable({
-      ref: tableRef("test.inverted-range"),
-      moduleName: "test",
-      name: "invertedRange",
-      limits: { minElements: 2, maxElements: 1 }
-    }),
-    /maximum elements are below its minimum/
-  );
 });

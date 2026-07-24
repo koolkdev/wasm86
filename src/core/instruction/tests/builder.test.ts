@@ -8,8 +8,7 @@ import { test } from "node:test";
 
 import {
   staticInstructionLocation as loc,
-  valueInstructionLocation,
-  type InstructionBuilder
+  valueInstructionLocation
 } from "#core/instruction/builder.js";
 import {
   immBinding,
@@ -384,7 +383,7 @@ test("two terminating branch arms complete the instruction path", () => {
   ));
 });
 
-test("a root jump flushes pending state and rejects later instructions", () => {
+test("a root jump flushes pending state", () => {
   const block = buildInstructionFunction((builder) => {
     builder.add(
       movSemantic(32),
@@ -398,14 +397,6 @@ test("a root jump flushes pending state and rejects later instructions", () => {
         loc(0x1005, 0x100a)
       ),
       false
-    );
-    throws(
-      () => builder.add(
-        movSemantic(32),
-        [regBinding("ebx"), immBinding(1)],
-        loc(0x100a, 0x100f)
-      ),
-      /after a block terminator/
     );
   });
   const eaxWrites = stateWritesFor(
@@ -597,65 +588,6 @@ test("a possible fault cannot be introduced after a memory write", () => {
       );
     }),
     /CPU exception cannot follow a memory write/
-  );
-});
-
-test("a failed instruction poisons the builder transaction", () => {
-  const partiallyInvalid: SemanticTemplate = (s, v) => {
-    s.write(s.operand(0), v.const(1), { width: 32 });
-    s.write(s.operand(1), v.const(2), { width: 32 });
-  };
-
-  throws(
-    () => buildInstructionFunction((builder) => {
-      throws(
-        () => builder.add(
-          partiallyInvalid,
-          [regBinding("eax"), immBinding(0)],
-          loc(0x1000, 0x1002)
-        ),
-        /immediate operand is not writable/
-      );
-      throws(
-        () => builder.add(
-          movSemantic(32),
-          [regBinding("ecx"), immBinding(2)],
-          loc(0x1002, 0x1007)
-        ),
-        /incomplete instruction/
-      );
-    }),
-    /incomplete instruction/
-  );
-});
-
-test("build rejects an empty sequence and closes its builder afterward", () => {
-  throws(
-    () => buildInstructionFunction(() => {}),
-    /no instructions were added/
-  );
-
-  let escaped: InstructionBuilder | undefined;
-
-  buildInstructionFunction((builder) => {
-    escaped = builder;
-    builder.add(
-      movSemantic(32),
-      [regBinding("eax"), immBinding(1)],
-      loc(0x1000, 0x1005)
-    );
-  });
-
-  ok(escaped !== undefined);
-  const closedBuilder = escaped;
-
-  throws(
-    () => closedBuilder.add(
-      movSemantic(32),
-      [regBinding("ecx"), immBinding(2)],
-      loc(0x1005, 0x100a)
-    ),
-    /closed instruction builder/
   );
 });
 

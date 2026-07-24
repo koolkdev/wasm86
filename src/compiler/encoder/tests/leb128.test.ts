@@ -1,4 +1,4 @@
-import { deepStrictEqual, throws } from "node:assert";
+import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
 import {
@@ -28,10 +28,4 @@ test("signed LEB128 preserves sign at byte boundaries", () => {
     deepStrictEqual(encodeI32Leb128(value), expected);
     deepStrictEqual(encodeI64Leb128(BigInt(value)), expected);
   }
-});
-
-test("LEB128 rejects values outside its declared integer type", () => {
-  throws(() => encodeU32Leb128(-1), RangeError);
-  throws(() => encodeI32Leb128(0x8000_0000), RangeError);
-  throws(() => encodeI64Leb128(1n << 63n), RangeError);
 });

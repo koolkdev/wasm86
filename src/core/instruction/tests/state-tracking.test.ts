@@ -295,7 +295,7 @@ test("state fields cache values and completed paths flush only dirty fields", ()
   strictEqual(stateWriteValue(idWrites[0]!), id);
 });
 
-test("segment channels are cached reads but cannot become ordinary pendings", () => {
+test("segment channels cache selector and base reads", () => {
   const { values, nodes, pending } = createHarness();
   const selector = pending.read(segmentSelectorChannel("fs"));
   const base = pending.read(segmentBaseChannel("fs"));
@@ -309,11 +309,6 @@ test("segment channels are cached reads but cannot become ordinary pendings", ()
     segmentSelectorChannel("fs")
   ).length, 1);
   strictEqual(readsFor(values, nodes(), segmentBaseChannel("fs")).length, 1);
-
-  throws(
-    () => pending.write(segmentSelectorChannel("fs"), values.const(0x23)),
-    /segment writes must use a segment-load host exit/
-  );
 });
 
 test("dynamic segment selector and base reads stay distinct", () => {

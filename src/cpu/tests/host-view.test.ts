@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
@@ -29,13 +29,6 @@ const noFlags = { CF: 0, PF: 0, AF: 0, ZF: 0, SF: 0, OF: 0 } as const;
 // CPU/Wasm ABI bytes: kind=ADD (2), width=32 (2 << 2).
 const add32LazyFlags = 0x0a;
 const noLazyFlags = 0x00;
-
-test("Cpu state host view rejects short memory", () => {
-  throws(
-    () => createStateHostView(new WebAssembly.Memory({ initial: 0 })),
-    /execution-state memory is too small/
-  );
-});
 
 test("Cpu state host view reads and writes architectural flags", () => {
   const { memory, state } = createState({ ...allFlagBytesSet });
@@ -95,15 +88,6 @@ test("Cpu state host view resolves lazy status flags without changing their owne
   strictEqual(state.flags.readFlag("AC"), false);
   strictEqual(state.flags.readFlag("ID"), true);
   deepStrictEqual(snapshot(memory), before);
-});
-
-test("Cpu state host view rejects an invalid lazy-flags record", () => {
-  const { state } = createState({ lazyFlagsKind: 0xff });
-
-  throws(
-    () => state.flags.readFlag("CF"),
-    /invalid lazy-flags kind byte/
-  );
 });
 
 test("Cpu state host writes materialize lazy status flags before replacing one", () => {

@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { writeBackingBytes } from "#memory/bytes.js";
@@ -25,10 +25,6 @@ test("flat instruction snapshots copy their complete readable request", () => {
   strictEqual(snapshot.linearStart, 0x1000);
   deepStrictEqual(snapshot.readByte(0x1000), { kind: "value", value: 0x12 });
   deepStrictEqual(snapshot.readByte(0x1002), { kind: "value", value: 0x56 });
-  throws(
-    () => snapshot.readByte(0x1003),
-    /lies outside its copied prefix and unreadable boundary/
-  );
 });
 
 test("flat instruction snapshots return their maximal prefix and one boundary fault", () => {

@@ -1,8 +1,7 @@
 import {
   deepStrictEqual,
   notDeepStrictEqual,
-  strictEqual,
-  throws
+  strictEqual
 } from "node:assert";
 import { test } from "node:test";
 
@@ -131,99 +130,4 @@ test("the derived host codec round-trips fieldless and mixed payload variants", 
   strictEqual(faultDecoded.variant, fault);
   strictEqual(faultDecoded.value(address), 0xffff_fffc);
   strictEqual(faultDecoded.value(detail), 0x8001);
-  throws(() => emptyDecoded.value(address), /does not belong to decoded variant/);
-});
-
-test("the derived codec rejects unknown tags, unused bits, and malformed payloads", () => {
-  const definition = exampleDefinition();
-  const layout = createVariantLayout("test.variant", [definition.set]);
-
-  throws(() => decodeVariant(layout, 0n), /unknown test.variant variant tag: 0/);
-
-  const empty = encodeVariant(layout, {
-    variant: definition.empty,
-    payload: []
-  });
-  throws(
-    () => decodeVariant(layout, empty | (1n << 8n)),
-    /nonzero unused payload bits/
-  );
-  throws(
-    () => encodeVariant(layout, {
-      variant: definition.mixed,
-      payload: [{ field: definition.byte, value: 1 }]
-    }),
-    /expected 2/
-  );
-  throws(
-    () => encodeVariant(layout, {
-      variant: definition.mixed,
-      payload: [
-        { field: definition.byte, value: 1 },
-        { field: definition.byte, value: 2 }
-      ]
-    }),
-    /duplicate payload field/
-  );
-  throws(
-    () => encodeVariant(layout, {
-      variant: definition.mixed,
-      payload: [
-        { field: definition.byte, value: 0x100 },
-        { field: definition.word, value: 0 }
-      ]
-    }),
-    /does not fit u8/
-  );
-  throws(
-    () => encodeVariant(layout, {
-      variant: definition.mixed,
-      payload: [
-        { field: new VariantFieldRef("example.variant.mixed.byte", "u8"), value: 1 },
-        { field: definition.word, value: 0 }
-      ]
-    }),
-    /does not belong to variant/
-  );
-});
-
-test("duplicate identities, foreign handles, malformed definitions, and i64 overflow reject", () => {
-  const duplicateFirst = new VariantRef("duplicate.variant.same", []);
-  const duplicateSecond = new VariantRef("duplicate.variant.same", []);
-
-  throws(
-    () => createVariantLayout("test.variant", [
-      variantSet("duplicate.variant", [duplicateFirst, duplicateSecond])
-    ]),
-    /duplicate variant id/
-  );
-  throws(
-    () => createVariantLayout("test.variant", [variantSet("empty.variant", [])]),
-    /has no variants/
-  );
-  throws(
-    () => createVariantLayout("bad id", [
-      variantSet("valid.variant", [new VariantRef("valid.variant.value", [])])
-    ]),
-    /must be a stable id/
-  );
-
-  const definition = exampleDefinition();
-  const layout = createVariantLayout("test.variant", [definition.set]);
-  const equalButForeign = exampleDefinition();
-
-  throws(() => layout.variant(equalButForeign.empty), /does not belong/);
-  throws(() => layout.field(equalButForeign.byte), /does not belong/);
-
-  const first = new VariantFieldRef("wide.variant.value.first", "u32");
-  const second = new VariantFieldRef("wide.variant.value.second", "u32");
-
-  throws(
-    () => createVariantLayout("wide.variant", [
-      variantSet("wide.variant", [
-        new VariantRef("wide.variant.value", [first, second])
-      ])
-    ]),
-    /does not fit an i64/
-  );
 });

@@ -114,6 +114,8 @@ class LayoutHostViewImpl implements LayoutHostView {
   }
 
   #write(offset: number, byteLength: LayoutByteLength, value: number): void {
+    assert(Number.isInteger(value), `layout write value must be an integer: ${value}`);
+
     const view = new DataView(this.#memory.buffer);
 
     switch (byteLength) {

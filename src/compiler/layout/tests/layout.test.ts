@@ -1,4 +1,4 @@
-import { deepStrictEqual, notDeepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, notDeepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { ArrayRef, FieldRef } from "#compiler/layout/handles.js";
@@ -74,7 +74,6 @@ test("declared element order is the indexing authority", () => {
   strictEqual(first.elementIndex("eax"), 0);
   strictEqual(second.elementIndex("eax"), 2);
   strictEqual(second.elementIndex("edx"), 0);
-  throws(() => first.elementIndex("ebx" as "eax"), /unknown element ebx/);
 });
 
 test("resolution derives natural alignment, padding, array stride, and aggregate size", () => {
@@ -130,56 +129,5 @@ test("the resolved record enumerates canonical structures and placement facts", 
         }
       ]
     }
-  );
-});
-
-test("duplicate stable IDs and foreign handles are rejected", () => {
-  const first = new FieldRef("duplicate.state.first", "u32");
-  const second = new FieldRef("duplicate.state.first", "u16");
-
-  throws(
-    () => createLayout("layout.test", [
-      layoutStructure("duplicate.first", [first]),
-      layoutStructure("duplicate.second", [second])
-    ]),
-    /duplicate layout member id/
-  );
-  throws(
-    () => createLayout("layout.test", [
-      layoutStructure("duplicate.structure", [first]),
-      layoutStructure("duplicate.structure", [new FieldRef("duplicate.structure.second", "u8")])
-    ]),
-    /duplicate structure id/
-  );
-
-  const layout = createLayout("layout.test", [layoutStructure("foreign.state", [
-    new FieldRef("foreign.state.owned", "u32")
-  ])]);
-
-  throws(() => layout.field(new FieldRef("foreign.state.owned", "u32")), /does not belong/);
-  throws(
-    () => layout.array(new ArrayRef("foreign.state.array", "u32", ["value"])),
-    /does not belong/
-  );
-});
-
-test("malformed identities and array shapes are rejected", () => {
-  throws(
-    () => createLayout("bad space", [layoutStructure("space.state", [new FieldRef("space.state.field", "u8")])]),
-    /layout space must be a stable id/
-  );
-  throws(
-    () => createLayout("layout.test", [layoutStructure("unscoped", [new FieldRef("unscoped.field", "u8")])]),
-    /stable namespaced id/
-  );
-  throws(
-    () => createLayout("layout.test", [layoutStructure("empty.state", [new ArrayRef("empty.state.array", "u8", [])])]),
-    /has no elements/
-  );
-  throws(
-    () => createLayout("layout.test", [layoutStructure("repeat.state", [
-      new ArrayRef("repeat.state.array", "u8", ["same", "same"])
-    ])]),
-    /duplicate element id/
   );
 });

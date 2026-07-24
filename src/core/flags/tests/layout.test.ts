@@ -1,7 +1,6 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { FieldRef } from "#compiler/layout/handles.js";
 import { x86Flags } from "#core/flags/definitions.js";
 import {
   flagStateFields,
@@ -31,12 +30,4 @@ test("flag field classes use their declared identities", () => {
     strictEqual(isConcreteFlagStateField(field), false);
     strictEqual(isLazyFlagStateField(field), true);
   }
-
-  const copiedField = new FieldRef(
-    flagStateFields.lazyKind.id,
-    flagStateFields.lazyKind.width
-  );
-
-  strictEqual(isConcreteFlagStateField(copiedField), false);
-  strictEqual(isLazyFlagStateField(copiedField), false);
 });

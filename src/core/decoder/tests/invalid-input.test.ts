@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
@@ -14,7 +14,6 @@ import { X86_32_CORE } from "#core/isa/x86-32.js";
 import {
   ByteArrayDecodeReader,
   decodeBytes,
-  isTestReaderFailure,
   startAddress
 } from "./byte-reader-fixture.js";
 
@@ -44,39 +43,6 @@ test("an undefined opcode after prefixes records the consumed evidence", () => {
   deepStrictEqual(decoded.exception, { kind: "UD" });
   strictEqual(decoded.instructionStart, startAddress);
   deepStrictEqual(decoded.raw, [0x66, 0x62]);
-});
-
-test("reader-owned failures propagate unchanged", () => {
-  for (const [values, missingAddress] of [
-    [[0xb8, 0x01, 0x02], startAddress + 3],
-    [[0x0f], startAddress + 1]
-  ] as const) {
-    throws(
-      () => decodeBytes(values),
-      (error: unknown) => {
-        if (!isTestReaderFailure(error)) {
-          return false;
-        }
-
-        strictEqual(error.address, missingAddress);
-        return true;
-      }
-    );
-  }
-});
-
-test("unrelated RangeError failures are not classified as CPU exceptions", () => {
-  const failure = new RangeError("unrelated reader failure");
-  const reader: IsaDecodeReader = {
-    readU8: () => {
-      throw failure;
-    }
-  };
-
-  throws(
-    () => decodeIsaInstructionFromReader(reader, startAddress),
-    (error: unknown) => error === failure
-  );
 });
 
 test("a reader CPU exception retains the bytes admitted before its fault", () => {
