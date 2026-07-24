@@ -5,7 +5,7 @@ import { exceptionExit } from "#core/exits.js";
 import type { BuildExit } from "#instructions/lowering/terminal.js";
 import type { OperandWidth } from "#core/types.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import type { MemoryAccessConstruction } from "#memory/access.js";
+import type { MemoryAccessConstruction } from "#memory/types.js";
 
 export class InstructionByteStream {
   readonly #instructionStart: ValueId;

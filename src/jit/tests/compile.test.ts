@@ -7,7 +7,7 @@ import { test } from "node:test";
 
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import {
-  compileJitFromMemory,
+  compileJitFromReader,
   type CompiledJitArtifact
 } from "#jit/compile.js";
 import { decodeExit } from "#cpu/exit.js";
@@ -18,10 +18,12 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import {
-  guestMemoryResource,
   testExecutionModel
 } from "#test/support/execution-model.js";
-import { createTestWasmMemories } from "#test/support/wasm-memories.js";
+import {
+  createTestWasmMemories,
+  type TestWasmMemories
+} from "#test/support/wasm-memories.js";
 
 const startEip = 0x1000;
 const instructionLimitExit = 0x0007_0000_0000_0000n;
@@ -29,7 +31,7 @@ const instructionLimitExit = 0x0007_0000_0000_0000n;
 test("a completed block commits its final state before fallthrough dispatch", () => {
   const memories = createTestWasmMemories();
   const artifact = compileFromMemory(
-    memories.guestMemory,
+    memories,
     startEip,
     { instructionLimit: 2 },
     [
@@ -43,10 +45,7 @@ test("a completed block commits its final state before fallthrough dispatch", ()
 
   ok(imported !== undefined, "fallthrough block has no dispatch import");
   const instance = instantiateCompiledProgram(artifact.program, {
-    memories: new Map([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [guestMemoryResource, memories.guestMemory]
-    ]),
+    memories: memories.programMemories,
     functions: new Map([[
       imported.ref,
       (targetEip: number): bigint => {
@@ -75,7 +74,7 @@ test("a mid-block data fault reports the faulting eip after committing earlier s
   const faultAddress = 0xff_0000;
   const memories = createTestWasmMemories();
   const artifact = compileFromMemory(
-    memories.guestMemory,
+    memories,
     startEip,
     { instructionLimit: 2 },
     [
@@ -83,13 +82,20 @@ test("a mid-block data fault reports the faulting eip after committing earlier s
       0x8b, 0x05, 0x00, 0x00, 0xff, 0x00 // mov eax, [0xff0000]
     ]
   );
+  const imported = artifact.program.functionImports[0];
+  const dispatchTargets: number[] = [];
   const stateView = new DataView(memories.cpuStateMemory.buffer);
+
+  ok(imported !== undefined, "fallthrough block has no dispatch import");
   const instance = instantiateCompiledProgram(artifact.program, {
-    memories: new Map([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [guestMemoryResource, memories.guestMemory]
-    ]),
-    functions: new Map()
+    memories: memories.programMemories,
+    functions: new Map([[
+      imported.ref,
+      (targetEip: number): bigint => {
+        dispatchTargets.push(targetEip >>> 0);
+        return instructionLimitExit;
+      }
+    ]])
   });
   const entry = instance.functionExports.get(artifact.entry);
 
@@ -107,13 +113,14 @@ test("a mid-block data fault reports the faulting eip after committing earlier s
   strictEqual(state.eax, 6);
   strictEqual(state.eip, startEip + 1);
   strictEqual(state.instructionCount, 1);
+  deepStrictEqual(dispatchTargets, []);
 });
 
 test("an inaccessible block start compiles its exact Memory exception", () => {
   const memories = createTestWasmMemories();
   const start = guestMemoryMinimumByteLength;
   const artifact = compileFromMemory(
-    memories.guestMemory,
+    memories,
     start,
     { instructionLimit: 1 }
   );
@@ -121,10 +128,7 @@ test("an inaccessible block start compiles its exact Memory exception", () => {
 
   const stateView = new DataView(memories.cpuStateMemory.buffer);
   const instance = instantiateCompiledProgram(artifact.program, {
-    memories: new Map([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [guestMemoryResource, memories.guestMemory]
-    ]),
+    memories: memories.programMemories,
     functions: new Map()
   });
   const entry = instance.functionExports.get(artifact.entry);
@@ -152,7 +156,7 @@ test("a boundary after a completed instruction becomes terminal control", () => 
 
   writeBackingBytes(memories.guestMemory, start, [0x90]);
   const artifact = compileFromMemory(
-    memories.guestMemory,
+    memories,
     start,
     { instructionLimit: 2 }
   );
@@ -164,10 +168,7 @@ test("a boundary after a completed instruction becomes terminal control", () => 
 
   const stateView = new DataView(memories.cpuStateMemory.buffer);
   const instance = instantiateCompiledProgram(artifact.program, {
-    memories: new Map([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [guestMemoryResource, memories.guestMemory]
-    ]),
+    memories: memories.programMemories,
     functions: new Map()
   });
   const entry = instance.functionExports.get(artifact.entry);
@@ -191,17 +192,14 @@ test("a terminal one-byte instruction at the final backing byte does not consume
 
   writeBackingBytes(memories.guestMemory, start, [0xcc]);
   const artifact = compileFromMemory(
-    memories.guestMemory,
+    memories,
     start,
     { instructionLimit: 2 }
   );
 
   const stateView = new DataView(memories.cpuStateMemory.buffer);
   const instance = instantiateCompiledProgram(artifact.program, {
-    memories: new Map([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [guestMemoryResource, memories.guestMemory]
-    ]),
+    memories: memories.programMemories,
     functions: new Map()
   });
   const entry = instance.functionExports.get(artifact.entry);
@@ -219,21 +217,25 @@ test("a terminal one-byte instruction at the final backing byte does not consume
 });
 
 function compileFromMemory(
-  memory: WebAssembly.Memory,
+  memories: TestWasmMemories,
   start: number,
   policy: Readonly<{ instructionLimit: number }>,
   bytes?: readonly number[]
 ): CompiledJitArtifact {
   if (bytes !== undefined) {
-    const firstFailingAddress = writeBackingBytes(memory, start, bytes);
+    const firstFailingAddress = writeBackingBytes(
+      memories.guestMemory,
+      start,
+      bytes
+    );
 
     ok(
       firstFailingAddress === undefined,
       `JIT source bytes exceed guest memory at 0x${firstFailingAddress?.toString(16)}`
     );
   }
-  return compileJitFromMemory({
-    memory,
+  return compileJitFromReader({
+    reader: memories.reader,
     start,
     policy,
     model: testExecutionModel

@@ -174,7 +174,11 @@ test("mutating memory bit operations validate the entire adjusted dword before w
     },
     expectedCompletion: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 2
+      }
     },
     expectedEip: startAddress,
     instructionCount: 0,
@@ -279,7 +283,7 @@ test("bit scans read memory sources and publish only after a complete read", asy
       kind: "cpuException",
       exception: {
         kind: "PF",
-        linearAddress: faultAddress,
+        linearAddress: guestMemoryMinimumByteLength,
         errorCode: 0
       }
     },

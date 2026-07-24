@@ -13,6 +13,7 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import { testExecutionModel } from "#test/support/execution-model.js";
+import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 
 type InterpreterHarness = Readonly<{
   guestMemory: WebAssembly.Memory;
@@ -38,22 +39,13 @@ let compiledInterpreter:
 
 export function instantiateInterpreter(): InterpreterHarness {
   compiledInterpreter ??= compileInterpreterProgram(testExecutionModel);
-  const guestMemory = new WebAssembly.Memory({
-    initial:
-      testExecutionModel.memory.physical.ramImport.limits.minPages
-  });
-  const cpuStateMemory = new WebAssembly.Memory({
-    initial: testExecutionModel.cpuState.memoryImport.limits.minPages
-  });
-  const stateView = new DataView(cpuStateMemory.buffer);
-  const guestView = new DataView(guestMemory.buffer);
+  const memories = createTestWasmMemories();
+  const stateView = new DataView(memories.cpuStateMemory.buffer);
+  const guestView = new DataView(memories.guestMemory.buffer);
   const instance = instantiateCompiledProgram(
     compiledInterpreter.program,
     {
-      memories: new Map([
-        [testExecutionModel.cpuState.resource, cpuStateMemory],
-        [testExecutionModel.memory.physical.ramResource, guestMemory]
-      ]),
+      memories: memories.programMemories,
       functions: new Map()
     }
   );
@@ -65,12 +57,12 @@ export function instantiateInterpreter(): InterpreterHarness {
     );
   }
   const stateStorage = createLayoutHostView(
-    cpuStateMemory,
+    memories.cpuStateMemory,
     testExecutionModel.cpuState.layout
   );
 
   return {
-    guestMemory,
+    guestMemory: memories.guestMemory,
     stateView,
     guestView,
     runFor(instructionBudget): RunStop {

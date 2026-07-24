@@ -12,7 +12,9 @@ import {
   type InstructionByteSnapshot
 } from "#jit/instruction-snapshot.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
-import { testExecutionModel } from "#test/support/execution-model.js";
+import {
+  createTestGuestMemoryBinding
+} from "#test/support/wasm-memories.js";
 import { jitMemoryWithBytes } from "./memory-fixture.js";
 
 const startAddress = 0x1000;
@@ -105,9 +107,10 @@ function memory(
   address = startAddress,
   policy: JitBlockPolicy = defaultJitBlockPolicy
 ): InstructionByteSnapshot {
-  const reader = testExecutionModel.memory.bindHost({
-    ram: jitMemoryWithBytes(values, address)
-  }).reader;
+  const guestMemory = jitMemoryWithBytes(values, address);
+  const reader = createTestGuestMemoryBinding(
+    guestMemory
+  ).reader;
 
   return snapshotInstructionBytes(
     reader,

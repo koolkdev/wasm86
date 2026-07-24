@@ -7,7 +7,7 @@ import type { VariableRef } from "#compiler/ir/variable.js";
 import type {
   MemoryAccess,
   MemoryDataAccessIntent
-} from "#memory/access.js";
+} from "#memory/types.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type {
   MemRef,

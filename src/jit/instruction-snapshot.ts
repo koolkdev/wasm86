@@ -3,7 +3,7 @@ import type { PageFault } from "#core/exceptions.js";
 import type {
   GuestMemoryByteRead,
   GuestMemoryReader
-} from "#memory/access.js";
+} from "#memory/types.js";
 
 declare const instructionByteSnapshotBrand: unique symbol;
 

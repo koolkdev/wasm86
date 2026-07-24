@@ -448,7 +448,11 @@ test("CALL validates its target read before any stack write and commits neither 
     initialState: { ebx: sourceFault, esp: 0x80, ...preservedFlags },
     expectedCompletion: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: sourceFault, errorCode: 0 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 0
+      }
     },
     expectedEip: startAddress,
     instructionCount: 0,
@@ -474,7 +478,7 @@ test("CALL validates its target read before any stack write and commits neither 
       kind: "cpuException",
       exception: {
         kind: "PF",
-        linearAddress: guestMemoryMinimumByteLength - 2,
+        linearAddress: guestMemoryMinimumByteLength,
         errorCode: 2
       }
     },
@@ -552,7 +556,11 @@ test("RET read faults leave EIP, ESP, cleanup, and memory uncommitted", async ()
     initialState: { esp: faultAddress, ...preservedFlags },
     expectedCompletion: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: faultAddress, errorCode: 0 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 0
+      }
     },
     expectedEip: startAddress,
     instructionCount: 0,

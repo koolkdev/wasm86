@@ -342,7 +342,11 @@ test("PUSHA-family writes validate the complete stack image before storing", asy
       },
       expectedCompletion: {
         kind: "cpuException",
-        exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+        exception: {
+          kind: "PF",
+          linearAddress: guestMemoryMinimumByteLength,
+          errorCode: 2
+        }
       },
       expectedEip: startAddress,
       instructionCount: 0,
@@ -384,7 +388,11 @@ test("POPA-family reads validate the complete stack image before restoring regis
       },
       expectedCompletion: {
         kind: "cpuException",
-        exception: { kind: "PF", linearAddress: address, errorCode: 0 }
+        exception: {
+          kind: "PF",
+          linearAddress: guestMemoryMinimumByteLength,
+          errorCode: 0
+        }
       },
       expectedEip: startAddress,
       instructionCount: 0,
@@ -408,7 +416,11 @@ test("ENTER write preflight leaves state and its trailing bytes unchanged", asyn
     },
     expectedCompletion: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 2
+      }
     },
     expectedEip: startAddress,
     instructionCount: 0,
@@ -433,7 +445,11 @@ test("ENTER read preflight leaves state and its would-be display stores unchange
     },
     expectedCompletion: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: readAddress, errorCode: 0 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 0
+      }
     },
     expectedEip: startAddress,
     instructionCount: 0,

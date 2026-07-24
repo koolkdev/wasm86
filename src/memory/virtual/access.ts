@@ -8,6 +8,7 @@ import {
   pageFault,
   pageFaultErrorCode
 } from "#core/exceptions.js";
+import type { MachineMemoryDefinition } from "../machine-memory.js";
 import type { PhysicalAddressSpaceDefinition } from "../physical.js";
 import type {
   LinearRange,
@@ -25,7 +26,6 @@ import {
   createRangeResolver,
   type RangeResolver
 } from "./resolution.js";
-import type { VirtualStorageDefinition } from "./storage.js";
 import {
   createVirtualLoadStore,
   type VirtualLoadStoreOperations
@@ -38,9 +38,9 @@ export type VirtualAccessDefinition = Readonly<{
 
 export function createVirtualAccessDefinition(
   physical: PhysicalAddressSpaceDefinition,
-  storage: VirtualStorageDefinition
+  machineMemory: MachineMemoryDefinition
 ): VirtualAccessDefinition {
-  const pageTable = createPageTableAccess(storage);
+  const pageTable = createPageTableAccess(machineMemory);
   const rangeResolver = createRangeResolver(pageTable);
   const scattered = createScatteredLoadStore(physical, pageTable);
   const loadStore = createVirtualLoadStore(

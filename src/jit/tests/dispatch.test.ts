@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { encodeVariant } from "#compiler/layout/variant-codec.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import { decodeExit, exitLayout } from "#cpu/exit.js";
-import { compileJitFromMemory } from "#jit/compile.js";
+import { compileJitFromReader } from "#jit/compile.js";
 import { instructionLimitExit } from "#interpreter/exits.js";
 import { writeBackingBytes } from "#memory/bytes.js";
 import {
@@ -12,7 +12,6 @@ import {
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
 import {
-  guestMemoryResource,
   testExecutionModel
 } from "#test/support/execution-model.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
@@ -28,8 +27,8 @@ test("a final static jmp returns through the typed dispatch import", () => {
     0x40,                         // inc eax
     0xe9, 0xfa, 0x0f, 0x00, 0x00 // jmp 0x2000
   ]);
-  const artifact = compileJitFromMemory({
-    memory: memories.guestMemory,
+  const artifact = compileJitFromReader({
+    reader: memories.reader,
     start: aEip,
     policy: { instructionLimit: 1024 },
     model: testExecutionModel
@@ -39,10 +38,7 @@ test("a final static jmp returns through the typed dispatch import", () => {
   ok(imported !== undefined, "compiled JIT artifact has no dispatch import");
   const dispatchTargets: number[] = [];
   const instance = instantiateCompiledProgram(artifact.program, {
-    memories: new Map([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [guestMemoryResource, memories.guestMemory]
-    ]),
+    memories: memories.programMemories,
     functions: new Map([[
       imported.ref,
       recordDispatches(dispatchTargets)
@@ -80,8 +76,8 @@ test("a conditional side transfer dispatches only when taken", () => {
       0xcd, 0x2e  // int 0x2e
     ]
   );
-  const artifact = compileJitFromMemory({
-    memory: memories.guestMemory,
+  const artifact = compileJitFromReader({
+    reader: memories.reader,
     start: aEip,
     policy: { instructionLimit: 1024 },
     model: testExecutionModel
@@ -91,10 +87,7 @@ test("a conditional side transfer dispatches only when taken", () => {
   ok(imported !== undefined, "compiled JIT artifact has no dispatch import");
   const dispatchTargets: number[] = [];
   const instance = instantiateCompiledProgram(artifact.program, {
-    memories: new Map([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [guestMemoryResource, memories.guestMemory]
-    ]),
+    memories: memories.programMemories,
     functions: new Map([[
       imported.ref,
       recordDispatches(dispatchTargets)
@@ -142,8 +135,8 @@ test("an indirect jump preserves the full u32 dispatch target", () => {
   const memories = createTestWasmMemories();
 
   writeSource(memories.guestMemory, aEip, [0xff, 0xe0]); // jmp eax
-  const artifact = compileJitFromMemory({
-    memory: memories.guestMemory,
+  const artifact = compileJitFromReader({
+    reader: memories.reader,
     start: aEip,
     policy: { instructionLimit: 1 },
     model: testExecutionModel
@@ -153,10 +146,7 @@ test("an indirect jump preserves the full u32 dispatch target", () => {
   ok(imported !== undefined, "compiled JIT artifact has no dispatch import");
   const dispatchTargets: number[] = [];
   const instance = instantiateCompiledProgram(artifact.program, {
-    memories: new Map([
-      [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [guestMemoryResource, memories.guestMemory]
-    ]),
+    memories: memories.programMemories,
     functions: new Map([[
       imported.ref,
       recordDispatches(dispatchTargets)

@@ -5,7 +5,7 @@ import type {
   MemoryAccessConstruction,
   MemoryAccessOperations,
   MemoryDataAccessIntent
-} from "#memory/access.js";
+} from "#memory/types.js";
 import type {
   AccessFault,
   AccessResolution,

@@ -3,39 +3,39 @@ import { resourceRef, type ResourceRef } from "#compiler/ir/resource.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
 import { wasmPagesForByteLength } from "#compiler/program/limits.js";
 import type { MemoryImport } from "#compiler/program/resources.js";
-import { virtualStorageLayout } from "./layout.js";
+import { pageTableLayout } from "./virtual/layout.js";
 
 const machineMemoryResourceDefinition = {
   id: "memory.machine",
   name: "machine"
 } as const;
 
-export type VirtualStorageDefinition = Readonly<{
-  machineResource: ResourceRef;
-  machineLayout: Layout;
-  machineImport: MemoryImport;
+export type MachineMemoryDefinition = Readonly<{
+  resource: ResourceRef;
+  layout: Layout;
+  memoryImport: MemoryImport;
   resources: readonly MemoryImport[];
 }>;
 
-export function createVirtualStorageDefinition(): VirtualStorageDefinition {
-  const machineResource = resourceRef(machineMemoryResourceDefinition.id);
-  const machineLayout = createLayout(
+export function createMachineMemoryDefinition(): MachineMemoryDefinition {
+  const resource = resourceRef(machineMemoryResourceDefinition.id);
+  const layout = createLayout(
     "machine-memory",
-    [virtualStorageLayout]
+    [pageTableLayout]
   );
-  const machineImport: MemoryImport = {
-    ref: machineResource,
+  const memoryImport: MemoryImport = {
+    ref: resource,
     moduleName: programImportModuleName,
     name: machineMemoryResourceDefinition.name,
     limits: {
-      minPages: wasmPagesForByteLength(machineLayout.byteLength)
+      minPages: wasmPagesForByteLength(layout.byteLength)
     }
   };
 
   return {
-    machineResource,
-    machineLayout,
-    machineImport,
-    resources: [machineImport]
+    resource,
+    layout,
+    memoryImport,
+    resources: [memoryImport]
   };
 }

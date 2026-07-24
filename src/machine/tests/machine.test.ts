@@ -41,3 +41,22 @@ test("machines do not share guest memory or Cpu state", () => {
   strictEqual(new Uint8Array(second.memory.buffer)[0], 0);
   strictEqual(second.cpu.state.core.readReg32("eax"), 0);
 });
+
+test("growing Machine RAM does not publish new virtual mappings", () => {
+  const machine = createMachine({ memoryByteLength: 0x1000 });
+  const unmappedStart = machine.memory.buffer.byteLength;
+
+  machine.memory.grow(1);
+  new Uint8Array(machine.memory.buffer)[unmappedStart] = 0xcc;
+  machine.cpu.state.core.eip = unmappedStart;
+
+  deepStrictEqual(machine.cpu.run({ instructionBudget: 1 }), {
+    kind: "cpuException",
+    exception: {
+      kind: "PF",
+      linearAddress: unmappedStart,
+      errorCode: 16
+    }
+  });
+  strictEqual(machine.cpu.state.core.eip, unmappedStart);
+});

@@ -130,13 +130,7 @@ export async function runCompiledInstructions(
   const instance = instantiateCompiledProgram(
     program,
     {
-      memories: new Map([
-        [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-        [
-          testExecutionModel.memory.physical.ramResource,
-          memories.guestMemory
-        ]
-      ]),
+      memories: memories.programMemories,
       functions: new Map([[
         built.dispatch.ref,
         (targetEip: number): bigint => {

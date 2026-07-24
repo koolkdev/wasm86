@@ -1,6 +1,7 @@
 import { compileProgram, type CompiledProgram } from "#compiler/compile.js";
 import type { FunctionExportRef } from "#compiler/program/exports.js";
 import type { ExecutionModel } from "#execution/model.js";
+import type { GuestMemoryReader } from "#memory/types.js";
 import {
   snapshotInstructionBytes,
   type InstructionByteSnapshot
@@ -18,20 +19,17 @@ export type CompiledJitArtifact = Readonly<{
   entryEip: number;
 }>;
 
-export function compileJitFromMemory(
+export function compileJitFromReader(
   input: Readonly<{
-    memory: WebAssembly.Memory;
+    reader: GuestMemoryReader;
     start: number;
     policy: JitBlockPolicy;
     model: ExecutionModel;
   }>
 ): CompiledJitArtifact {
   const byteLength = jitSnapshotRequestByteLength(input.policy);
-  const reader = input.model.memory.bindHost({
-    ram: input.memory
-  }).reader;
   const snapshot = snapshotInstructionBytes(
-    reader,
+    input.reader,
     { linearStart: input.start, byteLength }
   );
 

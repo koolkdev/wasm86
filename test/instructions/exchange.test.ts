@@ -107,7 +107,11 @@ test("XCHG validates a complete memory write before changing the register or byt
     initialState: { eax: address, ebx: 0x1234_5678, ...allFlagsSet },
     expectedCompletion: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 2
+      }
     },
     expectedEip: startAddress,
     instructionCount: 0,
@@ -185,7 +189,11 @@ test("XADD memory faults before publishing its source, flags, or store", async (
     initialState: { eax: address, ebx: 7, ...allFlagsSet },
     expectedCompletion: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 2
+      }
     },
     expectedEip: startAddress,
     instructionCount: 0,
@@ -293,7 +301,11 @@ test("CMPXCHG memory validates its write view before changing state", async () =
     initialState: { eax: address, ebx: 9, ...allFlagsSet },
     expectedCompletion: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 2
+      }
     },
     expectedEip: startAddress,
     instructionCount: 0,
@@ -370,7 +382,11 @@ test("CMPXCHG8B validates the full qword write before publishing any half", asyn
     },
     expectedCompletion: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: address, errorCode: 2 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 2
+      }
     },
     expectedEip: startAddress,
     instructionCount: 0,

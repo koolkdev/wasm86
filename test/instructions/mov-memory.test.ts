@@ -448,7 +448,11 @@ test("MOV read guards report exact 1-, 2-, and 4-byte fault ranges", async () =>
       initialState: { eax: 0xaaaa_aaaa, dsBase: 0 },
       expectedExit: {
         kind: "cpuException",
-        exception: { kind: "PF", linearAddress: faultAddress, errorCode: 0 }
+        exception: {
+          kind: "PF",
+          linearAddress: guestMemoryMinimumByteLength,
+          errorCode: 0
+        }
       }
     });
   }
@@ -470,7 +474,11 @@ test("MOV write guards fault before state or memory changes", async () => {
       initialState: { eax: 0x1234_5678, dsBase: 0 },
       expectedExit: {
         kind: "cpuException",
-        exception: { kind: "PF", linearAddress: faultAddress, errorCode: 2 }
+        exception: {
+          kind: "PF",
+          linearAddress: guestMemoryMinimumByteLength,
+          errorCode: 2
+        }
       },
       memoryPatches: [{ address: observedAddress, bytes: initialBytes }],
       expectedMemory: [{ address: observedAddress, bytes: initialBytes }]
@@ -489,7 +497,11 @@ test("faulting moffs reads and writes preserve instruction-start state and memor
     initialState: { eax: 0xaaaa_aaaa, dsBase: 0 },
     expectedExit: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: faultAddress, errorCode: 0 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 0
+      }
     },
     memoryPatches: [{ address: observedAddress, bytes: initialBytes }],
     expectedMemory: [{ address: observedAddress, bytes: initialBytes }]
@@ -500,7 +512,11 @@ test("faulting moffs reads and writes preserve instruction-start state and memor
     initialState: { eax: 0x1234_5678, dsBase: 0 },
     expectedExit: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: faultAddress, errorCode: 2 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 2
+      }
     },
     memoryPatches: [{ address: observedAddress, bytes: initialBytes }],
     expectedMemory: [{ address: observedAddress, bytes: initialBytes }]
@@ -517,7 +533,11 @@ test("faulting segment-selector store reports a word write before committing", a
     initialState: { ebx: faultAddress, gsSelector: 0xabcd },
     expectedExit: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: faultAddress, errorCode: 2 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 2
+      }
     },
     memoryPatches: [{ address: faultAddress, bytes: initialBytes }],
     expectedMemory: [{ address: faultAddress, bytes: initialBytes }]
@@ -538,7 +558,11 @@ test("not-taken CMOVcc reports its memory-source fault before any state write", 
     },
     expectedExit: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: faultAddress, errorCode: 0 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 0
+      }
     },
     memoryPatches: [{ address: faultAddress, bytes: sourceBytes }],
     expectedMemory: [{ address: faultAddress, bytes: sourceBytes }]

@@ -5,8 +5,8 @@ import type {
   ResourceEffect
 } from "#compiler/ir/resource.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
+import type { MachineMemoryDefinition } from "../machine-memory.js";
 import { pageTableEntries } from "./layout.js";
-import type { VirtualStorageDefinition } from "./storage.js";
 
 export type PageTableAccess = Readonly<{
   effect: ResourceEffect;
@@ -14,12 +14,12 @@ export type PageTableAccess = Readonly<{
 }>;
 
 export function createPageTableAccess(
-  storage: VirtualStorageDefinition
+  machineMemory: MachineMemoryDefinition
 ): PageTableAccess {
-  const entries = storage.machineLayout.array(pageTableEntries);
+  const entries = machineMemory.layout.array(pageTableEntries);
   const effect: ResourceEffect = {
     space: "resource",
-    resource: storage.machineResource,
+    resource: machineMemory.resource,
     range: {
       basis: { kind: "resource" },
       slice: {

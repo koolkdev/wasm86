@@ -798,7 +798,7 @@ test("faulting ALU source reads publish neither destination nor flag writes", as
     kind: "cpuException",
     exception: {
       kind: "PF",
-      linearAddress: faultAddress,
+      linearAddress: guestMemoryMinimumByteLength,
       errorCode: 0
     }
   });
@@ -836,7 +836,7 @@ test("faulting ALU read-modify-writes publish neither flags nor guest bytes", as
     kind: "cpuException",
     exception: {
       kind: "PF",
-      linearAddress: faultAddress,
+      linearAddress: guestMemoryMinimumByteLength,
       errorCode: 2
     }
   });

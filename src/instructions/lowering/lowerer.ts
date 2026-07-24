@@ -3,7 +3,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
 import { createStatusFlagResolvers } from "#core/flags/lazy/resolvers.js";
 import type { StateAccess } from "#core/state/access.js";
-import type { MemoryAccessConstruction } from "#memory/access.js";
+import type { MemoryAccessConstruction } from "#memory/types.js";
 import {
   buildInstructionSequence,
   type InstructionBuilder

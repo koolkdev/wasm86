@@ -14,11 +14,11 @@ import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import { functionExportRef } from "#compiler/program/exports.js";
 import { createProgramResources } from "#compiler/program/resources.js";
-import type { MemoryAccessIntent } from "#memory/access.js";
+import type { MemoryAccessIntent } from "#memory/types.js";
+import { createMachineMemoryDefinition } from "#memory/machine-memory.js";
 import { createPhysicalAddressSpaceDefinition } from "#memory/physical.js";
 import { createVirtualAccessDefinition } from "#memory/virtual/access.js";
 import { pageTableEntries } from "#memory/virtual/layout.js";
-import { createVirtualStorageDefinition } from "#memory/virtual/storage.js";
 
 const faultProjection = {
   condition: 0,
@@ -118,10 +118,10 @@ const byteSubaccessEntry = {
 } as const;
 
 const physical = createPhysicalAddressSpaceDefinition();
-const virtualStorage = createVirtualStorageDefinition();
+const machineMemoryDefinition = createMachineMemoryDefinition();
 const virtualAccess = createVirtualAccessDefinition(
   physical,
-  virtualStorage
+  machineMemoryDefinition
 );
 const compiledTestProgram = compileProgram(buildVirtualAccessTestProgram());
 
@@ -407,7 +407,7 @@ test("generated Virtual scattered write denial precedes physical mutation", () =
 function buildVirtualAccessTestProgram() {
   const builder = new ProgramBuilder(createProgramResources([
     ...physical.resources,
-    ...virtualStorage.resources
+    ...machineMemoryDefinition.resources
   ]));
 
   for (const intent of [
@@ -644,12 +644,12 @@ function createVirtualAccessFixture(): VirtualAccessFixture {
     initial: physical.ramImport.limits.minPages
   });
   const machine = new WebAssembly.Memory({
-    initial: virtualStorage.machineImport.limits.minPages
+    initial: machineMemoryDefinition.memoryImport.limits.minPages
   });
   const instance = instantiateCompiledProgram(compiledTestProgram, {
     memories: new Map([
       [physical.ramResource, ram],
-      [virtualStorage.machineResource, machine]
+      [machineMemoryDefinition.resource, machine]
     ]),
     functions: new Map()
   });
@@ -708,7 +708,7 @@ function createVirtualAccessFixture(): VirtualAccessFixture {
   ok(typeof rmw === "function", "Virtual RMW export is missing");
   const machineView = createLayoutHostView(
     machine,
-    virtualStorage.machineLayout
+    machineMemoryDefinition.layout
   );
 
   return {

@@ -1,7 +1,7 @@
 import { wasmPageByteLength } from "#compiler/program/limits.js";
 
-// Flat guest accesses are limited to the first Wasm page.
-// Guest memory must contain at least that page.
+// Guest RAM contains at least one Wasm page. Virtual initialization maps the
+// complete live backing, including the host's page rounding.
 export const guestMemoryMinimumPages = 1;
 export const guestMemoryMinimumByteLength =
   guestMemoryMinimumPages * wasmPageByteLength;

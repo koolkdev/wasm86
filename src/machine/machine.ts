@@ -45,16 +45,25 @@ export function createMachine(options: MachineOptions): Machine {
   }
 
   const { model, interpreter } = getInterpreterCompilation();
-  const physical = model.memory.physical;
+  const memoryDefinition = model.memory;
+  const physical = memoryDefinition.physical;
+  const machineMemoryDefinition = memoryDefinition.machineMemory;
   const initialPages = wasmPagesForByteLength(memoryByteLength);
   const maximumPages = physical.ramImport.limits.maxPages;
 
-  const memory = new WebAssembly.Memory({
-    initial: initialPages,
-    ...(maximumPages === undefined ? {} : { maximum: maximumPages })
+  const memory = createWasmMemory(initialPages, maximumPages);
+  const { minPages, maxPages } =
+    machineMemoryDefinition.memoryImport.limits;
+  const machineMemory = createWasmMemory(minPages, maxPages);
+  const boundMemory = memoryDefinition.bindHost({
+    ram: memory,
+    machine: machineMemory
   });
+
+  boundMemory.initializeIdentity();
   const sharedMemories = new Map<ResourceRef, WebAssembly.Memory>([
-    [physical.ramResource, memory]
+    [physical.ramResource, memory],
+    [machineMemoryDefinition.resource, machineMemory]
   ]);
   const cpu = createCpu({
     state: model.cpuState,
@@ -79,4 +88,15 @@ function getInterpreterCompilation(): InterpreterCompilation {
   }
 
   return interpreterCompilation;
+}
+
+function createWasmMemory(
+  initial: number,
+  maximum: number | undefined
+): WebAssembly.Memory {
+  return new WebAssembly.Memory(
+    maximum === undefined
+      ? { initial }
+      : { initial, maximum }
+  );
 }

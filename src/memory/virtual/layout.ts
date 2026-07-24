@@ -34,7 +34,7 @@ export const pageTableEntries = new ArrayRef(
   }
 );
 
-export const virtualStorageLayout = layoutStructure(
+export const pageTableLayout = layoutStructure(
   "memory.virtual",
   [pageTableEntries]
 );

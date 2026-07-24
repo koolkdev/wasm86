@@ -699,7 +699,7 @@ const faultCases = [
       kind: "cpuException",
       exception: {
         kind: "PF",
-        linearAddress: guestMemoryMinimumByteLength - 2,
+        linearAddress: guestMemoryMinimumByteLength,
         errorCode: 0
       }
     },
@@ -725,7 +725,7 @@ const faultCases = [
       kind: "cpuException",
       exception: {
         kind: "PF",
-        linearAddress: guestMemoryMinimumByteLength - 2,
+        linearAddress: guestMemoryMinimumByteLength,
         errorCode: 2
       }
     },
@@ -773,7 +773,7 @@ const faultCases = [
       kind: "cpuException",
       exception: {
         kind: "PF",
-        linearAddress: guestMemoryMinimumByteLength - 2,
+        linearAddress: guestMemoryMinimumByteLength,
         errorCode: 0
       }
     },

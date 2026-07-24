@@ -35,7 +35,7 @@ import type {
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type {
   MemoryAccessConstruction
-} from "#memory/access.js";
+} from "#memory/types.js";
 import type {
   OperandBinding,
   SegmentOperandBinding

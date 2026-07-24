@@ -218,7 +218,7 @@ const movSegmentCases = [
       kind: "cpuException",
       exception: {
         kind: "PF",
-        linearAddress: guestMemoryMinimumByteLength - 1,
+        linearAddress: guestMemoryMinimumByteLength,
         errorCode: 0
       }
     },
@@ -389,7 +389,7 @@ const popSegmentBoundaryCases = [
       kind: "cpuException",
       exception: {
         kind: "PF",
-        linearAddress: guestMemoryMinimumByteLength - 2,
+        linearAddress: guestMemoryMinimumByteLength,
         errorCode: 0
       }
     },
@@ -416,7 +416,7 @@ const popSegmentBoundaryCases = [
       kind: "cpuException",
       exception: {
         kind: "PF",
-        linearAddress: guestMemoryMinimumByteLength - 1,
+        linearAddress: guestMemoryMinimumByteLength,
         errorCode: 0
       }
     },

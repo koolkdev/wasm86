@@ -296,7 +296,11 @@ test("stack write faults leave instruction-start state and bytes unchanged", asy
     initialState: { ebx: destination, esp: stackAddress, ...allUserFlagsSet },
     expectedCompletion: {
       kind: "cpuException",
-      exception: { kind: "PF", linearAddress: destination, errorCode: 2 }
+      exception: {
+        kind: "PF",
+        linearAddress: guestMemoryMinimumByteLength,
+        errorCode: 2
+      }
     },
     expectedEip: startAddress,
     instructionCount: 0,
@@ -337,7 +341,11 @@ test("stack read faults leave instruction-start state unchanged", async () => {
       initialState: { ...entry.initialState, ...allUserFlagsSet },
       expectedCompletion: {
         kind: "cpuException",
-        exception: { kind: "PF", linearAddress: address, errorCode: 0 }
+        exception: {
+          kind: "PF",
+          linearAddress: guestMemoryMinimumByteLength,
+          errorCode: 0
+        }
       },
       expectedEip: startAddress,
       instructionCount: 0,

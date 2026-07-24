@@ -16,7 +16,7 @@ import type { OperandBinding } from "#instructions/lowering/bindings.js";
 import type { BuildExit } from "#instructions/lowering/terminal.js";
 import type { StateAccess } from "#core/state/access.js";
 import type { RegionBuilder, SwitchControlArm } from "#compiler/ir/builder/region.js";
-import type { MemoryAccessConstruction } from "#memory/access.js";
+import type { MemoryAccessConstruction } from "#memory/types.js";
 import { ModRmAddressDecoder } from "./decode/address.js";
 import {
   memoryFormDispatch,

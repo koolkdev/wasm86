@@ -2,7 +2,6 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { writeBackingBytes } from "#memory/bytes.js";
-import { testExecutionModel } from "#test/support/execution-model.js";
 import {
   guestMemoryMinimumByteLength,
   guestMemoryMinimumPages
@@ -12,8 +11,11 @@ import {
   type InstructionByteSnapshot,
   type InstructionSnapshotRequest
 } from "#jit/instruction-snapshot.js";
+import {
+  createTestGuestMemoryBinding
+} from "#test/support/wasm-memories.js";
 
-test("flat instruction snapshots copy their complete readable request", () => {
+test("Virtual instruction snapshots copy their complete readable request", () => {
   const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
 
   writeBackingBytes(memory, 0x1000, [0x12, 0x34, 0x56]);
@@ -27,7 +29,7 @@ test("flat instruction snapshots copy their complete readable request", () => {
   deepStrictEqual(snapshot.readByte(0x1002), { kind: "value", value: 0x56 });
 });
 
-test("flat instruction snapshots return their maximal prefix and one boundary fault", () => {
+test("Virtual instruction snapshots return their maximal prefix and one boundary fault", () => {
   const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
   const linearStart = guestMemoryMinimumByteLength - 2;
 
@@ -86,13 +88,14 @@ test("instruction snapshots do not observe later guest mutation", () => {
   );
 });
 
-test("flat snapshot authority keeps its boundary after backing growth", () => {
+test("Virtual snapshot authority keeps its mapping after backing growth", () => {
   const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
+  const reader = createTestGuestMemoryBinding(memory).reader;
 
   memory.grow(1);
   writeBackingBytes(memory, guestMemoryMinimumByteLength, [0x90]);
-  const snapshot = snapshotFromMemory(
-    memory,
+  const snapshot = snapshotInstructionBytes(
+    reader,
     { linearStart: guestMemoryMinimumByteLength, byteLength: 1 }
   );
 
@@ -110,8 +113,10 @@ function snapshotFromMemory(
   memory: WebAssembly.Memory,
   request: InstructionSnapshotRequest
 ): InstructionByteSnapshot {
+  const reader = createTestGuestMemoryBinding(memory).reader;
+
   return snapshotInstructionBytes(
-    testExecutionModel.memory.bindHost({ ram: memory }).reader,
+    reader,
     request
   );
 }
