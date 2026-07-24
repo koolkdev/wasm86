@@ -1,9 +1,9 @@
 import { maxSwitchMatch } from "#compiler/ir/controls/index.js";
-import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
+import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";
 import type {
   InstructionForm,
   ModRmModeForms
-} from "#core/decoder/model/types.js";
+} from "#instructions/decoder/model/types.js";
 
 type ModRmRegCase = Readonly<{
   matches: readonly number[];

@@ -12,22 +12,24 @@ import { functionType } from "#compiler/ir/function.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
 import { functionExportRef } from "#compiler/program/exports.js";
 import { functionRef } from "#compiler/ir/refs.js";
-import { decodeIsaInstructionFromReader } from "#core/decoder/decode.js";
+import { decodeIsaInstructionFromReader } from "#instructions/decoder/decode.js";
 import type {
   IsaDecodedInstruction,
   IsaDecodeReadResult,
   IsaDecodeReader
-} from "#core/decoder/types.js";
+} from "#instructions/decoder/types.js";
 import {
   x86StatusFlags,
   type X86StatusFlag
 } from "#core/flags/definitions.js";
 import {
-  createInstructionConstruction,
   staticInstructionLocation
-} from "#core/instruction/builder.js";
-import { staticOperandBinding } from "#core/instruction/static-binding.js";
-import type { InstructionTerminals } from "#core/instruction/terminal.js";
+} from "#instructions/lowering/builder.js";
+import {
+  createInstructionLowerer
+} from "#instructions/lowering/lowerer.js";
+import { staticOperandBinding } from "#instructions/lowering/static-binding.js";
+import type { InstructionTerminals } from "#instructions/lowering/terminal.js";
 import type { RunStop } from "#cpu/cpu.js";
 import { createCpuStateHostView } from "#cpu/host-view.js";
 import {
@@ -197,7 +199,7 @@ function buildInstructionProgram(
   instructions: readonly IsaDecodedInstruction[]
 ) {
   const program = new ProgramBuilder(testExecutionModel.resources);
-  const instructionConstruction = createInstructionConstruction({
+  const instructionLowerer = createInstructionLowerer({
     stateAccess: cpuStateAccess,
     memory: guestMemoryAccess,
     instructionCountField,
@@ -225,7 +227,7 @@ function buildInstructionProgram(
     type: entryType,
     effects: compiledInstructionEffects
   }, (fn) => {
-    const finalFallthrough = instructionConstruction.build(
+    const finalFallthrough = instructionLowerer.lower(
       fn.region,
       instructionFunctionTerminals(dispatch),
       (builder) => {

@@ -1,8 +1,8 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { VariableRef } from "#compiler/ir/variable.js";
-import type { EncodedValue } from "#core/decoder/model/types.js";
+import type { EncodedValue } from "#instructions/decoder/model/types.js";
 import { exceptionExit } from "#core/exits.js";
-import type { BuildExit } from "#core/instruction/terminal.js";
+import type { BuildExit } from "#instructions/lowering/terminal.js";
 import type { OperandWidth } from "#core/types.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { MemoryAccessConstruction } from "#memory/access.js";

@@ -1,6 +1,6 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { VariableRef } from "#compiler/ir/variable.js";
-import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
+import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";
 import type {
   DecodeCandidate,
   InstructionForm,
@@ -8,12 +8,12 @@ import type {
   ModRmModeForms,
   OpcodeLeaf,
   OpcodeNode
-} from "#core/decoder/model/types.js";
+} from "#instructions/decoder/model/types.js";
 import { invalidOpcode } from "#core/exceptions.js";
 import { exceptionExit } from "#core/exits.js";
-import type { InstructionSpec } from "#core/isa/spec.js";
-import type { OperandBinding } from "#core/instruction/bindings.js";
-import type { BuildExit } from "#core/instruction/terminal.js";
+import type { InstructionSpec } from "#instructions/isa/spec.js";
+import type { OperandBinding } from "#instructions/lowering/bindings.js";
+import type { BuildExit } from "#instructions/lowering/terminal.js";
 import type { StateAccess } from "#core/state/access.js";
 import type { RegionBuilder, SwitchControlArm } from "#compiler/ir/builder/region.js";
 import type { MemoryAccessConstruction } from "#memory/access.js";
@@ -54,7 +54,7 @@ export type InterpreterDecodeOptions = Readonly<{
   buildInstruction: BuildDecodedInstruction;
 }>;
 
-// Emits decode and instruction construction into the enclosing function;
+// Emits decode and instruction-dispatch IR into the enclosing function;
 // decode/* classes organize author-time construction, not generated calls.
 export function buildDecodeAndDispatch(
   region: RegionBuilder,

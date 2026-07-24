@@ -7,9 +7,9 @@ import type { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/ir/refs.js";
 import type { ExecutionModel } from "#execution/model.js";
 import {
-  createInstructionConstruction,
-  type InstructionConstruction
-} from "#core/instruction/builder.js";
+  createInstructionLowerer,
+  type InstructionLowerer
+} from "#instructions/lowering/lowerer.js";
 import { coreStateFields } from "#core/state/layout.js";
 import type { StateAccess } from "#core/state/access.js";
 import { buildExit } from "#cpu/exit.js";
@@ -29,7 +29,7 @@ export function defineInterpreterRun(
   program: ProgramBuilder,
   model: ExecutionModel
 ): FunctionDefinition {
-  const instructionConstruction = createInstructionConstruction({
+  const instructionLowerer = createInstructionLowerer({
     stateAccess: model.cpuState.access,
     memory: model.guestMemory.access,
     instructionCountField,
@@ -43,13 +43,13 @@ export function defineInterpreterRun(
       model.cpuState.resource,
       model.guestMemory.resource
     )
-  }, (fn) => buildRunBody(fn, model, instructionConstruction));
+  }, (fn) => buildRunBody(fn, model, instructionLowerer));
 }
 
 function buildRunBody(
   fn: FunctionBuilder,
   model: ExecutionModel,
-  instructionConstruction: InstructionConstruction
+  instructionLowerer: InstructionLowerer
 ): void {
   const stateAccess = model.cpuState.access;
   const entryEip = stateAccess.bind(fn.region).readField(
@@ -72,7 +72,7 @@ function buildRunBody(
           region,
           decoded,
           stateAccess,
-          instructionConstruction
+          instructionLowerer
         )
     });
   });

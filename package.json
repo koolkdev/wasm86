@@ -47,6 +47,10 @@
       "types": "./src/compiler/*",
       "default": "./dist/src/compiler/*"
     },
+    "#instructions/*": {
+      "types": "./src/instructions/*",
+      "default": "./dist/src/instructions/*"
+    },
     "#core/*": {
       "types": "./src/core/*",
       "default": "./dist/src/core/*"

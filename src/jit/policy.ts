@@ -1,4 +1,4 @@
-import { X86_32_CORE } from "#core/isa/x86-32.js";
+import { X86_32_CORE } from "#instructions/isa/x86-32.js";
 
 export type JitBlockPolicy = Readonly<{
   instructionLimit: number;

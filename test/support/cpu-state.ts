@@ -16,7 +16,7 @@ import {
   type LayoutByteLength,
   type LayoutWidth
 } from "#compiler/layout/handles.js";
-import type { InstructionStateChannel } from "#core/instruction/state/channels.js";
+import type { InstructionStateChannel } from "#instructions/lowering/state/channels.js";
 import {
   gprChannel,
   segmentAccessChannel,

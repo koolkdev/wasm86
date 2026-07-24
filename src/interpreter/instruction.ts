@@ -1,9 +1,7 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
-import {
-  type InstructionConstruction,
-  valueInstructionLocation
-} from "#core/instruction/builder.js";
-import type { InstructionTerminals } from "#core/instruction/terminal.js";
+import { valueInstructionLocation } from "#instructions/lowering/builder.js";
+import type { InstructionLowerer } from "#instructions/lowering/lowerer.js";
+import type { InstructionTerminals } from "#instructions/lowering/terminal.js";
 import type { StateAccess } from "#core/state/access.js";
 import { buildExit } from "#cpu/exit.js";
 import {
@@ -18,12 +16,12 @@ export function buildInterpreterInstruction(
   region: RegionBuilder,
   decoded: DecodedInstruction,
   stateAccess: StateAccess,
-  instructionConstruction: InstructionConstruction
+  instructionLowerer: InstructionLowerer
 ): void {
   const entryState = stateAccess.bind(region);
   const entryCount = entryState.readField(instructionCountField);
   const instructionLimit = entryState.readField(instructionLimitField);
-  const nextEip = instructionConstruction.build(
+  const nextEip = instructionLowerer.lower(
     region,
     interpreterTerminals(),
     (builder) => {

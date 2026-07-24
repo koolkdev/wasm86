@@ -16,12 +16,12 @@ import { functionRef } from "#compiler/ir/refs.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
-  createInstructionConstruction,
-  staticInstructionLocation,
-  type InstructionConstruction
-} from "#core/instruction/builder.js";
-import { staticOperandBinding } from "#core/instruction/static-binding.js";
-import type { InstructionTerminals } from "#core/instruction/terminal.js";
+  createInstructionLowerer,
+  type InstructionLowerer
+} from "#instructions/lowering/lowerer.js";
+import { staticInstructionLocation } from "#instructions/lowering/builder.js";
+import { staticOperandBinding } from "#instructions/lowering/static-binding.js";
+import type { InstructionTerminals } from "#instructions/lowering/terminal.js";
 import { exceptionExit } from "#core/exits.js";
 import { mapCpuException, type CpuException } from "#core/exceptions.js";
 import type { StateAccess } from "#core/state/access.js";
@@ -76,7 +76,7 @@ function defineJitBlock(
   decoded: JitDecodedBlock,
   dispatch: CallTarget
 ): FunctionDefinition {
-  const instructionConstruction = createInstructionConstruction({
+  const instructionLowerer = createInstructionLowerer({
     stateAccess: model.cpuState.access,
     memory: model.guestMemory.access,
     instructionCountField,
@@ -94,7 +94,7 @@ function defineJitBlock(
     fn,
     decoded,
     model.cpuState.access,
-    instructionConstruction,
+    instructionLowerer,
     dispatch
   ));
 }
@@ -103,7 +103,7 @@ function buildJitBlockBody(
   fn: FunctionBuilder,
   decoded: JitDecodedBlock,
   stateAccess: StateAccess,
-  instructionConstruction: InstructionConstruction,
+  instructionLowerer: InstructionLowerer,
   dispatch: CallTarget
 ): void {
   if (decoded.instructions.length === 0) {
@@ -123,7 +123,7 @@ function buildJitBlockBody(
     return;
   }
 
-  const finalFallthrough = instructionConstruction.build(
+  const finalFallthrough = instructionLowerer.lower(
     fn.region,
     jitInstructionTerminals(dispatch),
     (builder) => {

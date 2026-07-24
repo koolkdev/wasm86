@@ -4,7 +4,7 @@ import type {
   DecodeOperand,
   InstructionForm,
   SegmentSelection
-} from "#core/decoder/model/types.js";
+} from "#instructions/decoder/model/types.js";
 import {
   dynamicMemSegment,
   immDynamicBinding,
@@ -18,7 +18,7 @@ import {
   staticMemSegment,
   type OperandBinding,
   type SegmentBindingSelection
-} from "#core/instruction/bindings.js";
+} from "#instructions/lowering/bindings.js";
 import { registerAliasByIndex } from "#core/registers.js";
 import { segmentRegisterIndex } from "#core/segments.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";

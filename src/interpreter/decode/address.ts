@@ -1,10 +1,10 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { VariableRef } from "#compiler/ir/variable.js";
-import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
+import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";
 import type {
   AddressBase,
   Displacement
-} from "#core/decoder/model/types.js";
+} from "#instructions/decoder/model/types.js";
 import { reg32Index } from "#core/registers.js";
 import { segmentRegisterIndex } from "#core/segments.js";
 import type { StateAccess } from "#core/state/access.js";
