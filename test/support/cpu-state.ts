@@ -11,10 +11,10 @@ import { registerAlias } from "#core/registers.js";
 import { reg32, segmentRegisters, type SegmentRegister } from "#core/types.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import {
-  type ArrayRef,
   type FieldRef,
   type LayoutByteLength,
-  type LayoutWidth
+  type LayoutWidth,
+  type NamedArrayRef
 } from "#compiler/layout/handles.js";
 import type { InstructionStateChannel } from "#instructions/lowering/state/channels.js";
 import {
@@ -274,7 +274,7 @@ function channelLocation(channel: InstructionStateChannel): ResolvedLocation {
       return fieldLocation(channel);
     case "gpr": {
       const alias = registerAlias(channel.reg);
-      return arrayElementLocation(
+      return namedArrayElementLocation(
         coreStateFields.gprs,
         coreStateFields.gprs.elementIndex(alias.base),
         alias.bitOffset / 8,
@@ -282,12 +282,12 @@ function channelLocation(channel: InstructionStateChannel): ResolvedLocation {
       );
     }
     case "segment": {
-      const array = segmentArray(channel.field);
-      return arrayElementLocation(
+      const array = segmentNamedArray(channel.field);
+      return namedArrayElementLocation(
         array,
         array.elementIndex(channel.reg),
         0,
-        cpuState.layout.array(array).elementByteLength
+        cpuState.layout.namedArray(array).elementByteLength
       );
     }
   }
@@ -297,13 +297,13 @@ function fieldLocation(field: FieldRef): ResolvedLocation {
   return cpuState.layout.field(field);
 }
 
-function arrayElementLocation<TWidth extends LayoutWidth>(
-  arrayRef: ArrayRef<TWidth>,
+function namedArrayElementLocation<TWidth extends LayoutWidth>(
+  arrayRef: NamedArrayRef<TWidth>,
   index: number,
   byteOffset: number,
   byteLength: LayoutByteLength
 ): ResolvedLocation {
-  const array = cpuState.layout.array(arrayRef);
+  const array = cpuState.layout.namedArray(arrayRef);
 
   ok(index < array.count, `state element index ${index} is out of range`);
   return {
@@ -312,7 +312,9 @@ function arrayElementLocation<TWidth extends LayoutWidth>(
   };
 }
 
-function segmentArray(field: SegmentStateField): ArrayRef<"u16" | "u32", SegmentRegister> {
+function segmentNamedArray(
+  field: SegmentStateField
+): NamedArrayRef<"u16" | "u32", SegmentRegister> {
   switch (field) {
     case "selector":
       return coreStateFields.segmentSelectors;

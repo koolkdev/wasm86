@@ -3,7 +3,8 @@ import type {
   ArrayRef,
   FieldRef,
   LayoutByteLength,
-  LayoutWidth
+  LayoutWidth,
+  NamedArrayRef
 } from "./handles.js";
 import type { Layout } from "./layout.js";
 
@@ -13,16 +14,29 @@ export interface LayoutHostView {
     field: FieldRef<TWidth>,
     value: number
   ): void;
-  readArrayElement<
+  readNamedArrayElement<
     TWidth extends LayoutWidth,
     TElementId extends string
-  >(array: ArrayRef<TWidth, TElementId>, elementId: TElementId): number;
-  writeArrayElement<
+  >(array: NamedArrayRef<TWidth, TElementId>, elementId: TElementId): number;
+  writeNamedArrayElement<
     TWidth extends LayoutWidth,
     TElementId extends string
   >(
-    array: ArrayRef<TWidth, TElementId>,
+    array: NamedArrayRef<TWidth, TElementId>,
     elementId: TElementId,
+    value: number
+  ): void;
+  readArrayElement(
+    array: ArrayRef,
+    index: number,
+    byteOffset: number,
+    byteLength: LayoutByteLength
+  ): number;
+  writeArrayElement(
+    array: ArrayRef,
+    index: number,
+    byteOffset: number,
+    byteLength: LayoutByteLength,
     value: number
   ): void;
 }
@@ -67,37 +81,84 @@ class LayoutHostViewImpl implements LayoutHostView {
     this.#write(resolved.offset, resolved.byteLength, value);
   }
 
-  readArrayElement<
+  readNamedArrayElement<
     TWidth extends LayoutWidth,
     TElementId extends string
-  >(array: ArrayRef<TWidth, TElementId>, elementId: TElementId): number {
-    const resolved = this.#layout.array(array);
+  >(array: NamedArrayRef<TWidth, TElementId>, elementId: TElementId): number {
+    const resolved = this.#layout.namedArray(array);
     const index = array.elementIndex(elementId);
 
-    assert(index < resolved.count, `array index ${index} is outside ${array.id}`);
+    assert(index < resolved.count, `named array index ${index} is outside ${array.id}`);
     return this.#read(
       resolved.offset + index * resolved.stride,
       resolved.elementByteLength
     );
   }
 
-  writeArrayElement<
+  writeNamedArrayElement<
     TWidth extends LayoutWidth,
     TElementId extends string
   >(
-    array: ArrayRef<TWidth, TElementId>,
+    array: NamedArrayRef<TWidth, TElementId>,
     elementId: TElementId,
     value: number
   ): void {
-    const resolved = this.#layout.array(array);
+    const resolved = this.#layout.namedArray(array);
     const index = array.elementIndex(elementId);
 
-    assert(index < resolved.count, `array index ${index} is outside ${array.id}`);
+    assert(index < resolved.count, `named array index ${index} is outside ${array.id}`);
     this.#write(
       resolved.offset + index * resolved.stride,
       resolved.elementByteLength,
       value
     );
+  }
+
+  readArrayElement(
+    array: ArrayRef,
+    index: number,
+    byteOffset: number,
+    byteLength: LayoutByteLength
+  ): number {
+    return this.#read(
+      this.#arrayElementOffset(array, index, byteOffset, byteLength),
+      byteLength
+    );
+  }
+
+  writeArrayElement(
+    array: ArrayRef,
+    index: number,
+    byteOffset: number,
+    byteLength: LayoutByteLength,
+    value: number
+  ): void {
+    this.#write(
+      this.#arrayElementOffset(array, index, byteOffset, byteLength),
+      byteLength,
+      value
+    );
+  }
+
+  #arrayElementOffset(
+    array: ArrayRef,
+    index: number,
+    byteOffset: number,
+    byteLength: LayoutByteLength
+  ): number {
+    const resolved = this.#layout.array(array);
+
+    assert(
+      Number.isSafeInteger(index) && index >= 0 && index < resolved.count,
+      `array index ${index} is outside ${array.id}`
+    );
+    assert(
+      Number.isSafeInteger(byteOffset) &&
+        byteOffset >= 0 &&
+        byteOffset + byteLength <= resolved.elementByteLength,
+      `array element access is outside ${array.id}`
+    );
+    return resolved.offset + index * resolved.stride + byteOffset;
   }
 
   #read(offset: number, byteLength: LayoutByteLength): number {

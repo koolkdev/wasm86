@@ -33,7 +33,7 @@ function createAccess(): Readonly<{
 
 test("static execution-state operands use exact absolute resource slices", () => {
   const { values, access } = createAccess();
-  const gprs = cpuState.layout.array(coreStateFields.gprs);
+  const gprs = cpuState.layout.namedArray(coreStateFields.gprs);
   const eax = access.gpr("eax");
   const ax = access.gpr("ax");
   const al = access.gpr("al");
@@ -51,7 +51,7 @@ test("static execution-state operands use exact absolute resource slices", () =>
 
 test("a folded dynamic GPR address becomes an exact static operand", () => {
   const { values, access } = createAccess();
-  const gprs = cpuState.layout.array(coreStateFields.gprs);
+  const gprs = cpuState.layout.namedArray(coreStateFields.gprs);
   const highEax = access.dynamicGpr(values.const(4), 8);
 
   exactSlice(highEax, gprs.offset + 1, 1);
@@ -60,7 +60,7 @@ test("a folded dynamic GPR address becomes an exact static operand", () => {
 
 test("an unresolved dynamic GPR operand covers only the GPR array", () => {
   const { values, access } = createAccess();
-  const gprs = cpuState.layout.array(coreStateFields.gprs);
+  const gprs = cpuState.layout.namedArray(coreStateFields.gprs);
   const operand = access.dynamicGpr(values.parameter(0, "i32"), 8);
 
   exactSlice(operand, gprs.offset, gprs.stride * gprs.count);
@@ -70,7 +70,7 @@ test("an unresolved dynamic GPR operand covers only the GPR array", () => {
 
 test("dynamic segment effects stay within the selected field array", () => {
   const { values, access } = createAccess();
-  const bases = cpuState.layout.array(coreStateFields.segmentBases);
+  const bases = cpuState.layout.namedArray(coreStateFields.segmentBases);
   const operand = access.dynamicSegment(values.parameter(0, "i32"), "base");
 
   exactSlice(operand, bases.offset, bases.stride * bases.count);

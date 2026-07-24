@@ -2,7 +2,7 @@ import { notStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
-import { ArrayRef, FieldRef } from "#compiler/layout/handles.js";
+import { ArrayRef, FieldRef, NamedArrayRef } from "#compiler/layout/handles.js";
 import { createLayout } from "#compiler/layout/layout.js";
 import { layoutStructure } from "#compiler/layout/structure.js";
 
@@ -12,19 +12,27 @@ const fields = {
   doubleWord: new FieldRef("host-view.fields.double-word", "u32")
 } as const;
 
-const arrays = {
-  bytes: new ArrayRef("host-view.arrays.bytes", "u8", ["first", "second"]),
-  words: new ArrayRef("host-view.arrays.words", "u16", ["first", "second"]),
-  doubleWords: new ArrayRef(
+const namedArrays = {
+  bytes: new NamedArrayRef("host-view.arrays.bytes", "u8", ["first", "second"]),
+  words: new NamedArrayRef("host-view.arrays.words", "u16", ["first", "second"]),
+  doubleWords: new NamedArrayRef(
     "host-view.arrays.double-words",
     "u32",
     ["first", "second"]
   )
 } as const;
 
+const records = new ArrayRef("host-view.records.entries", {
+  count: 2,
+  element: { byteLength: 6, alignment: 4 }
+});
+
 const layout = createLayout("host-view.test", [
   layoutStructure("host-view.fields", Object.values(fields)),
-  layoutStructure("host-view.arrays", Object.values(arrays))
+  layoutStructure("host-view.arrays", Object.values(namedArrays))
+]);
+const recordLayout = createLayout("host-view.records", [
+  layoutStructure("host-view.records", [records])
 ]);
 
 test("layout host fields use their declared unsigned widths", () => {
@@ -49,28 +57,32 @@ test("layout host fields use their declared unsigned widths", () => {
   );
 });
 
-test("layout host arrays resolve typed element identities and widths", () => {
+test("layout host named arrays resolve typed element identities and widths", () => {
   const memory = new WebAssembly.Memory({ initial: 1 });
   const storage = createLayoutHostView(memory, layout);
 
-  storage.writeArrayElement(arrays.bytes, "second", 0x1fe);
-  storage.writeArrayElement(arrays.words, "second", 0x1_abcd);
-  storage.writeArrayElement(arrays.doubleWords, "second", 0x1_89ab_cdef);
+  storage.writeNamedArrayElement(namedArrays.bytes, "second", 0x1fe);
+  storage.writeNamedArrayElement(namedArrays.words, "second", 0x1_abcd);
+  storage.writeNamedArrayElement(
+    namedArrays.doubleWords,
+    "second",
+    0x1_89ab_cdef
+  );
 
-  strictEqual(storage.readArrayElement(arrays.bytes, "first"), 0);
-  strictEqual(storage.readArrayElement(arrays.bytes, "second"), 0xfe);
-  strictEqual(storage.readArrayElement(arrays.words, "first"), 0);
-  strictEqual(storage.readArrayElement(arrays.words, "second"), 0xabcd);
-  strictEqual(storage.readArrayElement(arrays.doubleWords, "first"), 0);
+  strictEqual(storage.readNamedArrayElement(namedArrays.bytes, "first"), 0);
+  strictEqual(storage.readNamedArrayElement(namedArrays.bytes, "second"), 0xfe);
+  strictEqual(storage.readNamedArrayElement(namedArrays.words, "first"), 0);
+  strictEqual(storage.readNamedArrayElement(namedArrays.words, "second"), 0xabcd);
+  strictEqual(storage.readNamedArrayElement(namedArrays.doubleWords, "first"), 0);
   strictEqual(
-    storage.readArrayElement(arrays.doubleWords, "second"),
+    storage.readNamedArrayElement(namedArrays.doubleWords, "second"),
     0x89ab_cdef
   );
 
   const view = new DataView(memory.buffer);
-  const bytes = layout.array(arrays.bytes);
-  const words = layout.array(arrays.words);
-  const doubleWords = layout.array(arrays.doubleWords);
+  const bytes = layout.namedArray(namedArrays.bytes);
+  const words = layout.namedArray(namedArrays.words);
+  const doubleWords = layout.namedArray(namedArrays.doubleWords);
 
   strictEqual(view.getUint8(bytes.offset + bytes.stride), 0xfe);
   strictEqual(view.getUint16(words.offset + words.stride, true), 0xabcd);
@@ -78,6 +90,27 @@ test("layout host arrays resolve typed element identities and widths", () => {
     view.getUint32(doubleWords.offset + doubleWords.stride, true),
     0x89ab_cdef
   );
+});
+
+test("layout host arrays access record-relative fields across memory growth", () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const storage = createLayoutHostView(memory, recordLayout);
+  const initialBuffer = memory.buffer;
+
+  storage.writeArrayElement(records, 1, 0, 2, 0xabcd);
+  storage.writeArrayElement(records, 1, 2, 4, 0x1234_5678);
+  memory.grow(1);
+
+  notStrictEqual(memory.buffer, initialBuffer);
+  strictEqual(storage.readArrayElement(records, 1, 0, 2), 0xabcd);
+  strictEqual(storage.readArrayElement(records, 1, 2, 4), 0x1234_5678);
+  storage.writeArrayElement(records, 1, 2, 4, 0x89ab_cdef);
+
+  const view = new DataView(memory.buffer);
+
+  strictEqual(view.getUint16(8, true), 0xabcd);
+  strictEqual(view.getUint32(10, true), 0x89ab_cdef);
+  strictEqual(view.getUint16(14, true), 0);
 });
 
 test("layout host access refreshes its DataView after memory growth", () => {

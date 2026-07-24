@@ -31,11 +31,11 @@ export class FieldRef<TWidth extends LayoutWidth = LayoutWidth> {
   ) {}
 }
 
-export class ArrayRef<
+export class NamedArrayRef<
   TWidth extends LayoutWidth = LayoutWidth,
   TElementId extends string = string
 > {
-  readonly kind = "array";
+  readonly kind = "namedArray";
   readonly #elementIndexes: ReadonlyMap<TElementId, number>;
 
   constructor(
@@ -56,9 +56,37 @@ export class ArrayRef<
   elementIndex(elementId: TElementId): number {
     const index = this.#elementIndexes.get(elementId);
 
-    assert(index !== undefined, `unknown element ${elementId} in layout array ${this.id}`);
+    assert(index !== undefined, `unknown element ${elementId} in named layout array ${this.id}`);
     return index;
   }
 }
 
-export type LayoutMember = FieldRef | ArrayRef;
+export type ArrayElementLayout = Readonly<{
+  byteLength: number;
+  alignment: number;
+}>;
+
+export type ArrayDefinition<
+  TElement extends ArrayElementLayout = ArrayElementLayout
+> = Readonly<{
+  count: number;
+  element: Readonly<TElement>;
+}>;
+
+export class ArrayRef<
+  TElement extends ArrayElementLayout = ArrayElementLayout
+> {
+  readonly kind = "array";
+  readonly count: number;
+  readonly element: Readonly<TElement>;
+
+  constructor(
+    readonly id: string,
+    definition: ArrayDefinition<TElement>
+  ) {
+    this.count = definition.count;
+    this.element = definition.element;
+  }
+}
+
+export type LayoutMember = FieldRef | NamedArrayRef | ArrayRef;
