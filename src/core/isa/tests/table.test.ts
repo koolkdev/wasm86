@@ -21,3 +21,30 @@ test("registered instructions have a decodable opcode and display text", () => {
     ok(instruction.syntax.trim().length > 0, instruction.id);
   }
 });
+
+test("instruction operands agree with their encoded ordering and opcode fields", () => {
+  for (const instruction of X86_32_CORE.instructions) {
+    const operands = instruction.operands ?? [];
+    const relativeIndex = operands.findIndex(
+      (operand) => operand.kind === "rel"
+    );
+    const hasOpcodeRegister = operands.some(
+      (operand) => operand.kind === "opcode.reg"
+    );
+    const hasOpcodeLowBits = instruction.opcode.some(
+      (part) =>
+        typeof part !== "number" &&
+        (part.bits ?? 8) < 8
+    );
+
+    ok(
+      relativeIndex === -1 || relativeIndex === operands.length - 1,
+      `${instruction.id} relative operand must be last`
+    );
+    strictEqual(
+      hasOpcodeRegister,
+      hasOpcodeLowBits,
+      `${instruction.id} opcode register binding`
+    );
+  }
+});

@@ -1,4 +1,3 @@
-import { assert } from "#common/assert.js";
 import {
   expandInstructionSpec,
   instructionReadsModRm,
@@ -33,7 +32,6 @@ export function buildInstructionForms(
     ))
   ).sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
 
-  assertUniqueFormIds(forms);
   return forms;
 }
 
@@ -44,10 +42,6 @@ function buildForm(
 ): InstructionForm {
   const operands = (instruction.operands ?? []).map(buildOperand);
 
-  assert(
-    !operands.slice(0, -1).some((operand) => operand.kind === "relative"),
-    `${instruction.id} relative operand must be last`
-  );
   const opcodeIdentity = opcode
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
@@ -210,16 +204,5 @@ function registerOperandWidth(type: RegOperandType): OperandWidth {
       return 16;
     case "r32":
       return 32;
-  }
-}
-
-function assertUniqueFormIds(
-  forms: readonly InstructionForm[]
-): void {
-  const ids = new Set<string>();
-
-  for (const form of forms) {
-    assert(!ids.has(form.id), `duplicate expanded instruction identity: ${form.id}`);
-    ids.add(form.id);
   }
 }

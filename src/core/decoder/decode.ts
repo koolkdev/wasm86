@@ -1,4 +1,3 @@
-import { assert } from "#common/assert.js";
 import {
   generalProtection,
   invalidOpcode,
@@ -56,11 +55,6 @@ class IsaDecodeCursor {
   }
 
   readByte(relativeOffset: number): number {
-    assert(
-      Number.isInteger(relativeOffset) && relativeOffset >= 0,
-      `invalid instruction byte offset: ${relativeOffset}`
-    );
-
     if (relativeOffset >= X86_32_DECODE_MODEL.instructionLengthLimit) {
       throw new CpuExceptionSignal(generalProtection(0));
     }
@@ -71,10 +65,6 @@ class IsaDecodeCursor {
       return cached;
     }
 
-    assert(
-      relativeOffset === this.#raw.length,
-      `instruction decoder skipped byte offset ${this.#raw.length} before ${relativeOffset}`
-    );
     const fetched = this.source.readU8(u32(this.instructionStart + relativeOffset));
 
     if (fetched.kind === "exception") {
@@ -82,10 +72,6 @@ class IsaDecodeCursor {
     }
     const value = fetched.value;
 
-    assert(
-      Number.isInteger(value) && value >= 0 && value <= 0xff,
-      `instruction byte out of range at offset ${relativeOffset}: ${value}`
-    );
     this.#raw.push(value);
     return value;
   }
@@ -202,9 +188,7 @@ class NumericDecodeEvaluator {
     opcodeOffset: number
   ): SelectedForm | undefined {
     const prefixIndex = this.prefixFlags & X86_32_DECODE_MODEL.prefixes.flagMask;
-    const candidates = leaf.byPrefix[prefixIndex];
-
-    assert(candidates !== undefined, `missing prefix bucket ${prefixIndex}`);
+    const candidates = leaf.byPrefix[prefixIndex]!;
 
     switch (candidates.kind) {
       case "empty":
@@ -243,17 +227,13 @@ class NumericDecodeEvaluator {
   private decodeRm(modRmByte: number): DecodedRm {
     const mod = modRmByte >>> 6;
     const rm = modRmByte & 0b111;
-    const mode = X86_32_DECODE_MODEL.addressForms.modes[mod];
-
-    assert(mode !== undefined, `missing ModRM mode ${mod}`);
+    const mode = X86_32_DECODE_MODEL.addressForms.modes[mod]!;
 
     if (mode.kind === "register") {
       return { kind: "reg", index: rm };
     }
 
-    const address = mode.rm[rm];
-
-    assert(address !== undefined, `missing ModRM R/M case ${mod}:${rm}`);
+    const address = mode.rm[rm]!;
 
     if (address.kind === "base") {
       return {
@@ -266,12 +246,10 @@ class NumericDecodeEvaluator {
     const scaleField = sib >>> 6;
     const indexField = (sib >>> 3) & 0b111;
     const baseField = sib & 0b111;
-    const base = address.bases[baseField];
+    const base = address.bases[baseField]!;
     const index = X86_32_DECODE_MODEL.addressForms.sibIndexes[indexField];
-    const encodedScale = X86_32_DECODE_MODEL.addressForms.sibScales[scaleField];
-
-    assert(base !== undefined, `missing SIB base case ${baseField}`);
-    assert(encodedScale !== undefined, `missing SIB scale case ${scaleField}`);
+    const encodedScale =
+      X86_32_DECODE_MODEL.addressForms.sibScales[scaleField]!;
     return {
       kind: "mem",
       address: this.decodeEffectiveAddress(
@@ -314,44 +292,46 @@ class NumericDecodeEvaluator {
     decodedRm: DecodedRm | undefined
   ): IsaOperandBinding {
     switch (operand.kind) {
-      case "modrm.reg":
-        assert(modRmByte !== undefined, `${form.id} has no ModRM byte for reg operand`);
+      case "modrm.reg": {
+        const byte = modRmByte!;
+
         return {
           kind: "reg",
-          alias: registerAliasByIndex(operand.width, (modRmByte >>> 3) & 0b111)
+          alias: registerAliasByIndex(operand.width, (byte >>> 3) & 0b111)
         };
+      }
       case "modrm.sreg": {
-        assert(modRmByte !== undefined, `${form.id} has no ModRM byte for segment operand`);
-        const reg = operand.registers[(modRmByte >>> 3) & 0b111];
+        const byte = modRmByte!;
+        const reg = operand.registers[(byte >>> 3) & 0b111]!;
 
-        assert(reg !== undefined, `${form.id} selected an invalid segment register`);
         return { kind: "segment", reg };
       }
-      case "modrm.rm":
-        assert(decodedRm !== undefined, `${form.id} has no decoded R/M operand`);
+      case "modrm.rm": {
+        const rm = decodedRm!;
 
-        if (decodedRm.kind === "reg") {
-          assert(
-            operand.form === "registerOrMemory",
-            `${form.id} selected a register for a memory-only operand`
-          );
+        if (rm.kind === "reg") {
+          const registerOperand = operand as Extract<
+            DecodeOperand,
+            { form: "registerOrMemory" }
+          >;
+
           return {
             kind: "reg",
-            alias: registerAliasByIndex(operand.registerWidth, decodedRm.index)
+            alias: registerAliasByIndex(registerOperand.registerWidth, rm.index)
           };
         }
 
         return {
           kind: "mem",
           accessWidth: operand.memoryWidth,
-          ...decodedRm.address,
-          segment: this.segmentOverride ?? decodedRm.address.segment
+          ...rm.address,
+          segment: this.segmentOverride ?? rm.address.segment
         } satisfies MemOperand;
+      }
       case "opcode.reg":
-        assert(form.opcodeLowBits !== undefined, `${form.id} has no opcode register bits`);
         return {
           kind: "reg",
-          alias: registerAliasByIndex(operand.width, form.opcodeLowBits)
+          alias: registerAliasByIndex(operand.width, form.opcodeLowBits!)
         };
       case "implicit.reg":
         return { kind: "reg", alias: operand.alias };

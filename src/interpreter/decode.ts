@@ -1,4 +1,3 @@
-import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { VariableRef } from "#compiler/ir/variable.js";
 import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
@@ -179,10 +178,6 @@ class InterpreterDecoder {
   ): void {
     switch (candidate.kind) {
       case "plain":
-        assert(
-          candidate.form.modrm === undefined,
-          `${candidate.form.id} unexpectedly reads ModRM`
-        );
         this.#buildInstruction(region, candidate.form, { kind: "none" });
         return;
       case "modRm": {
@@ -356,12 +351,8 @@ class InterpreterDecoder {
   }
 
   #recordMemoryForm(region: RegionBuilder, form: InstructionForm): void {
-    const ordinal = memoryFormDispatch.ordinalByForm.get(form);
+    const ordinal = memoryFormDispatch.ordinalByForm.get(form)!;
 
-    assert(
-      ordinal !== undefined,
-      `decode model omitted memory form ${form.id}`
-    );
     region.write(this.#memoryFormOrdinal, region.values.const(ordinal));
   }
 
@@ -383,11 +374,9 @@ class InterpreterDecoder {
     ordinal: ValueId,
     groups: readonly (readonly InstructionForm[])[]
   ): void {
-    assert(groups.length !== 0, "memory form dispatch has no groups");
-    const forms = groups[0];
+    const forms = groups[0]!;
     const remainingGroups = groups.slice(1);
 
-    assert(forms !== undefined, "memory form dispatch group is missing");
     region.switchControl(
       ordinal,
       forms.map((form, slot) => ({

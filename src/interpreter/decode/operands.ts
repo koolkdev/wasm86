@@ -1,4 +1,3 @@
-import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { VariableRef } from "#compiler/ir/variable.js";
 import type {
@@ -72,7 +71,6 @@ export class OperandDecoder {
   ): OperandBinding {
     switch (operand.kind) {
       case "modrm.reg": {
-        assert(form.modrm !== undefined, `${form.id} has no ModRM byte`);
         const modRmByte = region.read(this.#modRmByte);
 
         return regDynamicBinding(region.values.binary(
@@ -82,7 +80,6 @@ export class OperandDecoder {
         ));
       }
       case "modrm.sreg": {
-        assert(form.modrm !== undefined, `${form.id} has no ModRM byte`);
         const modRmByte = region.read(this.#modRmByte);
         const encodedIndex = region.values.binary(
           "and",
@@ -100,14 +97,10 @@ export class OperandDecoder {
         ));
       }
       case "modrm.rm":
-        return this.#rmBinding(form, operand, rm);
+        return this.#rmBinding(region, rm);
       case "opcode.reg":
-        assert(
-          form.opcodeLowBits !== undefined,
-          `${form.id} has no opcode register bits`
-        );
         return regBinding(
-          registerAliasByIndex(operand.width, form.opcodeLowBits).name
+          registerAliasByIndex(operand.width, form.opcodeLowBits!).name
         );
       case "implicit.reg":
         return regBinding(operand.alias.name);
@@ -151,16 +144,11 @@ export class OperandDecoder {
   }
 
   #rmBinding(
-    form: InstructionForm,
-    operand: Extract<DecodeOperand, { kind: "modrm.rm" }>,
+    region: RegionBuilder,
     rm: DecodedRm
   ): OperandBinding {
     switch (rm.kind) {
       case "register":
-        assert(
-          operand.form === "registerOrMemory",
-          "memory-only operand selected the register instruction path"
-        );
         return regDynamicBinding(rm.registerIndex);
       case "baseLess":
         return memOffsetBinding(
@@ -174,7 +162,7 @@ export class OperandDecoder {
           dynamicMemSegment(rm.segmentIndex)
         );
       case "none":
-        assert(false, `${form.id} omitted its R/M binding`);
+        return regDynamicBinding(region.values.unreachable());
     }
   }
 

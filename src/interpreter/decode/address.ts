@@ -1,4 +1,3 @@
-import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { VariableRef } from "#compiler/ir/variable.js";
 import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
@@ -15,32 +14,12 @@ import type { SegmentOverrideState } from "./prefixes.js";
 import { InstructionByteStream } from "./stream.js";
 
 const sibIndexes = X86_32_DECODE_MODEL.addressForms.sibIndexes;
-const sibScales = X86_32_DECODE_MODEL.addressForms.sibScales;
 const sibNoIndexEncoding = sibIndexes.findIndex(
   (register) => register === undefined
 );
 const dynamicBaseAddressKind = 0;
 const baseLessAddressKind = 1;
 const invalidAddressKind = -1;
-
-assert(
-  sibIndexes.length === 8 &&
-    sibNoIndexEncoding !== -1 &&
-    sibIndexes.filter((register) => register === undefined).length === 1,
-  "SIB index model must cover every encoding with exactly one no-index entry"
-);
-assert(
-  sibIndexes.every(
-    (register, encoding) =>
-      register === undefined || reg32Index(register) === encoding
-  ),
-  "SIB index encodings must match dynamic GPR indexes"
-);
-assert(
-  sibScales.length === 4 &&
-    sibScales.every((scale, encoding) => scale === 2 ** encoding),
-  "SIB scale encodings must map to consecutive powers of two"
-);
 
 export type DecodedMemoryAddress =
   | Readonly<{
@@ -161,10 +140,6 @@ export class ModRmAddressDecoder {
   }
 
   #decodeSib(region: RegionBuilder, bases: readonly AddressBase[]): void {
-    assert(
-      bases.length === sibIndexes.length,
-      "SIB base model must cover every encoded base"
-    );
     const sib = this.#stream.readByte(region);
     const scaleShift = region.values.binary(
       "shr_u",
@@ -196,11 +171,6 @@ export class ModRmAddressDecoder {
     const baseLessEncodings = bases.flatMap((base, encoding) =>
       base.base === undefined ? [encoding] : []
     );
-
-    assert(
-      baseLessEncodings.length <= 1,
-      "SIB base model has more than one base-less encoding"
-    );
     const baseLessEncoding = baseLessEncodings[0];
 
     if (baseLessEncoding === undefined) {
@@ -213,9 +183,8 @@ export class ModRmAddressDecoder {
       );
       return;
     }
-    const baseLess = bases[baseLessEncoding];
+    const baseLess = bases[baseLessEncoding]!;
 
-    assert(baseLess !== undefined, "SIB model omitted its base-less address");
     region.if(
       region.values.compare(
         32,
@@ -331,9 +300,7 @@ export class ModRmAddressDecoder {
     value: ValueId,
     encodings: readonly number[]
   ): ValueId {
-    const first = encodings[0];
-
-    assert(first !== undefined, "dynamic SIB segment group has no encodings");
+    const first = encodings[0]!;
     let matches = region.values.compare(
       32,
       "eq",
@@ -371,42 +338,22 @@ function prepareDynamicSibPlan(
   const dynamicBases = bases.flatMap((address, encoding) =>
     encoding === excludedEncoding ? [] : [{ address, encoding }]
   );
-  const first = dynamicBases[0];
+  const first = dynamicBases[0]!;
 
-  assert(first !== undefined, "SIB model has no dynamic bases");
   const displacement = first.address.displacement;
   const encodingsBySegment = new Map<SegmentRegister, number[]>();
 
   for (const { address, encoding } of dynamicBases) {
-    assert(
-      address.base !== undefined && reg32Index(address.base) === encoding,
-      `SIB base encoding ${encoding} does not match its dynamic GPR`
-    );
-    assert(
-      address.displacement.byteLength === displacement.byteLength &&
-        address.displacement.signed === displacement.signed,
-      "dynamic SIB bases do not share one displacement shape"
-    );
     const encodings = encodingsBySegment.get(address.defaultSegment) ?? [];
 
     encodings.push(encoding);
     encodingsBySegment.set(address.defaultSegment, encodings);
   }
-  assert(
-    encodingsBySegment.size === 2,
-    "dynamic SIB bases must select between two default segments"
-  );
-  const [compared, fallback] = [...encodingsBySegment]
+  const groups = [...encodingsBySegment]
     .sort((left, right) => left[1].length - right[1].length);
+  const compared = groups[0]!;
+  const fallback = groups[1]!;
 
-  assert(
-    compared !== undefined && fallback !== undefined,
-    "dynamic SIB segment groups are incomplete"
-  );
-  assert(
-    compared[1].length > 0,
-    "dynamic SIB segment group has no encodings"
-  );
   return {
     displacement,
     matchedSegment: compared[0],

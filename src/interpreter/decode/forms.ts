@@ -1,8 +1,6 @@
-import { assert } from "#common/assert.js";
 import { maxSwitchMatch } from "#compiler/ir/controls/index.js";
 import { X86_32_DECODE_MODEL } from "#core/decoder/model/index.js";
 import type {
-  DecodeOperand,
   InstructionForm,
   ModRmModeForms
 } from "#core/decoder/model/types.js";
@@ -22,10 +20,6 @@ const memoryForms = X86_32_DECODE_MODEL.forms.filter((form) => {
   if (form.modrm === undefined) {
     return false;
   }
-  assert(
-    modRmOperand(form) !== undefined,
-    `${form.id} uses ModRM without an R/M operand`
-  );
   return form.modrm.acceptedBytes.some(
     (accepted, byte) => accepted && (byte >>> 6) !== 0b11
   );
@@ -101,13 +95,4 @@ export function exactModRmCases(
     }
   }
   return cases;
-}
-
-function modRmOperand(
-  form: InstructionForm
-): Extract<DecodeOperand, { kind: "modrm.rm" }> | undefined {
-  return form.operands.find(
-    (operand): operand is Extract<DecodeOperand, { kind: "modrm.rm" }> =>
-      operand.kind === "modrm.rm"
-  );
 }
