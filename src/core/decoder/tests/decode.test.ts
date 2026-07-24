@@ -197,6 +197,61 @@ test("ModRM and SIB memory operands decode base, index, scale, and signed displa
   });
 });
 
+test("SIB fields select architectural bases, indexes, and scales", () => {
+  const cases = [
+    {
+      name: "ESP base and EDX index at scale one",
+      bytes: [0x8b, 0x04, 0x14],
+      expected: {
+        kind: "mem",
+        accessWidth: 32,
+        segment: "ss",
+        base: "esp",
+        index: "edx",
+        scale: 1,
+        disp: 0
+      }
+    },
+    {
+      name: "EBP base and ESI index at scale two with a signed displacement",
+      bytes: [0x8b, 0x44, 0x75, 0x80],
+      expected: {
+        kind: "mem",
+        accessWidth: 32,
+        segment: "ss",
+        base: "ebp",
+        index: "esi",
+        scale: 2,
+        disp: -128
+      }
+    },
+    {
+      name: "EDI base and EBP index at scale eight",
+      bytes: [0x8b, 0x04, 0xef],
+      expected: {
+        kind: "mem",
+        accessWidth: 32,
+        segment: "ds",
+        base: "edi",
+        index: "ebp",
+        scale: 8,
+        disp: 0
+      }
+    }
+  ] as const;
+
+  for (const entry of cases) {
+    const decoded = decodeBytes(entry.bytes);
+
+    strictEqual(decoded.kind, "instruction", entry.name);
+    if (decoded.kind !== "instruction") {
+      continue;
+    }
+
+    deepStrictEqual(decoded.instruction.operands[1], entry.expected, entry.name);
+  }
+});
+
 test("base-free ModRM and SIB addresses retain unsigned disp32 values", () => {
   const modRmResult = decodeBytes([
     0x8b, 0x05, 0x00, 0x20, 0x40, 0x80
