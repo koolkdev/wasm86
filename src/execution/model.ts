@@ -7,8 +7,8 @@ import {
   type CpuStateDefinition
 } from "#cpu/state.js";
 import {
-  createGuestMemoryDefinition,
-  type GuestMemoryDefinition
+  createMemoryDefinition,
+  type MemoryDefinition
 } from "#memory/access.js";
 
 // Static definitions used to build reusable execution code. Live Cpu state and
@@ -16,19 +16,19 @@ import {
 export type ExecutionModel = Readonly<{
   resources: ProgramResources;
   cpuState: CpuStateDefinition;
-  guestMemory: GuestMemoryDefinition;
+  memory: MemoryDefinition;
 }>;
 
 export function createExecutionModel(): ExecutionModel {
   const cpuState = createCpuStateDefinition();
-  const guestMemory = createGuestMemoryDefinition();
+  const memory = createMemoryDefinition();
 
   return {
     resources: createProgramResources([
       cpuState.memoryImport,
-      guestMemory.memoryImport
+      ...memory.resources
     ]),
     cpuState,
-    guestMemory
+    memory
   };
 }

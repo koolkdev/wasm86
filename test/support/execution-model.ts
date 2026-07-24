@@ -10,8 +10,9 @@ export const cpuState = testExecutionModel.cpuState;
 export const cpuStateAccess = testExecutionModel.cpuState.access;
 export const cpuStatusFlagResolvers =
   createStatusFlagResolvers(cpuStateAccess);
-export const guestMemoryAccess = testExecutionModel.guestMemory.access;
-export const guestMemoryResource = testExecutionModel.guestMemory.resource;
+export const guestMemoryAccess = testExecutionModel.memory.access;
+export const guestMemoryResource =
+  testExecutionModel.memory.physical.ramResource;
 export const testInstructionLowerer = createInstructionLowerer({
   stateAccess: cpuStateAccess,
   memory: guestMemoryAccess,

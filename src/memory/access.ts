@@ -1,28 +1,23 @@
-import {
-  resourceRef,
-  type DynamicByteOriginRef,
-  type ResourceRef
-} from "#compiler/ir/resource.js";
-import {
-  resourceRead,
-  resourceWrite
-} from "#compiler/ir/operations/resource.js";
+import type { StorageEffects } from "#compiler/ir/effects.js";
 import type {
   IntegerWidth,
   ValueId
 } from "#compiler/ir/values/types.js";
 import type { MemoryImport } from "#compiler/program/resources.js";
-import { programImportModuleName } from "#compiler/program/imports.js";
 import {
   type PageFault
 } from "#core/exceptions.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import {
   createFlatGuestMemoryReader,
-  flatMemoryOperand,
   flatMemoryResolution
 } from "./flat.js";
-import { guestMemoryResourceDefinition } from "./resource.js";
+import {
+  createPhysicalAddressSpaceDefinition,
+  type PhysicalAccess,
+  type PhysicalAccessOperations,
+  type PhysicalAddressSpaceDefinition
+} from "./physical.js";
 
 export type LinearRange = Readonly<{
   start: ValueId;
@@ -53,8 +48,8 @@ export type MemoryAccess<
   TIntent extends MemoryAccessIntent = MemoryAccessIntent
 > = Readonly<{
   range: LinearRange;
-  origin: DynamicByteOriginRef;
   intent: TIntent;
+  physicalAccess: PhysicalAccess;
 }>;
 
 export type MemoryResolution<
@@ -94,37 +89,50 @@ export type MemoryAccessConstruction = Readonly<{
   bind(region: RegionBuilder): MemoryAccessOperations;
 }>;
 
-export type GuestMemoryDefinition = Readonly<{
-  resource: ResourceRef;
-  access: MemoryAccessConstruction;
-  createReader(memory: WebAssembly.Memory): GuestMemoryReader;
-  memoryImport: MemoryImport;
+export type BoundMemory = Readonly<{
+  reader: GuestMemoryReader;
 }>;
 
-export function createGuestMemoryDefinition(): GuestMemoryDefinition {
-  const resource = resourceRef(guestMemoryResourceDefinition.id);
+export type MemoryDefinition = Readonly<{
+  physical: PhysicalAddressSpaceDefinition;
+  resources: readonly MemoryImport[];
+  access: MemoryAccessConstruction;
+  effects: StorageEffects;
+  bindHost(bindings: Readonly<{
+    ram: WebAssembly.Memory;
+  }>): BoundMemory;
+}>;
+
+export function createMemoryDefinition(): MemoryDefinition {
+  const physical = createPhysicalAddressSpaceDefinition();
 
   return {
-    resource,
+    physical,
+    resources: physical.resources,
     access: {
-      bind: (region) => new FlatMemoryAccessBuilder(resource, region)
+      bind: (region) => new FlatMemoryAccessBuilder(
+        physical.access.bind(region),
+        region
+      )
     },
-    createReader: createFlatGuestMemoryReader,
-    memoryImport: {
-      ref: resource,
-      moduleName: programImportModuleName,
-      name: guestMemoryResourceDefinition.name,
-      limits: guestMemoryResourceDefinition.limits
-    }
+    effects: physical.effects,
+    bindHost: ({ ram }) => ({
+      reader: createFlatGuestMemoryReader(
+        physical.bindHost({ ram }).reader
+      )
+    })
   };
 }
 
 class FlatMemoryAccessBuilder implements MemoryAccessOperations {
-  readonly #resource: ResourceRef;
+  readonly #physical: PhysicalAccessOperations;
   readonly #region: RegionBuilder;
 
-  constructor(resource: ResourceRef, region: RegionBuilder) {
-    this.#resource = resource;
+  constructor(
+    physical: PhysicalAccessOperations,
+    region: RegionBuilder
+  ) {
+    this.#physical = physical;
     this.#region = region;
   }
 
@@ -132,7 +140,12 @@ class FlatMemoryAccessBuilder implements MemoryAccessOperations {
     range: LinearRange,
     intent: TIntent
   ): MemoryResolution<TIntent> {
-    return flatMemoryResolution(this.#region.values, range, intent);
+    return flatMemoryResolution(
+      this.#region.values,
+      range,
+      intent,
+      this.#physical.issue(range)
+    );
   }
 
   load(
@@ -141,21 +154,11 @@ class FlatMemoryAccessBuilder implements MemoryAccessOperations {
     width: IntegerWidth,
     options: MemoryLoadOptions = {}
   ): ValueId {
-    const region = this.#region;
-    const source = flatMemoryOperand(
-      this.#resource,
-      region.values,
-      access,
+    return this.#physical.load(
+      access.physicalAccess,
       byteOffset,
-      width
-    );
-    const signed = options.signed === true && width !== 32;
-
-    return region.operation(
-      resourceRead,
-      signed
-        ? { source, mode: { kind: "signed" } }
-        : { source }
+      width,
+      options
     );
   }
 
@@ -165,15 +168,11 @@ class FlatMemoryAccessBuilder implements MemoryAccessOperations {
     value: ValueId,
     width: IntegerWidth
   ): void {
-    const region = this.#region;
-    const destination = flatMemoryOperand(
-      this.#resource,
-      region.values,
-      access,
+    this.#physical.store(
+      access.physicalAccess,
       byteOffset,
+      value,
       width
     );
-
-    region.operation(resourceWrite, { destination, value });
   }
 }

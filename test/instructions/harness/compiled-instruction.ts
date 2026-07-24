@@ -42,7 +42,6 @@ import {
   cpuState,
   cpuStateAccess,
   guestMemoryAccess,
-  guestMemoryResource,
   testExecutionModel
 } from "#test/support/execution-model.js";
 import { instructionLimitExit } from "#interpreter/exits.js";
@@ -133,7 +132,10 @@ export async function runCompiledInstructions(
     {
       memories: new Map([
         [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-        [testExecutionModel.guestMemory.resource, memories.guestMemory]
+        [
+          testExecutionModel.memory.physical.ramResource,
+          memories.guestMemory
+        ]
       ]),
       functions: new Map([[
         built.dispatch.ref,
@@ -271,14 +273,9 @@ const wholeCpuState: StorageAccess = {
   resource: cpuState.resource,
   range: { basis: { kind: "resource" } }
 };
-const wholeGuestMemory: StorageAccess = {
-  space: "resource",
-  resource: guestMemoryResource,
-  range: { basis: { kind: "resource" } }
-};
 const compiledInstructionEffects: StorageEffects = {
-  reads: [wholeCpuState, wholeGuestMemory],
-  writes: [wholeCpuState, wholeGuestMemory]
+  reads: [wholeCpuState, ...testExecutionModel.memory.effects.reads],
+  writes: [wholeCpuState, ...testExecutionModel.memory.effects.writes]
 };
 
 class FiniteInstructionReader implements IsaDecodeReader {

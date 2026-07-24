@@ -39,7 +39,8 @@ let compiledInterpreter:
 export function instantiateInterpreter(): InterpreterHarness {
   compiledInterpreter ??= compileInterpreterProgram(testExecutionModel);
   const guestMemory = new WebAssembly.Memory({
-    initial: testExecutionModel.guestMemory.memoryImport.limits.minPages
+    initial:
+      testExecutionModel.memory.physical.ramImport.limits.minPages
   });
   const cpuStateMemory = new WebAssembly.Memory({
     initial: testExecutionModel.cpuState.memoryImport.limits.minPages
@@ -51,7 +52,7 @@ export function instantiateInterpreter(): InterpreterHarness {
     {
       memories: new Map([
         [testExecutionModel.cpuState.resource, cpuStateMemory],
-        [testExecutionModel.guestMemory.resource, guestMemory]
+        [testExecutionModel.memory.physical.ramResource, guestMemory]
       ]),
       functions: new Map()
     }

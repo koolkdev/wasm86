@@ -11,7 +11,8 @@ export function createTestWasmMemories(): TestWasmMemories {
       initial: testExecutionModel.cpuState.memoryImport.limits.minPages
     }),
     guestMemory: new WebAssembly.Memory({
-      initial: testExecutionModel.guestMemory.memoryImport.limits.minPages
+      initial:
+        testExecutionModel.memory.physical.ramImport.limits.minPages
     })
   };
 }

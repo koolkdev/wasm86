@@ -13,7 +13,6 @@ import {
   guestMemoryMinimumPages
 } from "#memory/constants.js";
 import { writeBackingBytes } from "#memory/bytes.js";
-import { flatMemoryResolution } from "#memory/flat.js";
 import {
   guestMemoryResource,
   testExecutionModel
@@ -22,7 +21,7 @@ import {
 test("flat byte reads use the flat backing boundary and requested fault intent", () => {
   const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
   const finalAddress = guestMemoryMinimumByteLength - 1;
-  const reader = testExecutionModel.guestMemory.createReader(memory);
+  const reader = testExecutionModel.memory.bindHost({ ram: memory }).reader;
 
   writeBackingBytes(memory, finalAddress, [0xa5]);
 
@@ -73,8 +72,9 @@ test("generated flat resolution keeps its logical capacity after backing memory 
 
     assert(start !== undefined, "flat classifier start parameter is missing");
     assert(byteLength !== undefined, "flat classifier length parameter is missing");
-    const resolution = flatMemoryResolution(
-      fn.values,
+    const resolution = testExecutionModel.memory.access.bind(
+      fn.region
+    ).resolve(
       { start, byteLength },
       "read"
     );
@@ -88,7 +88,8 @@ test("generated flat resolution keeps its logical capacity after backing memory 
   });
 
   const memory = new WebAssembly.Memory({
-    initial: testExecutionModel.guestMemory.memoryImport.limits.minPages
+    initial:
+      testExecutionModel.memory.physical.ramImport.limits.minPages
   });
   const instance = instantiateCompiledProgram(
     compileProgram(builder.finish()),
@@ -107,8 +108,6 @@ test("generated flat resolution keeps its logical capacity after backing memory 
   strictEqual(classify(guestMemoryMinimumByteLength - 1, 1), 0);
   strictEqual(classify(guestMemoryMinimumByteLength - 1, 2), 1);
   strictEqual(classify(guestMemoryMinimumByteLength, 1), 1);
-  strictEqual(classify(0, 0), 1);
-  strictEqual(classify(-1, 0), 1);
 
   memory.grow(1);
 

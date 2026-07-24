@@ -27,7 +27,9 @@ export function compileJitFromMemory(
   }>
 ): CompiledJitArtifact {
   const byteLength = jitSnapshotRequestByteLength(input.policy);
-  const reader = input.model.guestMemory.createReader(input.memory);
+  const reader = input.model.memory.bindHost({
+    ram: input.memory
+  }).reader;
   const snapshot = snapshotInstructionBytes(
     reader,
     { linearStart: input.start, byteLength }

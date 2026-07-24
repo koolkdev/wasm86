@@ -48,7 +48,7 @@ export function buildJitProgram(
   const program = new ProgramBuilder(model.resources);
   const effects = jitExecutionEffects(
     model.cpuState.resource,
-    model.guestMemory.resource
+    model.memory.effects
   );
   const dispatch = program.importFunction({
     ref: functionRef("jit.dispatch"),
@@ -78,7 +78,7 @@ function defineJitBlock(
 ): FunctionDefinition {
   const instructionLowerer = createInstructionLowerer({
     stateAccess: model.cpuState.access,
-    memory: model.guestMemory.access,
+    memory: model.memory.access,
     instructionCountField,
     buildExit
   });
@@ -88,7 +88,7 @@ function defineJitBlock(
     type: jitBlockType,
     effects: jitExecutionEffects(
       model.cpuState.resource,
-      model.guestMemory.resource
+      model.memory.effects
     )
   }, (fn) => buildJitBlockBody(
     fn,
@@ -185,14 +185,14 @@ function buildCpuExceptionExit(
 
 function jitExecutionEffects(
   cpuState: ResourceRef,
-  guestMemory: ResourceRef
+  memory: StorageEffects
 ): StorageEffects {
-  const resources = [
-    wholeResourceEffect(cpuState),
-    wholeResourceEffect(guestMemory)
-  ];
+  const stateEffect = wholeResourceEffect(cpuState);
 
-  return { reads: resources, writes: resources };
+  return {
+    reads: [stateEffect, ...memory.reads],
+    writes: [stateEffect, ...memory.writes]
+  };
 }
 
 function wholeResourceEffect(resource: ResourceRef): ResourceEffect {

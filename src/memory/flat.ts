@@ -1,26 +1,19 @@
 import { assert } from "#common/assert.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type {
-  IntegerWidth,
-  ValueId
-} from "#compiler/ir/values/types.js";
-import {
-  DynamicByteOriginRef,
-  type ByteRange,
-  type ResourceByteOperand,
-  type ResourceRef
-} from "#compiler/ir/resource.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   pageFault,
   pageFaultErrorCode
 } from "#core/exceptions.js";
-import { readBackingByte } from "./bytes.js";
 import { guestMemoryMinimumByteLength } from "./constants.js";
+import type {
+  PhysicalAccess,
+  PhysicalByteReader
+} from "./physical.js";
 import type {
   GuestMemoryByteRead,
   GuestMemoryReader,
   LinearRange,
-  MemoryAccess,
   MemoryAccessIntent,
   MemoryReadIntent,
   MemoryResolution
@@ -32,19 +25,17 @@ type ConstantValues = Readonly<{
   constValue(value: ValueId): number | undefined;
 }>;
 
-const addressSpaceByteLength = 0x1_0000_0000;
-
 export function createFlatGuestMemoryReader(
-  memory: WebAssembly.Memory
+  physical: PhysicalByteReader
 ): GuestMemoryReader {
-  validateFlatMemoryBinding(memory);
   return {
-    readByte: (address, intent) => readFlatMemoryByte(memory, address, intent)
+    readByte: (address, intent) =>
+      readFlatMemoryByte(physical, address, intent)
   };
 }
 
 function readFlatMemoryByte(
-  memory: WebAssembly.Memory,
+  physical: PhysicalByteReader,
   address: number,
   intent: MemoryReadIntent
 ): GuestMemoryByteRead {
@@ -59,24 +50,17 @@ function readFlatMemoryByte(
     };
   }
 
-  const value = readBackingByte(memory, address);
+  const value = physical.readByte(address);
 
   assert(value !== undefined, `checked flat memory byte is absent at ${address}`);
   return { kind: "value", value };
 }
 
-function validateFlatMemoryBinding(memory: WebAssembly.Memory): void {
-  if (memory.buffer.byteLength < guestMemoryMinimumByteLength) {
-    throw new RangeError(
-      "guest memory is shorter than the flat address-space binding"
-    );
-  }
-}
-
 export function flatMemoryResolution<TIntent extends MemoryAccessIntent>(
   values: FlatMemoryValues,
   range: LinearRange,
-  intent: TIntent
+  intent: TIntent,
+  physical: PhysicalAccess
 ): MemoryResolution<TIntent> {
   const staticByteLength = values.constValue(range.byteLength);
 
@@ -97,7 +81,8 @@ export function flatMemoryResolution<TIntent extends MemoryAccessIntent>(
         range.start,
         values.const(guestMemoryMinimumByteLength - staticByteLength)
       ),
-      intent
+      intent,
+      physical
     );
   }
 
@@ -114,20 +99,21 @@ export function flatMemoryResolution<TIntent extends MemoryAccessIntent>(
       values.binary("sub", last, range.start)
     )
   );
-  return createMemoryResolution(values, range, faulted, intent);
+  return createMemoryResolution(values, range, faulted, intent, physical);
 }
 
 function createMemoryResolution<TIntent extends MemoryAccessIntent>(
   values: FlatMemoryValues,
   range: LinearRange,
   faulted: ValueId,
-  intent: TIntent
+  intent: TIntent,
+  physical: PhysicalAccess
 ): MemoryResolution<TIntent> {
   return {
     access: {
       range,
-      origin: new DynamicByteOriginRef(),
-      intent
+      intent,
+      physicalAccess: physical
     },
     fault: {
       condition: faulted,
@@ -136,75 +122,5 @@ function createMemoryResolution<TIntent extends MemoryAccessIntent>(
         values.const(pageFaultErrorCode(intent))
       )
     }
-  };
-}
-
-// Classify only from facts issued by this access. Value identities are never
-// reverse-engineered: a dynamic offset therefore widens to the whole origin.
-export function flatMemoryOperand(
-  resource: ResourceRef,
-  values: FlatMemoryValues,
-  access: MemoryAccess,
-  byteOffset: ValueId,
-  width: IntegerWidth
-): ResourceByteOperand {
-  assert(
-    width === 8 || width === 16 || width === 32,
-    `flat operation width must be 8, 16, or 32, got ${String(width)}`
-  );
-  const byteLength = width / 8;
-  const staticAccessByteLength = values.constValue(access.range.byteLength);
-  const staticByteOffset = values.constValue(byteOffset);
-
-  assert(
-    staticByteOffset === undefined || staticByteOffset >= 0,
-    `memory byte offset must be non-negative, got ${String(staticByteOffset)}`
-  );
-  assert(
-    staticByteOffset === undefined ||
-      staticAccessByteLength === undefined ||
-      staticByteOffset + byteLength <= staticAccessByteLength,
-    `${width}-bit memory access at byte offset ${String(staticByteOffset)} exceeds ${String(staticAccessByteLength)}-byte resolution`
-  );
-  const range = flatMemoryRange(values, access, staticByteOffset, byteLength);
-  const base = staticByteOffset === undefined
-    ? values.binary("add", access.range.start, byteOffset)
-    : access.range.start;
-
-  return {
-    effect: { space: "resource", resource, range },
-    address: {
-      base,
-      displacement: staticByteOffset ?? 0
-    },
-    width
-  };
-}
-
-function flatMemoryRange(
-  values: ConstantValues,
-  access: Pick<MemoryAccess, "origin" | "range">,
-  staticByteOffset: number | undefined,
-  byteLength: number
-): ByteRange {
-  if (staticByteOffset === undefined) {
-    return { basis: { kind: "dynamic", origin: access.origin } };
-  }
-  const staticStart = values.constValue(access.range.start);
-
-  if (staticStart !== undefined) {
-    const absoluteStart = (staticStart >>> 0) + staticByteOffset;
-
-    if (absoluteStart + byteLength <= addressSpaceByteLength) {
-      return {
-        basis: { kind: "resource" },
-        slice: { byteOffset: absoluteStart, byteLength }
-      };
-    }
-  }
-
-  return {
-    basis: { kind: "dynamic", origin: access.origin },
-    slice: { byteOffset: staticByteOffset, byteLength }
   };
 }

@@ -1,7 +1,7 @@
-import { guestMemoryMinimumPages } from "./constants.js";
+const physicalRamMinimumPages = 1;
 
-export const guestMemoryResourceDefinition = {
+export const physicalRamResourceDefinition = {
   id: "memory.guest",
   name: "guest",
-  limits: { minPages: guestMemoryMinimumPages }
+  limits: { minPages: physicalRamMinimumPages }
 } as const;

@@ -105,9 +105,9 @@ function memory(
   address = startAddress,
   policy: JitBlockPolicy = defaultJitBlockPolicy
 ): InstructionByteSnapshot {
-  const reader = testExecutionModel.guestMemory.createReader(
-    jitMemoryWithBytes(values, address)
-  );
+  const reader = testExecutionModel.memory.bindHost({
+    ram: jitMemoryWithBytes(values, address)
+  }).reader;
 
   return snapshotInstructionBytes(
     reader,

@@ -45,15 +45,16 @@ export function createMachine(options: MachineOptions): Machine {
   }
 
   const { model, interpreter } = getInterpreterCompilation();
+  const physical = model.memory.physical;
   const initialPages = wasmPagesForByteLength(memoryByteLength);
-  const maximumPages = model.guestMemory.memoryImport.limits.maxPages;
+  const maximumPages = physical.ramImport.limits.maxPages;
 
   const memory = new WebAssembly.Memory({
     initial: initialPages,
     ...(maximumPages === undefined ? {} : { maximum: maximumPages })
   });
   const sharedMemories = new Map<ResourceRef, WebAssembly.Memory>([
-    [model.guestMemory.resource, memory]
+    [physical.ramResource, memory]
   ]);
   const cpu = createCpu({
     state: model.cpuState,

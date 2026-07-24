@@ -17,7 +17,10 @@ import {
   readWasmCpuStateSnapshot,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import { testExecutionModel } from "#test/support/execution-model.js";
+import {
+  guestMemoryResource,
+  testExecutionModel
+} from "#test/support/execution-model.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 
 const startEip = 0x1000;
@@ -42,7 +45,7 @@ test("a completed block commits its final state before fallthrough dispatch", ()
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: new Map([
       [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+      [guestMemoryResource, memories.guestMemory]
     ]),
     functions: new Map([[
       imported.ref,
@@ -84,7 +87,7 @@ test("a mid-block data fault reports the faulting eip after committing earlier s
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: new Map([
       [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+      [guestMemoryResource, memories.guestMemory]
     ]),
     functions: new Map()
   });
@@ -120,7 +123,7 @@ test("an inaccessible block start compiles its exact Memory exception", () => {
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: new Map([
       [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+      [guestMemoryResource, memories.guestMemory]
     ]),
     functions: new Map()
   });
@@ -163,7 +166,7 @@ test("a boundary after a completed instruction becomes terminal control", () => 
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: new Map([
       [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+      [guestMemoryResource, memories.guestMemory]
     ]),
     functions: new Map()
   });
@@ -197,7 +200,7 @@ test("a terminal one-byte instruction at the final backing byte does not consume
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: new Map([
       [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+      [guestMemoryResource, memories.guestMemory]
     ]),
     functions: new Map()
   });

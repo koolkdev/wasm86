@@ -111,7 +111,7 @@ function snapshotFromMemory(
   request: InstructionSnapshotRequest
 ): InstructionByteSnapshot {
   return snapshotInstructionBytes(
-    testExecutionModel.guestMemory.createReader(memory),
+    testExecutionModel.memory.bindHost({ ram: memory }).reader,
     request
   );
 }

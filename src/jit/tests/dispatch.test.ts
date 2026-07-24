@@ -11,7 +11,10 @@ import {
   readWasmCpuStateSnapshot,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import { testExecutionModel } from "#test/support/execution-model.js";
+import {
+  guestMemoryResource,
+  testExecutionModel
+} from "#test/support/execution-model.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 
 const aEip = 0x1000;
@@ -38,7 +41,7 @@ test("a final static jmp returns through the typed dispatch import", () => {
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: new Map([
       [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+      [guestMemoryResource, memories.guestMemory]
     ]),
     functions: new Map([[
       imported.ref,
@@ -90,7 +93,7 @@ test("a conditional side transfer dispatches only when taken", () => {
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: new Map([
       [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+      [guestMemoryResource, memories.guestMemory]
     ]),
     functions: new Map([[
       imported.ref,
@@ -152,7 +155,7 @@ test("an indirect jump preserves the full u32 dispatch target", () => {
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: new Map([
       [testExecutionModel.cpuState.resource, memories.cpuStateMemory],
-      [testExecutionModel.guestMemory.resource, memories.guestMemory]
+      [guestMemoryResource, memories.guestMemory]
     ]),
     functions: new Map([[
       imported.ref,

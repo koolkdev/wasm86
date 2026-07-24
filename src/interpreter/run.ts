@@ -31,7 +31,7 @@ export function defineInterpreterRun(
 ): FunctionDefinition {
   const instructionLowerer = createInstructionLowerer({
     stateAccess: model.cpuState.access,
-    memory: model.guestMemory.access,
+    memory: model.memory.access,
     instructionCountField,
     buildExit
   });
@@ -41,7 +41,7 @@ export function defineInterpreterRun(
     type: interpreterRunType,
     effects: interpreterRunEffects(
       model.cpuState.resource,
-      model.guestMemory.resource
+      model.memory.effects
     )
   }, (fn) => buildRunBody(fn, model, instructionLowerer));
 }
@@ -65,7 +65,7 @@ function buildRunBody(
     }, { hint: "unlikely" });
     buildDecodeAndDispatch(body, instructionStart, {
       stateAccess,
-      memory: model.guestMemory.access,
+      memory: model.memory.access,
       buildExit,
       buildInstruction: (region, decoded) =>
         buildInterpreterInstruction(
@@ -100,16 +100,13 @@ function instructionLimitReached(
 
 function interpreterRunEffects(
   state: ResourceRef,
-  memory: ResourceRef
+  memory: StorageEffects
 ): StorageEffects {
-  const resources = [
-    wholeResourceEffect(state),
-    wholeResourceEffect(memory)
-  ];
+  const stateEffect = wholeResourceEffect(state);
 
   return {
-    reads: resources,
-    writes: resources
+    reads: [stateEffect, ...memory.reads],
+    writes: [stateEffect, ...memory.writes]
   };
 }
 
