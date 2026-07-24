@@ -6,6 +6,7 @@ import {
   pageTableEntries,
   pageTableEntryAttr,
   pageTableEntryFrameMask,
+  pageWalkResultAttr,
   virtualPageByteLength,
   virtualPageCount,
   virtualPageOffsetMask,
@@ -27,4 +28,19 @@ test("Virtual storage defines a complete u32 page table and its initial PTE enco
   strictEqual(pageTableEntryAttr.WRITABLE, 2);
   strictEqual(pageTableEntryFrameMask, 0xffff_f000);
   strictEqual(storage.machineImport.limits.minPages, 64);
+});
+
+test("Virtual page-walk markers are outside the stored PTE encoding", () => {
+  const storedBits = Object.values(pageTableEntryAttr).reduce(
+    (bits, attr) => bits | attr,
+    pageTableEntryFrameMask
+  );
+
+  strictEqual(
+    pageWalkResultAttr.LATER_DENIAL &
+      pageWalkResultAttr.SCATTERED,
+    0
+  );
+  strictEqual(pageWalkResultAttr.LATER_DENIAL & storedBits, 0);
+  strictEqual(pageWalkResultAttr.SCATTERED & storedBits, 0);
 });

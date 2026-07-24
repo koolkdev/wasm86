@@ -11,6 +11,14 @@ export const pageTableEntryAttr = {
   WRITABLE: 1 << 1
 } as const;
 
+// Page-walk results reuse a PTE-shaped word. These result-only markers occupy
+// bits that stored PTEs never use: the inline path decodes a raw PTE with the
+// same masks, so storing either marker would fabricate a route or denial fact.
+export const pageWalkResultAttr = {
+  LATER_DENIAL: 1 << 10,
+  SCATTERED: 1 << 11
+} as const;
+
 export const pageTableEntryFrameMask = 0xffff_f000;
 
 export const pageTableEntryLayout = {

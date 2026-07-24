@@ -17,7 +17,7 @@ import type {
   MemoryAccessIntent,
   MemoryReadIntent,
   MemoryResolution
-} from "./access.js";
+} from "./types.js";
 
 type FlatMemoryValues = Pick<ValueBuilder, "const" | "binary" | "compare"> & ConstantValues;
 
@@ -113,6 +113,7 @@ function createMemoryResolution<TIntent extends MemoryAccessIntent>(
     access: {
       range,
       intent,
+      scattered: values.const(0),
       physicalAccess: physical
     },
     fault: {

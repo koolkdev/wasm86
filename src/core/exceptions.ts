@@ -20,6 +20,7 @@ export const CpuExceptionVector = {
 export type CpuExceptionVector = (typeof CpuExceptionVector)[keyof typeof CpuExceptionVector];
 
 export const PageFaultErrorCode = {
+  PRESENT: 1 << 0,
   WRITE: 1 << 1,
   INSTRUCTION_FETCH: 1 << 4
 } as const;

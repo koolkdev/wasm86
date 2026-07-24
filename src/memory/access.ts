@@ -4,9 +4,6 @@ import type {
   ValueId
 } from "#compiler/ir/values/types.js";
 import type { MemoryImport } from "#compiler/program/resources.js";
-import {
-  type PageFault
-} from "#core/exceptions.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import {
   createFlatGuestMemoryReader,
@@ -14,84 +11,38 @@ import {
 } from "./flat.js";
 import {
   createPhysicalAddressSpaceDefinition,
-  type PhysicalAccess,
   type PhysicalAccessOperations,
   type PhysicalAddressSpaceDefinition
 } from "./physical.js";
+import type {
+  GuestMemoryReader,
+  LinearRange,
+  MemoryAccess,
+  MemoryAccessConstruction,
+  MemoryAccessIntent,
+  MemoryAccessOperations,
+  MemoryLoadOptions,
+  MemoryResolution
+} from "./types.js";
 import {
   createVirtualStorageDefinition,
   type VirtualStorageDefinition
 } from "./virtual/storage.js";
 
-export type LinearRange = Readonly<{
-  start: ValueId;
-  byteLength: ValueId;
-}>;
-
-export type MemoryDataAccessIntent = "read" | "write";
-export type MemoryAccessIntent = MemoryDataAccessIntent | "instructionFetch";
-export type MemoryReadIntent = Exclude<MemoryAccessIntent, "write">;
-
-export type GuestMemoryByteRead =
-  | Readonly<{ kind: "value"; value: number }>
-  | Readonly<{
-      kind: "exception";
-      exception: PageFault<number>;
-    }>;
-
-export type GuestMemoryReader = Readonly<{
-  readByte(address: number, intent: MemoryReadIntent): GuestMemoryByteRead;
-}>;
-
-export type MemoryFault = Readonly<{
-  condition: ValueId;
-  exception: PageFault<ValueId>;
-}>;
-
-export type MemoryAccess<
-  TIntent extends MemoryAccessIntent = MemoryAccessIntent
-> = Readonly<{
-  range: LinearRange;
-  intent: TIntent;
-  physicalAccess: PhysicalAccess;
-}>;
-
-export type MemoryResolution<
-  TIntent extends MemoryAccessIntent = MemoryAccessIntent
-> = Readonly<{
-  access: MemoryAccess<TIntent>;
-  fault: MemoryFault;
-}>;
-
-export type MemoryLoadOptions = Readonly<{
-  signed?: boolean;
-}>;
-
-export type MemoryAccessOperations = Readonly<{
-  // Resolution is control-free. Its caller owns selecting the returned fault
-  // before transferring through the access.
-  resolve<TIntent extends MemoryAccessIntent>(
-    range: LinearRange,
-    intent: TIntent
-  ): MemoryResolution<TIntent>;
-  // Loads and stores consume the access route without selecting its fault.
-  load(
-    access: MemoryAccess,
-    byteOffset: ValueId,
-    width: IntegerWidth,
-    options?: MemoryLoadOptions
-  ): ValueId;
-  store(
-    access: MemoryAccess<"write">,
-    byteOffset: ValueId,
-    value: ValueId,
-    width: IntegerWidth
-  ): void;
-}>;
-
-export type MemoryAccessConstruction = Readonly<{
-  bind(region: RegionBuilder): MemoryAccessOperations;
-}>;
+export type {
+  GuestMemoryByteRead,
+  GuestMemoryReader,
+  LinearRange,
+  MemoryAccess,
+  MemoryAccessConstruction,
+  MemoryAccessIntent,
+  MemoryAccessOperations,
+  MemoryDataAccessIntent,
+  MemoryFault,
+  MemoryLoadOptions,
+  MemoryReadIntent,
+  MemoryResolution
+} from "./types.js";
 
 export type BoundMemory = Readonly<{
   reader: GuestMemoryReader;
