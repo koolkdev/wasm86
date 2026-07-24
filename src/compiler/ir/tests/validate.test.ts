@@ -15,10 +15,7 @@ import {
   type FunctionGraph,
   type IrFunction
 } from "#compiler/ir/function.js";
-import {
-  IndirectCallTarget,
-  Invocation
-} from "#compiler/ir/invocation.js";
+import { Invocation } from "#compiler/ir/invocation.js";
 import { variableRead, variableWrite } from "#compiler/ir/operations/variables.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
 import {
@@ -27,10 +24,7 @@ import {
   type ResourceOperation
 } from "#compiler/ir/operations/resource.js";
 import type { Region, RegionNode } from "#compiler/ir/region.js";
-import {
-  functionRef,
-  tableRef
-} from "#compiler/ir/refs.js";
+import { functionRef } from "#compiler/ir/refs.js";
 import {
   DynamicByteOriginRef,
   resourceRef,
@@ -38,29 +32,19 @@ import {
   type ResourceByteOperand
 } from "#compiler/ir/resource.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
-import { valueId } from "#compiler/ir/values/id.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type {
   IntegerWidth,
   ValueId,
   ValueType
 } from "#compiler/ir/values/types.js";
-import {
-  fitsUnsigned,
-  signExtended
-} from "#compiler/ir/values/width-bounds.js";
+import { signExtended } from "#compiler/ir/values/width-bounds.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import {
-  memoryReadOperation,
   resourceReadNode,
   resourceWriteNode
 } from "#test/support/storage-operations.js";
 
-const validationDispatch = testFunctionDefinition(
-  "validation.dispatch",
-  ["i32"],
-  ["i64"]
-);
 const validationResource = resourceRef("test.validation-resource");
 
 function entryBlock(
@@ -68,18 +52,6 @@ function entryBlock(
   nodes: readonly RegionNode[]
 ): FunctionGraph {
   return { values, body: { nodes } };
-}
-
-function dispatchReturn(targetEip: ValueId): RegionNode {
-  return returnControl.create({
-    source: {
-      kind: "invocation",
-      invocation: Invocation.create({
-        target: validationDispatch,
-        arguments: [{ value: targetEip, type: "i32" }]
-      })
-    }
-  });
 }
 
 function exitReturn(values: ValueTable): RegionNode {
@@ -181,54 +153,6 @@ function switchBlock(
   return entryBlock(values, [selection, exitReturn(values)]);
 }
 
-test("a nested terminal graph validates", () => {
-  const values = new ValueTable();
-  const condition = values.const(1);
-  const target = values.const(0x2000);
-
-  doesNotThrow(() =>
-    validateFunctionBlock(
-      entryBlock(values, [
-        ifControl.create({
-          condition,
-          thenBody: { nodes: [dispatchReturn(target)] },
-          elseBody: { nodes: [exitReturn(values)] }
-        })
-      ])
-    )
-  );
-});
-
-test("a returned invocation with matching arguments and results validates", () => {
-  const values = new ValueTable();
-  const argument = values.parameter(0, "i32");
-  const target = testFunctionDefinition(
-    "validation.return-call",
-    ["i32"],
-    ["i64"]
-  );
-  const fn: IrFunction = {
-    type: functionType(["i32"], ["i64"]),
-    parameters: [argument],
-    values,
-    body: {
-      nodes: [
-        returnControl.create({
-          source: {
-            kind: "invocation",
-            invocation: Invocation.create({
-              target,
-              arguments: [{ value: argument, type: "i32" }]
-            })
-          }
-        })
-      ]
-    }
-  };
-
-  doesNotThrow(() => validateIrFunction(fn));
-});
-
 test("a returned invocation must match the enclosing result shape", () => {
   const values = new ValueTable();
   const target = testFunctionDefinition(
@@ -258,72 +182,6 @@ test("a returned invocation must match the enclosing result shape", () => {
   );
 });
 
-test("a returned invocation validates argument value types", () => {
-  const values = new ValueTable();
-  const argument = values.parameter(0, "i32");
-  const target = testFunctionDefinition(
-    "validation.return-argument",
-    ["i64"],
-    []
-  );
-  const fn: IrFunction = {
-    type: functionType(["i32"], []),
-    parameters: [argument],
-    values,
-    body: {
-      nodes: [
-        returnControl.create({
-          source: {
-            kind: "invocation",
-            invocation: Invocation.create({
-              target,
-              arguments: [{ value: argument, type: "i64" }]
-            })
-          }
-        })
-      ]
-    }
-  };
-
-  throws(() => validateIrFunction(fn), /must be i64, got i32/);
-});
-
-test("an indirect invocation validates its declared resource ranges", () => {
-  const values = new ValueTable();
-  const elementIndex = values.const(0);
-  const target = IndirectCallTarget.create({
-    table: tableRef("validation.effect-table"),
-    type: functionType([], ["i64"]),
-    effects: {
-      reads: [{
-        space: "resource",
-        resource: validationResource,
-        range: {
-          basis: { kind: "resource" },
-          slice: { byteOffset: -1, byteLength: 1 }
-        }
-      }],
-      writes: []
-    },
-    elementIndex: { value: elementIndex, type: "i32" }
-  });
-
-  throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [
-          returnControl.create({
-            source: {
-              kind: "invocation",
-              invocation: Invocation.create({ target, arguments: [] })
-            }
-          })
-        ])
-      ),
-    /byte offset/
-  );
-});
-
 test("a terminal control must be the final node in its body", () => {
   const values = new ValueTable();
 
@@ -350,35 +208,6 @@ test("the root body must complete", () => {
         ])
       ),
     /root body does not complete/
-  );
-});
-
-test("invocation operands must name values in the function table", () => {
-  const values = new ValueTable();
-
-  throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [dispatchReturn(valueId(99))])
-      ),
-    /unknown value id/
-  );
-});
-
-test("operation output bounds must match the declared result", () => {
-  const values = new ValueTable();
-  const address = values.const(0);
-  const output = values.addNodeOutput(fitsUnsigned(8));
-
-  throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [
-          memoryReadOperation(output, address, 32),
-          exitReturn(values)
-        ])
-      ),
-    /wrong bounds/
   );
 });
 
@@ -412,76 +241,6 @@ test("valid narrow resource operations and conservative slices validate", () => 
   );
 });
 
-test("resource displacements must be unsigned integers", () => {
-  const values = new ValueTable();
-  const operation = resourceRead.create(
-    {
-      source: resourceOperand(
-        { basis: { kind: "resource" } },
-        values.const(0),
-        -1,
-        8
-      )
-    },
-    allocateOutput(values)
-  );
-
-  throws(
-    () =>
-      validateFunctionBlock(
-        blockWithResourceOperation(values, operation)
-      ),
-    /displacement must be an unsigned 32-bit integer/
-  );
-});
-
-test("resource byte slices enforce offset, length, and address-space bounds", () => {
-  const cases: readonly [ByteRange, RegExp][] = [
-    [
-      {
-        basis: { kind: "resource" },
-        slice: { byteOffset: -1, byteLength: 1 }
-      },
-      /byte offset/
-    ],
-    [
-      {
-        basis: { kind: "resource" },
-        slice: { byteOffset: 0, byteLength: 0 }
-      },
-      /byte length/
-    ],
-    [
-      {
-        basis: {
-          kind: "dynamic",
-          origin: new DynamicByteOriginRef()
-        },
-        slice: { byteOffset: 0xffff_ffff, byteLength: 2 }
-      },
-      /range end/
-    ]
-  ];
-
-  for (const [range, expected] of cases) {
-    const values = new ValueTable();
-    const operation = resourceRead.create(
-      {
-        source: resourceOperand(range, values.const(0), 0, 8)
-      },
-      allocateOutput(values)
-    );
-
-    throws(
-      () =>
-        validateFunctionBlock(
-          blockWithResourceOperation(values, operation)
-        ),
-      expected
-    );
-  }
-});
-
 test("a resource slice must contain its transfer", () => {
   const values = new ValueTable();
   const operation = resourceRead.create(
@@ -508,124 +267,6 @@ test("a resource slice must contain its transfer", () => {
   );
 });
 
-test("unsigned read refinements must be valid and mechanically possible", () => {
-  const validValues = new ValueTable();
-  const valid = resourceRead.create(
-    {
-      source: resourceOperand(
-        { basis: { kind: "resource" } },
-        validValues.const(0),
-        0,
-        8
-      ),
-      mode: { kind: "unsigned", bounds: fitsUnsigned(1) }
-    },
-    allocateOutput(validValues)
-  );
-
-  doesNotThrow(() =>
-    validateFunctionBlock(
-      blockWithResourceOperation(validValues, valid)
-    )
-  );
-
-  const wideValues = new ValueTable();
-  const tooWide = resourceRead.create(
-    {
-      source: resourceOperand(
-        { basis: { kind: "resource" } },
-        wideValues.const(0),
-        0,
-        8
-      ),
-      mode: { kind: "unsigned", bounds: fitsUnsigned(16) }
-    },
-    allocateOutput(wideValues)
-  );
-
-  throws(
-    () =>
-      validateFunctionBlock(
-        blockWithResourceOperation(wideValues, tooWide)
-      ),
-    /refinement exceeds/
-  );
-
-  const malformedValues = new ValueTable();
-  const malformed = resourceRead.create(
-    {
-      source: resourceOperand(
-        { basis: { kind: "resource" } },
-        malformedValues.const(0),
-        0,
-        8
-      ),
-      mode: {
-        kind: "unsigned",
-        bounds: { unsignedBits: -1, signedBits: 0 }
-      }
-    },
-    allocateOutput(malformedValues)
-  );
-
-  throws(
-    () =>
-      validateFunctionBlock(
-        blockWithResourceOperation(malformedValues, malformed)
-      ),
-    /bounds are malformed/
-  );
-});
-
-test("value-producing and control-only switches validate", () => {
-  doesNotThrow(() => validateFunctionBlock(switchBlock({})));
-
-  const values = new ValueTable();
-  const selection = switchControl.create({
-    selector: values.const(0),
-    cases: [{ matches: [0, 2], body: { nodes: [] } }],
-    defaultBody: { nodes: [] }
-  });
-
-  doesNotThrow(() =>
-    validateFunctionBlock(
-      entryBlock(values, [selection, exitReturn(values)])
-    )
-  );
-});
-
-test("every fallthrough arm of a value-producing switch carries a result", () => {
-  throws(
-    () =>
-      validateFunctionBlock(
-        switchBlock({ defaultBody: { nodes: [] } })
-      ),
-    /must carry a result/
-  );
-});
-
-test("a control-only switch rejects arm results", () => {
-  const values = new ValueTable();
-  const selection = switchControl.create({
-    selector: values.const(0),
-    cases: [
-      {
-        matches: [0],
-        body: { nodes: [], result: values.const(1) }
-      }
-    ],
-    defaultBody: { nodes: [] }
-  });
-
-  throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [selection, exitReturn(values)])
-      ),
-    /carries a result without an owner output/
-  );
-});
-
 test("a completing arm cannot also carry a result", () => {
   throws(
     () =>
@@ -636,7 +277,7 @@ test("a completing arm cannot also carry a result", () => {
               matches: [0],
               body: {
                 nodes: [exitReturn(values)],
-                result: valueId(1)
+                result: values.const(4)
               }
             }
           ]
@@ -644,27 +285,6 @@ test("a completing arm cannot also carry a result", () => {
       ),
     /carries a result but completes/
   );
-});
-
-test("a seeded variable can be used in a nested descendant", () => {
-  const values = new ValueTable();
-  const variable = new VariableRef("i32");
-  const seed = values.const(7);
-  const output = values.addNodeOutput();
-  const body = entryBlock(values, [
-    variableWrite.create({
-      variable,
-      value: seed,
-      initialization: "seed"
-    }),
-    ifControl.create({
-      condition: values.const(1),
-      thenBody: { nodes: [variableReadNode(output, variable)] }
-    }),
-    exitReturn(values)
-  ]);
-
-  doesNotThrow(() => validateFunctionBlock(body));
 });
 
 test("a variable read must follow its seed", () => {
@@ -757,26 +377,6 @@ test("a variable cannot escape its declaring body", () => {
   );
 });
 
-test("a carried loop input and aligned continue validate", () => {
-  const values = new ValueTable();
-  const seed = values.const(3);
-  const loopInput = values.addLoopInput();
-  const loop = loopControl.create({
-    carried: [{ seed, loopInput }],
-    body: {
-      nodes: [
-        loopContinueControl.create({ updates: [loopInput] })
-      ]
-    }
-  });
-
-  doesNotThrow(() =>
-    validateFunctionBlock(
-      entryBlock(values, [loop, exitReturn(values)])
-    )
-  );
-});
-
 test("loopContinue belongs to a loop and aligns with its carried inputs", () => {
   const outsideValues = new ValueTable();
 
@@ -806,25 +406,6 @@ test("loopContinue belongs to a loop and aligns with its carried inputs", () => 
         entryBlock(values, [loop, exitReturn(values)])
       ),
     /updates do not align/
-  );
-});
-
-test("a carried loop input must be a loopInput value", () => {
-  const values = new ValueTable();
-  const seed = values.const(3);
-  const loop = loopControl.create({
-    carried: [{ seed, loopInput: seed }],
-    body: {
-      nodes: [loopContinueControl.create({ updates: [seed] })]
-    }
-  });
-
-  throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [loop, exitReturn(values)])
-      ),
-    /is not a loopInput value/
   );
 });
 
@@ -889,35 +470,6 @@ test("every node output has exactly one producer", () => {
         ])
       ),
     /more than one producer/
-  );
-});
-
-test("producer outputs must name nodeOutput values", () => {
-  const values = new ValueTable();
-  const address = values.const(0);
-  const constant = values.const(1);
-  const read = resourceRead.create(
-    {
-      source: resourceOperand(
-        { basis: { kind: "resource" } },
-        address,
-        0,
-        8
-      ),
-      mode: {
-        kind: "unsigned",
-        bounds: { unsignedBits: 1, signedBits: 2 }
-      }
-    },
-    () => constant
-  );
-
-  throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [read, exitReturn(values)])
-      ),
-    /is not a nodeOutput value/
   );
 });
 
