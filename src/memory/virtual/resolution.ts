@@ -5,6 +5,7 @@ import type { LinearRange } from "../types.js";
 import {
   pageTableEntryAttr,
   pageTableEntryFrameMask,
+  virtualPageByteLength,
   virtualPageOffsetMask,
   virtualPageShift
 } from "./layout.js";
@@ -49,7 +50,7 @@ function resolveRange(
   pageTable: PageTableAccess,
   pageWalk: PageWalk
 ): RangeResolution {
-  const result = selectResolutionWord(
+  const result = resolveRangeWord(
     region,
     range,
     required,
@@ -97,50 +98,130 @@ function resolveRange(
   };
 }
 
-function selectResolutionWord(
+function resolveRangeWord(
   region: RegionBuilder,
   range: LinearRange,
   required: ValueId,
   pageTable: PageTableAccess,
   pageWalk: PageWalk
 ): ResolutionWord {
-  const values = region.values;
-  const staticByteLength = values.constValue(range.byteLength);
+  const byteLength = region.values.constValue(range.byteLength);
 
-  assert(
-    staticByteLength === undefined || staticByteLength !== 0,
-    "virtual access byte length must be nonzero"
+  if (
+    byteLength === undefined ||
+    byteLength > virtualPageByteLength
+  ) {
+    return walkRange(region, range, required, pageWalk);
+  }
+
+  assert(byteLength !== 0, "virtual access byte length must be nonzero");
+
+  switch (byteLength) {
+    case 1:
+      return singlePageResult(region, range.start, pageTable);
+    case 2:
+    case 4:
+      return resolveScalarByAlignment(
+        region,
+        range,
+        required,
+        byteLength,
+        pageTable,
+        pageWalk
+      );
+    default:
+      return resolveStaticRangeByPageBoundary(
+        region,
+        range,
+        required,
+        byteLength,
+        pageTable,
+        pageWalk
+      );
+  }
+}
+
+function resolveScalarByAlignment(
+  region: RegionBuilder,
+  range: LinearRange,
+  required: ValueId,
+  byteLength: 2 | 4,
+  pageTable: PageTableAccess,
+  pageWalk: PageWalk
+): ResolutionWord {
+  // Because 2 and 4 divide the 4-KiB page size, natural alignment proves that
+  // the range needs only one PTE.
+  const values = region.values;
+  const misaligned = values.binary(
+    "and",
+    range.start,
+    values.const(byteLength - 1)
+  );
+  const staticMisaligned = values.constValue(misaligned);
+
+  if (staticMisaligned !== undefined) {
+    return staticMisaligned === 0
+      ? singlePageResult(region, range.start, pageTable)
+      : walkRange(region, range, required, pageWalk);
+  }
+  const word = region.ifValue(
+    misaligned,
+    (slow) => pageWalk.call(slow, range, required),
+    (fast) => readEntry(fast, range.start, pageTable),
+    { hint: "unlikely" }
   );
 
-  if (staticByteLength === 1) {
-    return singlePageResult(region, range.start, pageTable);
+  return pageWalk.decodeWord(region, word);
+}
+
+function resolveStaticRangeByPageBoundary(
+  region: RegionBuilder,
+  range: LinearRange,
+  required: ValueId,
+  byteLength: number,
+  pageTable: PageTableAccess,
+  pageWalk: PageWalk
+): ResolutionWord {
+  const crossesPage = staticRangeCrossesPage(
+    region,
+    range.start,
+    byteLength
+  );
+  const staticCrossesPage = region.values.constValue(crossesPage);
+
+  if (staticCrossesPage !== undefined) {
+    return staticCrossesPage === 0
+      ? singlePageResult(region, range.start, pageTable)
+      : walkRange(region, range, required, pageWalk);
   }
-  if (staticByteLength === 2 || staticByteLength === 4) {
-    // Because 2 and 4 divide the 4-KiB page size, a naturally aligned word or
-    // dword cannot cross a page. Its permission and frame need only one PTE.
-    const misaligned = values.binary(
-      "and",
-      range.start,
-      values.const(staticByteLength - 1)
-    );
-    const staticMisaligned = values.constValue(misaligned);
+  const word = region.ifValue(
+    crossesPage,
+    (crossing) => pageWalk.call(crossing, range, required),
+    (samePage) => readEntry(samePage, range.start, pageTable),
+    { hint: "unlikely" }
+  );
 
-    if (staticMisaligned !== undefined) {
-      return staticMisaligned === 0
-        ? singlePageResult(region, range.start, pageTable)
-        : walkRange(region, range, required, pageWalk);
-    }
-    const word = region.ifValue(
-      misaligned,
-      (slow) => pageWalk.call(slow, range, required),
-      (fast) => readEntry(fast, range.start, pageTable),
-      { hint: "unlikely" }
-    );
+  return pageWalk.decodeWord(region, word);
+}
 
-    return pageWalk.decodeWord(region, word);
-  }
+function staticRangeCrossesPage(
+  region: RegionBuilder,
+  start: ValueId,
+  byteLength: number
+): ValueId {
+  const values = region.values;
+  const pageOffset = values.binary(
+    "and",
+    start,
+    values.const(virtualPageOffsetMask)
+  );
 
-  return walkRange(region, range, required, pageWalk);
+  return values.compare(
+    32,
+    "gt_u",
+    pageOffset,
+    values.const(virtualPageByteLength - byteLength)
+  );
 }
 
 function singlePageResult(

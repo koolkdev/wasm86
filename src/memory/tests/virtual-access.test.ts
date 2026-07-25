@@ -64,6 +64,14 @@ const rmwEntry = {
   exportName: "rmw"
 } as const;
 
+const qwordReadDeniedEntry = {
+  ref: functionRef("memory.virtual.test.qword-read-denied"),
+  exportRef: functionExportRef(
+    "memory.virtual.test.qword-read-denied-export"
+  ),
+  exportName: "qwordReadDenied"
+} as const;
+
 const scalarReadEntries = {
   read16Unsigned: {
     ref: functionRef("memory.virtual.test.read16-unsigned"),
@@ -154,6 +162,7 @@ type VirtualAccessFixture = Readonly<{
   store16(start: number, value: number): number;
   store32(start: number, value: number): number;
   byteSubaccess(start: number, value: number): number;
+  qwordReadDenied(start: number): number;
   rmw(start: number): number;
 }>;
 
@@ -207,6 +216,19 @@ test("generated Virtual resolution reports the first denied linear address", () 
   );
 });
 
+test("generated Virtual static qword resolution checks its exact page boundary", () => {
+  const fixture = createVirtualAccessFixture();
+
+  fixture.writePte(1, 0x0000_3003);
+
+  strictEqual(fixture.qwordReadDenied(0x1ff8), 0);
+  strictEqual(fixture.qwordReadDenied(0x1ff9), 1);
+
+  fixture.writePte(2, 0x0000_4003);
+
+  strictEqual(fixture.qwordReadDenied(0x1ff9), 0);
+});
+
 test("generated Virtual faults distinguish presence and access intent", () => {
   const fixture = createVirtualAccessFixture();
   const address = 0x4234;
@@ -246,7 +268,7 @@ test("generated Virtual faults distinguish presence and access intent", () => {
 
 test("generated Virtual RMW transfers through Physical only after admission", () => {
   const fixture = createVirtualAccessFixture();
-  const address = 0x1ffe;
+  const address = 0x1ffd;
   const view = new DataView(fixture.ram.buffer);
 
   fixture.writePte(1, 0x0000_1003);
@@ -263,10 +285,10 @@ test("generated Virtual RMW transfers through Physical only after admission", ()
   strictEqual(view.getUint32(address, true), 0x1020_3040);
 });
 
-test("generated Virtual same-page RMW uses a nonidentity frame and page offset", () => {
+test("generated Virtual same-page unaligned RMW uses its nonidentity frame", () => {
   const fixture = createVirtualAccessFixture();
-  const linearAddress = 0x1120;
-  const physicalAddress = 0x3120;
+  const linearAddress = 0x1ffb;
+  const physicalAddress = 0x3ffb;
   const view = new DataView(fixture.ram.buffer);
 
   fixture.writePte(1, 0x0000_3003);
@@ -459,6 +481,30 @@ function buildVirtualAccessTestProgram() {
       target: entry.ref
     });
   }
+
+  builder.defineFunction({
+    ref: qwordReadDeniedEntry.ref,
+    type: rmwType,
+    effects: virtualAccess.effects
+  }, (fn) => {
+    const start = fn.parameters[0];
+
+    assert(start !== undefined, "Virtual qword read start is missing");
+    const resolution = virtualAccess.access.bind(fn.region).resolve(
+      {
+        start,
+        byteLength: fn.values.const(8)
+      },
+      "read"
+    );
+
+    fn.return([resolution.fault.condition]);
+  });
+  builder.exportFunction({
+    ref: qwordReadDeniedEntry.exportRef,
+    name: qwordReadDeniedEntry.exportName,
+    target: qwordReadDeniedEntry.ref
+  });
 
   for (const entry of Object.values(scalarReadEntries)) {
     builder.defineFunction({
@@ -688,6 +734,9 @@ function createVirtualAccessFixture(): VirtualAccessFixture {
   const byteSubaccess = instance.functionExports.get(
     byteSubaccessEntry.exportRef
   );
+  const qwordReadDenied = instance.functionExports.get(
+    qwordReadDeniedEntry.exportRef
+  );
   const rmw = instance.functionExports.get(rmwEntry.exportRef);
 
   ok(
@@ -704,6 +753,10 @@ function createVirtualAccessFixture(): VirtualAccessFixture {
   ok(
     typeof byteSubaccess === "function",
     "Virtual byte subaccess export is missing"
+  );
+  ok(
+    typeof qwordReadDenied === "function",
+    "Virtual qword read classifier export is missing"
   );
   ok(typeof rmw === "function", "Virtual RMW export is missing");
   const machineView = createLayoutHostView(
@@ -753,6 +806,7 @@ function createVirtualAccessFixture(): VirtualAccessFixture {
     store16: store16 as ScalarStore,
     store32: store32 as ScalarStore,
     byteSubaccess: byteSubaccess as ScalarStore,
+    qwordReadDenied: qwordReadDenied as ScalarRead,
     rmw: rmw as (start: number) => number
   };
 }

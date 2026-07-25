@@ -117,8 +117,8 @@ function buildPageWalk(
   const lastPage = pageIndex(fn.region, last);
   const firstEntry = pageTable.read(fn.region, firstPage);
 
-  // Misalignment also reaches this helper, so the usual walk still ends in the
-  // first page even though the one-PTE proof was unavailable at the call site.
+  // Misaligned scalars and dynamic ranges may still end in their first page.
+  // Return after its PTE rather than entering the multi-page walk.
   fn.region.if(
     values.compare(32, "eq", firstPage, lastPage),
     (singlePage) => singlePage.return([firstEntry]),
