@@ -158,6 +158,248 @@ test("the generated decoder composes repeated operand-size prefixes", () => {
   strictEqual(state.instructionCount, 8);
 });
 
+test("a same-page 15-byte instruction executes", () => {
+  const { exit, state } = executeInstruction(
+    [...new Array<number>(14).fill(0x66), 0x40],
+    createWasmCpuStateSnapshot({
+      eax: 0x1122_3344,
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+
+  deepStrictEqual(exit, { kind: "instructionLimit" });
+  strictEqual(state.eax, 0x1122_3345);
+  strictEqual(state.eip, startAddress + 15);
+  strictEqual(state.instructionCount, 8);
+});
+
+test("the generated decoder accepts its 11-byte form at byte 15 and rejects byte 16", () => {
+  const absoluteDwordStore = [
+    0xc7,
+    0x04,
+    0x25,
+    0x00,
+    0x20,
+    0x00,
+    0x00,
+    0x78,
+    0x56,
+    0x34,
+    0x12
+  ];
+  const initialState = createWasmCpuStateSnapshot({
+    eip: startAddress,
+    instructionCount: 7
+  });
+  const valid = executeInstruction(
+    [...new Array<number>(4).fill(0x2e), ...absoluteDwordStore],
+    initialState
+  );
+
+  deepStrictEqual(valid.exit, { kind: "instructionLimit" });
+  strictEqual(valid.state.eip, startAddress + 15);
+  strictEqual(valid.state.instructionCount, 8);
+  strictEqual(valid.guestView.getUint32(0x2000, true), 0x1234_5678);
+
+  const overlong = executeInstruction(
+    [...new Array<number>(5).fill(0x2e), ...absoluteDwordStore],
+    initialState
+  );
+
+  deepStrictEqual(overlong.exit, {
+    kind: "cpuException",
+    exception: { kind: "GP", errorCode: 0 }
+  });
+  deepStrictEqual(overlong.state, initialState);
+  strictEqual(overlong.guestView.getUint32(0x2000, true), 0);
+});
+
+test("a 15-byte instruction executes across a mapped page boundary", () => {
+  const pageBoundary = 0x1000;
+  const { exit, state } = executeInstruction(
+    [...new Array<number>(14).fill(0x66), 0x40],
+    createWasmCpuStateSnapshot({
+      eax: 0x1122_3344,
+      eip: pageBoundary - 8,
+      instructionCount: 7
+    })
+  );
+
+  deepStrictEqual(exit, { kind: "instructionLimit" });
+  strictEqual(state.eax, 0x1122_3345);
+  strictEqual(state.eip, pageBoundary + 7);
+  strictEqual(state.instructionCount, 8);
+});
+
+test("one interpreter run continues onto the next mapped page", () => {
+  const pageBoundary = 0x1000;
+  const interpreter = instantiateInterpreter();
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0x1122_3344,
+    eip: pageBoundary - 1,
+    instructionCount: 7
+  });
+
+  writeWasmCpuStateSnapshot(interpreter.stateView, initialState);
+  writeGuestBytes(interpreter.guestView, pageBoundary - 1, [0x40, 0x40]);
+
+  deepStrictEqual(interpreter.runFor(2), { kind: "instructionLimit" });
+  const state = readWasmCpuStateSnapshot(interpreter.stateView);
+
+  strictEqual(state.eax, 0x1122_3346);
+  strictEqual(state.eip, pageBoundary + 1);
+  strictEqual(state.instructionCount, 9);
+});
+
+test("a one-byte instruction executes at the final readable byte", () => {
+  const { exit, state } = executeInstruction(
+    [0x40],
+    createWasmCpuStateSnapshot({
+      eax: 0x1122_3344,
+      eip: guestMemoryMinimumByteLength - 1,
+      instructionCount: 7
+    })
+  );
+
+  deepStrictEqual(exit, { kind: "instructionLimit" });
+  strictEqual(state.eax, 0x1122_3345);
+  strictEqual(state.eip, guestMemoryMinimumByteLength);
+  strictEqual(state.instructionCount, 8);
+});
+
+test("one run continues across the final two readable instruction bytes", () => {
+  const boundary = guestMemoryMinimumByteLength;
+  const interpreter = instantiateInterpreter();
+  const initialState = createWasmCpuStateSnapshot({
+    eax: 0x1122_3344,
+    eip: boundary - 2,
+    instructionCount: 7
+  });
+
+  writeWasmCpuStateSnapshot(interpreter.stateView, initialState);
+  writeGuestBytes(interpreter.guestView, boundary - 2, [0x40, 0x40]);
+
+  deepStrictEqual(interpreter.runFor(2), { kind: "instructionLimit" });
+  const state = readWasmCpuStateSnapshot(interpreter.stateView);
+
+  strictEqual(state.eax, 0x1122_3346);
+  strictEqual(state.eip, boundary);
+  strictEqual(state.instructionCount, 9);
+});
+
+test("a five-byte instruction can end at the readable boundary", () => {
+  const boundary = guestMemoryMinimumByteLength;
+  const { exit, state } = executeInstruction(
+    [0xb8, 0x78, 0x56, 0x34, 0x12],
+    createWasmCpuStateSnapshot({
+      eax: 0,
+      eip: boundary - 5,
+      instructionCount: 7
+    })
+  );
+
+  deepStrictEqual(exit, { kind: "instructionLimit" });
+  strictEqual(state.eax, 0x1234_5678);
+  strictEqual(state.eip, boundary);
+  strictEqual(state.instructionCount, 8);
+});
+
+test("mapped instruction demands beyond byte 15 return general protection", () => {
+  const cases = [
+    {
+      name: "prefix rescan",
+      bytes: [...new Array<number>(15).fill(0x66), 0x40]
+    },
+    {
+      name: "ModRM",
+      bytes: [...new Array<number>(14).fill(0x66), 0x8b, 0xc0]
+    },
+    {
+      name: "two-byte immediate",
+      bytes: [
+        ...new Array<number>(13).fill(0x66),
+        0xb8,
+        0x34,
+        0x12
+      ]
+    }
+  ] as const;
+
+  for (const entry of cases) {
+    const initialState = createWasmCpuStateSnapshot({
+      eax: 0x1122_3344,
+      eip: startAddress,
+      instructionCount: 7
+    });
+    const { exit, state } = executeInstruction(
+      entry.bytes,
+      initialState
+    );
+
+    deepStrictEqual(exit, {
+      kind: "cpuException",
+      exception: { kind: "GP", errorCode: 0 }
+    }, entry.name);
+    deepStrictEqual(state, initialState, entry.name);
+  }
+});
+
+test("a fetch fault below offset 15 precedes an overlength fault", () => {
+  const boundary = guestMemoryMinimumByteLength;
+  const cases = [
+    {
+      name: "byte 14 is unavailable",
+      eip: boundary - 14,
+      bytes: [...new Array<number>(13).fill(0x66), 0xb8],
+      expectedExit: {
+        kind: "cpuException",
+        exception: {
+          kind: "PF",
+          linearAddress: boundary,
+          errorCode: 16
+        }
+      }
+    },
+    {
+      name: "only forbidden byte 15 is unavailable",
+      eip: boundary - 15,
+      bytes: [
+        ...new Array<number>(13).fill(0x66),
+        0xb8,
+        0x34
+      ],
+      expectedExit: {
+        kind: "cpuException",
+        exception: { kind: "GP", errorCode: 0 }
+      }
+    }
+  ] as const;
+
+  for (const entry of cases) {
+    const interpreter = instantiateInterpreter();
+    const initialState = createWasmCpuStateSnapshot({
+      eax: 0x1122_3344,
+      eip: entry.eip,
+      instructionCount: 7
+    });
+
+    writeWasmCpuStateSnapshot(interpreter.stateView, initialState);
+    writeGuestBytes(interpreter.guestView, entry.eip, entry.bytes);
+
+    deepStrictEqual(
+      interpreter.runFor(1),
+      entry.expectedExit,
+      entry.name
+    );
+    deepStrictEqual(
+      readWasmCpuStateSnapshot(interpreter.stateView),
+      initialState,
+      entry.name
+    );
+  }
+});
+
 test("the generated decoder dispatches a valid two-byte opcode", () => {
   const { exit, state } = executeInstruction(
     [0x0f, 0xc8],

@@ -45,7 +45,7 @@ test("an undefined opcode after prefixes records the consumed evidence", () => {
   deepStrictEqual(decoded.raw, [0x66, 0x62]);
 });
 
-test("a reader CPU exception retains the bytes admitted before its fault", () => {
+test("a reader CPU exception retains the bytes read before its fault", () => {
   const requests: number[] = [];
   const exception = pageFault(
     startAddress + 1,

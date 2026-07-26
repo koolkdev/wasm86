@@ -26,6 +26,7 @@ const faultProjection = {
   errorCode: 2
 } as const;
 const rmwFaultSentinel = -1;
+const directFetchByteOffset = 14;
 
 const classifierType = functionType(
   ["i32", "i32", "i32"],
@@ -33,6 +34,7 @@ const classifierType = functionType(
 );
 const rmwType = functionType(["i32"], ["i32"]);
 const storeType = functionType(["i32", "i32"], ["i32"]);
+const rangedReadType = functionType(["i32", "i32"], ["i32"]);
 
 const classifierEntries = {
   read: {
@@ -125,6 +127,22 @@ const byteSubaccessEntry = {
   exportName: "byteSubaccess"
 } as const;
 
+const directFetchEntry = {
+  ref: functionRef("memory.virtual.test.direct-fetch"),
+  exportRef: functionExportRef(
+    "memory.virtual.test.direct-fetch-export"
+  ),
+  exportName: "directFetch"
+} as const;
+
+const directRangeReadEntry = {
+  ref: functionRef("memory.virtual.test.direct-range-read"),
+  exportRef: functionExportRef(
+    "memory.virtual.test.direct-range-read-export"
+  ),
+  exportName: "directRangeRead"
+} as const;
+
 const physical = createPhysicalAddressSpaceDefinition();
 const machineMemoryDefinition = createMachineMemoryDefinition();
 const virtualAccess = createVirtualAccessDefinition(
@@ -162,6 +180,8 @@ type VirtualAccessFixture = Readonly<{
   store16(start: number, value: number): number;
   store32(start: number, value: number): number;
   byteSubaccess(start: number, value: number): number;
+  directFetch(start: number): number;
+  directRangeRead(start: number, byteLength: number): number;
   qwordReadDenied(start: number): number;
   rmw(start: number): number;
 }>;
@@ -371,7 +391,7 @@ test("generated Virtual scattered dword reads and stores cross physical frames",
   );
 });
 
-test("generated Virtual scattered RMW reuses its admitted write access", () => {
+test("generated Virtual scattered RMW reuses its resolved write access", () => {
   const fixture = createVirtualAccessFixture();
   const view = new DataView(fixture.ram.buffer);
 
@@ -424,6 +444,54 @@ test("generated Virtual scattered write denial precedes physical mutation", () =
     ],
     initialBytes
   );
+});
+
+test("direct fetch requires an allowed contiguous nonwrapping range", () => {
+  const fixture = createVirtualAccessFixture();
+  const view = new DataView(fixture.ram.buffer);
+
+  fixture.writePte(1, 0x0000_3003);
+  view.setUint8(0x3242, 0x51);
+  strictEqual(fixture.directFetch(0x1234), 0x51);
+
+  fixture.writePte(1, 0x0000_3003);
+  fixture.writePte(2, 0x0000_4001);
+  view.setUint8(0x4006, 0x52);
+  strictEqual(fixture.directFetch(0x1ff8), 0x52);
+
+  fixture.writePte(2, 0x0000_1003);
+  strictEqual(fixture.directFetch(0x1ff8), -1);
+
+  fixture.writePte(2, 0x0000_4000);
+  strictEqual(fixture.directFetch(0x1ff8), -1);
+
+  fixture.writePte(0xfffff, 0x0000_3003);
+  fixture.writePte(0, 0x0000_4003);
+  strictEqual(fixture.directFetch(0xffff_fff8), -1);
+
+  fixture.writePte(1, 0xffff_f003);
+  fixture.writePte(2, 0x0000_0003);
+  strictEqual(fixture.directFetch(0x1ff8), -1);
+});
+
+test("direct resolution checks every page of a dynamic range", () => {
+  const fixture = createVirtualAccessFixture();
+  const view = new DataView(fixture.ram.buffer);
+  const start = 0x1ffe;
+  const byteLength = 0x1004;
+
+  fixture.writePte(1, 0x0000_3003);
+  fixture.writePte(2, 0x0000_4003);
+  fixture.writePte(3, 0x0000_5003);
+  view.setUint8(0x5001, 0x53);
+
+  strictEqual(fixture.directRangeRead(start, byteLength), 0x53);
+
+  fixture.writePte(3, 0x0000_1003);
+  strictEqual(fixture.directRangeRead(start, byteLength), -1);
+
+  fixture.writePte(3, 0x0000_5000);
+  strictEqual(fixture.directRangeRead(start, byteLength), -1);
 });
 
 function buildVirtualAccessTestProgram() {
@@ -525,9 +593,9 @@ function buildVirtualAccessTestProgram() {
       const result = fn.region.ifValue(
         resolution.fault.condition,
         (fault) => fault.values.const(rmwFaultSentinel),
-        (admitted) => virtualAccess.access.bind(admitted).load(
+        (resolved) => virtualAccess.access.bind(resolved).load(
           resolution.access,
-          admitted.values.const(0),
+          resolved.values.const(0),
           entry.width,
           { signed: entry.signed }
         ),
@@ -564,14 +632,14 @@ function buildVirtualAccessTestProgram() {
       const result = fn.region.ifValue(
         resolution.fault.condition,
         (fault) => fault.values.const(1),
-        (admitted) => {
-          virtualAccess.access.bind(admitted).store(
+        (resolved) => {
+          virtualAccess.access.bind(resolved).store(
             resolution.access,
-            admitted.values.const(0),
+            resolved.values.const(0),
             value,
             entry.width
           );
-          return admitted.values.const(0);
+          return resolved.values.const(0);
         },
         { hint: "unlikely" }
       );
@@ -605,17 +673,17 @@ function buildVirtualAccessTestProgram() {
     const result = fn.region.ifValue(
       resolution.fault.condition,
       (fault) => fault.values.const(rmwFaultSentinel),
-      (admitted) => {
-        const memory = virtualAccess.access.bind(admitted);
+      (resolved) => {
+        const memory = virtualAccess.access.bind(resolved);
         const current = memory.load(
           resolution.access,
-          admitted.values.const(0),
+          resolved.values.const(0),
           8
         );
 
         memory.store(
           resolution.access,
-          admitted.values.const(1),
+          resolved.values.const(1),
           value,
           8
         );
@@ -630,6 +698,82 @@ function buildVirtualAccessTestProgram() {
     ref: byteSubaccessEntry.exportRef,
     name: byteSubaccessEntry.exportName,
     target: byteSubaccessEntry.ref
+  });
+
+  builder.defineFunction({
+    ref: directFetchEntry.ref,
+    type: rmwType,
+    effects: virtualAccess.effects
+  }, (fn) => {
+    const start = fn.parameters[0];
+
+    assert(start !== undefined, "Virtual direct fetch start is missing");
+    const memory = virtualAccess.access.withCache(fn.region);
+    const direct = memory.bind(fn.region).resolveDirect(
+      {
+        start,
+        byteLength: fn.values.const(15)
+      },
+      "instructionFetch"
+    );
+    const result = fn.region.ifValue(
+      direct.unavailable,
+      (unavailable) => unavailable.values.const(-1),
+      (available) => memory.bind(available).loadDirect(
+        direct.access,
+        available.values.const(directFetchByteOffset),
+        8
+      ),
+      { hint: "unlikely" }
+    );
+
+    fn.return([result]);
+  });
+  builder.exportFunction({
+    ref: directFetchEntry.exportRef,
+    name: directFetchEntry.exportName,
+    target: directFetchEntry.ref
+  });
+
+  builder.defineFunction({
+    ref: directRangeReadEntry.ref,
+    type: rangedReadType,
+    effects: virtualAccess.effects
+  }, (fn) => {
+    const start = fn.parameters[0];
+    const byteLength = fn.parameters[1];
+
+    assert(start !== undefined, "direct range read start is missing");
+    assert(
+      byteLength !== undefined,
+      "direct range read byte length is missing"
+    );
+    const memory = virtualAccess.access.bind(fn.region);
+    const direct = memory.resolveDirect(
+      { start, byteLength },
+      "read"
+    );
+    const result = fn.region.ifValue(
+      direct.unavailable,
+      (unavailable) => unavailable.values.const(-1),
+      (available) => virtualAccess.access.bind(available).loadDirect(
+        direct.access,
+        available.values.binary(
+          "sub",
+          byteLength,
+          available.values.const(1)
+        ),
+        8
+      ),
+      { hint: "unlikely" }
+    );
+
+    fn.return([result]);
+  });
+  builder.exportFunction({
+    ref: directRangeReadEntry.exportRef,
+    name: directRangeReadEntry.exportName,
+    target: directRangeReadEntry.ref
   });
 
   builder.defineFunction({
@@ -650,9 +794,9 @@ function buildVirtualAccessTestProgram() {
     const result = fn.region.ifValue(
       resolution.fault.condition,
       (fault) => fault.values.const(rmwFaultSentinel),
-      (admitted) => {
-        const memory = virtualAccess.access.bind(admitted);
-        const zero = admitted.values.const(0);
+      (resolved) => {
+        const memory = virtualAccess.access.bind(resolved);
+        const zero = resolved.values.const(0);
         const current = memory.load(
           resolution.access,
           zero,
@@ -662,10 +806,10 @@ function buildVirtualAccessTestProgram() {
         memory.store(
           resolution.access,
           zero,
-          admitted.values.binary(
+          resolved.values.binary(
             "add",
             current,
-            admitted.values.const(1)
+            resolved.values.const(1)
           ),
           32
         );
@@ -734,6 +878,12 @@ function createVirtualAccessFixture(): VirtualAccessFixture {
   const byteSubaccess = instance.functionExports.get(
     byteSubaccessEntry.exportRef
   );
+  const directFetch = instance.functionExports.get(
+    directFetchEntry.exportRef
+  );
+  const directRangeRead = instance.functionExports.get(
+    directRangeReadEntry.exportRef
+  );
   const qwordReadDenied = instance.functionExports.get(
     qwordReadDeniedEntry.exportRef
   );
@@ -753,6 +903,14 @@ function createVirtualAccessFixture(): VirtualAccessFixture {
   ok(
     typeof byteSubaccess === "function",
     "Virtual byte subaccess export is missing"
+  );
+  ok(
+    typeof directFetch === "function",
+    "Virtual direct fetch export is missing"
+  );
+  ok(
+    typeof directRangeRead === "function",
+    "Virtual direct range read export is missing"
   );
   ok(
     typeof qwordReadDenied === "function",
@@ -806,6 +964,9 @@ function createVirtualAccessFixture(): VirtualAccessFixture {
     store16: store16 as ScalarStore,
     store32: store32 as ScalarStore,
     byteSubaccess: byteSubaccess as ScalarStore,
+    directFetch: directFetch as ScalarRead,
+    directRangeRead:
+      directRangeRead as (start: number, byteLength: number) => number,
     qwordReadDenied: qwordReadDenied as ScalarRead,
     rmw: rmw as (start: number) => number
   };

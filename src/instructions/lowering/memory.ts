@@ -1,10 +1,10 @@
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type {
+  BoundMemoryAccess,
   LinearRange,
   MemoryAccess,
-  MemoryAccessConstruction,
-  MemoryAccessOperations,
-  MemoryDataAccessIntent
+  MemoryDataAccessIntent,
+  ResolvedMemoryAccess
 } from "#memory/types.js";
 import type {
   AccessFault,
@@ -35,18 +35,18 @@ type InstructionMemoryOptions = Readonly<{
 export class InstructionMemory implements SemanticMemoryOps {
   readonly #region: RegionBuilder;
   readonly #operands: ScopedOperandResolver;
-  readonly #memory: MemoryAccessOperations;
+  readonly #memory: BoundMemoryAccess;
   readonly #options: InstructionMemoryOptions;
 
   constructor(
     region: RegionBuilder,
-    construction: MemoryAccessConstruction,
+    memory: MemoryAccess,
     operands: ScopedOperandResolver,
     options: InstructionMemoryOptions
   ) {
     this.#region = region;
     this.#operands = operands;
-    this.#memory = construction.bind(region);
+    this.#memory = memory.bind(region);
     this.#options = options;
   }
 
@@ -89,7 +89,7 @@ export class InstructionMemory implements SemanticMemoryOps {
 
   guard<TIntent extends MemoryDataAccessIntent>(
     options: SemanticMemoryAccessOptions<TIntent>
-  ): MemoryAccess<TIntent> {
+  ): ResolvedMemoryAccess<TIntent> {
     const resolution = this.resolve(options);
 
     this.#options.raiseFault(resolution.fault);
@@ -123,7 +123,7 @@ export class InstructionMemory implements SemanticMemoryOps {
   }
 
   load(
-    access: MemoryAccess,
+    access: ResolvedMemoryAccess,
     options: SemanticMemoryLoadOptions
   ): Value {
     const { signed = false } = options;
@@ -137,7 +137,7 @@ export class InstructionMemory implements SemanticMemoryOps {
   }
 
   store(
-    access: MemoryAccess<"write">,
+    access: ResolvedMemoryAccess<"write">,
     options: SemanticMemoryStoreOptions
   ): void {
     this.#options.recordWrite();

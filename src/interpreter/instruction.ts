@@ -12,18 +12,24 @@ import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { instructionLimitExit } from "./exits.js";
 import type { DecodedInstruction } from "./decode.js";
 
+export type BuildInterpreterContinuation = (
+  region: RegionBuilder,
+  targetEip: ValueId
+) => void;
+
 export function buildInterpreterInstruction(
   region: RegionBuilder,
   decoded: DecodedInstruction,
   stateAccess: StateAccess,
-  instructionLowerer: InstructionLowerer
+  instructionLowerer: InstructionLowerer,
+  buildContinuation: BuildInterpreterContinuation
 ): void {
   const entryState = stateAccess.bind(region);
   const entryCount = entryState.readField(instructionCountField);
   const instructionLimit = entryState.readField(instructionLimitField);
   const nextEip = instructionLowerer.lower(
     region,
-    interpreterTerminals(),
+    interpreterTerminals(buildContinuation),
     (builder) => {
       builder.add(
         decoded.instruction.semantics,
@@ -39,16 +45,17 @@ export function buildInterpreterInstruction(
       nextEip,
       stateAccess,
       entryCount,
-      instructionLimit
+      instructionLimit,
+      buildContinuation
     );
   }
 }
 
-function interpreterTerminals(): InstructionTerminals {
+function interpreterTerminals(
+  buildContinuation: BuildInterpreterContinuation
+): InstructionTerminals {
   return {
-    dispatch: (region, targetEip) => {
-      region.loopContinue([targetEip]);
-    },
+    dispatch: buildContinuation,
     returnExit: (region, result) => {
       region.return([result]);
     }
@@ -60,7 +67,8 @@ function continueInterpreter(
   nextEip: ValueId,
   stateAccess: StateAccess,
   entryCount: ValueId,
-  instructionLimit: ValueId
+  instructionLimit: ValueId,
+  buildContinuation: BuildInterpreterContinuation
 ): void {
   const values = region.values;
   const completedCount = stateAccess.bind(region).readField(
@@ -76,12 +84,12 @@ function continueInterpreter(
   );
 
   // REP remains fused and may cross the deadline by more than the signed
-  // modular half-range. Comparing progress from the admitted entry count
+  // modular half-range. Comparing progress from the starting instruction count
   // preserves that overshoot while still stopping at this completion.
   region.if(crossedDeadline, (expired) => {
     expired.return([
       buildExit(expired.values, instructionLimitExit())
     ]);
   }, { hint: "unlikely" });
-  region.loopContinue([nextEip]);
+  buildContinuation(region, nextEip);
 }

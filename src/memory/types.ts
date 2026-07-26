@@ -31,7 +31,21 @@ export type MemoryFault = Readonly<{
   exception: PageFault<ValueId>;
 }>;
 
-export type MemoryAccess<
+export type DirectMemoryAccess<
+  TIntent extends MemoryAccessIntent = MemoryAccessIntent
+> = Readonly<{
+  intent: TIntent;
+  physicalAccess: PhysicalAccess;
+}>;
+
+export type DirectMemoryResolution<
+  TIntent extends MemoryAccessIntent = MemoryAccessIntent
+> = Readonly<{
+  unavailable: ValueId;
+  access: DirectMemoryAccess<TIntent>;
+}>;
+
+export type ResolvedMemoryAccess<
   TIntent extends MemoryAccessIntent = MemoryAccessIntent
 > = Readonly<{
   range: LinearRange;
@@ -43,7 +57,7 @@ export type MemoryAccess<
 export type MemoryResolution<
   TIntent extends MemoryAccessIntent = MemoryAccessIntent
 > = Readonly<{
-  access: MemoryAccess<TIntent>;
+  access: ResolvedMemoryAccess<TIntent>;
   fault: MemoryFault;
 }>;
 
@@ -51,26 +65,47 @@ export type MemoryLoadOptions = Readonly<{
   signed?: boolean;
 }>;
 
-export type MemoryAccessOperations = Readonly<{
+export type BoundMemoryAccess = Readonly<{
   // Callers must select the returned fault before using its access.
   resolve<TIntent extends MemoryAccessIntent>(
     range: LinearRange,
     intent: TIntent
   ): MemoryResolution<TIntent>;
+  // This does not raise a memory fault. The direct access is usable only when
+  // `unavailable` is zero.
+  resolveDirect<TIntent extends MemoryAccessIntent>(
+    range: LinearRange,
+    intent: TIntent
+  ): DirectMemoryResolution<TIntent>;
   load(
-    access: MemoryAccess,
+    access: ResolvedMemoryAccess,
+    byteOffset: ValueId,
+    width: IntegerWidth,
+    options?: MemoryLoadOptions
+  ): ValueId;
+  loadDirect(
+    access: DirectMemoryAccess,
     byteOffset: ValueId,
     width: IntegerWidth,
     options?: MemoryLoadOptions
   ): ValueId;
   store(
-    access: MemoryAccess<"write">,
+    access: ResolvedMemoryAccess<"write">,
+    byteOffset: ValueId,
+    value: ValueId,
+    width: IntegerWidth
+  ): void;
+  storeDirect(
+    access: DirectMemoryAccess<"write">,
     byteOffset: ValueId,
     value: ValueId,
     width: IntegerWidth
   ): void;
 }>;
 
-export type MemoryAccessConstruction = Readonly<{
-  bind(region: RegionBuilder): MemoryAccessOperations;
+export type MemoryAccess = Readonly<{
+  bind(region: RegionBuilder): BoundMemoryAccess;
+  // The root must dominate every use of the returned access. Cached values
+  // live for one invocation of that generated function.
+  withCache(root: RegionBuilder): MemoryAccess;
 }>;

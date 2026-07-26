@@ -24,7 +24,7 @@ import type {
 import type { OperandWidth } from "#core/types.js";
 import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type {
-  MemoryAccessConstruction
+  MemoryAccess
 } from "#memory/types.js";
 import type {
   OperandBinding,
@@ -65,7 +65,7 @@ export type InstructionBuilder = Readonly<{
 
 export type InstructionBuildOptions = Readonly<{
   stateAccess: StateAccess;
-  memory: MemoryAccessConstruction;
+  memory: MemoryAccess;
   instructionCountField: FieldRef<"u32">;
   buildExit: BuildExit;
   statusFlagResolvers: StatusFlagResolverFamily;

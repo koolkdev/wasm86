@@ -4,7 +4,7 @@ import { test } from "node:test";
 import {
   pageTableEntryAttr,
   pageTableEntryFrameMask,
-  pageWalkResultAttr,
+  resolutionResultAttr,
   virtualPageByteLength,
   virtualPageCount,
   virtualPageOffsetMask,
@@ -21,17 +21,17 @@ test("Virtual defines x86 page geometry and the stored PTE encoding", () => {
   strictEqual(pageTableEntryFrameMask, 0xffff_f000);
 });
 
-test("Virtual page-walk markers are outside the stored PTE encoding", () => {
+test("Virtual resolution markers are outside the stored PTE encoding", () => {
   const storedBits = Object.values(pageTableEntryAttr).reduce(
     (bits, attr) => bits | attr,
     pageTableEntryFrameMask
   );
 
   strictEqual(
-    pageWalkResultAttr.LATER_DENIAL &
-      pageWalkResultAttr.SCATTERED,
+    resolutionResultAttr.LATER_DENIAL &
+      resolutionResultAttr.SCATTERED,
     0
   );
-  strictEqual(pageWalkResultAttr.LATER_DENIAL & storedBits, 0);
-  strictEqual(pageWalkResultAttr.SCATTERED & storedBits, 0);
+  strictEqual(resolutionResultAttr.LATER_DENIAL & storedBits, 0);
+  strictEqual(resolutionResultAttr.SCATTERED & storedBits, 0);
 });

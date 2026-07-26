@@ -16,7 +16,10 @@ import type { OperandBinding } from "#instructions/lowering/bindings.js";
 import type { BuildExit } from "#instructions/lowering/terminal.js";
 import type { StateAccess } from "#core/state/access.js";
 import type { RegionBuilder, SwitchControlArm } from "#compiler/ir/builder/region.js";
-import type { MemoryAccessConstruction } from "#memory/types.js";
+import type {
+  DirectMemoryAccess,
+  MemoryAccess
+} from "#memory/types.js";
 import { ModRmAddressDecoder } from "./decode/address.js";
 import {
   memoryFormDispatch,
@@ -27,7 +30,10 @@ import {
   OperandDecoder,
   type DecodedRm
 } from "./decode/operands.js";
-import { PrefixDecoder } from "./decode/prefixes.js";
+import {
+  PrefixDecoder,
+  type ExactInstructionFallback
+} from "./decode/prefixes.js";
 import { InstructionByteStream } from "./decode/stream.js";
 
 type SelectedDecodeCandidate = Exclude<
@@ -47,11 +53,20 @@ export type BuildDecodedInstruction = (
   instruction: DecodedInstruction
 ) => void;
 
+export type InterpreterDecodeMode =
+  | Readonly<{ kind: "exact" }>
+  | Readonly<{
+      kind: "direct";
+      access: DirectMemoryAccess<"instructionFetch">;
+      fallbackToExact: ExactInstructionFallback;
+    }>;
+
 export type InterpreterDecodeOptions = Readonly<{
   stateAccess: StateAccess;
-  memory: MemoryAccessConstruction;
+  memory: MemoryAccess;
   buildExit: BuildExit;
   buildInstruction: BuildDecodedInstruction;
+  mode: InterpreterDecodeMode;
 }>;
 
 // Emits decode and instruction-dispatch IR into the enclosing function;
@@ -89,9 +104,14 @@ class InterpreterDecoder {
       region,
       instructionStart,
       options.memory,
-      options.buildExit
+      options.buildExit,
+      options.mode
     );
-    this.#prefixes = new PrefixDecoder(region, this.#stream);
+    this.#prefixes = new PrefixDecoder(
+      region,
+      this.#stream,
+      options.mode
+    );
     this.#memoryFormOrdinal = region.variable(invalidFormOrdinal);
     this.#modRmByte = region.variable(region.values.const(0x100));
     this.#operands = new OperandDecoder({

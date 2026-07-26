@@ -34,7 +34,7 @@ import type {
 } from "#core/types.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type {
-  MemoryAccessConstruction
+  MemoryAccess
 } from "#memory/types.js";
 import type {
   OperandBinding,
@@ -58,7 +58,7 @@ type WriteSegmentSelector = (
 type InstructionStorageOptions = Readonly<{
   stateAccess: StateAccess;
   statusFlagResolvers: StatusFlagResolverFamily;
-  memory: MemoryAccessConstruction;
+  memory: MemoryAccess;
   instructionCountField: FieldRef<"u32">;
   writeObserver: StateWriteObserver;
 }>;
@@ -73,14 +73,14 @@ type ScopedInstructionStorageOptions = Readonly<{
 // no operation sink is selected through an ambient cursor.
 export class InstructionStorage {
   readonly #stateAccess: StateAccess;
-  readonly #memoryConstruction: MemoryAccessConstruction;
+  readonly #memory: MemoryAccess;
 
   readonly state: InstructionState;
   readonly operands: OperandResolver;
 
   constructor(options: InstructionStorageOptions) {
     this.#stateAccess = options.stateAccess;
-    this.#memoryConstruction = options.memory;
+    this.#memory = options.memory;
     this.state = new InstructionState(
       options.stateAccess,
       options.statusFlagResolvers,
@@ -105,7 +105,7 @@ export class InstructionStorage {
       operands,
       new InstructionMemory(
         region,
-        this.#memoryConstruction,
+        this.#memory,
         operands,
         {
           raiseFault: options.raiseAccessFault,
@@ -133,8 +133,8 @@ export class InstructionStorage {
   }
 }
 
-// Instruction-facing storage fixed to one lexical RegionBuilder. MemoryAccess
-// values may come from an ancestor; only the operation that consumes them is
+// Instruction-facing storage fixed to one lexical RegionBuilder. Resolved
+// memory accesses may come from an ancestor; only the consuming operation is
 // bound here.
 export class ScopedInstructionStorage {
   readonly #region: RegionBuilder;

@@ -1,9 +1,5 @@
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
-import type {
-  IntegerWidth,
-  ValueId
-} from "#compiler/ir/values/types.js";
 import {
   pageFault,
   pageFaultErrorCode
@@ -11,28 +7,28 @@ import {
 import type { MachineMemoryDefinition } from "../machine-memory.js";
 import type { PhysicalAddressSpaceDefinition } from "../physical.js";
 import type {
+  BoundMemoryAccess,
+  DirectMemoryResolution,
   LinearRange,
   MemoryAccess,
-  MemoryAccessConstruction,
   MemoryAccessIntent,
-  MemoryAccessOperations,
-  MemoryLoadOptions,
   MemoryResolution
 } from "../types.js";
 import { pageTableEntryAttr } from "./layout.js";
-import { createScatteredLoadStore } from "./scattered-load-store.js";
-import { createPageTableAccess } from "./page-table.js";
+import { createCachedPageTableAccess } from "./page-cache.js";
 import {
-  createRangeResolver,
-  type RangeResolver
-} from "./resolution.js";
+  createScatteredLoadStore,
+  type ScatteredLoadStore
+} from "./scattered-load-store.js";
 import {
-  createVirtualLoadStore,
-  type VirtualLoadStoreOperations
-} from "./load-store.js";
+  createPageTableAccess,
+  type PageTableAccess
+} from "./page-table.js";
+import { VirtualRangeResolver } from "./resolution.js";
+import { bindVirtualLoadStore } from "./load-store.js";
 
 export type VirtualAccessDefinition = Readonly<{
-  access: MemoryAccessConstruction;
+  access: MemoryAccess;
   effects: StorageEffects;
 }>;
 
@@ -41,22 +37,22 @@ export function createVirtualAccessDefinition(
   machineMemory: MachineMemoryDefinition
 ): VirtualAccessDefinition {
   const pageTable = createPageTableAccess(machineMemory);
-  const rangeResolver = createRangeResolver(pageTable);
+  const rangeResolver = new VirtualRangeResolver(pageTable);
   const scattered = createScatteredLoadStore(physical, pageTable);
-  const loadStore = createVirtualLoadStore(
-    physical.access,
-    scattered
-  );
+  const createAccess = (firstEntrySource: PageTableAccess): MemoryAccess => ({
+    bind: (region) => bindVirtualAccess(
+      region,
+      physical,
+      rangeResolver,
+      firstEntrySource,
+      scattered
+    ),
+    withCache: (root) =>
+      createAccess(createCachedPageTableAccess(root, pageTable))
+  });
 
   return {
-    access: {
-      bind: (region) => new VirtualMemoryAccessBuilder(
-        physical,
-        rangeResolver,
-        loadStore,
-        region
-      )
-    },
+    access: createAccess(pageTable),
     effects: {
       reads: [pageTable.effect, ...physical.effects.reads],
       writes: physical.effects.writes
@@ -64,49 +60,36 @@ export function createVirtualAccessDefinition(
   };
 }
 
-class VirtualMemoryAccessBuilder implements MemoryAccessOperations {
-  readonly #physical: PhysicalAddressSpaceDefinition;
-  readonly #rangeResolver: RangeResolver;
-  readonly #loadStore: VirtualLoadStoreOperations;
-  readonly #region: RegionBuilder;
-
-  constructor(
-    physical: PhysicalAddressSpaceDefinition,
-    rangeResolver: RangeResolver,
-    loadStore: VirtualLoadStoreOperations,
-    region: RegionBuilder
-  ) {
-    this.#physical = physical;
-    this.#rangeResolver = rangeResolver;
-    this.#loadStore = loadStore;
-    this.#region = region;
-  }
-
-  resolve<TIntent extends MemoryAccessIntent>(
+function bindVirtualAccess(
+  region: RegionBuilder,
+  physical: PhysicalAddressSpaceDefinition,
+  rangeResolver: VirtualRangeResolver,
+  firstEntrySource: PageTableAccess,
+  scattered: ScatteredLoadStore
+): BoundMemoryAccess {
+  const resolve = <TIntent extends MemoryAccessIntent>(
     range: LinearRange,
     intent: TIntent
-  ): MemoryResolution<TIntent> {
-    const region = this.#region;
+  ): MemoryResolution<TIntent> => {
     const values = region.values;
-    const required = values.const(requiredEntryBits(intent));
-    const resolution = this.#rangeResolver.resolve(
+    const resolution = rangeResolver.resolve(
       region,
       range,
-      required
+      requiredEntryBits(intent),
+      firstEntrySource
     );
     const faultError = values.binary(
       "or",
       values.const(pageFaultErrorCode(intent)),
       resolution.deniedPresent
     );
-    const physical = this.#physical.access.bind(region);
 
     return {
       access: {
         range,
         intent,
         scattered: resolution.scattered,
-        physicalAccess: physical.issue({
+        physicalAccess: physical.access.bind(region).issue({
           start: resolution.firstPhysicalStart,
           byteLength: range.byteLength
         })
@@ -116,37 +99,35 @@ class VirtualMemoryAccessBuilder implements MemoryAccessOperations {
         exception: pageFault(resolution.deniedAddress, faultError)
       }
     };
-  }
-
-  load(
-    access: MemoryAccess,
-    byteOffset: ValueId,
-    width: IntegerWidth,
-    options: MemoryLoadOptions = {}
-  ): ValueId {
-    return this.#loadStore.load(
-      this.#region,
-      access,
-      byteOffset,
-      width,
-      options
+  };
+  const resolveDirect = <TIntent extends MemoryAccessIntent>(
+    range: LinearRange,
+    intent: TIntent
+  ): DirectMemoryResolution<TIntent> => {
+    const resolution = rangeResolver.resolveDirect(
+      region,
+      range,
+      requiredEntryBits(intent),
+      firstEntrySource
     );
-  }
 
-  store(
-    access: MemoryAccess<"write">,
-    byteOffset: ValueId,
-    value: ValueId,
-    width: IntegerWidth
-  ): void {
-    this.#loadStore.store(
-      this.#region,
-      access,
-      byteOffset,
-      value,
-      width
-    );
-  }
+    return {
+      unavailable: resolution.unavailable,
+      access: {
+        intent,
+        physicalAccess: physical.access.bind(region).issue({
+          start: resolution.firstPhysicalStart,
+          byteLength: range.byteLength
+        })
+      }
+    };
+  };
+
+  return {
+    resolve,
+    resolveDirect,
+    ...bindVirtualLoadStore(region, physical.access, scattered)
+  };
 }
 
 function requiredEntryBits(intent: MemoryAccessIntent): number {

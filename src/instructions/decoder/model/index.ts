@@ -10,6 +10,7 @@ import {
 import { deriveModRmFormSelection } from "./candidates.js";
 import type {
   DecodeCandidate,
+  DecodeOperand,
   InstructionForm,
   OpcodeLeaf,
   OpcodeNode,
@@ -47,14 +48,58 @@ const prefixes: PrefixModel = {
   flagMask: prefixFlagMask
 };
 const forms = buildInstructionForms(X86_32_CORE.instructions);
+// A ModRM encoding can add its own byte, a SIB, and a 32-bit displacement.
+const maximumModRmEncodingByteLength = 1 + 1 + 4;
 
 export const X86_32_DECODE_MODEL: X86DecodeModel = {
   instructionLengthLimit: X86_32_CORE.instructionLengthLimit,
+  maximumUnprefixedByteLength:
+    findMaximumUnprefixedByteLength(forms),
   prefixes,
   opcodeRoot: buildOpcodeTree(forms),
   addressForms: buildModRm32(),
   forms
 };
+
+function findMaximumUnprefixedByteLength(
+  instructionForms: readonly InstructionForm[]
+): number {
+  let maximum = 0;
+
+  for (const form of instructionForms) {
+    const byteLength =
+      form.opcode.length +
+      (form.modrm === undefined
+        ? 0
+        : maximumModRmEncodingByteLength) +
+      form.operands.reduce(
+        (sum, operand) => sum + encodedOperandByteLength(operand),
+        0
+      );
+
+    maximum = Math.max(maximum, byteLength);
+  }
+  return maximum;
+}
+
+function encodedOperandByteLength(operand: DecodeOperand): number {
+  switch (operand.kind) {
+    case "modrm.reg":
+    case "modrm.sreg":
+    case "modrm.rm":
+    case "opcode.reg":
+    case "implicit.reg":
+    case "implicit.sreg":
+    case "implicit.mem":
+      return 0;
+    case "moffs":
+      return operand.address.byteLength;
+    case "immediate":
+      return operand.value.byteLength;
+    case "relative":
+      return operand.displacement.byteLength;
+  }
+}
 
 function buildOpcodeTree(forms: readonly InstructionForm[]): OpcodeNode {
   const root = mutableOpcodeNode();

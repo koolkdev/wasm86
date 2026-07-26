@@ -5,8 +5,8 @@ import type { X86Flag } from "#core/flags/definitions.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { VariableRef } from "#compiler/ir/variable.js";
 import type {
-  MemoryAccess,
-  MemoryDataAccessIntent
+  MemoryDataAccessIntent,
+  ResolvedMemoryAccess
 } from "#memory/types.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type {
@@ -41,7 +41,7 @@ export type SemanticWriteOptions = Readonly<{
 
 // A resolved destination can cross into structured control. The consuming
 // semantic region is explicit so its read or write lands in that region while
-// retaining the original range check and MemoryAccess metadata.
+// retaining the original range check and resolved-access metadata.
 export interface SemanticUpdate {
   read(region: SemanticOps): Value;
   write(region: SemanticOps, value: ValueInput): void;
@@ -55,7 +55,7 @@ export type AccessFault = Readonly<{
 export type AccessResolution<
   TIntent extends MemoryDataAccessIntent = MemoryDataAccessIntent
 > = Readonly<{
-  access: MemoryAccess<TIntent>;
+  access: ResolvedMemoryAccess<TIntent>;
   fault: AccessFault;
 }>;
 
@@ -91,7 +91,7 @@ export interface SemanticMemoryOps {
   // Guards a reusable range without transferring bytes.
   guard<TIntent extends MemoryDataAccessIntent>(
     options: SemanticMemoryAccessOptions<TIntent>
-  ): MemoryAccess<TIntent>;
+  ): ResolvedMemoryAccess<TIntent>;
   // Resolution is non-terminating; its caller owns fault selection.
   resolve<TIntent extends MemoryDataAccessIntent>(
     options: SemanticMemoryAccessOptions<TIntent>
@@ -99,9 +99,12 @@ export interface SemanticMemoryOps {
   read(reference: MemRef, options: SemanticMemoryReadOptions): Value;
   write(reference: MemRef, options: SemanticMemoryWriteOptions): void;
   // Loads and stores consume an existing access without selecting its fault.
-  load(access: MemoryAccess, options: SemanticMemoryLoadOptions): Value;
+  load(
+    access: ResolvedMemoryAccess,
+    options: SemanticMemoryLoadOptions
+  ): Value;
   store(
-    access: MemoryAccess<"write">,
+    access: ResolvedMemoryAccess<"write">,
     options: SemanticMemoryStoreOptions
   ): void;
 }

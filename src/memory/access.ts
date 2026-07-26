@@ -8,7 +8,7 @@ import {
   createPhysicalAddressSpaceDefinition,
   type PhysicalAddressSpaceDefinition
 } from "./physical.js";
-import type { MemoryAccessConstruction } from "./types.js";
+import type { MemoryAccess } from "./types.js";
 import { createVirtualAccessDefinition } from "./virtual/access.js";
 import {
   bindVirtualAddressSpace,
@@ -21,7 +21,7 @@ export type MemoryDefinition = Readonly<{
   physical: PhysicalAddressSpaceDefinition;
   machineMemory: MachineMemoryDefinition;
   resources: readonly MemoryImport[];
-  access: MemoryAccessConstruction;
+  access: MemoryAccess;
   effects: StorageEffects;
   bindHost(bindings: Readonly<{
     ram: WebAssembly.Memory;

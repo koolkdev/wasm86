@@ -11,10 +11,10 @@ export const pageTableEntryAttr = {
   WRITABLE: 1 << 1
 } as const;
 
-// Page-walk results reuse a PTE-shaped word. These result-only markers occupy
-// bits that stored PTEs never use: the inline path decodes a raw PTE with the
-// same masks, so storing either marker would fabricate a route or denial fact.
-export const pageWalkResultAttr = {
+// Range-resolution results reuse a PTE-shaped word. These result-only markers
+// occupy bits that stored PTEs never use: same-page resolution treats a raw
+// PTE as this word, so storing either marker would fabricate a range fact.
+export const resolutionResultAttr = {
   LATER_DENIAL: 1 << 10,
   SCATTERED: 1 << 11
 } as const;

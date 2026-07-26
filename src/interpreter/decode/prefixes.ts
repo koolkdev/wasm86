@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { VariableRef } from "#compiler/ir/variable.js";
 import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";
@@ -11,16 +12,42 @@ export type SegmentOverrideState = Readonly<{
   registerIndex: VariableRef;
 }>;
 
+export type ExactInstructionFallback = (
+  region: RegionBuilder
+) => void;
+
+type PrefixDecodeMode =
+  | Readonly<{ kind: "exact" }>
+  | Readonly<{
+      kind: "direct";
+      fallbackToExact: ExactInstructionFallback;
+    }>;
+
+const maximumDirectPrefixCount =
+  X86_32_DECODE_MODEL.instructionLengthLimit -
+  X86_32_DECODE_MODEL.maximumUnprefixedByteLength;
+
+assert(
+  maximumDirectPrefixCount >= 0,
+  "an unprefixed instruction may exceed the architectural length limit"
+);
+
 export class PrefixDecoder {
   readonly segmentOverride: SegmentOverrideState;
   readonly #stream: InstructionByteStream;
   readonly #flags: VariableRef;
   readonly #firstOpcodeByte: VariableRef;
+  readonly #mode: PrefixDecodeMode;
 
-  constructor(region: RegionBuilder, stream: InstructionByteStream) {
+  constructor(
+    region: RegionBuilder,
+    stream: InstructionByteStream,
+    mode: PrefixDecodeMode
+  ) {
     const zero = region.values.const(0);
 
     this.#stream = stream;
+    this.#mode = mode;
     this.#flags = region.variable(zero);
     this.#firstOpcodeByte = region.variable(zero);
     this.segmentOverride = {
@@ -39,6 +66,14 @@ export class PrefixDecoder {
         prefixCases.map(({ matches, effect }): SwitchControlArm => ({
           matches,
           build: (prefix) => {
+            // Direct reads deliberately omit per-read bounds checks. Exact
+            // mode already enforces the architectural limit on every read.
+            if (this.#mode.kind === "direct") {
+              this.#guardDirectPrefixLimit(
+                prefix,
+                this.#mode.fallbackToExact
+              );
+            }
             this.#apply(prefix, effect);
             prefix.loopContinue([]);
           }
@@ -55,6 +90,24 @@ export class PrefixDecoder {
 
   firstOpcodeByte(region: RegionBuilder): ValueId {
     return region.read(this.#firstOpcodeByte);
+  }
+
+  #guardDirectPrefixLimit(
+    region: RegionBuilder,
+    fallback: ExactInstructionFallback
+  ): void {
+    const values = region.values;
+
+    region.if(
+      values.compare(
+        32,
+        "gt_u",
+        this.#stream.offset(region),
+        values.const(maximumDirectPrefixCount)
+      ),
+      fallback,
+      { hint: "unlikely" }
+    );
   }
 
   #apply(region: RegionBuilder, effect: PrefixEffect): void {

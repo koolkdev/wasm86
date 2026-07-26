@@ -191,6 +191,7 @@ export type OpcodeNode = Readonly<{
 
 export type X86DecodeModel = Readonly<{
   instructionLengthLimit: number;
+  maximumUnprefixedByteLength: number;
   prefixes: PrefixModel;
   opcodeRoot: OpcodeNode;
   addressForms: ModRm32Model;

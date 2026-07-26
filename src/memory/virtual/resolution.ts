@@ -5,16 +5,13 @@ import type { LinearRange } from "../types.js";
 import {
   pageTableEntryAttr,
   pageTableEntryFrameMask,
+  resolutionResultAttr,
   virtualPageByteLength,
   virtualPageOffsetMask,
   virtualPageShift
 } from "./layout.js";
 import type { PageTableAccess } from "./page-table.js";
-import {
-  createPageWalk,
-  type PageWalk,
-  type ResolutionWord
-} from "./page-walk.js";
+import { ResolutionFunctions } from "./resolution-functions.js";
 
 export type RangeResolution = Readonly<{
   denied: ValueId;
@@ -24,192 +21,208 @@ export type RangeResolution = Readonly<{
   scattered: ValueId;
 }>;
 
-export type RangeResolver = Readonly<{
+export type DirectRangeResolution = Readonly<{
+  unavailable: ValueId;
+  firstPhysicalStart: ValueId;
+}>;
+
+// Resolution helpers return a PTE-shaped word. A normal result preserves the
+// first entry, successful scattered ranges add SCATTERED, and a later denial
+// stores that page's linear base and permissions with LATER_DENIAL.
+export class VirtualRangeResolver {
+  readonly #functions: ResolutionFunctions;
+
+  constructor(pageTable: PageTableAccess) {
+    this.#functions = new ResolutionFunctions(pageTable);
+  }
+
   resolve(
     region: RegionBuilder,
     range: LinearRange,
-    required: ValueId
-  ): RangeResolution;
-}>;
+    requiredEntryBits: number,
+    firstEntrySource: PageTableAccess
+  ): RangeResolution {
+    const required = region.values.const(requiredEntryBits);
+    const resolutionWord = this.#resolveWord(
+      region,
+      range,
+      required,
+      firstEntrySource
+    );
 
-export function createRangeResolver(
-  pageTable: PageTableAccess
-): RangeResolver {
-  const pageWalk = createPageWalk(pageTable);
+    return decodeRangeResolution(
+      region,
+      range.start,
+      required,
+      resolutionWord
+    );
+  }
 
-  return {
-    resolve: (region, range, required) =>
-      resolveRange(region, range, required, pageTable, pageWalk)
-  };
-}
+  resolveDirect(
+    region: RegionBuilder,
+    range: LinearRange,
+    requiredEntryBits: number,
+    firstEntrySource: PageTableAccess
+  ): DirectRangeResolution {
+    const values = region.values;
+    const required = values.const(requiredEntryBits);
+    const firstEntry = readEntry(
+      region,
+      range.start,
+      firstEntrySource
+    );
+    const byteLength = values.constValue(range.byteLength);
 
-function resolveRange(
-  region: RegionBuilder,
-  range: LinearRange,
-  required: ValueId,
-  pageTable: PageTableAccess,
-  pageWalk: PageWalk
-): RangeResolution {
-  const result = resolveRangeWord(
-    region,
-    range,
-    required,
-    pageTable,
-    pageWalk
-  );
-  const values = region.values;
-  const word = result.word;
+    if (
+      byteLength === undefined ||
+      byteLength > virtualPageByteLength
+    ) {
+      const resolutionWord = this.#functions.resolveGeneral(
+        region,
+        range,
+        firstEntry,
+        required
+      );
 
-  return {
-    denied: values.compare(
-      32,
-      "ne",
-      values.binary("and", word, required),
+      return {
+        unavailable: directUnavailableFromWord(
+          region,
+          resolutionWord,
+          required,
+          requiredEntryBits
+        ),
+        firstPhysicalStart: physicalStart(
+          region,
+          resolutionWord,
+          range.start
+        )
+      };
+    }
+
+    assert(byteLength > 0, "virtual access byte length must be positive");
+    const samePageUnavailable = entryDeniesAccess(
+      region,
+      firstEntry,
       required
-    ),
-    deniedAddress: values.select(
-      result.laterDenial,
-      values.binary(
-        "and",
-        word,
-        values.const(pageTableEntryFrameMask)
-      ),
-      range.start
-    ),
-    deniedPresent: values.binary(
-      "and",
-      word,
-      values.const(pageTableEntryAttr.PRESENT)
-    ),
-    firstPhysicalStart: values.binary(
-      "or",
-      values.binary(
-        "and",
-        word,
-        values.const(pageTableEntryFrameMask)
-      ),
-      values.binary(
-        "and",
+    );
+    const unavailable = resolveStaticRange(
+      region,
+      range.start,
+      byteLength,
+      samePageUnavailable,
+      (helper) => this.#functions.directStaticUnavailable(
+        helper,
+        byteLength,
         range.start,
-        values.const(virtualPageOffsetMask)
+        firstEntry,
+        required
       )
-    ),
-    scattered: result.scattered
-  };
-}
+    );
 
-function resolveRangeWord(
-  region: RegionBuilder,
-  range: LinearRange,
-  required: ValueId,
-  pageTable: PageTableAccess,
-  pageWalk: PageWalk
-): ResolutionWord {
-  const byteLength = region.values.constValue(range.byteLength);
-
-  if (
-    byteLength === undefined ||
-    byteLength > virtualPageByteLength
-  ) {
-    return walkRange(region, range, required, pageWalk);
+    return {
+      unavailable,
+      firstPhysicalStart: physicalStart(
+        region,
+        firstEntry,
+        range.start
+      )
+    };
   }
 
-  assert(byteLength !== 0, "virtual access byte length must be nonzero");
+  #resolveWord(
+    region: RegionBuilder,
+    range: LinearRange,
+    required: ValueId,
+    firstEntrySource: PageTableAccess
+  ): ValueId {
+    const values = region.values;
+    const firstEntry = readEntry(
+      region,
+      range.start,
+      firstEntrySource
+    );
+    const byteLength = values.constValue(range.byteLength);
 
-  switch (byteLength) {
-    case 1:
-      return singlePageResult(region, range.start, pageTable);
-    case 2:
-    case 4:
-      return resolveScalarByAlignment(
+    if (
+      byteLength === undefined ||
+      byteLength > virtualPageByteLength
+    ) {
+      return this.#functions.resolveGeneral(
         region,
         range,
-        required,
-        byteLength,
-        pageTable,
-        pageWalk
+        firstEntry,
+        required
       );
-    default:
-      return resolveStaticRangeByPageBoundary(
-        region,
-        range,
-        required,
+    }
+
+    assert(byteLength > 0, "virtual access byte length must be positive");
+
+    return resolveStaticRange(
+      region,
+      range.start,
+      byteLength,
+      firstEntry,
+      (helper) => this.#functions.resolveStatic(
+        helper,
         byteLength,
-        pageTable,
-        pageWalk
-      );
+        range.start,
+        firstEntry,
+        required
+      )
+    );
   }
 }
 
-function resolveScalarByAlignment(
+function resolveStaticRange(
   region: RegionBuilder,
-  range: LinearRange,
-  required: ValueId,
-  byteLength: 2 | 4,
-  pageTable: PageTableAccess,
-  pageWalk: PageWalk
-): ResolutionWord {
-  // Because 2 and 4 divide the 4-KiB page size, natural alignment proves that
-  // the range needs only one PTE.
-  const values = region.values;
-  const misaligned = values.binary(
-    "and",
-    range.start,
-    values.const(byteLength - 1)
-  );
-  const staticMisaligned = values.constValue(misaligned);
-
-  if (staticMisaligned !== undefined) {
-    return staticMisaligned === 0
-      ? singlePageResult(region, range.start, pageTable)
-      : walkRange(region, range, required, pageWalk);
-  }
-  const word = region.ifValue(
-    misaligned,
-    (slow) => pageWalk.call(slow, range, required),
-    (fast) => readEntry(fast, range.start, pageTable),
-    { hint: "unlikely" }
-  );
-
-  return pageWalk.decodeWord(region, word);
-}
-
-function resolveStaticRangeByPageBoundary(
-  region: RegionBuilder,
-  range: LinearRange,
-  required: ValueId,
+  start: ValueId,
   byteLength: number,
-  pageTable: PageTableAccess,
-  pageWalk: PageWalk
-): ResolutionWord {
-  const crossesPage = staticRangeCrossesPage(
+  samePageResult: ValueId,
+  callHelper: (region: RegionBuilder) => ValueId
+): ValueId {
+  if (byteLength === 1) {
+    return samePageResult;
+  }
+
+  const needsHelper = staticRangeNeedsHelper(
     region,
-    range.start,
+    start,
     byteLength
   );
-  const staticCrossesPage = region.values.constValue(crossesPage);
+  const known = region.values.constValue(needsHelper);
 
-  if (staticCrossesPage !== undefined) {
-    return staticCrossesPage === 0
-      ? singlePageResult(region, range.start, pageTable)
-      : walkRange(region, range, required, pageWalk);
+  if (known === 0) {
+    return samePageResult;
   }
-  const word = region.ifValue(
-    crossesPage,
-    (crossing) => pageWalk.call(crossing, range, required),
-    (samePage) => readEntry(samePage, range.start, pageTable),
+  if (known !== undefined) {
+    return callHelper(region);
+  }
+
+  return region.ifValue(
+    needsHelper,
+    callHelper,
+    () => samePageResult,
     { hint: "unlikely" }
   );
-
-  return pageWalk.decodeWord(region, word);
 }
 
-function staticRangeCrossesPage(
+// Natural alignment proves that a word or dword stays on one page. Other
+// static sizes use the exact page boundary.
+function staticRangeNeedsHelper(
   region: RegionBuilder,
   start: ValueId,
   byteLength: number
 ): ValueId {
   const values = region.values;
+
+  if (byteLength === 2 || byteLength === 4) {
+    return values.binary(
+      "and",
+      start,
+      values.const(byteLength - 1)
+    );
+  }
+
   const pageOffset = values.binary(
     "and",
     start,
@@ -224,29 +237,81 @@ function staticRangeCrossesPage(
   );
 }
 
-function singlePageResult(
+function decodeRangeResolution(
   region: RegionBuilder,
-  address: ValueId,
-  pageTable: PageTableAccess
-): ResolutionWord {
-  // Keep these route facts literal. Decoding them from a dynamic PTE would hide
-  // the proof that a one-page access has no later denial or scattered frame run.
+  linearStart: ValueId,
+  required: ValueId,
+  resolutionWord: ValueId
+): RangeResolution {
+  const values = region.values;
+  const laterDenial = values.binary(
+    "and",
+    resolutionWord,
+    values.const(resolutionResultAttr.LATER_DENIAL)
+  );
+
   return {
-    word: readEntry(region, address, pageTable),
-    laterDenial: region.values.const(0),
-    scattered: region.values.const(0)
+    denied: entryDeniesAccess(region, resolutionWord, required),
+    deniedAddress: values.select(
+      laterDenial,
+      values.binary(
+        "and",
+        resolutionWord,
+        values.const(pageTableEntryFrameMask)
+      ),
+      linearStart
+    ),
+    deniedPresent: values.binary(
+      "and",
+      resolutionWord,
+      values.const(pageTableEntryAttr.PRESENT)
+    ),
+    firstPhysicalStart: physicalStart(
+      region,
+      resolutionWord,
+      linearStart
+    ),
+    scattered: values.binary(
+      "and",
+      resolutionWord,
+      values.const(resolutionResultAttr.SCATTERED)
+    )
   };
 }
 
-function walkRange(
+function directUnavailableFromWord(
   region: RegionBuilder,
-  range: LinearRange,
+  resolutionWord: ValueId,
   required: ValueId,
-  pageWalk: PageWalk
-): ResolutionWord {
-  return pageWalk.decodeWord(
-    region,
-    pageWalk.call(region, range, required)
+  requiredEntryBits: number
+): ValueId {
+  const directBits =
+    requiredEntryBits |
+    resolutionResultAttr.LATER_DENIAL |
+    resolutionResultAttr.SCATTERED;
+
+  return region.values.compare(
+    32,
+    "ne",
+    region.values.binary(
+      "and",
+      resolutionWord,
+      region.values.const(directBits)
+    ),
+    required
+  );
+}
+
+function entryDeniesAccess(
+  region: RegionBuilder,
+  entry: ValueId,
+  required: ValueId
+): ValueId {
+  return region.values.compare(
+    32,
+    "ne",
+    region.values.binary("and", entry, required),
+    required
   );
 }
 
@@ -262,4 +327,26 @@ function readEntry(
   );
 
   return pageTable.read(region, page);
+}
+
+function physicalStart(
+  region: RegionBuilder,
+  entry: ValueId,
+  linearStart: ValueId
+): ValueId {
+  const values = region.values;
+
+  return values.binary(
+    "or",
+    values.binary(
+      "and",
+      entry,
+      values.const(pageTableEntryFrameMask)
+    ),
+    values.binary(
+      "and",
+      linearStart,
+      values.const(virtualPageOffsetMask)
+    )
+  );
 }
