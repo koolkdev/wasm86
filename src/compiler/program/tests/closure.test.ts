@@ -5,7 +5,7 @@ import { assert } from "#common/assert.js";
 import { functionType } from "#compiler/ir/function.js";
 import { resourceRead, resourceWrite } from "#compiler/ir/operations/resource.js";
 import { resourceRef, type ByteRange, type ResourceEffect } from "#compiler/ir/resource.js";
-import { functionRef, tableRef } from "#compiler/ir/refs.js";
+import { functionRef, tableRef } from "#compiler/reference.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import { FunctionFamily, type FunctionDefinition } from "#compiler/program/functions.js";
 import { createProgramResources } from "#compiler/program/resources.js";

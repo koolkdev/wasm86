@@ -5,7 +5,7 @@ import { assert } from "#common/assert.js";
 import { compileProgram } from "#compiler/compile.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import { functionType } from "#compiler/ir/function.js";
-import { functionRef } from "#compiler/ir/refs.js";
+import { functionRef } from "#compiler/reference.js";
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import { functionExportRef } from "#compiler/program/exports.js";

@@ -11,7 +11,7 @@ import { ProgramBuilder } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/ir/function.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
 import { functionExportRef } from "#compiler/program/exports.js";
-import { functionRef } from "#compiler/ir/refs.js";
+import { functionRef } from "#compiler/reference.js";
 import { decodeIsaInstructionFromReader } from "#instructions/decoder/decode.js";
 import type {
   IsaDecodedInstruction,

@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ValueInput } from "#compiler/ir/values/types.js";
 import type { FunctionType } from "#compiler/ir/function.js";
-import type { FunctionRef, TableRef } from "#compiler/ir/refs.js";
+import type { FunctionRef, TableRef } from "#compiler/reference.js";
 
 export type DirectCallTarget = Readonly<{
   kind: "direct";

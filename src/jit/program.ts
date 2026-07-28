@@ -9,7 +9,7 @@ import { functionType } from "#compiler/ir/function.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
 import { functionExportRef, type FunctionExportRef } from "#compiler/program/exports.js";
-import { functionRef } from "#compiler/ir/refs.js";
+import { functionRef } from "#compiler/reference.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {

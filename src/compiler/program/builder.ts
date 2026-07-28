@@ -7,7 +7,7 @@ import { buildProgram, DeclarationCollection } from "./closure.js";
 import type { FunctionType } from "#compiler/ir/function.js";
 import type { FunctionDeclaration, Program } from "./program.js";
 import type { FunctionExport } from "./exports.js";
-import type { FunctionRef } from "#compiler/ir/refs.js";
+import type { FunctionRef } from "#compiler/reference.js";
 import type { ProgramResources, TableImport } from "./resources.js";
 import { maximumWasmTableElements, type TableLimits } from "./limits.js";
 import { validateProgramDeclarations } from "./validate.js";

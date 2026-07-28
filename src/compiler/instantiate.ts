@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import { wasmPageByteLength } from "#compiler/program/limits.js";
 import type { CompiledProgram } from "#compiler/compile.js";
-import type { FunctionRef } from "#compiler/ir/refs.js";
+import type { FunctionRef } from "#compiler/reference.js";
 import type { FunctionExportRef } from "#compiler/program/exports.js";
 
 const compiledModules = new WeakMap<CompiledProgram, WebAssembly.Module>();

@@ -2,7 +2,7 @@ import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { functionType } from "#compiler/ir/function.js";
-import { functionRef } from "#compiler/ir/refs.js";
+import { functionRef } from "#compiler/reference.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import { createProgramResources } from "#compiler/program/resources.js";
 

@@ -1,5 +1,5 @@
 import { emitModule } from "#compiler/lowering/module.js";
-import type { FunctionRef } from "#compiler/ir/refs.js";
+import type { FunctionRef } from "#compiler/reference.js";
 import { layoutProgram } from "#compiler/module/layout.js";
 import type { FunctionExportRef } from "#compiler/program/exports.js";
 import type { Program } from "#compiler/program/program.js";

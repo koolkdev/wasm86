@@ -20,7 +20,7 @@ import {
   type ResourceOperation
 } from "#compiler/ir/operations/resource.js";
 import type { Region, RegionNode } from "#compiler/ir/region.js";
-import { functionRef } from "#compiler/ir/refs.js";
+import { functionRef } from "#compiler/reference.js";
 import {
   DynamicByteOriginRef,
   resourceRef,

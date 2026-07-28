@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { functionType } from "#compiler/ir/function.js";
-import { functionRef } from "#compiler/ir/refs.js";
+import { functionRef } from "#compiler/reference.js";
 import { layoutProgram } from "#compiler/module/layout.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import { functionExportRef } from "#compiler/program/exports.js";

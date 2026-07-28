@@ -15,7 +15,7 @@ import { ProgramBuilder } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/ir/function.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import { functionExportRef, type FunctionExportRef } from "#compiler/program/exports.js";
-import { functionRef, type FunctionRef } from "#compiler/ir/refs.js";
+import { functionRef, type FunctionRef } from "#compiler/reference.js";
 import { createProgramResources } from "#compiler/program/resources.js";
 
 const fixture = createInstanceFixture();

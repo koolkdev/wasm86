@@ -4,7 +4,7 @@ import type { ResourceEffect, ResourceRef } from "#compiler/ir/resource.js";
 import type { ProgramBuilder } from "#compiler/program/builder.js";
 import { functionType } from "#compiler/ir/function.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef } from "#compiler/ir/refs.js";
+import { functionRef } from "#compiler/reference.js";
 import type { ExecutionModel } from "#execution/model.js";
 import { createInstructionLowerer } from "#instructions/lowering/lowerer.js";
 import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";

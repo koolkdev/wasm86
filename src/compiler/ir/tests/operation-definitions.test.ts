@@ -17,7 +17,7 @@ import { functionType } from "#compiler/ir/function.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef, tableRef } from "#compiler/ir/refs.js";
+import { functionRef, tableRef } from "#compiler/reference.js";
 import { describeNode } from "#compiler/ir/node.js";
 
 test("resource definitions describe their graph and resource interface", () => {

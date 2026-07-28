@@ -25,7 +25,7 @@ import { ValueTable } from "#compiler/ir/values/table.js";
 import { joinWidthBounds } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId, ValueType, WidthBounds } from "#compiler/ir/values/types.js";
 import type { FunctionType } from "#compiler/ir/function.js";
-import type { TableRef } from "#compiler/ir/refs.js";
+import type { TableRef } from "#compiler/reference.js";
 
 export type BuildBody = (b: RegionBuilder) => void;
 export type BuildResult = (b: RegionBuilder) => ValueId;

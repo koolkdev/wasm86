@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { FunctionType } from "#compiler/ir/function.js";
-import type { FunctionRef, TableRef } from "#compiler/ir/refs.js";
+import type { FunctionRef, TableRef } from "#compiler/reference.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 
 // The numeric module identities visible while realizing one function. The

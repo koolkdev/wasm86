@@ -5,7 +5,7 @@ import type { IrFunction } from "#compiler/ir/function.js";
 import type { FunctionType } from "#compiler/ir/function.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type { FunctionImport } from "./imports.js";
-import type { FunctionRef, TableRef } from "#compiler/ir/refs.js";
+import type { FunctionRef, TableRef } from "#compiler/reference.js";
 import type { FunctionExport } from "./exports.js";
 import type { MemoryImport, ProgramResources, TableImport } from "./resources.js";
 

@@ -16,7 +16,7 @@ import type {
   ProgramDeclarations,
   ProgramFunction
 } from "./program.js";
-import type { FunctionRef, TableRef } from "#compiler/ir/refs.js";
+import type { FunctionRef, TableRef } from "#compiler/reference.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { MemoryImport, ProgramResources } from "./resources.js";
 import { validateDeclaredFunctionEffects, validateFunctionEffectCoverage } from "./validate.js";

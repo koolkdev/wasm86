@@ -18,7 +18,7 @@ import { type RegionNode, type Region } from "#compiler/ir/region.js";
 import type { FunctionGraph, IrFunction } from "#compiler/ir/function.js";
 import { functionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef, tableRef } from "#compiler/ir/refs.js";
+import { functionRef, tableRef } from "#compiler/reference.js";
 import {
   compilerTestResourceEffect,
   compilerTestValues,

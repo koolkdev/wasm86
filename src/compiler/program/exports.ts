@@ -1,4 +1,4 @@
-import type { FunctionRef } from "#compiler/ir/refs.js";
+import type { FunctionRef } from "#compiler/reference.js";
 
 declare const refBrand: unique symbol;
 

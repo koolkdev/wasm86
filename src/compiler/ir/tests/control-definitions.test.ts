@@ -14,7 +14,7 @@ import {
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { functionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import { functionRef } from "#compiler/ir/refs.js";
+import { functionRef } from "#compiler/reference.js";
 import { VariableRef } from "#compiler/ir/variable.js";
 import type { Region } from "#compiler/ir/region.js";
 import { describeNode } from "#compiler/ir/node.js";
