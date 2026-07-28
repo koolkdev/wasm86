@@ -1,8 +1,5 @@
 import { assert } from "#common/assert.js";
-import {
-  type ResourceByteOperand,
-  type ResourceReadMode
-} from "#compiler/ir/resource.js";
+import { type ResourceByteOperand, type ResourceReadMode } from "#compiler/ir/resource.js";
 import { fitsUnsigned, signExtended } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
@@ -17,12 +14,13 @@ type ResourceReadCreateArgs = Readonly<{
   mode?: ResourceReadMode;
 }>;
 
-export type ResourceReadOperation = OperationNodeBase & Readonly<{
-  kind: "resource.read";
-  source: ResourceByteOperand;
-  mode?: ResourceReadMode;
-  output: ValueId;
-}>;
+export type ResourceReadOperation = OperationNodeBase &
+  Readonly<{
+    kind: "resource.read";
+    source: ResourceByteOperand;
+    mode?: ResourceReadMode;
+    output: ValueId;
+  }>;
 
 export const resourceRead: OperationDefinition<
   ResourceReadCreateArgs,
@@ -67,11 +65,12 @@ export type ResourceWriteArgs = Readonly<{
   value: ValueId;
 }>;
 
-export type ResourceWriteOperation = OperationNodeBase & Readonly<{
-  kind: "resource.write";
-  destination: ResourceByteOperand;
-  value: ValueId;
-}>;
+export type ResourceWriteOperation = OperationNodeBase &
+  Readonly<{
+    kind: "resource.write";
+    destination: ResourceByteOperand;
+    value: ValueId;
+  }>;
 
 export const resourceWrite: OperationDefinition<
   ResourceWriteArgs,
@@ -96,9 +95,7 @@ export const resourceWrite: OperationDefinition<
   })
 };
 
-export type ResourceOperation =
-  | ResourceReadOperation
-  | ResourceWriteOperation;
+export type ResourceOperation = ResourceReadOperation | ResourceWriteOperation;
 
 const i32Result: OperationResult = { type: "i32" };
 

@@ -5,9 +5,6 @@ export type LayoutStructure = Readonly<{
   members: readonly LayoutMember[];
 }>;
 
-export function layoutStructure(
-  id: string,
-  members: readonly LayoutMember[]
-): LayoutStructure {
+export function layoutStructure(id: string, members: readonly LayoutMember[]): LayoutStructure {
   return { id, members };
 }

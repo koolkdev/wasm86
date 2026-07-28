@@ -16,30 +16,14 @@ import type { OperandBinding } from "#instructions/lowering/bindings.js";
 import type { BuildExit } from "#instructions/lowering/terminal.js";
 import type { StateAccess } from "#core/state/access.js";
 import type { RegionBuilder, SwitchControlArm } from "#compiler/ir/builder/region.js";
-import type {
-  DirectMemoryAccess,
-  MemoryAccess
-} from "#memory/types.js";
+import type { DirectMemoryAccess, MemoryAccess } from "#memory/types.js";
 import { ModRmAddressDecoder } from "./decode/address.js";
-import {
-  memoryFormDispatch,
-  exactModRmCases,
-  modRmRegCases
-} from "./decode/forms.js";
-import {
-  OperandDecoder,
-  type DecodedRm
-} from "./decode/operands.js";
-import {
-  PrefixDecoder,
-  type ExactInstructionFallback
-} from "./decode/prefixes.js";
+import { memoryFormDispatch, exactModRmCases, modRmRegCases } from "./decode/forms.js";
+import { OperandDecoder, type DecodedRm } from "./decode/operands.js";
+import { PrefixDecoder, type ExactInstructionFallback } from "./decode/prefixes.js";
 import { InstructionByteStream } from "./decode/stream.js";
 
-type SelectedDecodeCandidate = Exclude<
-  DecodeCandidate,
-  Readonly<{ kind: "empty" }>
->;
+type SelectedDecodeCandidate = Exclude<DecodeCandidate, Readonly<{ kind: "empty" }>>;
 
 export type DecodedInstruction = Readonly<{
   instruction: InstructionSpec;
@@ -90,11 +74,7 @@ class InterpreterDecoder {
   readonly #address: ModRmAddressDecoder;
   readonly #operands: OperandDecoder;
 
-  constructor(
-    region: RegionBuilder,
-    instructionStart: ValueId,
-    options: InterpreterDecodeOptions
-  ) {
+  constructor(region: RegionBuilder, instructionStart: ValueId, options: InterpreterDecodeOptions) {
     const invalidFormOrdinal = region.values.const(-1);
 
     this.#root = region;
@@ -107,11 +87,7 @@ class InterpreterDecoder {
       options.buildExit,
       options.mode
     );
-    this.#prefixes = new PrefixDecoder(
-      region,
-      this.#stream,
-      options.mode
-    );
+    this.#prefixes = new PrefixDecoder(region, this.#stream, options.mode);
     this.#memoryFormOrdinal = region.variable(invalidFormOrdinal);
     this.#modRmByte = region.variable(region.values.const(0x100));
     this.#operands = new OperandDecoder({
@@ -144,11 +120,7 @@ class InterpreterDecoder {
     this.#dispatchSelectedMemoryForm(root);
   }
 
-  #dispatchOpcode(
-    region: RegionBuilder,
-    node: OpcodeNode,
-    byte: ValueId
-  ): void {
+  #dispatchOpcode(region: RegionBuilder, node: OpcodeNode, byte: ValueId): void {
     const arms: SwitchControlArm[] = [];
 
     node.next.forEach((next, match) => {
@@ -162,11 +134,7 @@ class InterpreterDecoder {
             this.#dispatchOpcodeLeaf(opcode, next.leaf);
             return;
           }
-          this.#dispatchOpcode(
-            opcode,
-            next,
-            this.#stream.readByte(opcode)
-          );
+          this.#dispatchOpcode(opcode, next, this.#stream.readByte(opcode));
         }
       });
     });
@@ -192,10 +160,7 @@ class InterpreterDecoder {
     region.switchControl(flags, arms, (invalid) => this.#invalidOpcode(invalid));
   }
 
-  #dispatchCandidate(
-    region: RegionBuilder,
-    candidate: SelectedDecodeCandidate
-  ): void {
+  #dispatchCandidate(region: RegionBuilder, candidate: SelectedDecodeCandidate): void {
     switch (candidate.kind) {
       case "plain":
         this.#buildInstruction(region, candidate.form, { kind: "none" });
@@ -243,11 +208,7 @@ class InterpreterDecoder {
     );
   }
 
-  #dispatchModRmFields(
-    region: RegionBuilder,
-    byte: ValueId,
-    fields: ModRmFieldSelection
-  ): void {
+  #dispatchModRmFields(region: RegionBuilder, byte: ValueId, fields: ModRmFieldSelection): void {
     switch (fields.kind) {
       case "mode":
         this.#dispatchModRmMode(region, byte, fields.forms);
@@ -258,34 +219,17 @@ class InterpreterDecoder {
     }
   }
 
-  #dispatchModRmMode(
-    region: RegionBuilder,
-    byte: ValueId,
-    forms: ModRmModeForms
-  ): void {
+  #dispatchModRmMode(region: RegionBuilder, byte: ValueId, forms: ModRmModeForms): void {
     // The forms are already selected; only register versus memory remains.
-    this.#dispatchModRmForms(
-      region,
-      byte,
-      this.#registerMode(region, byte),
-      forms
-    );
+    this.#dispatchModRmForms(region, byte, this.#registerMode(region, byte), forms);
   }
 
-  #dispatchModRmReg(
-    region: RegionBuilder,
-    byte: ValueId,
-    byReg: readonly ModRmModeForms[]
-  ): void {
+  #dispatchModRmReg(region: RegionBuilder, byte: ValueId, byReg: readonly ModRmModeForms[]): void {
     // Select the opcode-group forms by ModRM.reg, then branch between their
     // register and memory forms inside the selected arm.
     const formSelector = region.values.binary(
       "and",
-      region.values.binary(
-        "shr_u",
-        byte,
-        region.values.const(3)
-      ),
+      region.values.binary("shr_u", byte, region.values.const(3)),
       region.values.const(0b111)
     );
     const registerMode = this.#registerMode(region, byte);
@@ -294,24 +238,14 @@ class InterpreterDecoder {
       formSelector,
       modRmRegCases(byReg).map(({ matches, forms }) => ({
         matches,
-        build: (selected) => this.#dispatchModRmForms(
-          selected,
-          byte,
-          registerMode,
-          forms
-        )
+        build: (selected) => this.#dispatchModRmForms(selected, byte, registerMode, forms)
       })),
       (invalid) => this.#invalidOpcode(invalid)
     );
   }
 
   #registerMode(region: RegionBuilder, byte: ValueId): ValueId {
-    return region.values.compare(
-      32,
-      "ge_u",
-      byte,
-      region.values.const(0xc0)
-    );
+    return region.values.compare(32, "ge_u", byte, region.values.const(0xc0));
   }
 
   #dispatchModRmForms(
@@ -323,19 +257,9 @@ class InterpreterDecoder {
     region.write(this.#modRmByte, byte);
     region.if(
       registerMode,
-      (register) => this.#buildModRmForm(
-        register,
-        byte,
-        forms.register,
-        "register"
-      ),
+      (register) => this.#buildModRmForm(register, byte, forms.register, "register"),
       {
-        elseBuild: (memory) => this.#buildModRmForm(
-          memory,
-          byte,
-          forms.memory,
-          "memory"
-        )
+        elseBuild: (memory) => this.#buildModRmForm(memory, byte, forms.memory, "memory")
       }
     );
   }
@@ -355,11 +279,7 @@ class InterpreterDecoder {
         // Register arms have all required decode information and finish here.
         this.#buildInstruction(region, form, {
           kind: "register",
-          registerIndex: region.values.binary(
-            "and",
-            byte,
-            region.values.const(0b111)
-          )
+          registerIndex: region.values.binary("and", byte, region.values.const(0b111))
         });
         return;
       case "memory":
@@ -382,11 +302,7 @@ class InterpreterDecoder {
     // Compiler switch matches are bounded, so dispatch one switch-sized group
     // at a time. The default arm carries larger ordinals into the next group,
     // leaving forms in the first group on this switch alone.
-    this.#dispatchMemoryFormGroups(
-      region,
-      ordinal,
-      memoryFormDispatch.groups
-    );
+    this.#dispatchMemoryFormGroups(region, ordinal, memoryFormDispatch.groups);
   }
 
   #dispatchMemoryFormGroups(
@@ -406,37 +322,24 @@ class InterpreterDecoder {
       remainingGroups.length === 0
         ? (unreachable) => this.#unreachable(unreachable)
         : (nextGroup) => {
-          const nextOrdinal = nextGroup.values.binary(
-            "sub",
-            ordinal,
-            nextGroup.values.const(memoryFormDispatch.groupSize)
-          );
+            const nextOrdinal = nextGroup.values.binary(
+              "sub",
+              ordinal,
+              nextGroup.values.const(memoryFormDispatch.groupSize)
+            );
 
-          this.#dispatchMemoryFormGroups(
-            nextGroup,
-            nextOrdinal,
-            remainingGroups
-          );
-        }
+            this.#dispatchMemoryFormGroups(nextGroup, nextOrdinal, remainingGroups);
+          }
     );
   }
 
-  #buildMemoryInstruction(
-    region: RegionBuilder,
-    form: InstructionForm
-  ): void {
-    this.#address.withAddress(
-      region,
-      (addressArm, address) =>
-        this.#buildInstruction(addressArm, form, address)
+  #buildMemoryInstruction(region: RegionBuilder, form: InstructionForm): void {
+    this.#address.withAddress(region, (addressArm, address) =>
+      this.#buildInstruction(addressArm, form, address)
     );
   }
 
-  #buildInstruction(
-    region: RegionBuilder,
-    form: InstructionForm,
-    rm: DecodedRm
-  ): void {
+  #buildInstruction(region: RegionBuilder, form: InstructionForm, rm: DecodedRm): void {
     const bindings = this.#operands.buildBindings(region, form, rm);
     const nextEip = region.values.binary(
       "add",
@@ -453,12 +356,7 @@ class InterpreterDecoder {
   }
 
   #invalidOpcode(region: RegionBuilder): void {
-    region.return([
-      this.#options.buildExit(
-        region.values,
-        exceptionExit(invalidOpcode())
-      )
-    ]);
+    region.return([this.#options.buildExit(region.values, exceptionExit(invalidOpcode()))]);
   }
 
   #unreachable(region: RegionBuilder): void {

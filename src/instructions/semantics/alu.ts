@@ -2,11 +2,7 @@ import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { SemanticTemplate } from "#instructions/semantics/builder.js";
 import type { Value } from "#instructions/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#core/types.js";
-import {
-  addFlagSource,
-  logicFlagSource,
-  subFlagSource
-} from "#core/flags/lazy/sources.js";
+import { addFlagSource, logicFlagSource, subFlagSource } from "#core/flags/lazy/sources.js";
 import {
   writeAddFlags,
   writeDecFlags,

@@ -22,11 +22,7 @@ test("flag field classes use their declared identities", () => {
     strictEqual(isLazyFlagStateField(field), false);
   }
 
-  for (const field of [
-    flagStateFields.lazyKind,
-    flagStateFields.lazyA,
-    flagStateFields.lazyB
-  ]) {
+  for (const field of [flagStateFields.lazyKind, flagStateFields.lazyA, flagStateFields.lazyB]) {
     strictEqual(isConcreteFlagStateField(field), false);
     strictEqual(isLazyFlagStateField(field), true);
   }

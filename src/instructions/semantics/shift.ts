@@ -1,8 +1,5 @@
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type {
-  SemanticsBuilder,
-  SemanticTemplate
-} from "#instructions/semantics/builder.js";
+import type { SemanticsBuilder, SemanticTemplate } from "#instructions/semantics/builder.js";
 import type { Value } from "#instructions/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
 import { writeShiftFlags } from "./flag-writes.js";
@@ -52,7 +49,11 @@ export function doubleShiftSemantic(
   };
 }
 
-export function readShiftCount(s: SemanticsBuilder, v: ValueBuilder, countSource: ShiftCountSource): Value {
+export function readShiftCount(
+  s: SemanticsBuilder,
+  v: ValueBuilder,
+  countSource: ShiftCountSource
+): Value {
   switch (countSource) {
     case "one":
       return v.const(1);
@@ -101,25 +102,13 @@ function doubleShiftResult(
 
   switch (op) {
     case "shld":
-      return v.binary(
-        "or",
-        v.binary("shl", value, count),
-        v.binary("shr_u", source, backCount)
-      );
+      return v.binary("or", v.binary("shl", value, count), v.binary("shr_u", source, backCount));
     case "shrd":
-      return v.binary(
-        "or",
-        v.binary("shr_u", value, count),
-        v.binary("shl", source, backCount)
-      );
+      return v.binary("or", v.binary("shr_u", value, count), v.binary("shl", source, backCount));
   }
 }
 
-function sarShiftInput(
-  v: ValueBuilder,
-  width: OperandWidth,
-  value: Value
-): Value {
+function sarShiftInput(v: ValueBuilder, width: OperandWidth, value: Value): Value {
   switch (width) {
     case 8:
       return v.extend(8, value, true);

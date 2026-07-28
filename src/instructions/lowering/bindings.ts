@@ -1,9 +1,5 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type {
-  EffectiveAddress,
-  RegName,
-  SegmentRegister
-} from "#core/types.js";
+import type { EffectiveAddress, RegName, SegmentRegister } from "#core/types.js";
 
 export type EffectiveAddressComponents = Omit<EffectiveAddress, "segment">;
 
@@ -75,10 +71,7 @@ export type MemOperandBinding = Readonly<{
 }>;
 
 export type OperandBinding =
-  | RegOperandBinding
-  | SegmentOperandBinding
-  | ImmOperandBinding
-  | MemOperandBinding;
+  RegOperandBinding | SegmentOperandBinding | ImmOperandBinding | MemOperandBinding;
 
 export function regBinding(reg: RegName): RegOperandBinding {
   return {
@@ -87,27 +80,21 @@ export function regBinding(reg: RegName): RegOperandBinding {
   };
 }
 
-export function regDynamicBinding(
-  index: ValueId
-): RegOperandBinding {
+export function regDynamicBinding(index: ValueId): RegOperandBinding {
   return {
     kind: "reg",
     selection: { kind: "dynamic", index }
   };
 }
 
-export function segmentBinding(
-  reg: SegmentRegister
-): SegmentOperandBinding {
+export function segmentBinding(reg: SegmentRegister): SegmentOperandBinding {
   return {
     kind: "segment",
     selection: { kind: "static", reg }
   };
 }
 
-export function segmentDynamicBinding(
-  index: ValueId
-): SegmentOperandBinding {
+export function segmentDynamicBinding(index: ValueId): SegmentOperandBinding {
   return {
     kind: "segment",
     selection: { kind: "dynamic", index }
@@ -121,9 +108,7 @@ export function immBinding(value: number): ImmOperandBinding {
   };
 }
 
-export function immDynamicBinding(
-  value: ValueId
-): ImmOperandBinding {
+export function immDynamicBinding(value: ValueId): ImmOperandBinding {
   return {
     kind: "imm",
     source: { kind: "dynamic", value }
@@ -172,14 +157,10 @@ export function memDynamicBaseBinding(
   };
 }
 
-export function staticMemSegment(
-  reg: SegmentRegister
-): SegmentBindingSelection {
+export function staticMemSegment(reg: SegmentRegister): SegmentBindingSelection {
   return { kind: "static", reg };
 }
 
-export function dynamicMemSegment(
-  index: ValueId
-): SegmentBindingSelection {
+export function dynamicMemSegment(index: ValueId): SegmentBindingSelection {
   return { kind: "dynamic", index };
 }

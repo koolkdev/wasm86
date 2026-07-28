@@ -52,9 +52,7 @@ function validateComputed(
   anchor: SiteId,
   demands: PlacementProof["demands"][number]
 ): void {
-  const floor = analysis.dominatingSite(
-    demands.map((demand) => demand.consumedAt)
-  );
+  const floor = analysis.dominatingSite(demands.map((demand) => demand.consumedAt));
 
   assert(
     loopAnchors.allows(value, floor, anchor),
@@ -70,9 +68,8 @@ function validateProducer(
 ): void {
   const authored = getSite(analysis, producer.site);
   const anchor = getSite(analysis, anchorId);
-  const path = authored.region === anchor.region
-    ? []
-    : analysis.path(authored.region, anchor.region);
+  const path =
+    authored.region === anchor.region ? [] : analysis.path(authored.region, anchor.region);
 
   assert(authored.kind === "node", `producer ${producer.output} has no node site`);
   assert(path !== undefined, `producer ${producer.output} leaves its definition scope`);

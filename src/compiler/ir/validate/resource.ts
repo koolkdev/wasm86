@@ -1,8 +1,5 @@
 import { assert } from "#common/assert.js";
-import type {
-  StorageAccess,
-  StorageEffects
-} from "#compiler/ir/effects.js";
+import type { StorageAccess, StorageEffects } from "#compiler/ir/effects.js";
 import {
   type ByteRange,
   type ResourceEffect,
@@ -14,29 +11,19 @@ import type { WidthBounds } from "#compiler/ir/values/types.js";
 
 const resourceByteLength = 0x1_0000_0000;
 
-export function validateStorageEffectRanges(
-  effects: StorageEffects,
-  label: string
-): void {
+export function validateStorageEffectRanges(effects: StorageEffects, label: string): void {
   validateAccessRanges(effects.reads, "read", label);
   validateAccessRanges(effects.writes, "write", label);
 }
 
-export function validateResourceOperation(
-  operation: ResourceOperation,
-  path: string
-): void {
+export function validateResourceOperation(operation: ResourceOperation, path: string): void {
   const label = `${path} ${operation.kind}`;
-  const operand = operation.kind === "resource.read"
-    ? operation.source
-    : operation.destination;
+  const operand = operation.kind === "resource.read" ? operation.source : operation.destination;
   const { effect, width } = operand;
   const displacement = operand.address.displacement;
 
   assert(
-    Number.isInteger(displacement) &&
-      displacement >= 0 &&
-      displacement <= 0xffff_ffff,
+    Number.isInteger(displacement) && displacement >= 0 && displacement <= 0xffff_ffff,
     `${label} address displacement must be an unsigned 32-bit integer, got ${displacement}`
   );
 
@@ -65,18 +52,12 @@ function validateAccessRanges(
 ): void {
   for (const [index, access] of accesses.entries()) {
     if (access.space === "resource") {
-      validateResourceEffectRange(
-        access,
-        `${label} ${direction} effect ${index}`
-      );
+      validateResourceEffectRange(access, `${label} ${direction} effect ${index}`);
     }
   }
 }
 
-function validateResourceEffectRange(
-  effect: ResourceEffect,
-  label: string
-): void {
+function validateResourceEffectRange(effect: ResourceEffect, label: string): void {
   validateByteRange(effect.range, label);
 }
 
@@ -96,9 +77,7 @@ function validateReadMode(
   }
 
   assertValidBounds(refinement, label);
-  const mechanical = width === 32
-    ? { unsignedBits: 32, signedBits: 32 }
-    : fitsUnsigned(width);
+  const mechanical = width === 32 ? { unsignedBits: 32, signedBits: 32 } : fitsUnsigned(width);
 
   assert(
     refinement.unsignedBits <= mechanical.unsignedBits &&

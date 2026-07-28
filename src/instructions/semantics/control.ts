@@ -1,9 +1,6 @@
 import type { ConditionCode } from "#core/flags/conditions.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type {
-  SemanticsBuilder,
-  SemanticTemplate
-} from "#instructions/semantics/builder.js";
+import type { SemanticsBuilder, SemanticTemplate } from "#instructions/semantics/builder.js";
 import type { Value } from "#instructions/semantics/refs.js";
 import { popStack, pushStack, type StackOperandWidth } from "./stack.js";
 
@@ -106,8 +103,12 @@ export function enterSemantic(): SemanticTemplate {
             value: copied
           });
           loop.write(remaining, nextRemaining, { width: 32 });
-          loop.write(srcOffset, loopValues.binary("sub", currentSrcOffset, loopValues.const(4)), { width: 32 });
-          loop.write(dstOffset, loopValues.binary("sub", currentDstOffset, loopValues.const(4)), { width: 32 });
+          loop.write(srcOffset, loopValues.binary("sub", currentSrcOffset, loopValues.const(4)), {
+            width: 32
+          });
+          loop.write(dstOffset, loopValues.binary("sub", currentDstOffset, loopValues.const(4)), {
+            width: 32
+          });
           return loopValues.compare(32, "ne", nextRemaining, loopValues.const(0));
         });
         then.memory.store(writeAccess, { width: 32, value: frameTemp });

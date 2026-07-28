@@ -24,12 +24,14 @@ export interface MutableCoreStateView extends CoreStateView {
 export function readRegisterAlias(state: CoreStateView, alias: RegisterAlias): number {
   const value = state.readReg32(alias.base);
 
-  return alias.width === 32
-    ? value
-    : (value >>> alias.bitOffset) & widthMask(alias.width);
+  return alias.width === 32 ? value : (value >>> alias.bitOffset) & widthMask(alias.width);
 }
 
-export function writeRegisterAlias(state: MutableCoreStateView, alias: RegisterAlias, value: number): void {
+export function writeRegisterAlias(
+  state: MutableCoreStateView,
+  alias: RegisterAlias,
+  value: number
+): void {
   if (alias.width === 32) {
     state.writeReg32(alias.base, value);
     return;

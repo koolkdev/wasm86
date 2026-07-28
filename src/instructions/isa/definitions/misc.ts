@@ -1,5 +1,10 @@
 import { form, imm, mnemonic, modrmRm } from "../dsl.js";
-import { int3Semantic, intoSemantic, intSemantic, nopSemantic } from "#instructions/semantics/misc.js";
+import {
+  int3Semantic,
+  intoSemantic,
+  intSemantic,
+  nopSemantic
+} from "#instructions/semantics/misc.js";
 
 export const NOP = mnemonic("nop", [
   // 90 and 66 90 stay xchg (e)ax, (e)ax: architecturally identical

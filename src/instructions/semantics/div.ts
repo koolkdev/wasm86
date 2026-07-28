@@ -20,9 +20,8 @@ function implicitDivideSemantic(kind: DivideKind, width: OperandWidth): Semantic
   return (s, v) => {
     const src = s.operand(0);
     const divisor = s.read(src, { width, signed: kind === "signed" });
-    const result = kind === "signed"
-      ? signedDivide(s, v, width, divisor)
-      : unsignedDivide(s, v, width, divisor);
+    const result =
+      kind === "signed" ? signedDivide(s, v, width, divisor) : unsignedDivide(s, v, width, divisor);
 
     // The undefined DIV/IDIV status flags keep their prior values on observed
     // hardware, so no flags are written.
@@ -133,9 +132,10 @@ function undefinedSignedDivision(
     return divisorZero;
   }
 
-  const dividendMin = width === 16
-    ? v.compare(32, "eq", dividend, v.const(-0x8000_0000))
-    : v.compare64("eq", dividend, v.const64(-0x8000_0000_0000_0000n));
+  const dividendMin =
+    width === 16
+      ? v.compare(32, "eq", dividend, v.const(-0x8000_0000))
+      : v.compare64("eq", dividend, v.const64(-0x8000_0000_0000_0000n));
   const divisorMinusOne = v.compare(32, "eq", divisor, v.const(-1));
 
   return v.binary("or", divisorZero, v.binary("and", dividendMin, divisorMinusOne));
@@ -153,7 +153,11 @@ function narrowQuotientOverflows(
   return v.compare(32, "ge_u", v.binary("add", quotient, v.const(bias)), v.const(bias * 2));
 }
 
-function unsignedDividend(s: SemanticsBuilder, v: ValueBuilder, width: OperandWidth): UnsignedDividend {
+function unsignedDividend(
+  s: SemanticsBuilder,
+  v: ValueBuilder,
+  width: OperandWidth
+): UnsignedDividend {
   switch (width) {
     case 8: {
       const ax = s.read(s.reg("ax"), { width: 16 });
@@ -212,11 +216,7 @@ function signedDwordDividend(s: SemanticsBuilder, v: ValueBuilder): Value {
   return v.binary64("or", v.binary64("shl", high64, v.const64(32n)), low64);
 }
 
-function writeDivideResult(
-  s: SemanticsBuilder,
-  width: OperandWidth,
-  result: DivideResult
-): void {
+function writeDivideResult(s: SemanticsBuilder, width: OperandWidth, result: DivideResult): void {
   switch (width) {
     case 8:
       s.write(s.reg("al"), result.quotient, { width: 8 });

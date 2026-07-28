@@ -15,7 +15,19 @@ import { IMUL, MUL } from "./definitions/mul.js";
 import { SETCC } from "./definitions/setcc.js";
 import { RCL, RCR, ROL, ROR, SAR, SHL, SHLD, SHR, SHRD } from "./definitions/shift.js";
 import { CBW, CDQ, CWD, CWDE } from "./definitions/sign-extend.js";
-import { LEAVE, POP, POPA, POPAD, POPF, POPFD, PUSH, PUSHA, PUSHAD, PUSHF, PUSHFD } from "./definitions/stack.js";
+import {
+  LEAVE,
+  POP,
+  POPA,
+  POPAD,
+  POPF,
+  POPFD,
+  PUSH,
+  PUSHA,
+  PUSHAD,
+  PUSHF,
+  PUSHFD
+} from "./definitions/stack.js";
 import { CMPS, LODS, MOVS, SCAS, STOS } from "./definitions/strings.js";
 import { XCHG } from "./definitions/xchg.js";
 

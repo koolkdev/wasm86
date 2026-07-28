@@ -9,16 +9,16 @@ export type TestGuestMemoryBinding = Readonly<{
   memoryBindings: ReadonlyMap<ResourceRef, WebAssembly.Memory>;
 }>;
 
-export type TestWasmMemories = TestGuestMemoryBinding & Readonly<{
-  cpuStateMemory: WebAssembly.Memory;
-  programMemories: ReadonlyMap<ResourceRef, WebAssembly.Memory>;
-}>;
+export type TestWasmMemories = TestGuestMemoryBinding &
+  Readonly<{
+    cpuStateMemory: WebAssembly.Memory;
+    programMemories: ReadonlyMap<ResourceRef, WebAssembly.Memory>;
+  }>;
 
 export function createTestGuestMemoryBinding(
   guestMemory: WebAssembly.Memory
 ): TestGuestMemoryBinding {
-  const machineMemoryDefinition =
-    testExecutionModel.memory.machineMemory;
+  const machineMemoryDefinition = testExecutionModel.memory.machineMemory;
   const machineMemory = new WebAssembly.Memory({
     initial: machineMemoryDefinition.memoryImport.limits.minPages
   });
@@ -33,10 +33,7 @@ export function createTestGuestMemoryBinding(
     machineMemory,
     reader: boundMemory.reader,
     memoryBindings: new Map([
-      [
-        testExecutionModel.memory.physical.ramResource,
-        guestMemory
-      ],
+      [testExecutionModel.memory.physical.ramResource, guestMemory],
       [machineMemoryDefinition.resource, machineMemory]
     ])
   };
@@ -47,8 +44,7 @@ export function createTestWasmMemories(): TestWasmMemories {
     initial: testExecutionModel.cpuState.memoryImport.limits.minPages
   });
   const guestMemory = new WebAssembly.Memory({
-    initial:
-      testExecutionModel.memory.physical.ramImport.limits.minPages
+    initial: testExecutionModel.memory.physical.ramImport.limits.minPages
   });
   const guest = createTestGuestMemoryBinding(guestMemory);
 

@@ -1,10 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { IntegerWidth } from "./types.js";
 import type { ValueDefinition } from "./definition.js";
-import {
-  signExtendInteger,
-  truncateInteger
-} from "./integer-width.js";
+import { signExtendInteger, truncateInteger } from "./integer-width.js";
 import type { ValueId, ValueType } from "./types.js";
 import { fitsUnsigned, signExtended } from "./width-bounds.js";
 
@@ -63,9 +60,7 @@ export const extendValue: ValueDefinition<ExtendArgs, ExtendNode> = {
         const bounds = context.widthBounds(node.value);
         const knownBits = node.signed ? bounds.signedBits : bounds.unsignedBits;
 
-        return node.width === 32 || knownBits <= node.width
-          ? node.value
-          : undefined;
+        return node.width === 32 || knownBits <= node.width ? node.value : undefined;
       }
       case "i64":
         // The fold context currently creates i32 constants only.

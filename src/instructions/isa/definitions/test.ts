@@ -1,11 +1,4 @@
-import {
-  form,
-  imm,
-  implicitReg,
-  mnemonic,
-  modrmReg,
-  modrmRm
-} from "../dsl.js";
+import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm } from "../dsl.js";
 import { testSemantic } from "#instructions/semantics/test.js";
 
 export const TEST = mnemonic("test", [

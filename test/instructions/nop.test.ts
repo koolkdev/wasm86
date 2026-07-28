@@ -3,9 +3,7 @@ import { test } from "node:test";
 
 import { runCompiledInstructions } from "#test/instructions/harness/compiled-instruction.js";
 import { startAddress } from "#test/support/addresses.js";
-import {
-  createWasmCpuArchitecturalStateSnapshot
-} from "#test/support/cpu-state.js";
+import { createWasmCpuArchitecturalStateSnapshot } from "#test/support/cpu-state.js";
 
 const allFlagsSet = {
   CF: 1,

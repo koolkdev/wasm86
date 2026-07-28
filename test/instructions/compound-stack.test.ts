@@ -46,29 +46,24 @@ test("PUSHAD stores every dword in architectural order and captures original ESP
       ...allUserFlagsSet
     },
     expectedState: { esp: stackStart },
-    memoryPatches: [{
-      address: stackStart - 1,
-      bytes: [0xaa, ...new Array(stackImage.length).fill(0), 0xbb]
-    }],
-    expectedMemory: [{
-      address: stackStart - 1,
-      bytes: [0xaa, ...stackImage, 0xbb]
-    }]
+    memoryPatches: [
+      {
+        address: stackStart - 1,
+        bytes: [0xaa, ...new Array(stackImage.length).fill(0), 0xbb]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: stackStart - 1,
+        bytes: [0xaa, ...stackImage, 0xbb]
+      }
+    ]
   });
 });
 
 test("PUSHA stores every word in architectural order and captures original SP", async () => {
   const stackStart = 0x110;
-  const stackImage = wordsBytes(
-    0x7777,
-    0x6666,
-    0x5555,
-    0x0120,
-    0x4444,
-    0x3333,
-    0x2222,
-    0x1111
-  );
+  const stackImage = wordsBytes(0x7777, 0x6666, 0x5555, 0x0120, 0x4444, 0x3333, 0x2222, 0x1111);
 
   await assertInstructionCase({
     name: "PUSHA register image",
@@ -85,14 +80,18 @@ test("PUSHA stores every word in architectural order and captures original SP", 
       ...allUserFlagsSet
     },
     expectedState: { esp: stackStart },
-    memoryPatches: [{
-      address: stackStart - 1,
-      bytes: [0xaa, ...new Array(stackImage.length).fill(0), 0xbb]
-    }],
-    expectedMemory: [{
-      address: stackStart - 1,
-      bytes: [0xaa, ...stackImage, 0xbb]
-    }]
+    memoryPatches: [
+      {
+        address: stackStart - 1,
+        bytes: [0xaa, ...new Array(stackImage.length).fill(0), 0xbb]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: stackStart - 1,
+        bytes: [0xaa, ...stackImage, 0xbb]
+      }
+    ]
   });
 });
 
@@ -140,16 +139,7 @@ test("POPAD restores seven dword registers and skips the saved ESP cell", async 
 
 test("POPA restores seven word aliases and skips the saved SP cell", async () => {
   const stackStart = 0x110;
-  const stackImage = wordsBytes(
-    0x7777,
-    0x6666,
-    0x5555,
-    0xbeef,
-    0x4444,
-    0x3333,
-    0x2222,
-    0x1111
-  );
+  const stackImage = wordsBytes(0x7777, 0x6666, 0x5555, 0xbeef, 0x4444, 0x3333, 0x2222, 0x1111);
 
   await assertInstructionCase({
     name: "POPA register image",
@@ -188,14 +178,18 @@ test("ENTER level zero saves EBP once before allocating local bytes", async () =
     bytes: [0xc8, 0x10, 0x00, 0x00],
     initialState: { esp: 0x180, ebp: 0x1234_5678, ...allUserFlagsSet },
     expectedState: { ebp: 0x17c, esp: 0x16c },
-    memoryPatches: [{
-      address: 0x16c,
-      bytes: [...untouchedLocals, 0, 0, 0, 0]
-    }],
-    expectedMemory: [{
-      address: 0x16c,
-      bytes: [...untouchedLocals, ...dwordBytes(0x1234_5678)]
-    }]
+    memoryPatches: [
+      {
+        address: 0x16c,
+        bytes: [...untouchedLocals, 0, 0, 0, 0]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: 0x16c,
+        bytes: [...untouchedLocals, ...dwordBytes(0x1234_5678)]
+      }
+    ]
   });
 });
 
@@ -212,6 +206,7 @@ test("ENTER level two copies the enclosing display and appends its new frame", a
     expectedMemory: [
       {
         address: 0x110,
+        // prettier-ignore
         bytes: [
           0xcc, 0xcc, 0xcc, 0xcc,
           ...dwordBytes(0x0000_011c),
@@ -226,13 +221,10 @@ test("ENTER level two copies the enclosing display and appends its new frame", a
 
 test("ENTER level 31 copies all thirty enclosing display cells", async () => {
   const sourceLowToHigh = [
-    0x0000_901d, 0x0000_901c, 0x0000_901b, 0x0000_901a,
-    0x0000_9019, 0x0000_9018, 0x0000_9017, 0x0000_9016,
-    0x0000_9015, 0x0000_9014, 0x0000_9013, 0x0000_9012,
-    0x0000_9011, 0x0000_9010, 0x0000_900f, 0x0000_900e,
-    0x0000_900d, 0x0000_900c, 0x0000_900b, 0x0000_900a,
-    0x0000_9009, 0x0000_9008, 0x0000_9007, 0x0000_9006,
-    0x0000_9005, 0x0000_9004, 0x0000_9003, 0x0000_9002,
+    0x0000_901d, 0x0000_901c, 0x0000_901b, 0x0000_901a, 0x0000_9019, 0x0000_9018, 0x0000_9017,
+    0x0000_9016, 0x0000_9015, 0x0000_9014, 0x0000_9013, 0x0000_9012, 0x0000_9011, 0x0000_9010,
+    0x0000_900f, 0x0000_900e, 0x0000_900d, 0x0000_900c, 0x0000_900b, 0x0000_900a, 0x0000_9009,
+    0x0000_9008, 0x0000_9007, 0x0000_9006, 0x0000_9005, 0x0000_9004, 0x0000_9003, 0x0000_9002,
     0x0000_9001, 0x0000_9000
   ] as const;
 
@@ -241,13 +233,16 @@ test("ENTER level 31 copies all thirty enclosing display cells", async () => {
     bytes: [0xc8, 0x00, 0x00, 0x1f],
     initialState: { esp: 0x300, ebp: 0x500, ...allUserFlagsSet },
     expectedState: { ebp: 0x2fc, esp: 0x280 },
-    memoryPatches: [{
-      address: 0x488,
-      bytes: dwordsBytes(...sourceLowToHigh)
-    }],
+    memoryPatches: [
+      {
+        address: 0x488,
+        bytes: dwordsBytes(...sourceLowToHigh)
+      }
+    ],
     expectedMemory: [
       {
         address: 0x280,
+        // prettier-ignore
         bytes: dwordsBytes(
           0x0000_02fc,
           ...sourceLowToHigh,
@@ -269,18 +264,22 @@ test("ENTER masks its nesting level to five bits", async () => {
     initialState: { esp: 0x180, ebp: 0x240, ...allUserFlagsSet },
     expectedState: { ebp: 0x17c, esp: 0x174 },
     memoryPatches: [{ address: 0x174, bytes: new Array(12).fill(0xcc) }],
-    expectedMemory: [{
-      address: 0x174,
-      bytes: [
-        0xcc, 0xcc, 0xcc, 0xcc,
-        ...dwordBytes(0x0000_017c),
-        ...dwordBytes(0x0000_0240)
-      ]
-    }]
+    expectedMemory: [
+      {
+        address: 0x174,
+        // prettier-ignore
+        bytes: [
+          0xcc, 0xcc, 0xcc, 0xcc,
+          ...dwordBytes(0x0000_017c),
+          ...dwordBytes(0x0000_0240)
+        ]
+      }
+    ]
   });
 });
 
 test("nested ENTER frames expose an outer local through the copied display", async () => {
+  // prettier-ignore
   const bytes = [
     0xc8, 0x04, 0x00, 0x01,
     0xc7, 0x45, 0xf8, 0x78, 0x56, 0x34, 0x12,
@@ -295,18 +294,20 @@ test("nested ENTER frames expose an outer local through the copied display", asy
     initialState: { esp: 0x300, ...allUserFlagsSet },
     expectedState: { eax: 0x1234_5678, ebp: 0x2f0, esp: 0x2e4 },
     instructionCount: 5,
-    expectedMemory: [{
-      address: 0x2e4,
-      bytes: dwordsBytes(
-        0x0000_0000,
-        0x0000_02f0,
-        0x0000_02fc,
-        0x0000_02fc,
-        0x1234_5678,
-        0x0000_02fc,
-        0x0000_0000
-      )
-    }]
+    expectedMemory: [
+      {
+        address: 0x2e4,
+        bytes: dwordsBytes(
+          0x0000_0000,
+          0x0000_02f0,
+          0x0000_02fc,
+          0x0000_02fc,
+          0x1234_5678,
+          0x0000_02fc,
+          0x0000_0000
+        )
+      }
+    ]
   });
 });
 
@@ -477,10 +478,5 @@ function wordBytes(value: number): readonly number[] {
 }
 
 function dwordBytes(value: number): readonly number[] {
-  return [
-    value & 0xff,
-    (value >>> 8) & 0xff,
-    (value >>> 16) & 0xff,
-    (value >>> 24) & 0xff
-  ];
+  return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
 }

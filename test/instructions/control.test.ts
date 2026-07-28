@@ -299,14 +299,18 @@ test("SETcc supports a high-byte register and reports an exact memory write faul
     },
     expectedEip: startAddress,
     instructionCount: 0,
-    memoryPatches: [{
-      address: guestMemoryMinimumByteLength - 1,
-      bytes: [0x5a]
-    }],
-    expectedMemory: [{
-      address: guestMemoryMinimumByteLength - 1,
-      bytes: [0x5a]
-    }]
+    memoryPatches: [
+      {
+        address: guestMemoryMinimumByteLength - 1,
+        bytes: [0x5a]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: guestMemoryMinimumByteLength - 1,
+        bytes: [0x5a]
+      }
+    ]
   });
 });
 
@@ -423,14 +427,18 @@ test("CALL pushes the next instruction address before dispatching", async () => 
       expectedState: { esp: 0x3c },
       expectedCompletion: { kind: "dispatched", targetEip: 0x1234 },
       expectedEip: 0x1234,
-      memoryPatches: [{
-        address: 0x3b,
-        bytes: [0xaa, 0, 0, 0, 0, 0x34, 0x12, 0, 0, 0xbb]
-      }],
-      expectedMemory: [{
-        address: 0x3b,
-        bytes: [0xaa, 0x03, 0x10, 0, 0, 0x34, 0x12, 0, 0, 0xbb]
-      }]
+      memoryPatches: [
+        {
+          address: 0x3b,
+          bytes: [0xaa, 0, 0, 0, 0, 0x34, 0x12, 0, 0, 0xbb]
+        }
+      ],
+      expectedMemory: [
+        {
+          address: 0x3b,
+          bytes: [0xaa, 0x03, 0x10, 0, 0, 0x34, 0x12, 0, 0, 0xbb]
+        }
+      ]
     }
   ];
 
@@ -484,14 +492,18 @@ test("CALL validates its target read before any stack write and commits neither 
     },
     expectedEip: startAddress,
     instructionCount: 0,
-    memoryPatches: [{
-      address: guestMemoryMinimumByteLength - 2,
-      bytes: [0xaa, 0xbb]
-    }],
-    expectedMemory: [{
-      address: guestMemoryMinimumByteLength - 2,
-      bytes: [0xaa, 0xbb]
-    }]
+    memoryPatches: [
+      {
+        address: guestMemoryMinimumByteLength - 2,
+        bytes: [0xaa, 0xbb]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: guestMemoryMinimumByteLength - 2,
+        bytes: [0xaa, 0xbb]
+      }
+    ]
   });
 });
 

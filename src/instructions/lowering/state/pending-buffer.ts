@@ -70,9 +70,7 @@ export class PendingBuffer<C> {
   }
 
   snapshotBoundary(): void {
-    this.#boundary = new Map(
-      [...this.#entries].map(([channel, entry]) => [channel, entry.value])
-    );
+    this.#boundary = new Map([...this.#entries].map(([channel, entry]) => [channel, entry.value]));
   }
 
   boundaryHas(channel: C): boolean {
@@ -88,8 +86,8 @@ export class PendingBuffer<C> {
   entriesForPath(path: StatePathKind): ReadonlyArray<readonly [C, ValueId]> {
     return path === "fault"
       ? [...this.#boundary]
-      : [...this.#entries].flatMap(([channel, entry]) => (
+      : [...this.#entries].flatMap(([channel, entry]) =>
           entry.dirty ? [[channel, entry.value] as const] : []
-        ));
+        );
   }
 }

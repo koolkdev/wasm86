@@ -10,25 +10,15 @@ import { createInstructionLowerer } from "#instructions/lowering/lowerer.js";
 import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";
 import { coreStateFields } from "#core/state/layout.js";
 import { buildExit } from "#cpu/exit.js";
-import {
-  instructionCountField,
-  instructionLimitField
-} from "#cpu/instruction-count.js";
+import { instructionCountField, instructionLimitField } from "#cpu/instruction-count.js";
 import type { FunctionBuilder } from "#compiler/ir/builder/function.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import {
-  buildDecodeAndDispatch,
-  type BuildDecodedInstruction
-} from "./decode.js";
+import { buildDecodeAndDispatch, type BuildDecodedInstruction } from "./decode.js";
 import { instructionLimitExit } from "./exits.js";
-import {
-  buildInterpreterInstruction,
-  type BuildInterpreterContinuation
-} from "./instruction.js";
+import { buildInterpreterInstruction, type BuildInterpreterContinuation } from "./instruction.js";
 
 const interpreterRunType = functionType([], ["i64"]);
-const instructionLengthLimit =
-  X86_32_DECODE_MODEL.instructionLengthLimit;
+const instructionLengthLimit = X86_32_DECODE_MODEL.instructionLengthLimit;
 
 export function defineInterpreterRun(
   program: ProgramBuilder,
@@ -42,10 +32,7 @@ export function defineInterpreterRun(
     instructionCountField,
     buildExit
   });
-  const effects = interpreterRunEffects(
-    model.cpuState.resource,
-    model.memory.effects
-  );
+  const effects = interpreterRunEffects(model.cpuState.resource, model.memory.effects);
 
   // `run` is the common loop: it validates one maximum-length fetch window,
   // decodes directly from it, and continues with the next EIP. If that window
@@ -55,35 +42,34 @@ export function defineInterpreterRun(
   // tail-calls `run` to return to the common path. Function bodies are built
   // after both definitions exist, so the two paths can refer to each other.
   let exactInstruction: FunctionDefinition | undefined;
-  const run = program.defineFunction({
-    ref: functionRef("interpreter.run"),
-    type: interpreterRunType,
-    effects
-  }, buildRunBody);
+  const run = program.defineFunction(
+    {
+      ref: functionRef("interpreter.run"),
+      type: interpreterRunType,
+      effects
+    },
+    buildRunBody
+  );
 
-  exactInstruction = program.defineFunction({
-    ref: functionRef("interpreter.run.exact-instruction"),
-    type: interpreterRunType,
-    effects
-  }, buildExactInstructionBody);
+  exactInstruction = program.defineFunction(
+    {
+      ref: functionRef("interpreter.run.exact-instruction"),
+      type: interpreterRunType,
+      effects
+    },
+    buildExactInstructionBody
+  );
   return run;
 
   function buildRunBody(fn: FunctionBuilder): void {
-    assert(
-      exactInstruction !== undefined,
-      "exact interpreter instruction function is missing"
-    );
+    assert(exactInstruction !== undefined, "exact interpreter instruction function is missing");
     const exact = exactInstruction;
     // This cache survives loop iterations but resets on the next invocation.
     const fetchMemory = memory.withCache(fn.region);
-    const entryEip = stateAccess.bind(fn.region).readField(
-      coreStateFields.eip
-    );
+    const entryEip = stateAccess.bind(fn.region).readField(coreStateFields.eip);
     const instructionStart = fn.values.addLoopInput();
 
-    fn.region.loop([
-      { seed: entryEip, loopInput: instructionStart }
-    ], (body) => {
+    fn.region.loop([{ seed: entryEip, loopInput: instructionStart }], (body) => {
       buildInstructionLimitExit(body);
       // One range proof makes every direct byte read in this decode safe.
       const directFetch = fetchMemory.bind(body).resolveDirect(
@@ -93,20 +79,14 @@ export function defineInterpreterRun(
         },
         "instructionFetch"
       );
-      const fallbackToExactInstruction = (
-        region: RegionBuilder
-      ): void =>
+      const fallbackToExactInstruction = (region: RegionBuilder): void =>
         region.returnCall(exact, []);
 
       // The fallback re-decodes the same EIP; no architectural state has
       // changed while proving the window or consuming decode bytes.
-      body.if(
-        directFetch.unavailable,
-        fallbackToExactInstruction,
-        { hint: "unlikely" }
-      );
-      const continueLoop: BuildInterpreterContinuation =
-        (region, targetEip) => region.loopContinue([targetEip]);
+      body.if(directFetch.unavailable, fallbackToExactInstruction, { hint: "unlikely" });
+      const continueLoop: BuildInterpreterContinuation = (region, targetEip) =>
+        region.loopContinue([targetEip]);
 
       buildDecodeAndDispatch(body, instructionStart, {
         stateAccess,
@@ -117,8 +97,7 @@ export function defineInterpreterRun(
           access: directFetch.access,
           fallbackToExact: fallbackToExactInstruction
         },
-        buildInstruction:
-          buildInstructionWithContinuation(continueLoop)
+        buildInstruction: buildInstructionWithContinuation(continueLoop)
       });
     });
 
@@ -129,11 +108,8 @@ export function defineInterpreterRun(
   function buildExactInstructionBody(fn: FunctionBuilder): void {
     // Exact mode resolves only the bytes this instruction actually consumes.
     const fetchMemory = memory.withCache(fn.region);
-    const instructionStart = stateAccess.bind(fn.region).readField(
-      coreStateFields.eip
-    );
-    const resumeRun: BuildInterpreterContinuation =
-      (region) => region.returnCall(run, []);
+    const instructionStart = stateAccess.bind(fn.region).readField(coreStateFields.eip);
+    const resumeRun: BuildInterpreterContinuation = (region) => region.returnCall(run, []);
 
     buildInstructionLimitExit(fn.region);
     buildDecodeAndDispatch(fn.region, instructionStart, {
@@ -148,13 +124,8 @@ export function defineInterpreterRun(
   function buildInstructionWithContinuation(
     continuation: BuildInterpreterContinuation
   ): BuildDecodedInstruction {
-    return (region, decoded) => buildInterpreterInstruction(
-      region,
-      decoded,
-      stateAccess,
-      instructionLowerer,
-      continuation
-    );
+    return (region, decoded) =>
+      buildInterpreterInstruction(region, decoded, stateAccess, instructionLowerer, continuation);
   }
 
   function buildInstructionLimitExit(region: RegionBuilder): void {
@@ -162,25 +133,19 @@ export function defineInterpreterRun(
     const count = state.readField(instructionCountField);
     const limit = state.readField(instructionLimitField);
     const countMinusLimit = region.values.binary("sub", count, limit);
-    const reached = region.values.compare(
-      32,
-      "ge_s",
-      countMinusLimit,
-      region.values.const(0)
-    );
+    const reached = region.values.compare(32, "ge_s", countMinusLimit, region.values.const(0));
 
-    region.if(reached, (expired) => {
-      expired.return([
-        buildExit(expired.values, instructionLimitExit())
-      ]);
-    }, { hint: "unlikely" });
+    region.if(
+      reached,
+      (expired) => {
+        expired.return([buildExit(expired.values, instructionLimitExit())]);
+      },
+      { hint: "unlikely" }
+    );
   }
 }
 
-function interpreterRunEffects(
-  state: ResourceRef,
-  memory: StorageEffects
-): StorageEffects {
+function interpreterRunEffects(state: ResourceRef, memory: StorageEffects): StorageEffects {
   const stateEffect = wholeResourceEffect(state);
 
   return {

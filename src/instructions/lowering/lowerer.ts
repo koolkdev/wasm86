@@ -4,14 +4,8 @@ import type { FieldRef } from "#compiler/layout/handles.js";
 import { createStatusFlagResolvers } from "#core/flags/lazy/resolvers.js";
 import type { StateAccess } from "#core/state/access.js";
 import type { MemoryAccess } from "#memory/types.js";
-import {
-  buildInstructionSequence,
-  type InstructionBuilder
-} from "./builder.js";
-import type {
-  BuildExit,
-  InstructionTerminals
-} from "./terminal.js";
+import { buildInstructionSequence, type InstructionBuilder } from "./builder.js";
+import type { BuildExit, InstructionTerminals } from "./terminal.js";
 
 export type InstructionLowerer = Readonly<{
   lower(
@@ -30,9 +24,7 @@ export type InstructionLowererOptions = Readonly<{
 
 // One lowerer shares its generated status-flag resolver family across every
 // instruction body without exposing that family to Interpreter or JIT.
-export function createInstructionLowerer(
-  options: InstructionLowererOptions
-): InstructionLowerer {
+export function createInstructionLowerer(options: InstructionLowererOptions): InstructionLowerer {
   const statusFlagResolvers = createStatusFlagResolvers(options.stateAccess);
 
   return {

@@ -32,10 +32,7 @@ type LogicFlagSource = Readonly<{
   result: ValueId;
 }>;
 
-export type SimpleFlagSource =
-  | AddFlagSource
-  | SubFlagSource
-  | LogicFlagSource;
+export type SimpleFlagSource = AddFlagSource | SubFlagSource | LogicFlagSource;
 
 export function addFlagSource(input: Omit<AddFlagSource, "kind">): AddFlagSource {
   return { kind: "add", ...input };
@@ -78,10 +75,9 @@ export function statusFlagValuesForSource(
   }
 }
 
-export const simpleFlagSourceConditionOperators: Readonly<Record<
-  SimpleFlagSource["kind"],
-  Partial<Record<ConditionCode, CompareOperator>>
->> = {
+export const simpleFlagSourceConditionOperators: Readonly<
+  Record<SimpleFlagSource["kind"], Partial<Record<ConditionCode, CompareOperator>>>
+> = {
   add: {},
   sub: {
     E: "eq",

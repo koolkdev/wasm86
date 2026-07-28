@@ -1,36 +1,16 @@
 import { assert } from "#common/assert.js";
-import {
-  controlCompletes,
-  type Control
-} from "#compiler/ir/controls/index.js";
+import { controlCompletes, type Control } from "#compiler/ir/controls/index.js";
 import { invocationInputs } from "#compiler/ir/invocation.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
-import {
-  describeOperation,
-  type Operation
-} from "#compiler/ir/operations/index.js";
+import { describeOperation, type Operation } from "#compiler/ir/operations/index.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import { unboundedWidthBounds } from "#compiler/ir/values/width-bounds.js";
-import type {
-  ValueId,
-  ValueType,
-  WidthBounds
-} from "#compiler/ir/values/types.js";
+import type { ValueId, ValueType, WidthBounds } from "#compiler/ir/values/types.js";
 import type { VariableRef } from "#compiler/ir/variable.js";
-import {
-  regionCompletes,
-  type Region,
-  type RegionNode
-} from "./region.js";
+import { regionCompletes, type Region, type RegionNode } from "./region.js";
 import type { FunctionGraph, IrFunction } from "./function.js";
-import {
-  describeNode,
-  type NestedRegion
-} from "./node.js";
-import {
-  validateResourceOperation,
-  validateStorageEffectRanges
-} from "./validate/resource.js";
+import { describeNode, type NestedRegion } from "./node.js";
+import { validateResourceOperation, validateStorageEffectRanges } from "./validate/resource.js";
 
 type RegionNodeSite = Readonly<{
   body: Region;
@@ -43,10 +23,7 @@ type RegionOwner = Readonly<{
   nodeIndex: number;
 }>;
 
-type LoopScope = Extract<
-  NestedRegion["scope"],
-  { kind: "loop" }
->;
+type LoopScope = Extract<NestedRegion["scope"], { kind: "loop" }>;
 
 type RegionValidationContext = Readonly<{
   path: string;
@@ -165,10 +142,7 @@ class IrValidator {
     }
   }
 
-  #indexOperationOutputs(
-    operation: Operation,
-    site: RegionNodeSite
-  ): void {
+  #indexOperationOutputs(operation: Operation, site: RegionNodeSite): void {
     const { outputs } = describeNode(operation);
 
     for (const output of outputs) {
@@ -184,11 +158,7 @@ class IrValidator {
     }
   }
 
-  #indexNestedBody(
-    body: Region,
-    owner: RegionNodeSite,
-    path: string
-  ): void {
+  #indexNestedBody(body: Region, owner: RegionNodeSite, path: string): void {
     this.#recordRegionOwner(body, owner, path);
     this.#indexBody(body, path);
   }
@@ -207,10 +177,7 @@ class IrValidator {
   // The seed write is the variable's declaration: the body holding it is the
   // variable's lexical scope, so scoping needs no identity beyond this site.
   #indexVariableDefinition(operation: Operation, site: RegionNodeSite): void {
-    if (
-      operation.kind !== "variable.write" ||
-      operation.initialization !== "seed"
-    ) {
+    if (operation.kind !== "variable.write" || operation.initialization !== "seed") {
       return;
     }
 
@@ -226,17 +193,11 @@ class IrValidator {
       this.#block.values.node(output).kind === "nodeOutput",
       `${site.path} producer output ${output} is not a nodeOutput value`
     );
-    assert(
-      !this.#producers.has(output),
-      `node output ${output} has more than one producer`
-    );
+    assert(!this.#producers.has(output), `node output ${output} has more than one producer`);
     this.#producers.set(output, site);
   }
 
-  #indexScopedInputs(
-    nested: NestedRegion,
-    site: RegionNodeSite
-  ): void {
+  #indexScopedInputs(nested: NestedRegion, site: RegionNodeSite): void {
     if (nested.scope.kind === "ordinary") {
       return;
     }
@@ -279,10 +240,7 @@ class IrValidator {
 
       this.#validateNode(node, site, context);
 
-      if (
-        node.category === "control" &&
-        controlCompletes(node, { regionCompletes })
-      ) {
+      if (node.category === "control" && controlCompletes(node, { regionCompletes })) {
         assert(
           nodeIndex === body.nodes.length - 1,
           `${context.path} has nodes after its terminal ${node.kind} control`
@@ -333,11 +291,7 @@ class IrValidator {
     assert(context.ownerOutput === undefined, `${context.path} must carry a result`);
   }
 
-  #validateNode(
-    node: RegionNode,
-    site: RegionNodeSite,
-    context: RegionValidationContext
-  ): void {
+  #validateNode(node: RegionNode, site: RegionNodeSite, context: RegionValidationContext): void {
     if (node.category === "operation") {
       this.#validateOperationInputs(node, site);
       this.#validateVariableAccess(node, site);
@@ -366,10 +320,7 @@ class IrValidator {
     }
   }
 
-  #validateOperationInputs(
-    operation: Operation,
-    site: RegionNodeSite
-  ): void {
+  #validateOperationInputs(operation: Operation, site: RegionNodeSite): void {
     for (const input of describeNode(operation).inputs) {
       const actualType = this.#block.values.valueType(input.value);
 
@@ -377,32 +328,19 @@ class IrValidator {
         actualType === input.type,
         `${site.path} operand ${input.value} must be ${input.type}, got ${actualType}`
       );
-      this.#validateValueUse(
-        input.value,
-        site,
-        `${site.path} operand ${input.value}`
-      );
+      this.#validateValueUse(input.value, site, `${site.path} operand ${input.value}`);
     }
   }
 
   #validateVariableAccess(operation: Operation, site: RegionNodeSite): void {
-    if (
-      operation.kind !== "variable.read" &&
-      operation.kind !== "variable.write"
-    ) {
+    if (operation.kind !== "variable.read" && operation.kind !== "variable.write") {
       return;
     }
 
     const seed = this.#variableSeeds.get(operation.variable);
 
-    assert(
-      seed !== undefined,
-      `${site.path} uses a variable with no seed in this root`
-    );
-    if (
-      operation.kind === "variable.write" &&
-      operation.initialization === "seed"
-    ) {
+    assert(seed !== undefined, `${site.path} uses a variable with no seed in this root`);
+    if (operation.kind === "variable.write" && operation.initialization === "seed") {
       return;
     }
     this.#assertVariableSeedDominates(seed, site);
@@ -417,7 +355,7 @@ class IrValidator {
       return;
     }
 
-    for (let body = use.body; body !== seed.body; ) {
+    for (let body = use.body; body !== seed.body;) {
       const owner = this.#regionOwners.get(body);
 
       assert(
@@ -483,11 +421,7 @@ class IrValidator {
     }
   }
 
-  #validateValueUse(
-    value: ValueId,
-    site: RegionNodeSite,
-    path: string
-  ): void {
+  #validateValueUse(value: ValueId, site: RegionNodeSite, path: string): void {
     const visited = new Set<ValueId>();
 
     const visit = (id: ValueId): void => {
@@ -546,7 +480,7 @@ class IrValidator {
       return;
     }
 
-    for (let body = use.body; body !== producer.body; ) {
+    for (let body = use.body; body !== producer.body;) {
       const owner = this.#regionOwners.get(body);
 
       assert(
@@ -567,7 +501,7 @@ class IrValidator {
   }
 
   #bodyIsWithin(body: Region, scope: Region): boolean {
-    for (let current = body; ; ) {
+    for (let current = body; ;) {
       if (current === scope) {
         return true;
       }
@@ -614,10 +548,7 @@ class IrValidator {
     }
   }
 
-  #validateReturn(
-    control: Extract<Control, { kind: "return" }>,
-    path: string
-  ): void {
+  #validateReturn(control: Extract<Control, { kind: "return" }>, path: string): void {
     const fn = this.#function;
 
     const source = control.source;
@@ -657,7 +588,6 @@ class IrValidator {
       assert(actual === expected, `${path} result ${index} must be ${expected}, got ${actual}`);
     }
   }
-
 }
 
 function assertValueType(

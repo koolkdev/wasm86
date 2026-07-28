@@ -12,9 +12,7 @@ export type WasmIfInstructionOptions = Readonly<{
   result?: WasmValueType | undefined;
 }>;
 
-export type WasmInstructionDescriptor<
-  Args extends readonly unknown[]
-> = Readonly<{
+export type WasmInstructionDescriptor<Args extends readonly unknown[]> = Readonly<{
   opcode: number;
   encodeImmediate: (body: ByteSink, ...args: Args) => void;
   branchHint?: (...args: Args) => WasmBranchHint | undefined;
@@ -30,15 +28,11 @@ function instruction<Args extends readonly unknown[]>(
     : { opcode, encodeImmediate, branchHint };
 }
 
-function plainInstruction(
-  opcode: number
-): WasmInstructionDescriptor<readonly []> {
+function plainInstruction(opcode: number): WasmInstructionDescriptor<readonly []> {
   return instruction(opcode, () => {});
 }
 
-function u32Instruction(
-  opcode: number
-): WasmInstructionDescriptor<readonly [value: number]> {
+function u32Instruction(opcode: number): WasmInstructionDescriptor<readonly [value: number]> {
   return instruction(opcode, (body, value) => {
     body.writeU32(value);
   });
@@ -52,20 +46,15 @@ function memoryInstruction(
   });
 }
 
-const blockInstruction = instruction<readonly [result?: WasmValueType]>(
-  0x02,
-  (body, result) => {
-    body.writeByte(result ?? emptyBlockType);
-  }
-);
+const blockInstruction = instruction<readonly [result?: WasmValueType]>(0x02, (body, result) => {
+  body.writeByte(result ?? emptyBlockType);
+});
 
 const loopInstruction = instruction(0x03, (body) => {
   body.writeByte(emptyBlockType);
 });
 
-const ifInstruction = instruction<
-  readonly [options?: WasmIfInstructionOptions]
->(
+const ifInstruction = instruction<readonly [options?: WasmIfInstructionOptions]>(
   0x04,
   (body, options = {}) => {
     body.writeByte(options.result ?? emptyBlockType);
@@ -73,9 +62,7 @@ const ifInstruction = instruction<
   (options = {}) => options.hint
 );
 
-const brIfInstruction = instruction<
-  readonly [labelDepth: number, hint?: WasmBranchHint]
->(
+const brIfInstruction = instruction<readonly [labelDepth: number, hint?: WasmBranchHint]>(
   0x0d,
   (body, labelDepth) => {
     body.writeU32(labelDepth);
@@ -95,33 +82,29 @@ const brTableInstruction = instruction<
   body.writeU32(defaultLabelDepth);
 });
 
-const callIndirectInstruction = instruction<
-  readonly [typeIndex: number, tableIndex: number]
->(0x11, (body, typeIndex, tableIndex) => {
-  body.writeU32(typeIndex);
-  body.writeU32(tableIndex);
-});
-
-const returnCallIndirectInstruction = instruction<
-  readonly [typeIndex: number, tableIndex: number]
->(0x13, (body, typeIndex, tableIndex) => {
-  body.writeU32(typeIndex);
-  body.writeU32(tableIndex);
-});
-
-const i32ConstInstruction = instruction<readonly [value: number]>(
-  0x41,
-  (body, value) => {
-    body.writeBytes(encodeI32Leb128(value));
+const callIndirectInstruction = instruction<readonly [typeIndex: number, tableIndex: number]>(
+  0x11,
+  (body, typeIndex, tableIndex) => {
+    body.writeU32(typeIndex);
+    body.writeU32(tableIndex);
   }
 );
 
-const i64ConstInstruction = instruction<readonly [value: bigint]>(
-  0x42,
-  (body, value) => {
-    body.writeBytes(encodeI64Leb128(value));
+const returnCallIndirectInstruction = instruction<readonly [typeIndex: number, tableIndex: number]>(
+  0x13,
+  (body, typeIndex, tableIndex) => {
+    body.writeU32(typeIndex);
+    body.writeU32(tableIndex);
   }
 );
+
+const i32ConstInstruction = instruction<readonly [value: number]>(0x41, (body, value) => {
+  body.writeBytes(encodeI32Leb128(value));
+});
+
+const i64ConstInstruction = instruction<readonly [value: bigint]>(0x42, (body, value) => {
+  body.writeBytes(encodeI64Leb128(value));
+});
 
 export const wasmInstruction = {
   control: {

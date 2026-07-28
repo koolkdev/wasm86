@@ -2,9 +2,7 @@ import { assert } from "#common/assert.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import { wasmPageByteLength } from "#compiler/program/limits.js";
 import type { CompiledProgram } from "#compiler/compile.js";
-import type {
-  FunctionRef
-} from "#compiler/ir/refs.js";
+import type { FunctionRef } from "#compiler/ir/refs.js";
 import type { FunctionExportRef } from "#compiler/program/exports.js";
 
 const compiledModules = new WeakMap<CompiledProgram, WebAssembly.Module>();
@@ -22,18 +20,12 @@ export function instantiateCompiledProgram(
   program: CompiledProgram,
   bindings: ProgramInstanceBindings
 ): ProgramInstance {
-  const importsByModule = new Map<
-    string,
-    Map<string, WebAssembly.ImportValue>
-  >();
+  const importsByModule = new Map<string, Map<string, WebAssembly.ImportValue>>();
 
   for (const imported of program.memoryImports) {
     const memory = bindings.memories.get(imported.ref);
 
-    assert(
-      memory !== undefined,
-      `missing memory binding for program resource ${imported.ref.id}`
-    );
+    assert(memory !== undefined, `missing memory binding for program resource ${imported.ref.id}`);
     assert(
       memory.buffer.byteLength >= imported.limits.minPages * wasmPageByteLength,
       `memory binding for program resource ${imported.ref.id} is smaller than its declared minimum`
@@ -45,10 +37,7 @@ export function instantiateCompiledProgram(
   for (const imported of program.functionImports) {
     const fn = bindings.functions.get(imported.ref);
 
-    assert(
-      fn !== undefined,
-      `missing function binding for program function ${imported.ref.id}`
-    );
+    assert(fn !== undefined, `missing function binding for program function ${imported.ref.id}`);
     addImport(importsByModule, imported.moduleName, imported.name, fn);
   }
 
@@ -70,10 +59,7 @@ export function instantiateCompiledProgram(
   for (const exported of program.functionExports) {
     const value = instance.exports[exported.name];
 
-    assert(
-      value !== undefined,
-      `missing function export for program ref ${exported.ref.id}`
-    );
+    assert(value !== undefined, `missing function export for program ref ${exported.ref.id}`);
     functionExports.set(exported.ref, value);
   }
 

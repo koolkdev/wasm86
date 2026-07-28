@@ -8,10 +8,7 @@ import type { Program } from "#compiler/program/program.js";
 import { functionType } from "#compiler/ir/function.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
-import {
-  functionExportRef,
-  type FunctionExportRef
-} from "#compiler/program/exports.js";
+import { functionExportRef, type FunctionExportRef } from "#compiler/program/exports.js";
 import { functionRef } from "#compiler/ir/refs.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -41,15 +38,9 @@ type JitProgram = Readonly<{
   entry: FunctionExportRef;
 }>;
 
-export function buildJitProgram(
-  model: ExecutionModel,
-  decoded: JitDecodedBlock
-): JitProgram {
+export function buildJitProgram(model: ExecutionModel, decoded: JitDecodedBlock): JitProgram {
   const program = new ProgramBuilder(model.resources);
-  const effects = jitExecutionEffects(
-    model.cpuState.resource,
-    model.memory.effects
-  );
+  const effects = jitExecutionEffects(model.cpuState.resource, model.memory.effects);
   const dispatch = program.importFunction({
     ref: functionRef("jit.dispatch"),
     type: jitDispatchType,
@@ -58,9 +49,7 @@ export function buildJitProgram(
     name: jitDispatchImportName
   });
   const block = defineJitBlock(program, model, decoded, dispatch);
-  const entry = functionExportRef(
-    `jit.block-export.${hex(decoded.startEip)}`
-  );
+  const entry = functionExportRef(`jit.block-export.${hex(decoded.startEip)}`);
 
   program.exportFunction({
     ref: entry,
@@ -83,20 +72,14 @@ function defineJitBlock(
     buildExit
   });
 
-  return program.defineFunction({
-    ref: functionRef(`jit.block.${hex(decoded.startEip)}`),
-    type: jitBlockType,
-    effects: jitExecutionEffects(
-      model.cpuState.resource,
-      model.memory.effects
-    )
-  }, (fn) => buildJitBlockBody(
-    fn,
-    decoded,
-    model.cpuState.access,
-    instructionLowerer,
-    dispatch
-  ));
+  return program.defineFunction(
+    {
+      ref: functionRef(`jit.block.${hex(decoded.startEip)}`),
+      type: jitBlockType,
+      effects: jitExecutionEffects(model.cpuState.resource, model.memory.effects)
+    },
+    (fn) => buildJitBlockBody(fn, decoded, model.cpuState.access, instructionLowerer, dispatch)
+  );
 }
 
 function buildJitBlockBody(
@@ -117,9 +100,7 @@ function buildJitBlockBody(
       state.field(coreStateFields.eip),
       fn.values.const(decoded.terminator.instructionStart)
     );
-    fn.return([
-      buildCpuExceptionExit(fn.values, decoded.terminator.exception)
-    ]);
+    fn.return([buildCpuExceptionExit(fn.values, decoded.terminator.exception)]);
     return;
   }
 
@@ -148,13 +129,10 @@ function buildJitBlockBody(
     const completedEip = fn.values.constValue(finalFallthrough);
 
     assert(
-      completedEip !== undefined &&
-        u32(completedEip) === u32(decoded.terminator.instructionStart),
+      completedEip !== undefined && u32(completedEip) === u32(decoded.terminator.instructionStart),
       "a decode-time CPU exception does not follow the decoded instruction prefix"
     );
-    fn.return([
-      buildCpuExceptionExit(fn.values, decoded.terminator.exception)
-    ]);
+    fn.return([buildCpuExceptionExit(fn.values, decoded.terminator.exception)]);
     return;
   }
   fn.returnCall(dispatch, [finalFallthrough]);
@@ -171,22 +149,14 @@ function jitInstructionTerminals(dispatch: CallTarget): InstructionTerminals {
   };
 }
 
-function buildCpuExceptionExit(
-  values: ValueTable,
-  exception: CpuException<number>
-): ValueId {
+function buildCpuExceptionExit(values: ValueTable, exception: CpuException<number>): ValueId {
   return buildExit(
     values,
-    exceptionExit(
-      mapCpuException(exception, (value) => values.const(value))
-    )
+    exceptionExit(mapCpuException(exception, (value) => values.const(value)))
   );
 }
 
-function jitExecutionEffects(
-  cpuState: ResourceRef,
-  memory: StorageEffects
-): StorageEffects {
+function jitExecutionEffects(cpuState: ResourceRef, memory: StorageEffects): StorageEffects {
   const stateEffect = wholeResourceEffect(cpuState);
 
   return {

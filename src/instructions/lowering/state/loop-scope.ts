@@ -40,8 +40,7 @@ export class StateLoopScope {
 
     for (const channel of carried) {
       assert(
-        channel.kind === "gpr" ||
-          (channel.kind === "field" && isLazyFlagStateField(channel)),
+        channel.kind === "gpr" || (channel.kind === "field" && isLazyFlagStateField(channel)),
         `loop body writes unsupported state channel: ${JSON.stringify(channel)}`
       );
     }
@@ -67,9 +66,7 @@ export class StateLoopScope {
   }
 
   captureExitValues(access: BoundStateAccess): readonly ValueId[] {
-    return this.#openCarried().map((value) =>
-      this.#state.readChannel(access, value.channel)
-    );
+    return this.#openCarried().map((value) => this.#state.readChannel(access, value.channel));
   }
 
   exitWritebacks(
@@ -88,10 +85,9 @@ export class StateLoopScope {
       this.#state.invalidate(value.channel);
     }
 
-    if (carried.some(
-      (value) => value.channel.kind === "field" &&
-        isLazyFlagStateField(value.channel)
-    )) {
+    if (
+      carried.some((value) => value.channel.kind === "field" && isLazyFlagStateField(value.channel))
+    ) {
       // This keeps a later resolver inside an arm from publishing a carried
       // lazy value that has no iteration-start value to restore.
       this.#state.statusFlags.resetToInputs();
@@ -102,9 +98,7 @@ export class StateLoopScope {
 
   assertHoistableRead(effect: ResourceEffect): void {
     assert(
-      this.#openCarried().every(
-        (value) => !mayAlias(this.#state.effect(value.channel), effect)
-      ),
+      this.#openCarried().every((value) => !mayAlias(this.#state.effect(value.channel), effect)),
       "an execution-state read overlaps loop-carried state"
     );
   }
@@ -114,10 +108,7 @@ export class StateLoopScope {
   }
 
   #openCarried(): readonly LoopCarriedState[] {
-    assert(
-      this.#carried !== undefined && !this.#closed,
-      "loop state scope is not open"
-    );
+    assert(this.#carried !== undefined && !this.#closed, "loop state scope is not open");
     return this.#carried;
   }
 }

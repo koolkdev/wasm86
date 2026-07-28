@@ -1,23 +1,13 @@
 import { assert } from "#common/assert.js";
 import { isLazyFlagStateField } from "#core/flags/layout.js";
-import type {
-  IfBody,
-  LoopBody,
-  SemanticsBuilder
-} from "#instructions/semantics/builder.js";
-import {
-  ifControl,
-  type BranchHint
-} from "#compiler/ir/controls/index.js";
+import type { IfBody, LoopBody, SemanticsBuilder } from "#instructions/semantics/builder.js";
+import { ifControl, type BranchHint } from "#compiler/ir/controls/index.js";
 import { resourceWrite } from "#compiler/ir/operations/resource.js";
 import { regionCompletes, type Region } from "#compiler/ir/region.js";
 import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { type InstructionStateChannel } from "./state/channels.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type {
-  SemanticRegionScope,
-  SemanticScopeStack
-} from "./scope.js";
+import type { SemanticRegionScope, SemanticScopeStack } from "./scope.js";
 import type { InstructionState } from "./state/state.js";
 import type { StateWriteLog } from "./state/write-log.js";
 
@@ -88,23 +78,14 @@ export class ControlEmitter {
     const conditionValue = parent.values.constValue(condition);
 
     if (conditionValue !== undefined) {
-      (conditionValue !== 0 ? emitThen : emitElse)(
-        this.#bindScope(parentScope),
-        parent.values
-      );
+      (conditionValue !== 0 ? emitThen : emitElse)(this.#bindScope(parentScope), parent.values);
       return "continues";
     }
 
     const thenArm = this.#buildArm(parentScope, emitThen);
     const elseArm = this.#buildArm(parentScope, emitElse);
 
-    return this.#emitTwoArmedIf(
-      parentScope,
-      condition,
-      thenArm,
-      elseArm,
-      hint
-    );
+    return this.#emitTwoArmedIf(parentScope, condition, thenArm, elseArm, hint);
   }
 
   runLoopBody<T>(
@@ -114,9 +95,7 @@ export class ControlEmitter {
     finish: (condition: ValueId) => T
   ): T {
     return this.#scopes.enter(parentScope, "loop", region, (scope) => {
-      const outcome = scope.run(() => (
-        body(this.#bindScope(scope), region.values)
-      ));
+      const outcome = scope.run(() => body(this.#bindScope(scope), region.values));
 
       assert(outcome.kind === "fallthrough", "a loop body must not terminate the instruction");
       scope.commitMemoryWrites();
@@ -131,23 +110,22 @@ export class ControlEmitter {
     hint?: BranchHint
   ): void {
     const parent = parentScope.region;
-    const implicitElse = thenArm.outcome === "completes"
-      ? undefined
-      : this.#buildImplicitElse(parentScope, thenArm.writtenChannels);
+    const implicitElse =
+      thenArm.outcome === "completes"
+        ? undefined
+        : this.#buildImplicitElse(parentScope, thenArm.writtenChannels);
 
-    parent.push(ifControl.create({
-      condition,
-      ...(hint !== undefined ? { hint } : {}),
-      thenBody: thenArm.region.build(),
-      ...(implicitElse !== undefined ? { elseBody: implicitElse } : {})
-    }));
+    parent.push(
+      ifControl.create({
+        condition,
+        ...(hint !== undefined ? { hint } : {}),
+        thenBody: thenArm.region.build(),
+        ...(implicitElse !== undefined ? { elseBody: implicitElse } : {})
+      })
+    );
 
     if (thenArm.outcome === "continues") {
-      this.#applyJoinEffects(
-        parentScope,
-        [thenArm],
-        thenArm.writtenChannels
-      );
+      this.#applyJoinEffects(parentScope, [thenArm], thenArm.writtenChannels);
     }
   }
 
@@ -168,12 +146,14 @@ export class ControlEmitter {
       this.#commitMissingJoinChannels(arm, joinedChannels);
     }
 
-    parent.push(ifControl.create({
-      condition,
-      ...(hint !== undefined ? { hint } : {}),
-      thenBody: thenArm.region.build(),
-      elseBody: elseArm.region.build()
-    }));
+    parent.push(
+      ifControl.create({
+        condition,
+        ...(hint !== undefined ? { hint } : {}),
+        thenBody: thenArm.region.build(),
+        elseBody: elseArm.region.build()
+      })
+    );
 
     if (continuingArms.length === 0) {
       return "completes";
@@ -183,10 +163,7 @@ export class ControlEmitter {
     return "continues";
   }
 
-  #buildArm(
-    parentScope: SemanticRegionScope,
-    emitBody: IfBody
-  ): BuiltArm {
+  #buildArm(parentScope: SemanticRegionScope, emitBody: IfBody): BuiltArm {
     const writeCheckpoint = this.#writeLog.checkpoint();
 
     return this.#state.enterScope(() => {
@@ -215,10 +192,13 @@ export class ControlEmitter {
     });
   }
 
-  #commitMissingJoinChannels(arm: ContinuingArm, joinedChannels: readonly InstructionStateChannel[]): void {
-    const missing = joinedChannels.filter((channel) => (
+  #commitMissingJoinChannels(
+    arm: ContinuingArm,
+    joinedChannels: readonly InstructionStateChannel[]
+  ): void {
+    const missing = joinedChannels.filter((channel) =>
       arm.writtenChannels.every((written) => !this.#state.sameChannel(written, channel))
-    ));
+    );
 
     this.#flushDirtyChannelsInto(arm.region, missing);
   }
@@ -245,11 +225,10 @@ export class ControlEmitter {
 
     for (const channel of channels) {
       if (this.#state.isChannelDirty(channel)) {
-        region.operation(resourceWrite, this.#state.writeback(
-          access,
-          channel,
-          this.#state.readChannel(access, channel)
-        ));
+        region.operation(
+          resourceWrite,
+          this.#state.writeback(access, channel, this.#state.readChannel(access, channel))
+        );
         emitted = true;
       }
     }
@@ -275,10 +254,7 @@ export class ControlEmitter {
       this.#writeLog.recordStateWrite(channel);
     }
 
-    if (channels.some(
-      (channel) => channel.kind === "field" &&
-        isLazyFlagStateField(channel)
-    )) {
+    if (channels.some((channel) => channel.kind === "field" && isLazyFlagStateField(channel))) {
       // This keeps a later resolver inside an arm from publishing a joined
       // lazy value that has no instruction-start value to restore.
       this.#state.statusFlags.resetToInputs();

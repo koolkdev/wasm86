@@ -2,10 +2,7 @@ import { assert } from "#common/assert.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { OperandWidth } from "#core/types.js";
-import {
-  x86StatusFlags,
-  type X86StatusFlag
-} from "../definitions.js";
+import { x86StatusFlags, type X86StatusFlag } from "../definitions.js";
 import { LAZY_FLAGS_KIND } from "./encoding.js";
 import {
   addFlagSource,
@@ -27,10 +24,7 @@ export function resolveLazyStatusFlagBytes(
   const kind = kindByte & 0b11;
   const width = lazyFlagWidths[kindByte >>> 2];
 
-  if (
-    width === undefined ||
-    kind === LAZY_FLAGS_KIND.NONE
-  ) {
+  if (width === undefined || kind === LAZY_FLAGS_KIND.NONE) {
     throw new RangeError(`invalid lazy-flags kind byte: ${kindByte}`);
   }
 
@@ -40,20 +34,13 @@ export function resolveLazyStatusFlagBytes(
   const source = lazyFlagSource(values, kind, width, left, right);
   // Host reads use the compiler's normal flag graph with constant inputs, so
   // the ValueTable folds the architectural definition instead of duplicating it.
-  const resolved = statusFlagValuesForSource(
-    values,
-    source,
-    { undefinedAF: values.const(0) }
-  );
+  const resolved = statusFlagValuesForSource(values, source, { undefinedAF: values.const(0) });
   const result = {} as Record<X86StatusFlag, 0 | 1>;
 
   for (const flag of x86StatusFlags) {
     const value = values.constValue(resolved[flag]);
 
-    assert(
-      value === 0 || value === 1,
-      `lazy ${flag} did not fold to a flag byte`
-    );
+    assert(value === 0 || value === 1, `lazy ${flag} did not fold to a flag byte`);
     result[flag] = value;
   }
 

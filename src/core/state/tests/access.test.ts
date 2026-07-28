@@ -9,10 +9,7 @@ import { flagStateFields } from "#core/flags/layout.js";
 import { coreStateFields } from "#core/state/layout.js";
 import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { testExecutionModel } from "#test/support/execution-model.js";
-import {
-  BoundStateAccess,
-  StateAccess
-} from "../access.js";
+import { BoundStateAccess, StateAccess } from "../access.js";
 
 const cpuState = testExecutionModel.cpuState;
 
@@ -81,10 +78,10 @@ test("state reads and writes normalize to resource operations", () => {
   const { values, body, access } = createAccess();
   const flag = access.field(flagStateFields.concrete.ZF);
   const count = access.field(instructionCountField);
-  const flagValue = access.readField(
-    flagStateFields.concrete.ZF,
-    { kind: "unsigned", bounds: fitsUnsigned(1) }
-  );
+  const flagValue = access.readField(flagStateFields.concrete.ZF, {
+    kind: "unsigned",
+    bounds: fitsUnsigned(1)
+  });
 
   access.write(count, values.const(7));
 
@@ -109,11 +106,7 @@ test("state reads and writes normalize to resource operations", () => {
   strictEqual(write.destination.effect.resource, cpuState.resource);
 });
 
-function exactSlice(
-  operand: ResourceByteOperand,
-  byteOffset: number,
-  byteLength: number
-): void {
+function exactSlice(operand: ResourceByteOperand, byteOffset: number, byteLength: number): void {
   strictEqual(operand.effect.resource, cpuState.resource);
   deepStrictEqual(operand.effect.range, {
     basis: { kind: "resource" },

@@ -20,19 +20,20 @@ export function emitFunction(
 ): EncodedWasmFunctionBody {
   assert(context.placement.function === fn, "placement belongs to another IR function");
 
-  const localTypes = context.placement.plan.localTypes.map((type) =>
-    wasmTypeForValue(type)
-  );
+  const localTypes = context.placement.plan.localTypes.map((type) => wasmTypeForValue(type));
 
-  return encodeWasmFunctionBody({
-    parameterCount: fn.parameters.length,
-    localTypes
-  }, (body, resolveLocal) => {
-    emitFunctionRegions(fn, {
-      body,
-      bindings: context.bindings,
-      placement: context.placement,
-      resolveLocal
-    });
-  });
+  return encodeWasmFunctionBody(
+    {
+      parameterCount: fn.parameters.length,
+      localTypes
+    },
+    (body, resolveLocal) => {
+      emitFunctionRegions(fn, {
+        body,
+        bindings: context.bindings,
+        placement: context.placement,
+        resolveLocal
+      });
+    }
+  );
 }

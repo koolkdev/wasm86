@@ -8,8 +8,26 @@ import { buildFlagImage, writeFlagsFromImage } from "./flag-image.js";
 export type StackOperandWidth = Extract<OperandWidth, 16 | 32>;
 
 const x86Low16Flags = x86Flags.filter((flag) => x86EflagsBitOffset[flag] < 16);
-const pushadRegisters = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"] as const satisfies readonly Reg32[];
-const pushaRegisters = ["ax", "cx", "dx", "bx", "sp", "bp", "si", "di"] as const satisfies readonly Reg16[];
+const pushadRegisters = [
+  "eax",
+  "ecx",
+  "edx",
+  "ebx",
+  "esp",
+  "ebp",
+  "esi",
+  "edi"
+] as const satisfies readonly Reg32[];
+const pushaRegisters = [
+  "ax",
+  "cx",
+  "dx",
+  "bx",
+  "sp",
+  "bp",
+  "si",
+  "di"
+] as const satisfies readonly Reg16[];
 const popadCells = [
   ["edi", 0],
   ["esi", 4],
@@ -43,11 +61,7 @@ export function pushStack(
   s.write(s.reg("esp"), nextEsp, { width: 32 });
 }
 
-export function popStack(
-  s: SemanticsBuilder,
-  v: ValueBuilder,
-  width: StackOperandWidth
-): Value {
+export function popStack(s: SemanticsBuilder, v: ValueBuilder, width: StackOperandWidth): Value {
   const esp = s.read(s.reg("esp"), { width: 32 });
   const stack = s.memory.reference("ss", esp);
   const value = s.memory.read(stack, { width });
@@ -124,9 +138,12 @@ function pushAll(s: SemanticsBuilder, v: ValueBuilder, width: StackOperandWidth)
     intent: "write"
   });
 
-  const values = width === 32
-    ? pushadRegisters.map((reg) => reg === "esp" ? esp : s.read(s.reg(reg), { width: 32 }))
-    : pushaRegisters.map((reg) => reg === "sp" ? v.truncate(16, esp) : s.read(s.reg(reg), { width: 16 }));
+  const values =
+    width === 32
+      ? pushadRegisters.map((reg) => (reg === "esp" ? esp : s.read(s.reg(reg), { width: 32 })))
+      : pushaRegisters.map((reg) =>
+          reg === "sp" ? v.truncate(16, esp) : s.read(s.reg(reg), { width: 16 })
+        );
 
   values.forEach((value, index) => {
     const byteOffset = totalBytes - cellBytes * (index + 1);
@@ -204,10 +221,7 @@ export function popSegmentSemantic(width: StackOperandWidth = 32): SemanticTempl
 export function leaveSemantic(): SemanticTemplate {
   return (s, v) => {
     const frame = s.read(s.reg("ebp"), { width: 32 });
-    const savedFrame = s.memory.read(
-      s.memory.reference("ss", frame),
-      { width: 32 }
-    );
+    const savedFrame = s.memory.read(s.memory.reference("ss", frame), { width: 32 });
     const nextEsp = v.binary("add", frame, v.const(4));
 
     s.write(s.reg("esp"), nextEsp, { width: 32 });

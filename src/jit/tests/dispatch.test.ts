@@ -7,13 +7,8 @@ import { decodeExit, exitLayout } from "#cpu/exit.js";
 import { compileJitFromReader } from "#jit/compile.js";
 import { instructionLimitExit } from "#interpreter/exits.js";
 import { writeBackingBytes } from "#memory/bytes.js";
-import {
-  readWasmCpuStateSnapshot,
-  writeWasmCpuStateSnapshot
-} from "#test/support/cpu-state.js";
-import {
-  testExecutionModel
-} from "#test/support/execution-model.js";
+import { readWasmCpuStateSnapshot, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 
 const aEip = 0x1000;
@@ -23,10 +18,15 @@ const dispatchStop = encodeVariant(exitLayout, instructionLimitExit());
 test("a final static jmp returns through the typed dispatch import", () => {
   const memories = createTestWasmMemories();
 
-  writeSource(memories.guestMemory, aEip, [
-    0x40,                         // inc eax
-    0xe9, 0xfa, 0x0f, 0x00, 0x00 // jmp 0x2000
-  ]);
+  writeSource(
+    memories.guestMemory,
+    aEip,
+    // prettier-ignore
+    [
+      0x40,                         // inc eax
+      0xe9, 0xfa, 0x0f, 0x00, 0x00 // jmp 0x2000
+    ]
+  );
   const artifact = compileJitFromReader({
     reader: memories.reader,
     start: aEip,
@@ -39,10 +39,7 @@ test("a final static jmp returns through the typed dispatch import", () => {
   const dispatchTargets: number[] = [];
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: memories.programMemories,
-    functions: new Map([[
-      imported.ref,
-      recordDispatches(dispatchTargets)
-    ]])
+    functions: new Map([[imported.ref, recordDispatches(dispatchTargets)]])
   });
   const entry = instance.functionExports.get(artifact.entry);
 
@@ -69,6 +66,7 @@ test("a conditional side transfer dispatches only when taken", () => {
   writeSource(
     memories.guestMemory,
     aEip,
+    // prettier-ignore
     [
       0x40,       // inc eax
       0x75, 0x1d, // jnz 0x1020
@@ -88,10 +86,7 @@ test("a conditional side transfer dispatches only when taken", () => {
   const dispatchTargets: number[] = [];
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: memories.programMemories,
-    functions: new Map([[
-      imported.ref,
-      recordDispatches(dispatchTargets)
-    ]])
+    functions: new Map([[imported.ref, recordDispatches(dispatchTargets)]])
   });
   const entry = instance.functionExports.get(artifact.entry);
 
@@ -101,10 +96,7 @@ test("a conditional side transfer dispatches only when taken", () => {
   writeWasmCpuStateSnapshot(stateView, { eip: aEip });
   const takenEncoded: unknown = entry();
 
-  ok(
-    typeof takenEncoded === "bigint",
-    "compiled JIT entry must return i64"
-  );
+  ok(typeof takenEncoded === "bigint", "compiled JIT entry must return i64");
   deepStrictEqual(decodeExit(takenEncoded), { kind: "instructionLimit" });
   deepStrictEqual(dispatchTargets, [takenEip]);
   const takenState = readWasmCpuStateSnapshot(stateView);
@@ -115,14 +107,8 @@ test("a conditional side transfer dispatches only when taken", () => {
   writeWasmCpuStateSnapshot(stateView, { eip: aEip, eax: 0xffff_ffff });
   const notTakenEncoded: unknown = entry();
 
-  ok(
-    typeof notTakenEncoded === "bigint",
-    "compiled JIT entry must return i64"
-  );
-  deepStrictEqual(
-    decodeExit(notTakenEncoded),
-    { kind: "hostTrap", vector: 0x2e }
-  );
+  ok(typeof notTakenEncoded === "bigint", "compiled JIT entry must return i64");
+  deepStrictEqual(decodeExit(notTakenEncoded), { kind: "hostTrap", vector: 0x2e });
   deepStrictEqual(dispatchTargets, [takenEip]);
   const notTakenState = readWasmCpuStateSnapshot(stateView);
 
@@ -147,10 +133,7 @@ test("an indirect jump preserves the full u32 dispatch target", () => {
   const dispatchTargets: number[] = [];
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: memories.programMemories,
-    functions: new Map([[
-      imported.ref,
-      recordDispatches(dispatchTargets)
-    ]])
+    functions: new Map([[imported.ref, recordDispatches(dispatchTargets)]])
   });
   const entry = instance.functionExports.get(artifact.entry);
 
@@ -165,16 +148,8 @@ test("an indirect jump preserves the full u32 dispatch target", () => {
   deepStrictEqual(dispatchTargets, [targetEip]);
 });
 
-function writeSource(
-  memory: WebAssembly.Memory,
-  eip: number,
-  bytes: readonly number[]
-): void {
-  const firstFailingAddress = writeBackingBytes(
-    memory,
-    eip,
-    bytes
-  );
+function writeSource(memory: WebAssembly.Memory, eip: number, bytes: readonly number[]): void {
+  const firstFailingAddress = writeBackingBytes(memory, eip, bytes);
 
   ok(
     firstFailingAddress === undefined,
@@ -182,9 +157,7 @@ function writeSource(
   );
 }
 
-function recordDispatches(
-  dispatchTargets: number[]
-): (targetEip: number) => bigint {
+function recordDispatches(dispatchTargets: number[]): (targetEip: number) => bigint {
   return (targetEip) => {
     dispatchTargets.push(targetEip >>> 0);
     return dispatchStop;

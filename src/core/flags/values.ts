@@ -24,11 +24,7 @@ export function addStatusFlagValues(
     ...zspValues(values, dag),
     CF: addCarry(values, dag, input.carryIn),
     AF: auxCarry(values, dag),
-    OF: signBit(
-      values,
-      input.width,
-      values.binary("and", dag.leftXorResult, dag.rightXorResult)
-    )
+    OF: signBit(values, input.width, values.binary("and", dag.leftXorResult, dag.rightXorResult))
   };
 }
 
@@ -48,11 +44,7 @@ export function subStatusFlagValues(
     ...zspValues(values, dag),
     CF: subBorrow(values, dag, input.borrowIn),
     AF: auxCarry(values, dag),
-    OF: signBit(
-      values,
-      input.width,
-      values.binary("and", dag.leftXorRight, dag.leftXorResult)
-    )
+    OF: signBit(values, input.width, values.binary("and", dag.leftXorRight, dag.leftXorResult))
   };
 }
 
@@ -139,12 +131,7 @@ export function shiftStatusFlagValues(
   const cf = shiftCarry(values, input);
   const of = shiftOverflow(values, { ...input, cf });
   const countNonZero = values.compare(32, "ne", input.count, zero);
-  const countLeWidth = values.compare(
-    32,
-    "le_u",
-    input.count,
-    values.const(input.width)
-  );
+  const countLeWidth = values.compare(32, "le_u", input.count, values.const(input.width));
   const cfDefined = values.binary("and", countNonZero, countLeWidth);
   const zsp = zspValues(values, { width: input.width, result: input.result });
   const nonzeroOf = values.select(countIsOne, of, zero);
@@ -188,14 +175,15 @@ type ResultFlagDag = Readonly<{
   result: ValueId;
 }>;
 
-type BinaryFlagDag = ResultFlagDag & Readonly<{
-  left: ValueId;
-  right: ValueId;
-  leftXorResult: ValueId;
-  rightXorResult: ValueId;
-  leftXorRight: ValueId;
-  leftXorRightXorResult: ValueId;
-}>;
+type BinaryFlagDag = ResultFlagDag &
+  Readonly<{
+    left: ValueId;
+    right: ValueId;
+    leftXorResult: ValueId;
+    rightXorResult: ValueId;
+    leftXorRight: ValueId;
+    leftXorRightXorResult: ValueId;
+  }>;
 
 function binaryFlagDag(
   values: ValueBuilder,
@@ -231,47 +219,28 @@ export function zspValues(
   };
 }
 
-function addCarry(
-  values: ValueBuilder,
-  dag: BinaryFlagDag,
-  carryIn?: ValueId
-): ValueId {
+function addCarry(values: ValueBuilder, dag: BinaryFlagDag, carryIn?: ValueId): ValueId {
   const carry = values.compare(dag.width, "lt_u", dag.result, dag.left);
 
   if (carryIn === undefined) {
     return carry;
   }
 
-  return values.select(
-    carryIn,
-    values.compare(dag.width, "le_u", dag.result, dag.left),
-    carry
-  );
+  return values.select(carryIn, values.compare(dag.width, "le_u", dag.result, dag.left), carry);
 }
 
-function subBorrow(
-  values: ValueBuilder,
-  dag: BinaryFlagDag,
-  borrowIn?: ValueId
-): ValueId {
+function subBorrow(values: ValueBuilder, dag: BinaryFlagDag, borrowIn?: ValueId): ValueId {
   const borrow = values.compare(dag.width, "lt_u", dag.left, dag.right);
 
   if (borrowIn === undefined) {
     return borrow;
   }
 
-  return values.select(
-    borrowIn,
-    values.compare(dag.width, "le_u", dag.left, dag.right),
-    borrow
-  );
+  return values.select(borrowIn, values.compare(dag.width, "le_u", dag.left, dag.right), borrow);
 }
 
 function auxCarry(values: ValueBuilder, dag: BinaryFlagDag): ValueId {
-  return lowBit(
-    values,
-    values.binary("shr_u", dag.leftXorRightXorResult, values.const(4))
-  );
+  return lowBit(values, values.binary("shr_u", dag.leftXorRightXorResult, values.const(4)));
 }
 
 function shiftCarry(
@@ -283,9 +252,10 @@ function shiftCarry(
     count: ValueId;
   }>
 ): ValueId {
-  const shift = input.op === "shl" || input.op === "shld"
-    ? values.binary("sub", values.const(input.width), input.count)
-    : values.binary("sub", input.count, values.const(1));
+  const shift =
+    input.op === "shl" || input.op === "shld"
+      ? values.binary("sub", values.const(input.width), input.count)
+      : values.binary("sub", input.count, values.const(1));
 
   return lowBit(values, values.binary("shr_u", input.value, shift));
 }
@@ -303,11 +273,7 @@ function shiftOverflow(
   switch (input.op) {
     case "shl":
     case "shld":
-      return values.binary(
-        "xor",
-        signBit(values, input.width, input.result),
-        input.cf
-      );
+      return values.binary("xor", signBit(values, input.width, input.result), input.cf);
     case "shr":
       return signBit(values, input.width, input.value);
     case "shrd":
@@ -333,11 +299,7 @@ function rotateOverflow(
   switch (input.op) {
     case "rol":
     case "rcl":
-      return values.binary(
-        "xor",
-        signBit(values, input.width, input.result),
-        input.carry
-      );
+      return values.binary("xor", signBit(values, input.width, input.result), input.carry);
     case "ror":
     case "rcr":
       return values.binary(
@@ -355,27 +317,15 @@ function parityFlag(values: ValueBuilder, value: ValueId): ValueId {
   return values.compare(32, "eq", odd, values.const(0));
 }
 
-export function bitAt(
-  values: ValueBuilder,
-  value: ValueId,
-  bit: number
-): ValueId {
+export function bitAt(values: ValueBuilder, value: ValueId, bit: number): ValueId {
   return lowBit(values, values.binary("shr_u", value, values.const(bit)));
 }
 
-export function signBit(
-  values: ValueBuilder,
-  width: OperandWidth,
-  value: ValueId
-): ValueId {
+export function signBit(values: ValueBuilder, width: OperandWidth, value: ValueId): ValueId {
   return values.binary("shr_u", value, values.const(width - 1));
 }
 
-export function nextSignBit(
-  values: ValueBuilder,
-  width: OperandWidth,
-  value: ValueId
-): ValueId {
+export function nextSignBit(values: ValueBuilder, width: OperandWidth, value: ValueId): ValueId {
   return bitAt(values, value, width - 2);
 }
 

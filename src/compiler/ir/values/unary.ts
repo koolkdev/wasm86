@@ -37,7 +37,7 @@ const unaryOperators: Readonly<Record<UnaryOperator, UnaryDefinition>> = {
     bounds: fitsUnsigned(6)
   },
   eqz: {
-    evaluate: (value) => value === 0 ? 1 : 0,
+    evaluate: (value) => (value === 0 ? 1 : 0),
     bounds: fitsUnsigned(1)
   }
 };

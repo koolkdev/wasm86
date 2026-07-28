@@ -8,6 +8,7 @@ test("Cpu exhausts its instruction budget and resumes only on a later explicit r
   const machine = createMachine({ memoryByteLength: 0x2000 });
   const bytes = new Uint8Array(machine.memory.buffer);
 
+  // prettier-ignore
   bytes.set([
     0xb8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
     0xb9, 0x02, 0x00, 0x00, 0x00, // mov ecx, 2

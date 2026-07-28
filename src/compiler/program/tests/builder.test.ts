@@ -13,21 +13,28 @@ const emptyResources = createProgramResources([]);
 test("a finished program builder rejects later use", () => {
   const program = new ProgramBuilder(emptyResources);
 
-  program.defineFunction({
-    ref: functionRef("test.function"),
-    type: voidType,
-    effects: noEffects
-  }, (fn) => fn.return([]));
+  program.defineFunction(
+    {
+      ref: functionRef("test.function"),
+      type: voidType,
+      effects: noEffects
+    },
+    (fn) => fn.return([])
+  );
 
   program.finish();
 
   throws(() => program.finish(), /finished program/);
   throws(
-    () => program.defineFunction({
-      ref: functionRef("test.late-function"),
-      type: voidType,
-      effects: noEffects
-    }, (fn) => fn.return([])),
+    () =>
+      program.defineFunction(
+        {
+          ref: functionRef("test.late-function"),
+          type: voidType,
+          effects: noEffects
+        },
+        (fn) => fn.return([])
+      ),
     /finished program/
   );
 });
@@ -36,21 +43,27 @@ test("closing rejects topology changes without poisoning the builder", () => {
   const program = new ProgramBuilder(emptyResources);
   let triesMutation = true;
 
-  const original = program.defineFunction({
-    ref: functionRef("test.closing-function"),
-    type: voidType,
-    effects: noEffects
-  }, (fn) => {
-    if (triesMutation) {
-      triesMutation = false;
-      program.defineFunction({
-        ref: functionRef("test.closing-late-function"),
-        type: voidType,
-        effects: noEffects
-      }, (late) => late.return([]));
+  const original = program.defineFunction(
+    {
+      ref: functionRef("test.closing-function"),
+      type: voidType,
+      effects: noEffects
+    },
+    (fn) => {
+      if (triesMutation) {
+        triesMutation = false;
+        program.defineFunction(
+          {
+            ref: functionRef("test.closing-late-function"),
+            type: voidType,
+            effects: noEffects
+          },
+          (late) => late.return([])
+        );
+      }
+      fn.return([]);
     }
-    fn.return([]);
-  });
+  );
 
   throws(() => program.finish(), /while it is closing/);
 
@@ -73,11 +86,15 @@ test("function imports and definitions cannot reuse one declaration ref", () => 
   });
 
   throws(
-    () => program.defineFunction({
-      ref,
-      type: voidType,
-      effects: noEffects
-    }, (fn) => fn.return([])),
+    () =>
+      program.defineFunction(
+        {
+          ref,
+          type: voidType,
+          effects: noEffects
+        },
+        (fn) => fn.return([])
+      ),
     /duplicate program function.*declaration/
   );
 });

@@ -1,10 +1,5 @@
 import type { IntegerWidth } from "./types.js";
-import type {
-  ValueId,
-  ValueInput,
-  ValueType,
-  WidthBounds
-} from "./types.js";
+import type { ValueId, ValueInput, ValueType, WidthBounds } from "./types.js";
 
 export type ValueNodeBase = Readonly<{ kind: string }>;
 export type ValueCaptureMode = "reemit" | "producer" | "compute";
@@ -30,13 +25,15 @@ type ValueExtension = Readonly<{
   value: ValueId;
 }>;
 
-export type ValueFoldContext = ValueBoundsContext & ValueTrapContext & Readonly<{
-  constant(value: number): ValueId;
-  unreachable(type: ValueType): ValueId;
-  extension(id: ValueId): ValueExtension | undefined;
-  truncate(width: IntegerWidth, value: ValueId): ValueId;
-  eqz(value: ValueId): ValueId;
-}>;
+export type ValueFoldContext = ValueBoundsContext &
+  ValueTrapContext &
+  Readonly<{
+    constant(value: number): ValueId;
+    unreachable(type: ValueType): ValueId;
+    extension(id: ValueId): ValueExtension | undefined;
+    truncate(width: IntegerWidth, value: ValueId): ValueId;
+    eqz(value: ValueId): ValueId;
+  }>;
 
 // A definition owns one normalized node kind. Optional hooks mean the form has
 // no special behavior; StoredValueEntry supplies their common defaults.

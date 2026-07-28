@@ -1,10 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import {
-  decodeBytes,
-  startAddress
-} from "./byte-reader-fixture.js";
+import { decodeBytes, startAddress } from "./byte-reader-fixture.js";
 
 test("string instructions expose their architectural source and destination addresses", () => {
   const result = decodeBytes([0xa5]);
@@ -44,26 +41,17 @@ test("repeat and operand-size prefixes compose in either order", () => {
 
   strictEqual(repeatFirstResult.kind, "instruction");
   strictEqual(operandSizeFirstResult.kind, "instruction");
-  if (
-    repeatFirstResult.kind !== "instruction" ||
-    operandSizeFirstResult.kind !== "instruction"
-  ) {
+  if (repeatFirstResult.kind !== "instruction" || operandSizeFirstResult.kind !== "instruction") {
     return;
   }
 
-  for (const decoded of [
-    repeatFirstResult.instruction,
-    operandSizeFirstResult.instruction
-  ]) {
+  for (const decoded of [repeatFirstResult.instruction, operandSizeFirstResult.instruction]) {
     strictEqual(decoded.spec.id, "movs.rep_m16_m16");
     strictEqual(decoded.spec.syntax, "rep movs");
     strictEqual(decoded.operands[0]?.kind, "mem");
     strictEqual(decoded.operands[1]?.kind, "mem");
 
-    if (
-      decoded.operands[0]?.kind === "mem" &&
-      decoded.operands[1]?.kind === "mem"
-    ) {
+    if (decoded.operands[0]?.kind === "mem" && decoded.operands[1]?.kind === "mem") {
       strictEqual(decoded.operands[0].accessWidth, 16);
       strictEqual(decoded.operands[1].accessWidth, 16);
     }
@@ -103,10 +91,7 @@ test("segment overrides affect only overridable string operands", () => {
 
   strictEqual(movsResult.kind, "instruction");
   strictEqual(stosResult.kind, "instruction");
-  if (
-    movsResult.kind !== "instruction" ||
-    stosResult.kind !== "instruction"
-  ) {
+  if (movsResult.kind !== "instruction" || stosResult.kind !== "instruction") {
     return;
   }
 

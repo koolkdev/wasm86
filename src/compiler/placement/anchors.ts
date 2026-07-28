@@ -1,9 +1,5 @@
 import { assert } from "#common/assert.js";
-import type {
-  FunctionAnalysis,
-  SiteId,
-  ValueDemand
-} from "#compiler/analysis/model.js";
+import type { FunctionAnalysis, SiteId, ValueDemand } from "#compiler/analysis/model.js";
 import type { StorageAccess } from "#compiler/ir/effects.js";
 import { describeNode } from "#compiler/ir/node.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
@@ -20,9 +16,10 @@ type AnchoredValue = Readonly<{
   lastDemand: SiteId;
 }>;
 
-export type PlannedValue = AnchoredValue & Readonly<{
-  kind: "atUse" | "capture" | "control";
-}>;
+export type PlannedValue = AnchoredValue &
+  Readonly<{
+    kind: "atUse" | "capture" | "control";
+  }>;
 
 export function planValueAnchors(
   block: FunctionGraph,
@@ -97,9 +94,7 @@ class AnchorPlanner {
         continue;
       }
 
-      let anchor = this.analysis.dominatingSite(
-        demands.map((demand) => demand.consumedAt)
-      );
+      let anchor = this.analysis.dominatingSite(demands.map((demand) => demand.consumedAt));
       const mode = this.block.values.captureMode(value);
 
       if (mode === "compute") {
@@ -115,9 +110,7 @@ class AnchorPlanner {
     }
 
     const anchors = this.#anchored.map((placement) => placement?.anchor);
-    const planned = new Array<PlannedValue | undefined>(
-      this.block.values.size()
-    ).fill(undefined);
+    const planned = new Array<PlannedValue | undefined>(this.block.values.size()).fill(undefined);
 
     return this.#anchored.map((placement, raw) => {
       if (placement === undefined) {
@@ -127,11 +120,12 @@ class AnchorPlanner {
       const demands = this.#demands.get(value);
 
       assert(demands !== undefined, `value ${value} has no placement demands`);
-      const kind = this.analysis.controlProducer(value) !== undefined
-        ? "control"
-        : demands.some((demand) => demand.consumedAt === placement.anchor)
-          ? "atUse"
-          : "capture";
+      const kind =
+        this.analysis.controlProducer(value) !== undefined
+          ? "control"
+          : demands.some((demand) => demand.consumedAt === placement.anchor)
+            ? "atUse"
+            : "capture";
       const hasLocal = (candidate: ValueId): boolean => {
         const earlier = planned[candidate];
         const other = this.#anchored[candidate];
@@ -180,11 +174,7 @@ class AnchorPlanner {
     });
   }
 
-  #placeValue(
-    value: ValueId,
-    anchor: SiteId,
-    demands: readonly ValueDemand[]
-  ): void {
+  #placeValue(value: ValueId, anchor: SiteId, demands: readonly ValueDemand[]): void {
     assert(this.#anchored[value] === undefined, `value ${value} is realized twice`);
     this.#anchored[value] = {
       anchor,
@@ -198,9 +188,7 @@ class AnchorPlanner {
     demands: readonly ValueDemand[]
   ): SiteId {
     const description = describeNode(operation);
-    let anchor = this.analysis.dominatingSite(
-      demands.map((demand) => demand.consumedAt)
-    );
+    let anchor = this.analysis.dominatingSite(demands.map((demand) => demand.consumedAt));
 
     anchor = this.#clampBeforeNestedLoop(this.#site(producerSite).region, anchor);
 
@@ -247,11 +235,7 @@ class AnchorPlanner {
     return owner.nodeIndex > producerSite.nodeIndex;
   }
 
-  #crossesAliasingWrite(
-    operation: Operation,
-    producerSiteId: SiteId,
-    anchorId: SiteId
-  ): boolean {
+  #crossesAliasingWrite(operation: Operation, producerSiteId: SiteId, anchorId: SiteId): boolean {
     const description = describeNode(operation);
     const reads = description.effects.reads;
 
@@ -289,9 +273,7 @@ class AnchorPlanner {
       const site = this.analysis.siteOf(region, index);
 
       if (
-        this.analysis.writesAt(site).some((write) =>
-          reads.some((read) => mayAlias(read, write))
-        )
+        this.analysis.writesAt(site).some((write) => reads.some((read) => mayAlias(read, write)))
       ) {
         return true;
       }
@@ -304,9 +286,7 @@ class AnchorPlanner {
     this.block.values.node(demand.value);
     const demands = this.#demands.get(demand.value);
 
-    demands === undefined
-      ? this.#demands.set(demand.value, [demand])
-      : demands.push(demand);
+    demands === undefined ? this.#demands.set(demand.value, [demand]) : demands.push(demand);
   }
 
   #site(id: SiteId) {

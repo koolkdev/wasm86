@@ -3,10 +3,11 @@ import { assert } from "#common/assert.js";
 export type LayoutWidth = "u8" | "u16" | "u32";
 export type LayoutByteLength = 1 | 2 | 4;
 
-export type ByteLengthOf<TWidth extends LayoutWidth> =
-  TWidth extends "u8" ? 1
-    : TWidth extends "u16" ? 2
-      : 4;
+export type ByteLengthOf<TWidth extends LayoutWidth> = TWidth extends "u8"
+  ? 1
+  : TWidth extends "u16"
+    ? 2
+    : 4;
 
 export function widthByteLength(width: LayoutWidth): LayoutByteLength {
   switch (width) {
@@ -66,16 +67,12 @@ export type ArrayElementLayout = Readonly<{
   alignment: number;
 }>;
 
-export type ArrayDefinition<
-  TElement extends ArrayElementLayout = ArrayElementLayout
-> = Readonly<{
+export type ArrayDefinition<TElement extends ArrayElementLayout = ArrayElementLayout> = Readonly<{
   count: number;
   element: Readonly<TElement>;
 }>;
 
-export class ArrayRef<
-  TElement extends ArrayElementLayout = ArrayElementLayout
-> {
+export class ArrayRef<TElement extends ArrayElementLayout = ArrayElementLayout> {
   readonly kind = "array";
   readonly count: number;
   readonly element: Readonly<TElement>;

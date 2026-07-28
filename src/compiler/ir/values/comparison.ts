@@ -9,16 +9,7 @@ type ComparisonDefinition = Readonly<{
 }>;
 
 export type CompareOperator =
-  | "eq"
-  | "ne"
-  | "lt_u"
-  | "le_u"
-  | "gt_u"
-  | "ge_u"
-  | "lt_s"
-  | "le_s"
-  | "gt_s"
-  | "ge_s";
+  "eq" | "ne" | "lt_u" | "le_u" | "gt_u" | "ge_u" | "lt_s" | "le_s" | "gt_s" | "ge_s";
 
 const comparisons: Readonly<Record<CompareOperator, ComparisonDefinition>> = {
   eq: {
@@ -32,22 +23,22 @@ const comparisons: Readonly<Record<CompareOperator, ComparisonDefinition>> = {
     signed: false
   },
   lt_u: {
-    evaluate: (a, b) => (a >>> 0) < (b >>> 0),
+    evaluate: (a, b) => a >>> 0 < b >>> 0,
     same: false,
     signed: false
   },
   le_u: {
-    evaluate: (a, b) => (a >>> 0) <= (b >>> 0),
+    evaluate: (a, b) => a >>> 0 <= b >>> 0,
     same: true,
     signed: false
   },
   gt_u: {
-    evaluate: (a, b) => (a >>> 0) > (b >>> 0),
+    evaluate: (a, b) => a >>> 0 > b >>> 0,
     same: false,
     signed: false
   },
   ge_u: {
-    evaluate: (a, b) => (a >>> 0) >= (b >>> 0),
+    evaluate: (a, b) => a >>> 0 >= b >>> 0,
     same: true,
     signed: false
   },
@@ -113,9 +104,7 @@ export const comparisonValue: ValueDefinition<ComparisonArgs, ComparisonNode> = 
       }
     }
 
-    return node.a === node.b
-      ? context.constant(definition.same ? 1 : 0)
-      : undefined;
+    return node.a === node.b ? context.constant(definition.same ? 1 : 0) : undefined;
   },
   captureMode: "compute"
 };

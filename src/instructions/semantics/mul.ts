@@ -62,7 +62,12 @@ function writeImulResult(
   s.write(dst, product.low, { width });
 }
 
-function writeImplicitProduct(s: SemanticsBuilder, v: ValueBuilder, width: OperandWidth, product: MultiplyProduct): void {
+function writeImplicitProduct(
+  s: SemanticsBuilder,
+  v: ValueBuilder,
+  width: OperandWidth,
+  product: MultiplyProduct
+): void {
   switch (width) {
     case 8:
       s.write(s.reg("ax"), v.truncate(16, product.full), { width: 16 });

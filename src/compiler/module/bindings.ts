@@ -19,9 +19,7 @@ export type ModuleBindingIndices = Readonly<{
   resources: ReadonlyMap<ResourceRef, number>;
 }>;
 
-export function createModuleBindings(
-  indices: ModuleBindingIndices
-): ModuleBindings {
+export function createModuleBindings(indices: ModuleBindingIndices): ModuleBindings {
   return {
     functionIndex(ref) {
       const index = indices.functions.get(ref);

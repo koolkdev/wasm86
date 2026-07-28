@@ -1,11 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { MemRef, SegmentRef } from "#instructions/semantics/refs.js";
 import type { SegmentRegister } from "#core/types.js";
-import type {
-  EffectiveAddressComponents,
-  MemAddressSource,
-  OperandBinding
-} from "./bindings.js";
+import type { EffectiveAddressComponents, MemAddressSource, OperandBinding } from "./bindings.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 import type { InstructionState } from "./state/state.js";
@@ -39,16 +35,8 @@ export class OperandResolver {
     this.#state = state;
   }
 
-  bind(
-    scope: OperandScope,
-    access: BoundStateAccess
-  ): ScopedOperandResolver {
-    return new ScopedOperandResolver(
-      this,
-      this.#state,
-      scope,
-      access
-    );
+  bind(scope: OperandScope, access: BoundStateAccess): ScopedOperandResolver {
+    return new ScopedOperandResolver(this, this.#state, scope, access);
   }
 
   beginInstruction(bindings: readonly OperandBinding[]): void {
@@ -77,10 +65,7 @@ export class OperandResolver {
   segment(index: number): SegmentRef {
     const binding = this.binding(index);
 
-    assert(
-      binding.kind === "segment",
-      `${binding.kind} operand is not a segment register`
-    );
+    assert(binding.kind === "segment", `${binding.kind} operand is not a segment register`);
     return binding.selection;
   }
 
@@ -156,10 +141,7 @@ export class ScopedOperandResolver {
   }
 
   #bindingAddress(binding: OperandBinding): ValueId {
-    assert(
-      binding.kind === "mem",
-      `address of a ${binding.kind} operand binding`
-    );
+    assert(binding.kind === "mem", `address of a ${binding.kind} operand binding`);
 
     switch (binding.address.kind) {
       case "static":
@@ -170,34 +152,21 @@ export class ScopedOperandResolver {
   }
 
   #bindingMemoryReference(index: number, binding: OperandBinding): MemRef {
-    assert(
-      binding.kind === "mem",
-      `memory reference of a ${binding.kind} operand binding`
-    );
+    assert(binding.kind === "mem", `memory reference of a ${binding.kind} operand binding`);
     return {
       segment: binding.segment,
       offset: this.address(index)
     };
   }
 
-  #dynamicAddress(
-    address: Extract<MemAddressSource, { kind: "dynamic" }>
-  ): ValueId {
+  #dynamicAddress(address: Extract<MemAddressSource, { kind: "dynamic" }>): ValueId {
     if (address.baseRegisterIndex === undefined) {
       return address.addend;
     }
 
-    const base = this.#state.gpr.readDynamic(
-      this.#access,
-      address.baseRegisterIndex,
-      32
-    );
+    const base = this.#state.gpr.readDynamic(this.#access, address.baseRegisterIndex, 32);
 
-    return this.#access.values.binary(
-      "add",
-      base,
-      address.addend
-    );
+    return this.#access.values.binary("add", base, address.addend);
   }
 
   #effectiveAddress(components: EffectiveAddressComponents): ValueId {
@@ -209,17 +178,16 @@ export class ScopedOperandResolver {
 
     if (components.index !== undefined) {
       const index = this.#state.gpr.read(this.#access, components.index);
-      const scaled = components.scale === 1
-        ? index
-        : this.#access.values.binary(
-            "shl",
-            index,
-            this.#access.values.const(scaleShift[components.scale])
-          );
+      const scaled =
+        components.scale === 1
+          ? index
+          : this.#access.values.binary(
+              "shl",
+              index,
+              this.#access.values.const(scaleShift[components.scale])
+            );
 
-      address = address === undefined
-        ? scaled
-        : this.#access.values.binary("add", address, scaled);
+      address = address === undefined ? scaled : this.#access.values.binary("add", address, scaled);
     }
 
     if (address === undefined) {
@@ -228,11 +196,7 @@ export class ScopedOperandResolver {
 
     return components.disp === 0
       ? address
-      : this.#access.values.binary(
-          "add",
-          address,
-          this.#access.values.const(components.disp)
-        );
+      : this.#access.values.binary("add", address, this.#access.values.const(components.disp));
   }
 
   #linearAddress(segment: SegmentRegister, offset: ValueId): ValueId {

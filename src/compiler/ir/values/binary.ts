@@ -1,23 +1,13 @@
 import { assert } from "#common/assert.js";
-import {
-  binaryArithmetic,
-  type BinaryArithmeticOperator
-} from "./binary-arithmetic.js";
-import {
-  binaryBitwise,
-  type BinaryBitwiseOperator
-} from "./binary-bitwise.js";
+import { binaryArithmetic, type BinaryArithmeticOperator } from "./binary-arithmetic.js";
+import { binaryBitwise, type BinaryBitwiseOperator } from "./binary-bitwise.js";
 import type {
   ValueBoundsContext,
   ValueDefinition,
   ValueFoldContext,
   ValueTrapContext
 } from "./definition.js";
-import type {
-  ValueId,
-  ValueType,
-  WidthBounds
-} from "./types.js";
+import type { ValueId, ValueType, WidthBounds } from "./types.js";
 
 export type BinaryFoldCase = Readonly<{
   context: ValueFoldContext;
@@ -78,9 +68,7 @@ export const binaryValue: ValueDefinition<BinaryArgs, BinaryNode> = {
     assert(node.type === "i32", `width bounds requested for ${node.type} binary value`);
     const bounds = binaryOperations[node.operator].bounds;
 
-    return typeof bounds === "function"
-      ? bounds({ context, a: node.a, b: node.b })
-      : bounds;
+    return typeof bounds === "function" ? bounds({ context, a: node.a, b: node.b }) : bounds;
   },
   fold: (node, context) => {
     if (node.type !== "i32") {
@@ -92,12 +80,14 @@ export const binaryValue: ValueDefinition<BinaryArgs, BinaryNode> = {
     const right = context.constValue(node.b);
 
     if (left !== undefined && right !== undefined) {
-      if (definition.mayTrap?.({
-        context,
-        type: node.type,
-        a: node.a,
-        b: node.b
-      })) {
+      if (
+        definition.mayTrap?.({
+          context,
+          type: node.type,
+          a: node.a,
+          b: node.b
+        })
+      ) {
         return context.unreachable(node.type);
       }
 

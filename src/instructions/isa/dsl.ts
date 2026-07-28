@@ -14,10 +14,7 @@ import type {
   RmOperandType
 } from "./spec.js";
 
-export function form(
-  formId: string,
-  spec: InstructionFormSpec
-): InstructionForm {
+export function form(formId: string, spec: InstructionFormSpec): InstructionForm {
   return { formId, spec };
 }
 
@@ -40,9 +37,7 @@ export function defineIsa(definition: IsaDefinition): DefinedIsa {
   };
 }
 
-export function instructionsForMnemonic(
-  entry: InstructionMnemonic
-): readonly InstructionSpec[] {
+export function instructionsForMnemonic(entry: InstructionMnemonic): readonly InstructionSpec[] {
   return entry.forms.map((entryForm) =>
     instruction({
       id: `${entry.mnemonic}.${entryForm.formId}`,
@@ -104,7 +99,12 @@ export function imm(
   extension?: ImmediateExtension,
   semanticWidth?: OperandWidth
 ): OperandSpec {
-  const operand: { kind: "imm"; width: OperandWidth; semanticWidth?: OperandWidth; extension?: ImmediateExtension } = {
+  const operand: {
+    kind: "imm";
+    width: OperandWidth;
+    semanticWidth?: OperandWidth;
+    extension?: ImmediateExtension;
+  } = {
     kind: "imm",
     width
   };

@@ -16,12 +16,7 @@ import type {
   SemanticMemoryStoreOptions,
   SemanticMemoryWriteOptions
 } from "#instructions/semantics/builder.js";
-import type {
-  MemRef,
-  OperandInput,
-  Value,
-  ValueInput
-} from "#instructions/semantics/refs.js";
+import type { MemRef, OperandInput, Value, ValueInput } from "#instructions/semantics/refs.js";
 import type { SegmentRegister } from "#core/types.js";
 import type { ScopedOperandResolver } from "./operand-resolver.js";
 
@@ -57,21 +52,14 @@ export class InstructionMemory implements SemanticMemoryOps {
     };
   }
 
-  operand(
-    operand: OperandInput,
-    addressOffset?: ValueInput
-  ): MemRef {
+  operand(operand: OperandInput, addressOffset?: ValueInput): MemRef {
     const reference = this.#operands.memoryReference(operand.index);
 
     return addressOffset === undefined
       ? reference
       : {
           segment: reference.segment,
-          offset: this.#region.values.binary(
-            "add",
-            reference.offset,
-            addressOffset
-          )
+          offset: this.#region.values.binary("add", reference.offset, addressOffset)
         };
   }
 
@@ -79,10 +67,7 @@ export class InstructionMemory implements SemanticMemoryOps {
     options: SemanticMemoryAccessOptions<TIntent>
   ): AccessResolution<TIntent> {
     const { reference, byteLength, intent } = options;
-    const resolution = this.#memory.resolve(
-      this.#range(reference, byteLength),
-      intent
-    );
+    const resolution = this.#memory.resolve(this.#range(reference, byteLength), intent);
 
     return { access: resolution.access, fault: resolution.fault };
   }
@@ -96,10 +81,7 @@ export class InstructionMemory implements SemanticMemoryOps {
     return resolution.access;
   }
 
-  read(
-    reference: MemRef,
-    options: SemanticMemoryReadOptions
-  ): Value {
+  read(reference: MemRef, options: SemanticMemoryReadOptions): Value {
     const access = this.guard({
       reference,
       byteLength: this.#region.values.const(options.width / 8),
@@ -109,10 +91,7 @@ export class InstructionMemory implements SemanticMemoryOps {
     return this.load(access, options);
   }
 
-  write(
-    reference: MemRef,
-    options: SemanticMemoryWriteOptions
-  ): void {
+  write(reference: MemRef, options: SemanticMemoryWriteOptions): void {
     const access = this.guard({
       reference,
       byteLength: this.#region.values.const(options.width / 8),
@@ -122,10 +101,7 @@ export class InstructionMemory implements SemanticMemoryOps {
     this.store(access, { width: options.width, value: options.value });
   }
 
-  load(
-    access: ResolvedMemoryAccess,
-    options: SemanticMemoryLoadOptions
-  ): Value {
+  load(access: ResolvedMemoryAccess, options: SemanticMemoryLoadOptions): Value {
     const { signed = false } = options;
 
     return this.#memory.load(
@@ -136,10 +112,7 @@ export class InstructionMemory implements SemanticMemoryOps {
     );
   }
 
-  store(
-    access: ResolvedMemoryAccess<"write">,
-    options: SemanticMemoryStoreOptions
-  ): void {
+  store(access: ResolvedMemoryAccess<"write">, options: SemanticMemoryStoreOptions): void {
     this.#options.recordWrite();
     this.#memory.store(
       access,

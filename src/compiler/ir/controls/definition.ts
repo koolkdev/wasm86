@@ -21,10 +21,7 @@ export type ControlCompletionContext = Readonly<{
   regionCompletes: (body: Region) => boolean;
 }>;
 
-export type ControlDefinition<
-  CreateArgs,
-  Entry extends ControlNodeBase
-> = Readonly<{
+export type ControlDefinition<CreateArgs, Entry extends ControlNodeBase> = Readonly<{
   kind: Entry["kind"];
   create(args: CreateArgs): Entry;
   describe(control: Entry): DerivedControlDescription;

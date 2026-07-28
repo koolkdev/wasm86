@@ -4,10 +4,7 @@ import { test } from "node:test";
 import { X86_32_CORE } from "#instructions/isa/x86-32.js";
 
 const instructionsById = new Map(
-  X86_32_CORE.instructions.map((instruction) => [
-    instruction.id,
-    instruction
-  ])
+  X86_32_CORE.instructions.map((instruction) => [instruction.id, instruction])
 );
 
 test("x86-32 core exposes its identity and architectural limit", () => {
@@ -147,10 +144,7 @@ test("special memory and segment encodings retain their distinct operand shapes"
     },
     {
       opcode: [0x8c],
-      operands: [
-        { kind: "modrm.rm", type: "r32_m16" },
-        { kind: "modrm.sreg" }
-      ]
+      operands: [{ kind: "modrm.rm", type: "r32_m16" }, { kind: "modrm.sreg" }]
     }
   );
 

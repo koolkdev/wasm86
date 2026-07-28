@@ -13,10 +13,7 @@ import { covers, mayAlias } from "#compiler/ir/effects.js";
 const firstResource = resourceRef("test.range.first-resource");
 const secondResource = resourceRef("test.range.second-resource");
 
-function bytes(
-  range: ByteRange,
-  resource: ResourceRef = firstResource
-): ResourceEffect {
+function bytes(range: ByteRange, resource: ResourceRef = firstResource): ResourceEffect {
   return { space: "resource", resource, range };
 }
 
@@ -31,11 +28,7 @@ function whole(origin: DynamicByteOriginRef): ByteRange {
   return { basis: { kind: "dynamic", origin } };
 }
 
-function slice(
-  origin: DynamicByteOriginRef,
-  byteOffset: number,
-  byteLength: number
-): ByteRange {
+function slice(origin: DynamicByteOriginRef, byteOffset: number, byteLength: number): ByteRange {
   return {
     basis: { kind: "dynamic", origin },
     slice: { byteOffset, byteLength }

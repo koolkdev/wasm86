@@ -1,23 +1,14 @@
 import type { Invocation } from "#compiler/ir/invocation.js";
 import type { RegionNode } from "#compiler/ir/region.js";
-import type {
-  CallOperation,
-  Operation
-} from "#compiler/ir/operations/index.js";
+import type { CallOperation, Operation } from "#compiler/ir/operations/index.js";
 import {
   resourceRead as resourceReadOperation,
   resourceWrite as resourceWriteOperation
 } from "#compiler/ir/operations/resource.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import type {
-  IntegerWidth,
-  ValueId
-} from "#compiler/ir/values/types.js";
+import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
-import {
-  cpuStatusFlagResolvers,
-  guestMemoryResource
-} from "#test/support/execution-model.js";
+import { cpuStatusFlagResolvers, guestMemoryResource } from "#test/support/execution-model.js";
 import {
   DynamicByteOriginRef,
   resourceRef,
@@ -30,9 +21,10 @@ type OperationOf<Kind extends Operation["kind"]> = Extract<Operation, { kind: Ki
 
 export type MemoryReadOperation = OperationOf<"resource.read">;
 export type MemoryWriteOperation = OperationOf<"resource.write">;
-export type StatusFlagCallOperation = CallOperation & Readonly<{
-  output: ValueId;
-}>;
+export type StatusFlagCallOperation = CallOperation &
+  Readonly<{
+    output: ValueId;
+  }>;
 
 const compilerTestResource = resourceRef("test.compiler-storage");
 
@@ -44,10 +36,7 @@ export function compilerTestValues(): ValueTable {
   return values;
 }
 
-export function compilerTestResourceEffect(
-  region: number,
-  byteLength = 4
-): ResourceEffect {
+export function compilerTestResourceEffect(region: number, byteLength = 4): ResourceEffect {
   return {
     space: "resource",
     resource: compilerTestResource,
@@ -71,10 +60,7 @@ export function resourceReadNode(
     width
   };
   return signed === true
-    ? resourceReadOperation.create(
-        { source, mode: { kind: "signed" } },
-        () => output
-      )
+    ? resourceReadOperation.create({ source, mode: { kind: "signed" } }, () => output)
     : resourceReadOperation.create({ source }, () => output);
 }
 
@@ -84,16 +70,14 @@ export function resourceWriteNode(
   value: ValueId,
   width: IntegerWidth = 32
 ): MemoryWriteOperation {
-  return resourceWriteOperation.create(
-    {
-      destination: {
-        effect: compilerTestResourceEffect(region, width / 8),
-        address: { base: values.const(0), displacement: region * 4 },
-        width
-      },
-      value
-    }
-  );
+  return resourceWriteOperation.create({
+    destination: {
+      effect: compilerTestResourceEffect(region, width / 8),
+      address: { base: values.const(0), displacement: region * 4 },
+      width
+    },
+    value
+  });
 }
 
 export function operandRead(
@@ -111,12 +95,10 @@ export function operandWrite(
   destination: ResourceByteOperand,
   value: ValueId
 ): MemoryWriteOperation {
-  return resourceWriteOperation.create(
-    {
-      destination,
-      value
-    }
-  );
+  return resourceWriteOperation.create({
+    destination,
+    value
+  });
 }
 
 export function memoryReadOperation(
@@ -180,32 +162,30 @@ export function memoryWriteOperation(
     slice: { byteOffset: 0, byteLength: width / 8 }
   };
 
-  return resourceWriteOperation.create(
-    {
-      destination: {
-        effect: { space: "resource", resource: guestMemoryResource, range },
-        address: { base: address, displacement: 0 },
-        width
-      },
-      value
-    }
-  );
+  return resourceWriteOperation.create({
+    destination: {
+      effect: { space: "resource", resource: guestMemoryResource, range },
+      address: { base: address, displacement: 0 },
+      width
+    },
+    value
+  });
 }
 
 export function isMemoryRead(node: RegionNode): node is MemoryReadOperation {
-  return node.kind === "resource.read" &&
-    node.source.effect.resource === guestMemoryResource;
+  return node.kind === "resource.read" && node.source.effect.resource === guestMemoryResource;
 }
 
 export function isMemoryWrite(node: RegionNode): node is MemoryWriteOperation {
-  return node.kind === "resource.write" &&
-    node.destination.effect.resource === guestMemoryResource;
+  return node.kind === "resource.write" && node.destination.effect.resource === guestMemoryResource;
 }
 
 export function isStatusFlagCall(node: RegionNode): node is StatusFlagCallOperation {
-  return node.kind === "call" &&
+  return (
+    node.kind === "call" &&
     node.output !== undefined &&
-    statusFlagForTarget(node.invocation.target) !== undefined;
+    statusFlagForTarget(node.invocation.target) !== undefined
+  );
 }
 
 export function resolvedStatusFlag(operation: StatusFlagCallOperation): X86StatusFlag {
@@ -217,14 +197,10 @@ export function resolvedStatusFlag(operation: StatusFlagCallOperation): X86Statu
   return flag;
 }
 
-function statusFlagForTarget(
-  target: Invocation["target"]
-): X86StatusFlag | undefined {
+function statusFlagForTarget(target: Invocation["target"]): X86StatusFlag | undefined {
   if (target.kind !== "direct") {
     return undefined;
   }
 
-  return x86StatusFlags.find((flag) =>
-    target.ref.id === cpuStatusFlagResolvers.get(flag).ref.id
-  );
+  return x86StatusFlags.find((flag) => target.ref.id === cpuStatusFlagResolvers.get(flag).ref.id);
 }

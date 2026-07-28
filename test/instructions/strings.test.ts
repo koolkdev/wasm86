@@ -77,9 +77,7 @@ const oneShotCases = [
       { address: sourceAddress, bytes: [0x7c] },
       { address: destinationAddress - 1, bytes: [0xaa, 0x00, 0xbb] }
     ],
-    expectedMemory: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0x7c, 0xbb] }
-    ]
+    expectedMemory: [{ address: destinationAddress - 1, bytes: [0xaa, 0x7c, 0xbb] }]
   },
   {
     name: "MOVSB copies one byte and decrements both indexes when DF is set",
@@ -95,9 +93,7 @@ const oneShotCases = [
       { address: sourceAddress, bytes: [0x7c] },
       { address: destinationAddress - 1, bytes: [0xaa, 0x00, 0xbb] }
     ],
-    expectedMemory: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0x7c, 0xbb] }
-    ]
+    expectedMemory: [{ address: destinationAddress - 1, bytes: [0xaa, 0x7c, 0xbb] }]
   },
   {
     name: "MOVSW copies one word and increments both indexes by two",
@@ -113,9 +109,7 @@ const oneShotCases = [
       { address: sourceAddress, bytes: [0xef, 0xbe] },
       { address: destinationAddress - 1, bytes: [0xaa, 0x00, 0x00, 0xbb] }
     ],
-    expectedMemory: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0xef, 0xbe, 0xbb] }
-    ]
+    expectedMemory: [{ address: destinationAddress - 1, bytes: [0xaa, 0xef, 0xbe, 0xbb] }]
   },
   {
     name: "MOVSW copies one word and decrements both indexes by two",
@@ -131,9 +125,7 @@ const oneShotCases = [
       { address: sourceAddress, bytes: [0xef, 0xbe] },
       { address: destinationAddress - 1, bytes: [0xaa, 0x00, 0x00, 0xbb] }
     ],
-    expectedMemory: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0xef, 0xbe, 0xbb] }
-    ]
+    expectedMemory: [{ address: destinationAddress - 1, bytes: [0xaa, 0xef, 0xbe, 0xbb] }]
   },
   {
     name: "MOVSD copies one dword and increments both indexes by four",
@@ -194,12 +186,8 @@ const oneShotCases = [
       ...preservedFlags
     },
     expectedState: { edi: 0x201 },
-    memoryPatches: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0x00, 0xbb] }
-    ],
-    expectedMemory: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0x7c, 0xbb] }
-    ]
+    memoryPatches: [{ address: destinationAddress - 1, bytes: [0xaa, 0x00, 0xbb] }],
+    expectedMemory: [{ address: destinationAddress - 1, bytes: [0xaa, 0x7c, 0xbb] }]
   },
   {
     name: "STOSB stores AL and decrements EDI when DF is set",
@@ -212,12 +200,8 @@ const oneShotCases = [
       ...preservedFlags
     },
     expectedState: { edi: 0x1ff },
-    memoryPatches: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0x00, 0xbb] }
-    ],
-    expectedMemory: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0x7c, 0xbb] }
-    ]
+    memoryPatches: [{ address: destinationAddress - 1, bytes: [0xaa, 0x00, 0xbb] }],
+    expectedMemory: [{ address: destinationAddress - 1, bytes: [0xaa, 0x7c, 0xbb] }]
   },
   {
     name: "STOSW stores AX and increments EDI by two",
@@ -230,12 +214,8 @@ const oneShotCases = [
       ...preservedFlags
     },
     expectedState: { edi: 0x202 },
-    memoryPatches: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0x00, 0x00, 0xbb] }
-    ],
-    expectedMemory: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0xef, 0xbe, 0xbb] }
-    ]
+    memoryPatches: [{ address: destinationAddress - 1, bytes: [0xaa, 0x00, 0x00, 0xbb] }],
+    expectedMemory: [{ address: destinationAddress - 1, bytes: [0xaa, 0xef, 0xbe, 0xbb] }]
   },
   {
     name: "STOSW stores AX and decrements EDI by two",
@@ -248,12 +228,8 @@ const oneShotCases = [
       ...preservedFlags
     },
     expectedState: { edi: 0x1fe },
-    memoryPatches: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0x00, 0x00, 0xbb] }
-    ],
-    expectedMemory: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0xef, 0xbe, 0xbb] }
-    ]
+    memoryPatches: [{ address: destinationAddress - 1, bytes: [0xaa, 0x00, 0x00, 0xbb] }],
+    expectedMemory: [{ address: destinationAddress - 1, bytes: [0xaa, 0xef, 0xbe, 0xbb] }]
   },
   {
     name: "STOSD stores EAX and increments EDI by four",
@@ -370,12 +346,8 @@ const oneShotCases = [
       ...preservedFlags
     },
     expectedState: { eax: 0xcafe_babe, esi: 0x104 },
-    memoryPatches: [
-      { address: sourceAddress, bytes: [0xbe, 0xba, 0xfe, 0xca] }
-    ],
-    expectedMemory: [
-      { address: sourceAddress, bytes: [0xbe, 0xba, 0xfe, 0xca] }
-    ]
+    memoryPatches: [{ address: sourceAddress, bytes: [0xbe, 0xba, 0xfe, 0xca] }],
+    expectedMemory: [{ address: sourceAddress, bytes: [0xbe, 0xba, 0xfe, 0xca] }]
   },
   {
     name: "LODSD loads EAX and decrements ESI by four",
@@ -388,12 +360,8 @@ const oneShotCases = [
       ...preservedFlags
     },
     expectedState: { eax: 0xcafe_babe, esi: 0xfc },
-    memoryPatches: [
-      { address: sourceAddress, bytes: [0xbe, 0xba, 0xfe, 0xca] }
-    ],
-    expectedMemory: [
-      { address: sourceAddress, bytes: [0xbe, 0xba, 0xfe, 0xca] }
-    ]
+    memoryPatches: [{ address: sourceAddress, bytes: [0xbe, 0xba, 0xfe, 0xca] }],
+    expectedMemory: [{ address: sourceAddress, bytes: [0xbe, 0xba, 0xfe, 0xca] }]
   },
   {
     name: "CMPSB subtracts the ES byte from the source byte and increments indexes",
@@ -600,12 +568,8 @@ const oneShotCases = [
       ...compareInitialFlags
     },
     expectedState: { edi: 0x204, ...dwordCompareFlags },
-    memoryPatches: [
-      { address: destinationAddress, bytes: [0x01, 0x00, 0x00, 0x00] }
-    ],
-    expectedMemory: [
-      { address: destinationAddress, bytes: [0x01, 0x00, 0x00, 0x00] }
-    ]
+    memoryPatches: [{ address: destinationAddress, bytes: [0x01, 0x00, 0x00, 0x00] }],
+    expectedMemory: [{ address: destinationAddress, bytes: [0x01, 0x00, 0x00, 0x00] }]
   },
   {
     name: "SCASD subtracts the ES dword from EAX and decrements EDI by four",
@@ -618,12 +582,8 @@ const oneShotCases = [
       ...compareInitialFlags
     },
     expectedState: { edi: 0x1fc, ...dwordCompareFlags },
-    memoryPatches: [
-      { address: destinationAddress, bytes: [0x01, 0x00, 0x00, 0x00] }
-    ],
-    expectedMemory: [
-      { address: destinationAddress, bytes: [0x01, 0x00, 0x00, 0x00] }
-    ]
+    memoryPatches: [{ address: destinationAddress, bytes: [0x01, 0x00, 0x00, 0x00] }],
+    expectedMemory: [{ address: destinationAddress, bytes: [0x01, 0x00, 0x00, 0x00] }]
   }
 ] as const satisfies readonly InstructionCase[];
 
@@ -705,12 +665,8 @@ const faultCases = [
     },
     expectedEip: 0x1000,
     instructionCount: 0,
-    memoryPatches: [
-      { address: guestMemoryMinimumByteLength - 2, bytes: [0xaa, 0xbb] }
-    ],
-    expectedMemory: [
-      { address: guestMemoryMinimumByteLength - 2, bytes: [0xaa, 0xbb] }
-    ]
+    memoryPatches: [{ address: guestMemoryMinimumByteLength - 2, bytes: [0xaa, 0xbb] }],
+    expectedMemory: [{ address: guestMemoryMinimumByteLength - 2, bytes: [0xaa, 0xbb] }]
   },
   {
     name: "MOVSD reports its destination write fault after the source read without index progress",

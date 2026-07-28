@@ -8,8 +8,7 @@ export type Value = ValueId;
 export type OperandRef = Readonly<{ kind: "operand"; index: number }>;
 export type RegRef = Readonly<{ kind: "reg"; reg: RegName }>;
 export type SegmentRef =
-  | Readonly<{ kind: "static"; reg: SegmentRegister }>
-  | Readonly<{ kind: "dynamic"; index: Value }>;
+  Readonly<{ kind: "static"; reg: SegmentRegister }> | Readonly<{ kind: "dynamic"; index: Value }>;
 export type MemRef = Readonly<{
   segment: SegmentRef;
   offset: Value;

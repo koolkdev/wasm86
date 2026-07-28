@@ -37,5 +37,4 @@ export class FunctionImport implements DirectCallTarget {
   isAvailableTo(owner: object): boolean {
     return this.#owner === owner;
   }
-
 }

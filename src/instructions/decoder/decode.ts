@@ -1,15 +1,7 @@
-import {
-  generalProtection,
-  invalidOpcode,
-  type CpuException
-} from "#core/exceptions.js";
+import { generalProtection, invalidOpcode, type CpuException } from "#core/exceptions.js";
 import { u32 } from "#common/numeric.js";
 import { registerAliasByIndex } from "#core/registers.js";
-import type {
-  EffectiveAddress,
-  MemOperand,
-  SegmentRegister
-} from "#core/types.js";
+import type { EffectiveAddress, MemOperand, SegmentRegister } from "#core/types.js";
 import { selectModRmForm } from "./model/candidates.js";
 import { X86_32_DECODE_MODEL } from "./model/index.js";
 import type {
@@ -34,12 +26,10 @@ type SelectedForm = Readonly<{
 }>;
 
 type DecodedRm =
-  | Readonly<{ kind: "reg"; index: number }>
-  | Readonly<{ kind: "mem"; address: EffectiveAddress }>;
+  Readonly<{ kind: "reg"; index: number }> | Readonly<{ kind: "mem"; address: EffectiveAddress }>;
 
 class CpuExceptionSignal {
-  constructor(readonly exception: CpuException<number>) {
-  }
+  constructor(readonly exception: CpuException<number>) {}
 }
 
 class IsaDecodeCursor {
@@ -154,9 +144,7 @@ class NumericDecodeEvaluator {
         return;
       case "repeat":
         this.prefixFlags &= ~(flagBits.rep | flagBits.repne);
-        this.prefixFlags |= effect.value === "rep"
-          ? flagBits.rep
-          : flagBits.repne;
+        this.prefixFlags |= effect.value === "rep" ? flagBits.rep : flagBits.repne;
         return;
       case "segment":
         this.segmentOverride = effect.value;
@@ -183,10 +171,7 @@ class NumericDecodeEvaluator {
     }
   }
 
-  private selectForm(
-    leaf: OpcodeLeaf,
-    opcodeOffset: number
-  ): SelectedForm | undefined {
+  private selectForm(leaf: OpcodeLeaf, opcodeOffset: number): SelectedForm | undefined {
     const prefixIndex = this.prefixFlags & X86_32_DECODE_MODEL.prefixes.flagMask;
     const candidates = leaf.byPrefix[prefixIndex]!;
 
@@ -206,9 +191,8 @@ class NumericDecodeEvaluator {
   }
 
   private decodeInstruction(selected: SelectedForm): IsaDecodedInstruction {
-    const decodedRm = selected.modRmByte === undefined
-      ? undefined
-      : this.decodeRm(selected.modRmByte);
+    const decodedRm =
+      selected.modRmByte === undefined ? undefined : this.decodeRm(selected.modRmByte);
     const operands = selected.form.operands.map((operand) =>
       this.decodeOperand(selected.form, operand, selected.modRmByte, decodedRm)
     );
@@ -248,15 +232,10 @@ class NumericDecodeEvaluator {
     const baseField = sib & 0b111;
     const base = address.bases[baseField]!;
     const index = X86_32_DECODE_MODEL.addressForms.sibIndexes[indexField];
-    const encodedScale =
-      X86_32_DECODE_MODEL.addressForms.sibScales[scaleField]!;
+    const encodedScale = X86_32_DECODE_MODEL.addressForms.sibScales[scaleField]!;
     return {
       kind: "mem",
-      address: this.decodeEffectiveAddress(
-        base,
-        index,
-        index === undefined ? 1 : encodedScale
-      )
+      address: this.decodeEffectiveAddress(base, index, index === undefined ? 1 : encodedScale)
     };
   }
 
@@ -310,10 +289,7 @@ class NumericDecodeEvaluator {
         const rm = decodedRm!;
 
         if (rm.kind === "reg") {
-          const registerOperand = operand as Extract<
-            DecodeOperand,
-            { form: "registerOrMemory" }
-          >;
+          const registerOperand = operand as Extract<DecodeOperand, { form: "registerOrMemory" }>;
 
           return {
             kind: "reg",

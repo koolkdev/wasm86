@@ -1,9 +1,6 @@
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { resourceRead } from "#compiler/ir/operations/resource.js";
-import type {
-  ResourceByteOperand,
-  ResourceEffect
-} from "#compiler/ir/resource.js";
+import type { ResourceByteOperand, ResourceEffect } from "#compiler/ir/resource.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { MachineMemoryDefinition } from "../machine-memory.js";
 import { pageTableEntries } from "./layout.js";
@@ -13,9 +10,7 @@ export type PageTableAccess = Readonly<{
   read(region: RegionBuilder, page: ValueId): ValueId;
 }>;
 
-export function createPageTableAccess(
-  machineMemory: MachineMemoryDefinition
-): PageTableAccess {
+export function createPageTableAccess(machineMemory: MachineMemoryDefinition): PageTableAccess {
   const entries = machineMemory.layout.array(pageTableEntries);
   const effect: ResourceEffect = {
     space: "resource",
@@ -35,11 +30,7 @@ export function createPageTableAccess(
       const source: ResourceByteOperand = {
         effect,
         address: {
-          base: region.values.binary(
-            "mul",
-            page,
-            region.values.const(entries.stride)
-          ),
+          base: region.values.binary("mul", page, region.values.const(entries.stride)),
           displacement: entries.offset
         },
         width: 32

@@ -33,10 +33,7 @@ export type VariantSet = Readonly<{
   variants: readonly VariantRef[];
 }>;
 
-export function variantSet(
-  id: string,
-  variants: readonly VariantRef[]
-): VariantSet {
+export function variantSet(id: string, variants: readonly VariantRef[]): VariantSet {
   return { id, variants };
 }
 
@@ -86,9 +83,7 @@ export interface VariantLayout {
 
   variant(ref: VariantRef): VariantPlacement;
   variantForTag(tag: number): VariantRef;
-  field<TWidth extends LayoutWidth>(
-    ref: VariantFieldRef<TWidth>
-  ): VariantLayoutField<TWidth>;
+  field<TWidth extends LayoutWidth>(ref: VariantFieldRef<TWidth>): VariantLayoutField<TWidth>;
 }
 
 class VariantLayoutImpl implements VariantLayout {
@@ -122,10 +117,7 @@ class VariantLayoutImpl implements VariantLayout {
   variant(ref: VariantRef): VariantPlacement {
     const variant = this.#variants.get(ref);
 
-    assert(
-      variant !== undefined,
-      `variant ${ref.id} does not belong to the ${this.id} layout`
-    );
+    assert(variant !== undefined, `variant ${ref.id} does not belong to the ${this.id} layout`);
     return variant;
   }
 
@@ -138,23 +130,15 @@ class VariantLayoutImpl implements VariantLayout {
     return variant;
   }
 
-  field<TWidth extends LayoutWidth>(
-    ref: VariantFieldRef<TWidth>
-  ): VariantLayoutField<TWidth> {
+  field<TWidth extends LayoutWidth>(ref: VariantFieldRef<TWidth>): VariantLayoutField<TWidth> {
     const field = this.#fields.get(ref);
 
-    assert(
-      field !== undefined,
-      `variant field ${ref.id} does not belong to the ${this.id} layout`
-    );
+    assert(field !== undefined, `variant field ${ref.id} does not belong to the ${this.id} layout`);
     return field as VariantLayoutField<TWidth>;
   }
 }
 
-export function createVariantLayout(
-  id: string,
-  sets: readonly VariantSet[]
-): VariantLayout {
+export function createVariantLayout(id: string, sets: readonly VariantSet[]): VariantLayout {
   assertId(id, "variant layout id");
   assert(sets.length > 0, `variant layout ${id} has no sets`);
 
@@ -164,46 +148,30 @@ export function createVariantLayout(
 
   for (const set of sets) {
     assertScopedId(set.id, "variant set id");
-    assert(
-      !setIds.has(set.id),
-      `duplicate variant set id: ${set.id}`
-    );
+    assert(!setIds.has(set.id), `duplicate variant set id: ${set.id}`);
     setIds.add(set.id);
-    assert(
-      set.variants.length > 0,
-      `variant set ${set.id} has no variants`
-    );
+    assert(set.variants.length > 0, `variant set ${set.id} has no variants`);
 
     for (const variant of set.variants) {
       assertScopedId(variant.id, "variant id");
-      assert(
-        !variantIds.has(variant.id),
-        `duplicate variant id: ${variant.id}`
-      );
+      assert(!variantIds.has(variant.id), `duplicate variant id: ${variant.id}`);
       variantIds.add(variant.id);
 
       for (const field of variant.fields) {
         assertScopedId(field.id, "variant field id");
-        assert(
-          !fieldIds.has(field.id),
-          `duplicate variant field id: ${field.id}`
-        );
+        assert(!fieldIds.has(field.id), `duplicate variant field id: ${field.id}`);
         fieldIds.add(field.id);
       }
     }
   }
 
-  assert(
-    variantIds.size <= 0xff,
-    `variant layout ${id} has too many variants: ${variantIds.size}`
-  );
+  assert(variantIds.size <= 0xff, `variant layout ${id} has too many variants: ${variantIds.size}`);
 
   const orderedSets = [...sets]
     .sort((left, right) => compareIds(left.id, right.id))
     .map((set) => ({
       set,
-      variants: [...set.variants]
-        .sort((left, right) => compareIds(left.id, right.id))
+      variants: [...set.variants].sort((left, right) => compareIds(left.id, right.id))
     }));
   const variants = new Map<VariantRef, VariantPlacement>();
   const variantsByTag = new Map<number, VariantRef>();

@@ -8,10 +8,7 @@ import {
   type ReturnControl,
   type SwitchControl
 } from "#compiler/ir/controls/index.js";
-import {
-  invocationInputs,
-  type CallTarget
-} from "#compiler/ir/invocation.js";
+import { invocationInputs, type CallTarget } from "#compiler/ir/invocation.js";
 import { regionCompletes, type Region } from "#compiler/ir/region.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ModuleBindings } from "#compiler/module/bindings.js";
@@ -90,26 +87,16 @@ export function createControlEmitter({
 
       valueEmitter.emitUse(control.selector);
       valueEmitter.emitCaptures();
-      body.write(
-        wasmInstruction.control.brTable,
-        switchLabelDepths(control.cases),
-        caseCount
-      );
+      body.write(wasmInstruction.control.brTable, switchLabelDepths(control.cases), caseCount);
 
       control.cases.forEach((entry, index) => {
         body.write(wasmInstruction.control.end);
-        frame.withNestedControl(
-          () => emitBody(entry.body, outputLocal),
-          caseCount - index + 1
-        );
+        frame.withNestedControl(() => emitBody(entry.body, outputLocal), caseCount - index + 1);
         body.write(wasmInstruction.control.br, caseCount - index);
       });
 
       body.write(wasmInstruction.control.end);
-      frame.withNestedControl(
-        () => emitBody(control.defaultBody, outputLocal),
-        1
-      );
+      frame.withNestedControl(() => emitBody(control.defaultBody, outputLocal), 1);
       body.write(wasmInstruction.control.end);
     });
 
@@ -189,9 +176,7 @@ export function createControlEmitter({
       outputPlacement === undefined || outputPlacement.kind === "control",
       `control output ${output} has the wrong placement`
     );
-    const outputLocal = outputPlacement === undefined
-      ? undefined
-      : valueEmitter.valueLocal(output);
+    const outputLocal = outputPlacement === undefined ? undefined : valueEmitter.valueLocal(output);
 
     emit(outputLocal);
     if (outputLocal !== undefined) {
@@ -237,10 +222,7 @@ function emitReturnCall(
 ): void {
   switch (target.kind) {
     case "direct":
-      body.write(
-        wasmInstruction.returnCall.direct,
-        bindings.functionIndex(target.ref)
-      );
+      body.write(wasmInstruction.returnCall.direct, bindings.functionIndex(target.ref));
       return;
     case "indirect":
       body.write(

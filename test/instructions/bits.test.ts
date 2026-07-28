@@ -57,6 +57,7 @@ for (const entry of registerBitCases) {
 
 test("memory bit strings adjust positive register offsets by whole dwords", async () => {
   const base = 0x2400;
+  // prettier-ignore
   const initialBytes = [
     0x11, 0x22, 0x33, 0x44,
     0x00, 0x00, 0x00, 0x00,
@@ -69,19 +70,23 @@ test("memory bit strings adjust positive register offsets by whole dwords", asyn
     initialState: { eax: base, ecx: 37, ...preservedFlags },
     expectedState: { CF: 0 },
     memoryPatches: [{ address: base, bytes: initialBytes }],
-    expectedMemory: [{
-      address: base,
-      bytes: [
-        0x11, 0x22, 0x33, 0x44,
-        0x20, 0x00, 0x00, 0x00,
-        0x55, 0x66, 0x77, 0x88
-      ]
-    }]
+    expectedMemory: [
+      {
+        address: base,
+        // prettier-ignore
+        bytes: [
+          0x11, 0x22, 0x33, 0x44,
+          0x20, 0x00, 0x00, 0x00,
+          0x55, 0x66, 0x77, 0x88
+        ]
+      }
+    ]
   });
 });
 
 test("memory bit strings adjust negative register offsets below the effective address", async () => {
   const base = 0x2504;
+  // prettier-ignore
   const sentinelBytes = [
     0xaa, 0xbb, 0xcc, 0x80,
     0x11, 0x22, 0x33, 0x44
@@ -93,10 +98,12 @@ test("memory bit strings adjust negative register offsets below the effective ad
     initialState: { eax: base, ecx: 0xffff_ffff, ...preservedFlags },
     expectedState: { CF: 1 },
     memoryPatches: [{ address: base - 4, bytes: sentinelBytes }],
-    expectedMemory: [{
-      address: base - 4,
-      bytes: [0xaa, 0xbb, 0xcc, 0x00, 0x11, 0x22, 0x33, 0x44]
-    }]
+    expectedMemory: [
+      {
+        address: base - 4,
+        bytes: [0xaa, 0xbb, 0xcc, 0x00, 0x11, 0x22, 0x33, 0x44]
+      }
+    ]
   });
 
   await assertInstructionCase({
@@ -304,10 +311,5 @@ test("BSWAP reverses all four bytes and preserves flags", async () => {
 });
 
 function dwordBytes(value: number): readonly number[] {
-  return [
-    value & 0xff,
-    (value >>> 8) & 0xff,
-    (value >>> 16) & 0xff,
-    (value >>> 24) & 0xff
-  ];
+  return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
 }

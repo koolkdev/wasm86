@@ -18,19 +18,11 @@ export function emitSegmentLoad(
   binding: SegmentOperandBinding,
   selector: ValueId
 ): SegmentWriteOutcome {
-  terminator.segmentLoad(
-    region,
-    access,
-    segmentIndex(region, binding),
-    selector
-  );
+  terminator.segmentLoad(region, access, segmentIndex(region, binding), selector);
   return "terminated";
 }
 
-function segmentIndex(
-  region: RegionBuilder,
-  binding: SegmentOperandBinding
-): ValueId {
+function segmentIndex(region: RegionBuilder, binding: SegmentOperandBinding): ValueId {
   switch (binding.selection.kind) {
     case "static":
       return region.values.const(segmentRegisterIndex(binding.selection.reg));

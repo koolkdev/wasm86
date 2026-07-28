@@ -27,16 +27,10 @@ export function emitOperation(
       emitCall(body, bindings, operation.invocation.target);
       return;
     case "variable.read":
-      body.write(
-        wasmInstruction.local.get,
-        values.variableLocal(operation.variable)
-      );
+      body.write(wasmInstruction.local.get, values.variableLocal(operation.variable));
       return;
     case "variable.write":
-      body.write(
-        wasmInstruction.local.set,
-        values.variableLocal(operation.variable)
-      );
+      body.write(wasmInstruction.local.set, values.variableLocal(operation.variable));
       return;
     case "resource.read":
       emitResourceRead(body, bindings, operation);
@@ -101,17 +95,10 @@ function emitResourceWrite(
   }
 }
 
-function emitCall(
-  body: WasmInstructionWriter,
-  bindings: ModuleBindings,
-  target: CallTarget
-): void {
+function emitCall(body: WasmInstructionWriter, bindings: ModuleBindings, target: CallTarget): void {
   switch (target.kind) {
     case "direct":
-      body.write(
-        wasmInstruction.call.direct,
-        bindings.functionIndex(target.ref)
-      );
+      body.write(wasmInstruction.call.direct, bindings.functionIndex(target.ref));
       return;
     case "indirect":
       body.write(

@@ -11,11 +11,12 @@ type VariableReadArgs = Readonly<{
   variable: VariableRef;
 }>;
 
-export type VariableReadOperation = OperationNodeBase & Readonly<{
-  kind: "variable.read";
-  variable: VariableRef;
-  output: ValueId;
-}>;
+export type VariableReadOperation = OperationNodeBase &
+  Readonly<{
+    kind: "variable.read";
+    variable: VariableRef;
+    output: ValueId;
+  }>;
 
 export const variableRead: OperationDefinition<
   VariableReadArgs,
@@ -35,10 +36,12 @@ export const variableRead: OperationDefinition<
   },
   describe: (operation) => ({
     inputs: [],
-    productions: [{
-      result: operationResult(operation.variable.type),
-      output: operation.output
-    }],
+    productions: [
+      {
+        result: operationResult(operation.variable.type),
+        output: operation.output
+      }
+    ],
     effects: {
       reads: [{ space: "variable", variable: operation.variable }],
       writes: []
@@ -54,12 +57,13 @@ type VariableWriteArgs = Readonly<{
   initialization: VariableWriteInitialization;
 }>;
 
-export type VariableWriteOperation = OperationNodeBase & Readonly<{
-  kind: "variable.write";
-  variable: VariableRef;
-  value: ValueId;
-  initialization: VariableWriteInitialization;
-}>;
+export type VariableWriteOperation = OperationNodeBase &
+  Readonly<{
+    kind: "variable.write";
+    variable: VariableRef;
+    value: ValueId;
+    initialization: VariableWriteInitialization;
+  }>;
 
 export const variableWrite: OperationDefinition<
   VariableWriteArgs,

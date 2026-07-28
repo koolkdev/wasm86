@@ -10,18 +10,12 @@ import type { Layout } from "./layout.js";
 
 export interface LayoutHostView {
   readField<TWidth extends LayoutWidth>(field: FieldRef<TWidth>): number;
-  writeField<TWidth extends LayoutWidth>(
-    field: FieldRef<TWidth>,
-    value: number
-  ): void;
-  readNamedArrayElement<
-    TWidth extends LayoutWidth,
-    TElementId extends string
-  >(array: NamedArrayRef<TWidth, TElementId>, elementId: TElementId): number;
-  writeNamedArrayElement<
-    TWidth extends LayoutWidth,
-    TElementId extends string
-  >(
+  writeField<TWidth extends LayoutWidth>(field: FieldRef<TWidth>, value: number): void;
+  readNamedArrayElement<TWidth extends LayoutWidth, TElementId extends string>(
+    array: NamedArrayRef<TWidth, TElementId>,
+    elementId: TElementId
+  ): number;
+  writeNamedArrayElement<TWidth extends LayoutWidth, TElementId extends string>(
     array: NamedArrayRef<TWidth, TElementId>,
     elementId: TElementId,
     value: number
@@ -41,10 +35,7 @@ export interface LayoutHostView {
   ): void;
 }
 
-export function createLayoutHostView(
-  memory: WebAssembly.Memory,
-  layout: Layout
-): LayoutHostView {
+export function createLayoutHostView(memory: WebAssembly.Memory, layout: Layout): LayoutHostView {
   if (memory.buffer.byteLength < layout.byteLength) {
     throw new RangeError(
       `${layout.space} memory is too small: ${memory.buffer.byteLength} < ${layout.byteLength}`
@@ -58,10 +49,7 @@ class LayoutHostViewImpl implements LayoutHostView {
   readonly #memory: WebAssembly.Memory;
   readonly #layout: Layout;
 
-  constructor(
-    memory: WebAssembly.Memory,
-    layout: Layout
-  ) {
+  constructor(memory: WebAssembly.Memory, layout: Layout) {
     this.#memory = memory;
     this.#layout = layout;
   }
@@ -72,33 +60,24 @@ class LayoutHostViewImpl implements LayoutHostView {
     return this.#read(resolved.offset, resolved.byteLength);
   }
 
-  writeField<TWidth extends LayoutWidth>(
-    field: FieldRef<TWidth>,
-    value: number
-  ): void {
+  writeField<TWidth extends LayoutWidth>(field: FieldRef<TWidth>, value: number): void {
     const resolved = this.#layout.field(field);
 
     this.#write(resolved.offset, resolved.byteLength, value);
   }
 
-  readNamedArrayElement<
-    TWidth extends LayoutWidth,
-    TElementId extends string
-  >(array: NamedArrayRef<TWidth, TElementId>, elementId: TElementId): number {
+  readNamedArrayElement<TWidth extends LayoutWidth, TElementId extends string>(
+    array: NamedArrayRef<TWidth, TElementId>,
+    elementId: TElementId
+  ): number {
     const resolved = this.#layout.namedArray(array);
     const index = array.elementIndex(elementId);
 
     assert(index < resolved.count, `named array index ${index} is outside ${array.id}`);
-    return this.#read(
-      resolved.offset + index * resolved.stride,
-      resolved.elementByteLength
-    );
+    return this.#read(resolved.offset + index * resolved.stride, resolved.elementByteLength);
   }
 
-  writeNamedArrayElement<
-    TWidth extends LayoutWidth,
-    TElementId extends string
-  >(
+  writeNamedArrayElement<TWidth extends LayoutWidth, TElementId extends string>(
     array: NamedArrayRef<TWidth, TElementId>,
     elementId: TElementId,
     value: number
@@ -107,11 +86,7 @@ class LayoutHostViewImpl implements LayoutHostView {
     const index = array.elementIndex(elementId);
 
     assert(index < resolved.count, `named array index ${index} is outside ${array.id}`);
-    this.#write(
-      resolved.offset + index * resolved.stride,
-      resolved.elementByteLength,
-      value
-    );
+    this.#write(resolved.offset + index * resolved.stride, resolved.elementByteLength, value);
   }
 
   readArrayElement(
@@ -120,10 +95,7 @@ class LayoutHostViewImpl implements LayoutHostView {
     byteOffset: number,
     byteLength: LayoutByteLength
   ): number {
-    return this.#read(
-      this.#arrayElementOffset(array, index, byteOffset, byteLength),
-      byteLength
-    );
+    return this.#read(this.#arrayElementOffset(array, index, byteOffset, byteLength), byteLength);
   }
 
   writeArrayElement(
@@ -133,11 +105,7 @@ class LayoutHostViewImpl implements LayoutHostView {
     byteLength: LayoutByteLength,
     value: number
   ): void {
-    this.#write(
-      this.#arrayElementOffset(array, index, byteOffset, byteLength),
-      byteLength,
-      value
-    );
+    this.#write(this.#arrayElementOffset(array, index, byteOffset, byteLength), byteLength, value);
   }
 
   #arrayElementOffset(

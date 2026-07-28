@@ -1,18 +1,12 @@
 import { assert } from "#common/assert.js";
-import {
-  resourceRead,
-  resourceWrite
-} from "#compiler/ir/operations/resource.js";
+import { resourceRead, resourceWrite } from "#compiler/ir/operations/resource.js";
 import type {
   ResourceByteOperand,
   ResourceEffect,
   ResourceReadMode,
   ResourceRef
 } from "#compiler/ir/resource.js";
-import type {
-  IntegerWidth,
-  ValueId
-} from "#compiler/ir/values/types.js";
+import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import {
   widthByteLength,
   type FieldRef,
@@ -24,11 +18,7 @@ import type { Layout, LayoutNamedArray } from "#compiler/layout/layout.js";
 import { registerAlias } from "#core/registers.js";
 import { coreStateFields } from "#core/state/layout.js";
 import type { GprChannel, SegmentStateField } from "#core/state/channels.js";
-import type {
-  OperandWidth,
-  RegName,
-  SegmentRegister
-} from "#core/types.js";
+import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 
@@ -64,17 +54,10 @@ export class StateAccess {
       widthByteLength(layoutWidth(alias.width))
     );
 
-    return resourceEffect(
-      this.#state,
-      slice.byteOffset,
-      slice.byteLength
-    );
+    return resourceEffect(this.#state, slice.byteOffset, slice.byteLength);
   }
 
-  segmentEffect(
-    reg: SegmentRegister,
-    field: SegmentStateField
-  ): ResourceEffect {
+  segmentEffect(reg: SegmentRegister, field: SegmentStateField): ResourceEffect {
     const arrayRef = segmentNamedArray(field);
     const slice = namedArrayElementSlice(
       this.#state,
@@ -84,11 +67,7 @@ export class StateAccess {
       widthByteLength(arrayRef.elementWidth)
     );
 
-    return resourceEffect(
-      this.#state,
-      slice.byteOffset,
-      slice.byteLength
-    );
+    return resourceEffect(this.#state, slice.byteOffset, slice.byteLength);
   }
 
   owns(effect: ResourceEffect): boolean {
@@ -139,32 +118,24 @@ export class BoundStateAccess {
     const byteLength = widthByteLength(layoutWidth(width));
     const array = this.#state.layout.namedArray(coreStateFields.gprs);
     const strideShift = powerOfTwoShift(array.stride);
-    const relativeOffset = width === 8
-      ? values.binary(
-          "add",
-          values.binary(
-            "shl",
-            values.binary("and", index, values.const(3)),
-            values.const(strideShift)
-          ),
-          values.binary(
-            "and",
-            values.binary("shr_u", index, values.const(2)),
-            values.const(1)
+    const relativeOffset =
+      width === 8
+        ? values.binary(
+            "add",
+            values.binary(
+              "shl",
+              values.binary("and", index, values.const(3)),
+              values.const(strideShift)
+            ),
+            values.binary("and", values.binary("shr_u", index, values.const(2)), values.const(1))
           )
-        )
-      : values.binary(
-          "shl",
-          values.binary("and", index, values.const(7)),
-          values.const(strideShift)
-        );
+        : values.binary(
+            "shl",
+            values.binary("and", index, values.const(7)),
+            values.const(strideShift)
+          );
 
-    return this.#dynamicNamedArray(
-      coreStateFields.gprs,
-      array,
-      relativeOffset,
-      byteLength
-    );
+    return this.#dynamicNamedArray(coreStateFields.gprs, array, relativeOffset, byteLength);
   }
 
   segment(reg: SegmentRegister, field: SegmentStateField): ResourceByteOperand {
@@ -182,28 +153,15 @@ export class BoundStateAccess {
     const values = this.#region.values;
     const arrayRef = segmentNamedArray(field);
     const array = this.#state.layout.namedArray(arrayRef);
-    const relativeOffset = values.binary(
-      "shl",
-      index,
-      values.const(powerOfTwoShift(array.stride))
-    );
+    const relativeOffset = values.binary("shl", index, values.const(powerOfTwoShift(array.stride)));
 
-    return this.#dynamicNamedArray(
-      arrayRef,
-      array,
-      relativeOffset,
-      array.elementByteLength
-    );
+    return this.#dynamicNamedArray(arrayRef, array, relativeOffset, array.elementByteLength);
   }
 
   field<TWidth extends LayoutWidth>(field: FieldRef<TWidth>): ResourceByteOperand {
     const placed = this.#state.layout.field(field);
 
-    return this.#staticOperand(
-      placed.offset,
-      placed.byteLength,
-      integerWidth(field.width)
-    );
+    return this.#staticOperand(placed.offset, placed.byteLength, integerWidth(field.width));
   }
 
   read(operand: ResourceByteOperand, mode?: ResourceReadMode): ValueId {
@@ -219,10 +177,7 @@ export class BoundStateAccess {
     );
   }
 
-  readField<TWidth extends LayoutWidth>(
-    field: FieldRef<TWidth>,
-    mode?: ResourceReadMode
-  ): ValueId {
+  readField<TWidth extends LayoutWidth>(field: FieldRef<TWidth>, mode?: ResourceReadMode): ValueId {
     return this.read(this.field(field), mode);
   }
 
@@ -237,13 +192,7 @@ export class BoundStateAccess {
     byteOffset: number,
     byteLength: LayoutByteLength
   ): ResourceByteOperand {
-    const slice = namedArrayElementSlice(
-      this.#state,
-      arrayRef,
-      index,
-      byteOffset,
-      byteLength
-    );
+    const slice = namedArrayElementSlice(this.#state, arrayRef, index, byteOffset, byteLength);
 
     return this.#staticOperand(
       slice.byteOffset,
@@ -262,7 +211,8 @@ export class BoundStateAccess {
 
     if (staticRelativeOffset !== undefined) {
       assert(
-        Number.isInteger(staticRelativeOffset) && staticRelativeOffset >= 0 &&
+        Number.isInteger(staticRelativeOffset) &&
+          staticRelativeOffset >= 0 &&
           staticRelativeOffset + byteLength <= array.stride * array.count,
         `access exceeds named layout array ${arrayRef.id}`
       );
@@ -320,7 +270,8 @@ function namedArrayElementSlice<TWidth extends LayoutWidth>(
     `invalid element index ${index} for named layout array ${arrayRef.id}`
   );
   assert(
-    Number.isInteger(byteOffset) && byteOffset >= 0 &&
+    Number.isInteger(byteOffset) &&
+      byteOffset >= 0 &&
       byteOffset + byteLength <= array.elementByteLength,
     `access exceeds named layout array element ${arrayRef.id}`
   );

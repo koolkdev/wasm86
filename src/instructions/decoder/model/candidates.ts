@@ -1,9 +1,5 @@
 import { assert } from "#common/assert.js";
-import type {
-  InstructionForm,
-  ModRmFormSelection,
-  ModRmModeForms
-} from "./types.js";
+import type { InstructionForm, ModRmFormSelection, ModRmModeForms } from "./types.js";
 
 const nonUniform = Symbol("nonUniformModRmForms");
 
@@ -23,9 +19,7 @@ export function deriveModRmFormSelection(
   }
 
   assert(
-    byReg.some(
-      ({ register, memory }) => register !== undefined || memory !== undefined
-    ),
+    byReg.some(({ register, memory }) => register !== undefined || memory !== undefined),
     "ModRM candidate accepts no bytes"
   );
   const first = byReg[0]!;

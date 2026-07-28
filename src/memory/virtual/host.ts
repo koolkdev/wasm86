@@ -1,22 +1,9 @@
 import { assert } from "#common/assert.js";
-import {
-  createLayoutHostView,
-  type LayoutHostView
-} from "#compiler/layout/host-view.js";
-import {
-  pageFault,
-  pageFaultErrorCode
-} from "#core/exceptions.js";
+import { createLayoutHostView, type LayoutHostView } from "#compiler/layout/host-view.js";
+import { pageFault, pageFaultErrorCode } from "#core/exceptions.js";
 import type { MachineMemoryDefinition } from "../machine-memory.js";
-import type {
-  BoundPhysicalAddressSpace,
-  PhysicalAddressSpaceDefinition
-} from "../physical.js";
-import type {
-  GuestMemoryByteRead,
-  GuestMemoryReader,
-  MemoryReadIntent
-} from "../types.js";
+import type { BoundPhysicalAddressSpace, PhysicalAddressSpaceDefinition } from "../physical.js";
+import type { GuestMemoryByteRead, GuestMemoryReader, MemoryReadIntent } from "../types.js";
 import {
   pageTableEntries,
   pageTableEntryAttr,
@@ -40,24 +27,13 @@ export function bindVirtualAddressSpace(
   }>
 ): BoundVirtualAddressSpace {
   const boundPhysical = physical.bindHost({ ram: bindings.ram });
-  const machineView = createLayoutHostView(
-    bindings.machine,
-    machineMemoryDefinition.layout
-  );
+  const machineView = createLayoutHostView(bindings.machine, machineMemoryDefinition.layout);
 
   return {
-    initializeIdentity: () => initializeIdentity(
-      bindings.ram,
-      bindings.machine,
-      machineMemoryDefinition
-    ),
+    initializeIdentity: () =>
+      initializeIdentity(bindings.ram, bindings.machine, machineMemoryDefinition),
     reader: {
-      readByte: (address, intent) => readVirtualByte(
-        boundPhysical,
-        machineView,
-        address,
-        intent
-      )
+      readByte: (address, intent) => readVirtualByte(boundPhysical, machineView, address, intent)
     }
   };
 }
@@ -67,27 +43,16 @@ function initializeIdentity(
   machine: WebAssembly.Memory,
   machineMemoryDefinition: MachineMemoryDefinition
 ): void {
-  const entries = machineMemoryDefinition.layout.array(
-    pageTableEntries
-  );
-  const mappedPageCount =
-    ram.buffer.byteLength / virtualPageByteLength;
+  const entries = machineMemoryDefinition.layout.array(pageTableEntries);
+  const mappedPageCount = ram.buffer.byteLength / virtualPageByteLength;
 
-  assert(
-    mappedPageCount <= entries.count,
-    "physical RAM exceeds the virtual page table"
-  );
+  assert(mappedPageCount <= entries.count, "physical RAM exceeds the virtual page table");
   // Clear only Virtual's PTE slice, then map every page in the current,
   // Wasm-rounded RAM backing. Machine calls this once; later RAM growth
   // deliberately adds physical backing without publishing new mappings.
-  new Uint8Array(
-    machine.buffer,
-    entries.offset,
-    entries.stride * entries.count
-  ).fill(0);
+  new Uint8Array(machine.buffer, entries.offset, entries.stride * entries.count).fill(0);
   const view = new DataView(machine.buffer);
-  const attributes =
-    pageTableEntryAttr.PRESENT | pageTableEntryAttr.WRITABLE;
+  const attributes = pageTableEntryAttr.PRESENT | pageTableEntryAttr.WRITABLE;
 
   for (let page = 0; page < mappedPageCount; page += 1) {
     view.setUint32(

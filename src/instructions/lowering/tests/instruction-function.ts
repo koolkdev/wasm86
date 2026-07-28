@@ -1,9 +1,5 @@
-import type {
-  InstructionBuilder
-} from "#instructions/lowering/builder.js";
-import type {
-  InstructionLowerer
-} from "#instructions/lowering/lowerer.js";
+import type { InstructionBuilder } from "#instructions/lowering/builder.js";
+import type { InstructionLowerer } from "#instructions/lowering/lowerer.js";
 import type { InstructionTerminals } from "#instructions/lowering/terminal.js";
 import { functionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
@@ -29,11 +25,7 @@ export function buildInstructionFunction(
   lowerer: InstructionLowerer = testInstructionLowerer
 ): IrFunction {
   return buildFunction(instructionFunctionType, (fn) => {
-    const finalFallthrough = lowerer.lower(
-      fn.region,
-      instructionFunctionTerminals(),
-      build
-    );
+    const finalFallthrough = lowerer.lower(fn.region, instructionFunctionTerminals(), build);
 
     if (finalFallthrough !== undefined) {
       fn.returnCall(testInstructionDispatch, [finalFallthrough]);

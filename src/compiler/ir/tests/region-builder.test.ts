@@ -1,24 +1,12 @@
-import {
-  deepStrictEqual,
-  doesNotThrow,
-  ok,
-  strictEqual,
-  throws
-} from "node:assert";
+import { deepStrictEqual, doesNotThrow, ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import type { RegionNode } from "#compiler/ir/region.js";
 import { buildFunction } from "#compiler/ir/builder/function.js";
 import { invocationInputs } from "#compiler/ir/invocation.js";
 import { describeNode } from "#compiler/ir/node.js";
-import {
-  resourceRead,
-  resourceWrite
-} from "#compiler/ir/operations/resource.js";
-import {
-  resourceRef,
-  type ResourceByteOperand
-} from "#compiler/ir/resource.js";
+import { resourceRead, resourceWrite } from "#compiler/ir/operations/resource.js";
+import { resourceRef, type ResourceByteOperand } from "#compiler/ir/resource.js";
 import { RegionBuilder, type RegionNodeSink } from "#compiler/ir/builder/region.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
@@ -27,10 +15,7 @@ import { ValueTable } from "#compiler/ir/values/table.js";
 import { functionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef, tableRef } from "#compiler/ir/refs.js";
-import {
-  compilerTestResourceEffect,
-  resourceWriteNode
-} from "#test/support/storage-operations.js";
+import { compilerTestResourceEffect, resourceWriteNode } from "#test/support/storage-operations.js";
 
 function readArgs(values: ValueTable, region = 0) {
   return {
@@ -219,19 +204,17 @@ test("call and returnCall share indirect target normalization", () => {
   strictEqual(callInvocation.target, target);
   strictEqual(returnInvocation.target, target);
   deepStrictEqual(target.elementIndex, { value: elementIndex, type: "i32" });
-  deepStrictEqual(
-    invocationInputs(returnInvocation),
-    invocationInputs(callInvocation)
-  );
+  deepStrictEqual(invocationInputs(returnInvocation), invocationInputs(callInvocation));
   deepStrictEqual(describeNode(returned).operands, [argument, elementIndex]);
   strictEqual(call.output, output);
   throws(
-    () => builder.indirectTarget({
-      table,
-      type,
-      effects,
-      elementIndex: values.const64(1n)
-    }),
+    () =>
+      builder.indirectTarget({
+        table,
+        type,
+        effects,
+        elementIndex: values.const64(1n)
+      }),
     /table element index must be i32, got i64/
   );
 });
@@ -331,7 +314,7 @@ test("effect, push, and extend append nodes without outputs", () => {
 
 test("custom node sinks can divert emitted top-level nodes", () => {
   const values = new ValueTable();
-  const sink = new class implements RegionNodeSink {
+  const sink = new (class implements RegionNodeSink {
     readonly bodyNodes: RegionNode[] = [];
     readonly diverted: RegionNode[] = [];
 
@@ -347,7 +330,7 @@ test("custom node sinks can divert emitted top-level nodes", () => {
     nodes(): readonly RegionNode[] {
       return this.bodyNodes;
     }
-  }();
+  })();
   const builder = new RegionBuilder(values, sink);
   const read = builder.operation(resourceRead, readArgs(values));
 
@@ -368,10 +351,7 @@ test("if builds hinted then and else bodies against child builders", () => {
 
   builder.if(
     condition,
-    (then) => then.operation(
-      resourceWrite,
-      writeArgs(then.values, then.values.const(4))
-    ),
+    (then) => then.operation(resourceWrite, writeArgs(then.values, then.values.const(4))),
     {
       hint: "unlikely",
       elseBuild: (other) => other.return([exitResult])
@@ -394,24 +374,21 @@ test("if builds hinted then and else bodies against child builders", () => {
 
 test("function snapshots retain values created in control children", () => {
   let childValue!: ValueId;
-  const built = buildFunction(
-    functionType(["i32", "i32"], ["i32"]),
-    (fn) => {
-      const [condition, input] = fn.parameters;
+  const built = buildFunction(functionType(["i32", "i32"], ["i32"]), (fn) => {
+    const [condition, input] = fn.parameters;
 
-      ok(condition !== undefined && input !== undefined);
-      const result = fn.region.ifValue(
-        condition,
-        (child) => {
-          childValue = child.values.binary("add", input, child.values.const(1));
-          return childValue;
-        },
-        () => input
-      );
+    ok(condition !== undefined && input !== undefined);
+    const result = fn.region.ifValue(
+      condition,
+      (child) => {
+        childValue = child.values.binary("add", input, child.values.const(1));
+        return childValue;
+      },
+      () => input
+    );
 
-      fn.return([result]);
-    }
-  );
+    fn.return([result]);
+  });
 
   doesNotThrow(() => validateIrFunction(built));
   strictEqual(built.values.valueType(childValue), "i32");
@@ -432,15 +409,17 @@ test("switch preserves arm results and derives one shared output", () => {
   let defaultResult!: ValueId;
   const output = builder.switch(
     selector,
-    [{
-      match: 3,
-      build: (arm) => {
-        const [result] = arm.call(target, args);
+    [
+      {
+        match: 3,
+        build: (arm) => {
+          const [result] = arm.call(target, args);
 
-        ok(result !== undefined, "expected call result");
-        return (armResult = result);
+          ok(result !== undefined, "expected call result");
+          return (armResult = result);
+        }
       }
-    }],
+    ],
     (arm) => (defaultResult = arm.values.const(1))
   );
 
@@ -480,17 +459,17 @@ test("control-only switch shares one body across all matches in an arm", () => {
 
   builder.switchControl(
     selector,
-    [{
-      matches: [1, 3, 5],
-      build: (arm) => {
-        armBuilds += 1;
-        arm.operation(resourceWrite, writeArgs(arm.values, arm.values.const(7)));
+    [
+      {
+        matches: [1, 3, 5],
+        build: (arm) => {
+          armBuilds += 1;
+          arm.operation(resourceWrite, writeArgs(arm.values, arm.values.const(7)));
+        }
       }
-    }],
-    (fallback) => fallback.operation(
-      resourceWrite,
-      writeArgs(fallback.values, fallback.values.const(9))
-    )
+    ],
+    (fallback) =>
+      fallback.operation(resourceWrite, writeArgs(fallback.values, fallback.values.const(9)))
   );
 
   strictEqual(armBuilds, 1);
@@ -513,11 +492,21 @@ test("control-only switch rejects an arm without matches before building bodies"
   let built = false;
 
   throws(
-    () => builder.switchControl(
-      values.const(0),
-      [{ matches: [], build: () => { built = true; } }],
-      () => { built = true; }
-    ),
+    () =>
+      builder.switchControl(
+        values.const(0),
+        [
+          {
+            matches: [],
+            build: () => {
+              built = true;
+            }
+          }
+        ],
+        () => {
+          built = true;
+        }
+      ),
     /control-only switch arm 0 has no matches/
   );
   strictEqual(built, false);
@@ -531,7 +520,9 @@ test("loop bodies take the back edge through loopContinue and validate", () => {
     fn.region.loop([{ seed: fn.values.const(3), loopInput: input }], (body) => {
       const next = body.values.binary("sub", input, body.values.const(1));
 
-      body.if(body.values.compare(32, "ne", next, body.values.const(0)), (taken) => taken.loopContinue([next]));
+      body.if(body.values.compare(32, "ne", next, body.values.const(0)), (taken) =>
+        taken.loopContinue([next])
+      );
     });
     fn.return([fn.values.const64(0n)]);
   });

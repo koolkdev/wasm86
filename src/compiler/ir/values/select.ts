@@ -28,10 +28,8 @@ export const selectValue: ValueDefinition<SelectArgs, SelectNode> = {
     { value: node.condition, type: "i32" }
   ],
   resultType: () => "i32",
-  widthBounds: (node, context) => joinWidthBounds([
-    context.widthBounds(node.whenTrue),
-    context.widthBounds(node.whenFalse)
-  ]),
+  widthBounds: (node, context) =>
+    joinWidthBounds([context.widthBounds(node.whenTrue), context.widthBounds(node.whenFalse)]),
   fold: (node, context) => {
     if (node.whenTrue === node.whenFalse) {
       return node.whenTrue;

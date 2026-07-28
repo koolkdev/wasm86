@@ -76,14 +76,18 @@ test("PUSH [ESP] reads its source before allocating the destination cell", async
     bytes: [0xff, 0x34, 0x24],
     initialState: { esp: 0x104, ...allUserFlagsSet },
     expectedState: { esp: 0x100 },
-    memoryPatches: [{
-      address: 0x100,
-      bytes: [...dwordBytes(0), ...dwordBytes(0x5566_7788)]
-    }],
-    expectedMemory: [{
-      address: 0x100,
-      bytes: [...dwordBytes(0x5566_7788), ...dwordBytes(0x5566_7788)]
-    }]
+    memoryPatches: [
+      {
+        address: 0x100,
+        bytes: [...dwordBytes(0), ...dwordBytes(0x5566_7788)]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: 0x100,
+        bytes: [...dwordBytes(0x5566_7788), ...dwordBytes(0x5566_7788)]
+      }
+    ]
   });
 });
 
@@ -134,14 +138,18 @@ test("POP memory destinations use incremented ESP when computing their address",
     bytes: [0x8f, 0x04, 0x24],
     initialState: { esp: 0x100, ...allUserFlagsSet },
     expectedState: { esp: 0x104 },
-    memoryPatches: [{
-      address: 0x100,
-      bytes: [...dwordBytes(0x5566_7788), ...dwordBytes(0)]
-    }],
-    expectedMemory: [{
-      address: 0x100,
-      bytes: [...dwordBytes(0x5566_7788), ...dwordBytes(0x5566_7788)]
-    }]
+    memoryPatches: [
+      {
+        address: 0x100,
+        bytes: [...dwordBytes(0x5566_7788), ...dwordBytes(0)]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: 0x100,
+        bytes: [...dwordBytes(0x5566_7788), ...dwordBytes(0x5566_7788)]
+      }
+    ]
   });
 
   await assertInstructionCase({
@@ -149,19 +157,24 @@ test("POP memory destinations use incremented ESP when computing their address",
     bytes: [0x66, 0x8f, 0x44, 0x24, 0x08],
     initialState: { esp: 0x100, ...allUserFlagsSet },
     expectedState: { esp: 0x102 },
-    memoryPatches: [{
-      address: 0x100,
-      bytes: [0xef, 0xbe, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    }],
-    expectedMemory: [{
-      address: 0x100,
-      bytes: [
-        0xef, 0xbe,
-        0, 0, 0, 0,
-        0, 0, 0, 0,
-        0xef, 0xbe
-      ]
-    }]
+    memoryPatches: [
+      {
+        address: 0x100,
+        bytes: [0xef, 0xbe, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: 0x100,
+        // prettier-ignore
+        bytes: [
+          0xef, 0xbe,
+          0, 0, 0, 0,
+          0, 0, 0, 0,
+          0xef, 0xbe
+        ]
+      }
+    ]
   });
 });
 
@@ -387,10 +400,5 @@ function wordBytes(value: number): readonly number[] {
 }
 
 function dwordBytes(value: number): readonly number[] {
-  return [
-    value & 0xff,
-    (value >>> 8) & 0xff,
-    (value >>> 16) & 0xff,
-    (value >>> 24) & 0xff
-  ];
+  return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
 }

@@ -1,9 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { PageFault } from "#core/exceptions.js";
-import type {
-  GuestMemoryByteRead,
-  GuestMemoryReader
-} from "#memory/types.js";
+import type { GuestMemoryByteRead, GuestMemoryReader } from "#memory/types.js";
 
 declare const instructionByteSnapshotBrand: unique symbol;
 
@@ -31,19 +28,12 @@ export function snapshotInstructionBytes(
     const read = reader.readByte(linearStart + index, "instructionFetch");
 
     if (read.kind === "exception") {
-      return new CopiedInstructionByteSnapshot(
-        linearStart,
-        new Uint8Array(bytes),
-        read.exception
-      );
+      return new CopiedInstructionByteSnapshot(linearStart, new Uint8Array(bytes), read.exception);
     }
     bytes.push(read.value);
   }
 
-  return new CopiedInstructionByteSnapshot(
-    linearStart,
-    new Uint8Array(bytes)
-  );
+  return new CopiedInstructionByteSnapshot(linearStart, new Uint8Array(bytes));
 }
 
 class CopiedInstructionByteSnapshot implements InstructionByteSnapshot {
@@ -68,10 +58,7 @@ class CopiedInstructionByteSnapshot implements InstructionByteSnapshot {
     if (offset >= 0 && offset < this.#bytes.byteLength) {
       const value = this.#bytes[offset];
 
-      assert(
-        value !== undefined,
-        `missing instruction snapshot byte at offset ${offset}`
-      );
+      assert(value !== undefined, `missing instruction snapshot byte at offset ${offset}`);
       return { kind: "value", value };
     }
 

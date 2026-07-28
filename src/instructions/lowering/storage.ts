@@ -1,16 +1,10 @@
 import { assert } from "#common/assert.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
-import {
-  isX86StatusFlag,
-  type X86Flag
-} from "#core/flags/definitions.js";
+import { isX86StatusFlag, type X86Flag } from "#core/flags/definitions.js";
 import type { StatusFlagResolverFamily } from "#core/flags/lazy/resolvers.js";
 import type { SimpleFlagSource } from "#core/flags/lazy/sources.js";
-import type {
-  BoundStateAccess,
-  StateAccess
-} from "#core/state/access.js";
+import type { BoundStateAccess, StateAccess } from "#core/state/access.js";
 import type {
   AccessFault,
   SemanticReadOptions,
@@ -28,23 +22,12 @@ import type {
   Value,
   ValueInput
 } from "#instructions/semantics/refs.js";
-import type {
-  OperandWidth,
-  RegName
-} from "#core/types.js";
+import type { OperandWidth, RegName } from "#core/types.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import type {
-  MemoryAccess
-} from "#memory/types.js";
-import type {
-  OperandBinding,
-  SegmentOperandBinding
-} from "./bindings.js";
+import type { MemoryAccess } from "#memory/types.js";
+import type { OperandBinding, SegmentOperandBinding } from "./bindings.js";
 import { InstructionMemory } from "./memory.js";
-import {
-  OperandResolver,
-  type ScopedOperandResolver
-} from "./operand-resolver.js";
+import { OperandResolver, type ScopedOperandResolver } from "./operand-resolver.js";
 import type { SemanticRegionScope } from "./scope.js";
 import { InstructionState } from "./state/state.js";
 import type { StateWriteObserver } from "./state/write-log.js";
@@ -103,23 +86,15 @@ export class InstructionStorage {
       access,
       this.state,
       operands,
-      new InstructionMemory(
-        region,
-        this.#memory,
-        operands,
-        {
-          raiseFault: options.raiseAccessFault,
-          recordWrite: () => scope.recordMemoryWrite()
-        }
-      ),
+      new InstructionMemory(region, this.#memory, operands, {
+        raiseFault: options.raiseAccessFault,
+        recordWrite: () => scope.recordMemoryWrite()
+      }),
       options
     );
   }
 
-  beginInstruction(
-    bindings: readonly OperandBinding[],
-    eip: ValueInput
-  ): void {
+  beginInstruction(bindings: readonly OperandBinding[], eip: ValueInput): void {
     this.operands.beginInstruction(bindings);
     this.state.beginInstruction(eip);
   }
@@ -183,10 +158,7 @@ export class ScopedInstructionStorage {
   }
 
   variable(seed: ValueInput): SemanticVar {
-    assert(
-      this.#region.values.valueType(seed) === "i32",
-      "semantic var seed must be i32"
-    );
+    assert(this.#region.values.valueType(seed) === "i32", "semantic var seed must be i32");
     return this.#region.variable(seed) as SemanticVar;
   }
 
@@ -199,27 +171,17 @@ export class ScopedInstructionStorage {
 
     if (source.kind === "operand" && this.#operands.isMemory(source.index)) {
       const width = options.memory?.width ?? options.width;
-      const reference = this.memory.operand(
-        source,
-        options.memory?.addressOffset?.()
-      );
+      const reference = this.memory.operand(source, options.memory?.addressOffset?.());
       return this.memory.read(reference, { width, signed });
     }
 
     return this.#readStorage(source, options.width, signed);
   }
 
-  write(
-    target: StorageInput,
-    value: ValueInput,
-    options: SemanticWriteOptions
-  ): void {
+  write(target: StorageInput, value: ValueInput, options: SemanticWriteOptions): void {
     if (target.kind === "operand" && this.#operands.isMemory(target.index)) {
       const width = options.memory?.width ?? options.width;
-      const reference = this.memory.operand(
-        target,
-        options.memory?.addressOffset?.()
-      );
+      const reference = this.memory.operand(target, options.memory?.addressOffset?.());
       this.memory.write(reference, { width, value });
       return;
     }
@@ -227,25 +189,16 @@ export class ScopedInstructionStorage {
     this.#writeStorage(target, value, options.width);
   }
 
-  update(
-    target: StorageInput,
-    options: SemanticWriteOptions
-  ): SemanticUpdate {
+  update(target: StorageInput, options: SemanticWriteOptions): SemanticUpdate {
     if (target.kind === "operand") {
       const binding = this.#operands.binding(target.index);
 
-      assert(
-        binding.kind !== "imm",
-        "an immediate operand is not writable"
-      );
+      assert(binding.kind !== "imm", "an immediate operand is not writable");
     }
 
     if (target.kind === "operand" && this.#operands.isMemory(target.index)) {
       const width = options.memory?.width ?? options.width;
-      const reference = this.memory.operand(
-        target,
-        options.memory?.addressOffset?.()
-      );
+      const reference = this.memory.operand(target, options.memory?.addressOffset?.());
       const access = this.memory.guard({
         reference,
         byteLength: this.#region.values.const(width / 8),
@@ -259,31 +212,26 @@ export class ScopedInstructionStorage {
     }
 
     return {
-      read: (region) => region.read(target, {
-        width: options.width
-      }),
-      write: (region, value) => region.write(target, value, {
-        width: options.width
-      })
+      read: (region) =>
+        region.read(target, {
+          width: options.width
+        }),
+      write: (region, value) =>
+        region.write(target, value, {
+          width: options.width
+        })
     };
   }
 
   readFlag(flag: X86Flag): Value {
     return isX86StatusFlag(flag)
-      ? this.#state.statusFlags.read(
-          { region: this.#region, access: this.#access },
-          flag
-        )
+      ? this.#state.statusFlags.read({ region: this.#region, access: this.#access }, flag)
       : this.#state.flags.read(this.#access, flag);
   }
 
   writeFlag(flag: X86Flag, value: ValueInput): void {
     if (isX86StatusFlag(flag)) {
-      this.#state.statusFlags.write(
-        { region: this.#region, access: this.#access },
-        flag,
-        value
-      );
+      this.#state.statusFlags.write({ region: this.#region, access: this.#access }, flag, value);
       return;
     }
 
@@ -291,69 +239,41 @@ export class ScopedInstructionStorage {
   }
 
   writeStatusFlagsSource(source: SimpleFlagSource): void {
-    this.#state.statusFlags.writeSource(
-      { region: this.#region, access: this.#access },
-      source
-    );
+    this.#state.statusFlags.writeSource({ region: this.#region, access: this.#access }, source);
   }
 
   condition(cc: ConditionCode): Value {
-    return this.#state.statusFlags.condition(
-      { region: this.#region, access: this.#access },
-      cc
-    );
+    return this.#state.statusFlags.condition({ region: this.#region, access: this.#access }, cc);
   }
 
   addInstructionCount(amount: ValueInput): void {
     this.#state.instructionCount.add(this.#access, amount);
   }
 
-  #readStorage(
-    storage: StorageInput,
-    width: OperandWidth,
-    signed: boolean
-  ): Value {
-    const options = signed ? { signed: true } as const : {};
+  #readStorage(storage: StorageInput, width: OperandWidth, signed: boolean): Value {
+    const options = signed ? ({ signed: true } as const) : {};
 
     switch (storage.kind) {
       case "variable":
         return this.#region.read(storage);
       case "reg":
-        return this.#state.gpr.read(
-          this.#access,
-          storage.reg,
-          width,
-          options
-        );
+        return this.#state.gpr.read(this.#access, storage.reg, width, options);
       case "operand": {
         const binding = this.#operands.binding(storage.index);
 
         switch (binding.kind) {
           case "imm": {
-            const value = binding.source.kind === "static"
-              ? this.#region.values.const(binding.source.value)
-              : binding.source.value;
+            const value =
+              binding.source.kind === "static"
+                ? this.#region.values.const(binding.source.value)
+                : binding.source.value;
 
-            return this.#region.values.widthAdjusted(
-              width,
-              value,
-              signed
-            );
+            return this.#region.values.widthAdjusted(width, value, signed);
           }
           case "reg":
             return binding.selection.kind === "static"
-              ? this.#state.gpr.read(
-                  this.#access,
-                  binding.selection.reg,
-                  width,
-                  options
-                )
-              : this.#state.gpr.readDynamic(
-                  this.#access,
-                  binding.selection.index,
-                  width,
-                  options
-                );
+              ? this.#state.gpr.read(this.#access, binding.selection.reg, width, options)
+              : this.#state.gpr.readDynamic(this.#access, binding.selection.index, width, options);
           case "segment":
             return binding.selection.kind === "static"
               ? this.#state.segments.readSelector(
@@ -375,11 +295,7 @@ export class ScopedInstructionStorage {
     }
   }
 
-  #writeStorage(
-    storage: StorageInput,
-    value: ValueInput,
-    width: OperandWidth
-  ): void {
+  #writeStorage(storage: StorageInput, value: ValueInput, width: OperandWidth): void {
     switch (storage.kind) {
       case "variable":
         this.#region.write(storage, value);
@@ -393,20 +309,10 @@ export class ScopedInstructionStorage {
         switch (binding.kind) {
           case "reg":
             if (binding.selection.kind === "static") {
-              this.#state.gpr.write(
-                this.#access,
-                binding.selection.reg,
-                value,
-                width
-              );
+              this.#state.gpr.write(this.#access, binding.selection.reg, value, width);
               return;
             }
-            this.#state.gpr.writeDynamic(
-              this.#access,
-              binding.selection.index,
-              width,
-              value
-            );
+            this.#state.gpr.writeDynamic(this.#access, binding.selection.index, width, value);
             return;
           case "segment":
             this.#writeSegmentSelector(binding, value, width);

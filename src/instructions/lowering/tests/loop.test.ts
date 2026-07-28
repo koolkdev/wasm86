@@ -11,14 +11,8 @@ import type { FunctionGraph } from "#compiler/ir/function.js";
 import { describeNode } from "#compiler/ir/node.js";
 import type { RegionNode } from "#compiler/ir/region.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
-import {
-  buildInstructionFunction
-} from "./instruction-function.js";
-import {
-  isStateWrite,
-  writesStateChannel,
-  type StateWriteOperation
-} from "./state-operations.js";
+import { buildInstructionFunction } from "./instruction-function.js";
+import { isStateWrite, writesStateChannel, type StateWriteOperation } from "./state-operations.js";
 
 const repEip = 0x1000;
 const repNextEip = 0x1002;
@@ -28,9 +22,7 @@ function loopsIn(nodes: readonly RegionNode[]): LoopControl[] {
     if (node.kind === "loop") {
       return [node, ...loopsIn(node.body.nodes)];
     }
-    return describeNode(node).nestedBodies.flatMap((nested) =>
-      loopsIn(nested.body.nodes)
-    );
+    return describeNode(node).nestedBodies.flatMap((nested) => loopsIn(nested.body.nodes));
   });
 }
 
@@ -52,9 +44,7 @@ function assertCarries(
 
   for (const channel of channels) {
     strictEqual(
-      commits.filter((write) =>
-        writesStateChannel(block.values, write, channel)
-      ).length,
+      commits.filter((write) => writesStateChannel(block.values, write, channel)).length,
       1,
       `${channel.kind} channel is committed from the loop`
     );
@@ -69,11 +59,7 @@ test("loop analysis preserves values captured from the enclosing scope", () => {
         const offset = v.const(7);
 
         s.loop((loop, loopValues) => {
-          loop.write(
-            loop.reg("ebx"),
-            loopValues.binary("add", outer, offset),
-            { width: 32 }
-          );
+          loop.write(loop.reg("ebx"), loopValues.binary("add", outer, offset), { width: 32 });
           return loopValues.const(0);
         });
       },
@@ -101,12 +87,7 @@ test("loop analysis can use a semantic variable created in an enclosing arm", ()
             );
 
             loop.write(counter, next, { width: 32 });
-            return loopValues.compare(
-              32,
-              "ne",
-              next,
-              loopValues.const(0)
-            );
+            return loopValues.compare(32, "ne", next, loopValues.const(0));
           });
           then.read(counter, { width: 32 });
         });
@@ -125,16 +106,9 @@ test("scratch analysis conservatively retains writes from a folded final arm", (
       (s, v) => {
         s.write(s.reg("eax"), v.const(0), { width: 32 });
         s.loop((loop, loopValues) => {
-          loop.if(
-            loop.read(loop.reg("eax"), { width: 32 }),
-            (then) => {
-              then.write(
-                then.reg("ebx"),
-                loopValues.const(1),
-                { width: 32 }
-              );
-            }
-          );
+          loop.if(loop.read(loop.reg("eax"), { width: 32 }), (then) => {
+            then.write(then.reg("ebx"), loopValues.const(1), { width: 32 });
+          });
           return loopValues.const(0);
         });
       },
@@ -149,22 +123,23 @@ test("scratch analysis conservatively retains writes from a folded final arm", (
 
 test("input-backed flag reads stay rejected in nested loop arms", () => {
   throws(
-    () => buildInstructionFunction((builder) => {
-      builder.add(
-        (s) => {
-          s.loop((loop, values) => {
-            const condition = loop.read(loop.reg("eax"), { width: 32 });
+    () =>
+      buildInstructionFunction((builder) => {
+        builder.add(
+          (s) => {
+            s.loop((loop, values) => {
+              const condition = loop.read(loop.reg("eax"), { width: 32 });
 
-            loop.if(condition, (arm) => {
-              arm.readFlag("CF");
+              loop.if(condition, (arm) => {
+                arm.readFlag("CF");
+              });
+              return values.const(0);
             });
-            return values.const(0);
-          });
-        },
-        [],
-        loc(repEip, repNextEip)
-      );
-    }),
+          },
+          [],
+          loc(repEip, repNextEip)
+        );
+      }),
     /input-backed status flag reads inside a loop body/
   );
 });
@@ -175,11 +150,7 @@ test("loop analysis derives register and lazy-flag carries", () => {
       builder.add(
         (s) => {
           s.loop((loop, values) => {
-            loop.write(
-              loop.reg("eax"),
-              values.const(0),
-              { width: 32 }
-            );
+            loop.write(loop.reg("eax"), values.const(0), { width: 32 });
             return values.const(0);
           });
         },
@@ -197,12 +168,14 @@ test("loop analysis derives register and lazy-flag carries", () => {
       builder.add(
         (s) => {
           s.loop((loop, values) => {
-            loop.writeStatusFlagsSource(subFlagSource({
-              width: 32,
-              left: values.const(0),
-              right: values.const(0),
-              result: values.const(0)
-            }));
+            loop.writeStatusFlagsSource(
+              subFlagSource({
+                width: 32,
+                left: values.const(0),
+                right: values.const(0),
+                result: values.const(0)
+              })
+            );
             return values.const(0);
           });
         },
@@ -222,19 +195,20 @@ test("loop analysis derives register and lazy-flag carries", () => {
 
 test("overlapping architectural writes are rejected during carry discovery", () => {
   throws(
-    () => buildInstructionFunction((builder) => {
-      builder.add(
-        (s) => {
-          s.loop((loop, values) => {
-            loop.write(loop.reg("al"), values.const(1), { width: 8 });
-            loop.write(loop.reg("ax"), values.const(2), { width: 16 });
-            return values.const(0);
-          });
-        },
-        [],
-        loc(repEip, repNextEip)
-      );
-    }),
+    () =>
+      buildInstructionFunction((builder) => {
+        builder.add(
+          (s) => {
+            s.loop((loop, values) => {
+              loop.write(loop.reg("al"), values.const(1), { width: 8 });
+              loop.write(loop.reg("ax"), values.const(2), { width: 16 });
+              return values.const(0);
+            });
+          },
+          [],
+          loc(repEip, repNextEip)
+        );
+      }),
     /overlapping state channels/
   );
 });
@@ -253,18 +227,9 @@ test("semantic variables do not become architectural loop carries", () => {
           );
 
           loop.write(counter, next, { width: 32 });
-          return loopValues.compare(
-            32,
-            "ne",
-            next,
-            loopValues.const(0)
-          );
+          return loopValues.compare(32, "ne", next, loopValues.const(0));
         });
-        s.write(
-          s.reg("eax"),
-          s.read(counter, { width: 32 }),
-          { width: 32 }
-        );
+        s.write(s.reg("eax"), s.read(counter, { width: 32 }), { width: 32 });
       },
       [],
       loc(repEip, repNextEip)
@@ -277,8 +242,7 @@ test("semantic variables do not become architectural loop carries", () => {
 
   const eaxWrites = block.body.nodes.filter(
     (node): node is StateWriteOperation =>
-      isStateWrite(node) &&
-      writesStateChannel(block.values, node, gprChannel("eax"))
+      isStateWrite(node) && writesStateChannel(block.values, node, gprChannel("eax"))
   );
 
   strictEqual(eaxWrites.length, 1);

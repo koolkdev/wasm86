@@ -21,14 +21,8 @@ test("division is nontrapping only when its divisor rules out a trap", () => {
     values.isNonTrapping(values.binary("div_u", dividend, values.parameter(1, "i32"))),
     false
   );
-  strictEqual(
-    values.isNonTrapping(values.binary("div_u", dividend, values.const(17))),
-    true
-  );
-  strictEqual(
-    values.isNonTrapping(values.binary("div_s", dividend, values.const(-1))),
-    false
-  );
+  strictEqual(values.isNonTrapping(values.binary("div_u", dividend, values.const(17))), true);
+  strictEqual(values.isNonTrapping(values.binary("div_s", dividend, values.const(-1))), false);
 });
 
 test("trapping inputs remain trapping through otherwise safe expressions", () => {

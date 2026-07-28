@@ -1,29 +1,14 @@
-import {
-  deepStrictEqual,
-  ok,
-  strictEqual
-} from "node:assert";
+import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
-import {
-  compileJitFromReader,
-  type CompiledJitArtifact
-} from "#jit/compile.js";
+import { compileJitFromReader, type CompiledJitArtifact } from "#jit/compile.js";
 import { decodeExit } from "#cpu/exit.js";
 import { guestMemoryMinimumByteLength } from "#memory/constants.js";
 import { writeBackingBytes } from "#memory/bytes.js";
-import {
-  readWasmCpuStateSnapshot,
-  writeWasmCpuStateSnapshot
-} from "#test/support/cpu-state.js";
-import {
-  testExecutionModel
-} from "#test/support/execution-model.js";
-import {
-  createTestWasmMemories,
-  type TestWasmMemories
-} from "#test/support/wasm-memories.js";
+import { readWasmCpuStateSnapshot, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
+import { testExecutionModel } from "#test/support/execution-model.js";
+import { createTestWasmMemories, type TestWasmMemories } from "#test/support/wasm-memories.js";
 
 const startEip = 0x1000;
 const instructionLimitExit = 0x0007_0000_0000_0000n;
@@ -34,6 +19,7 @@ test("a completed block commits its final state before fallthrough dispatch", ()
     memories,
     startEip,
     { instructionLimit: 2 },
+    // prettier-ignore
     [
       0x83, 0xc0, 0x01, // add eax, 1
       0x83, 0xc0, 0x01  // add eax, 1
@@ -46,13 +32,15 @@ test("a completed block commits its final state before fallthrough dispatch", ()
   ok(imported !== undefined, "fallthrough block has no dispatch import");
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: memories.programMemories,
-    functions: new Map([[
-      imported.ref,
-      (targetEip: number): bigint => {
-        dispatchTargets.push(targetEip >>> 0);
-        return instructionLimitExit;
-      }
-    ]])
+    functions: new Map([
+      [
+        imported.ref,
+        (targetEip: number): bigint => {
+          dispatchTargets.push(targetEip >>> 0);
+          return instructionLimitExit;
+        }
+      ]
+    ])
   });
   const entry = instance.functionExports.get(artifact.entry);
 
@@ -77,6 +65,7 @@ test("a mid-block data fault reports the faulting eip after committing earlier s
     memories,
     startEip,
     { instructionLimit: 2 },
+    // prettier-ignore
     [
       0x40,                               // inc eax
       0x8b, 0x05, 0x00, 0x00, 0xff, 0x00 // mov eax, [0xff0000]
@@ -89,13 +78,15 @@ test("a mid-block data fault reports the faulting eip after committing earlier s
   ok(imported !== undefined, "fallthrough block has no dispatch import");
   const instance = instantiateCompiledProgram(artifact.program, {
     memories: memories.programMemories,
-    functions: new Map([[
-      imported.ref,
-      (targetEip: number): bigint => {
-        dispatchTargets.push(targetEip >>> 0);
-        return instructionLimitExit;
-      }
-    ]])
+    functions: new Map([
+      [
+        imported.ref,
+        (targetEip: number): bigint => {
+          dispatchTargets.push(targetEip >>> 0);
+          return instructionLimitExit;
+        }
+      ]
+    ])
   });
   const entry = instance.functionExports.get(artifact.entry);
 
@@ -119,11 +110,7 @@ test("a mid-block data fault reports the faulting eip after committing earlier s
 test("an inaccessible block start compiles its exact Memory exception", () => {
   const memories = createTestWasmMemories();
   const start = guestMemoryMinimumByteLength;
-  const artifact = compileFromMemory(
-    memories,
-    start,
-    { instructionLimit: 1 }
-  );
+  const artifact = compileFromMemory(memories, start, { instructionLimit: 1 });
   const exception = { kind: "PF", linearAddress: start, errorCode: 16 };
 
   const stateView = new DataView(memories.cpuStateMemory.buffer);
@@ -155,11 +142,7 @@ test("a boundary after a completed instruction becomes terminal control", () => 
   const start = guestMemoryMinimumByteLength - 1;
 
   writeBackingBytes(memories.guestMemory, start, [0x90]);
-  const artifact = compileFromMemory(
-    memories,
-    start,
-    { instructionLimit: 2 }
-  );
+  const artifact = compileFromMemory(memories, start, { instructionLimit: 2 });
   const exception = {
     kind: "PF",
     linearAddress: guestMemoryMinimumByteLength,
@@ -191,11 +174,7 @@ test("a terminal one-byte instruction at the final backing byte does not consume
   const start = guestMemoryMinimumByteLength - 1;
 
   writeBackingBytes(memories.guestMemory, start, [0xcc]);
-  const artifact = compileFromMemory(
-    memories,
-    start,
-    { instructionLimit: 2 }
-  );
+  const artifact = compileFromMemory(memories, start, { instructionLimit: 2 });
 
   const stateView = new DataView(memories.cpuStateMemory.buffer);
   const instance = instantiateCompiledProgram(artifact.program, {
@@ -223,11 +202,7 @@ function compileFromMemory(
   bytes?: readonly number[]
 ): CompiledJitArtifact {
   if (bytes !== undefined) {
-    const firstFailingAddress = writeBackingBytes(
-      memories.guestMemory,
-      start,
-      bytes
-    );
+    const firstFailingAddress = writeBackingBytes(memories.guestMemory, start, bytes);
 
     ok(
       firstFailingAddress === undefined,

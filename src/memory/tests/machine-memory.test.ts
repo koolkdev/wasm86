@@ -12,8 +12,5 @@ test("machine memory includes the complete Virtual page table", () => {
   strictEqual(entries.elementByteLength, 4);
   strictEqual(entries.elementAlignment, 4);
   strictEqual(definition.memoryImport.limits.minPages, 64);
-  strictEqual(
-    definition.memoryImport.ref,
-    definition.resource
-  );
+  strictEqual(definition.memoryImport.ref, definition.resource);
 });

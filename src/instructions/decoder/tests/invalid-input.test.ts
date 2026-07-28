@@ -2,20 +2,10 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { decodeIsaInstructionFromReader } from "#instructions/decoder/decode.js";
-import type {
-  IsaDecodeReadResult,
-  IsaDecodeReader
-} from "#instructions/decoder/types.js";
-import {
-  PageFaultErrorCode,
-  pageFault
-} from "#core/exceptions.js";
+import type { IsaDecodeReadResult, IsaDecodeReader } from "#instructions/decoder/types.js";
+import { PageFaultErrorCode, pageFault } from "#core/exceptions.js";
 import { X86_32_CORE } from "#instructions/isa/x86-32.js";
-import {
-  ByteArrayDecodeReader,
-  decodeBytes,
-  startAddress
-} from "./byte-reader-fixture.js";
+import { ByteArrayDecodeReader, decodeBytes, startAddress } from "./byte-reader-fixture.js";
 
 const instructionLengthLimit = X86_32_CORE.instructionLengthLimit;
 
@@ -47,10 +37,7 @@ test("an undefined opcode after prefixes records the consumed evidence", () => {
 
 test("a reader CPU exception retains the bytes read before its fault", () => {
   const requests: number[] = [];
-  const exception = pageFault(
-    startAddress + 1,
-    PageFaultErrorCode.INSTRUCTION_FETCH
-  );
+  const exception = pageFault(startAddress + 1, PageFaultErrorCode.INSTRUCTION_FETCH);
   const reader: IsaDecodeReader = {
     readU8(address) {
       requests.push(address);
@@ -108,18 +95,12 @@ test("a maximum-length prefixed instruction remains valid", () => {
     return;
   }
   strictEqual(decoded.instruction.length, instructionLengthLimit);
-  strictEqual(
-    decoded.instruction.nextEip,
-    startAddress + instructionLengthLimit
-  );
+  strictEqual(decoded.instruction.nextEip, startAddress + instructionLengthLimit);
   deepStrictEqual(decoded.instruction.raw, values);
 });
 
 test("fifteen prefixes produce GP(0) without requesting byte 16", () => {
-  const values = [
-    ...new Array<number>(instructionLengthLimit).fill(0x66),
-    0x90
-  ];
+  const values = [...new Array<number>(instructionLengthLimit).fill(0x66), 0x90];
   const reader = new TrackingDecodeReader(values);
   const decoded = decodeIsaInstructionFromReader(reader, startAddress);
 

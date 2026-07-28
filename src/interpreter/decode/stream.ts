@@ -7,13 +7,9 @@ import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";
 import type { EncodedValue } from "#instructions/decoder/model/types.js";
 import type { BuildExit } from "#instructions/lowering/terminal.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import type {
-  DirectMemoryAccess,
-  MemoryAccess
-} from "#memory/types.js";
+import type { DirectMemoryAccess, MemoryAccess } from "#memory/types.js";
 
-const instructionLengthLimit =
-  X86_32_DECODE_MODEL.instructionLengthLimit;
+const instructionLengthLimit = X86_32_DECODE_MODEL.instructionLengthLimit;
 
 export type InstructionFetchMode =
   | Readonly<{ kind: "exact" }>
@@ -49,23 +45,13 @@ export class InstructionByteStream {
 
   readByte(region: RegionBuilder): ValueId {
     return this.#fetch.kind === "direct"
-      ? this.#readDirectValue(
-        region,
-        this.#fetch.access,
-        1,
-        false
-      )
+      ? this.#readDirectValue(region, this.#fetch.access, 1, false)
       : this.#readExactByte(region);
   }
 
   readEncoded(region: RegionBuilder, encoded: EncodedValue): ValueId {
     return this.#fetch.kind === "direct"
-      ? this.#readDirectValue(
-        region,
-        this.#fetch.access,
-        encoded.byteLength,
-        encoded.signed
-      )
+      ? this.#readDirectValue(region, this.#fetch.access, encoded.byteLength, encoded.signed)
       : this.#readExactEncoded(region, encoded);
   }
 
@@ -79,12 +65,7 @@ export class InstructionByteStream {
     // exceed the already-resolved instruction range.
     const cursor = this.offset(region);
     const width = (byteLength * 8) as OperandWidth;
-    const value = this.#memory.bind(region).loadDirect(
-      access,
-      cursor,
-      width,
-      { signed }
-    );
+    const value = this.#memory.bind(region).loadDirect(access, cursor, width, { signed });
 
     this.#advance(region, cursor, byteLength);
     return value;
@@ -105,34 +86,22 @@ export class InstructionByteStream {
       "instructionFetch"
     );
 
-    region.if(resolution.fault.condition, (fault) => {
-      fault.return([
-        this.#buildExit(
-          fault.values,
-          exceptionExit(resolution.fault.exception)
-        )
-      ]);
-    }, { hint: "unlikely" });
-    const byte = memory.load(
-      resolution.access,
-      values.const(0),
-      8
+    region.if(
+      resolution.fault.condition,
+      (fault) => {
+        fault.return([this.#buildExit(fault.values, exceptionExit(resolution.fault.exception))]);
+      },
+      { hint: "unlikely" }
     );
+    const byte = memory.load(resolution.access, values.const(0), 8);
 
     this.#advance(region, cursor, 1);
     return byte;
   }
 
-  #readExactEncoded(
-    region: RegionBuilder,
-    encoded: EncodedValue
-  ): ValueId {
+  #readExactEncoded(region: RegionBuilder, encoded: EncodedValue): ValueId {
     if (encoded.byteLength === 1) {
-      return region.values.widthAdjusted(
-        8,
-        this.#readExactByte(region),
-        encoded.signed
-      );
+      return region.values.widthAdjusted(8, this.#readExactByte(region), encoded.signed);
     }
     const cursor = this.offset(region);
     const values = region.values;
@@ -140,23 +109,15 @@ export class InstructionByteStream {
       32,
       "gt_u",
       cursor,
-      values.const(
-        instructionLengthLimit - encoded.byteLength
-      )
+      values.const(instructionLengthLimit - encoded.byteLength)
     );
 
     // A crossing encoded value is read byte by byte: an unavailable byte
     // below the limit may page-fault before offset 15 produces GP(0).
     return region.ifValue(
       crossesLimit,
-      (crossing) =>
-        this.#readExactEncodedBytewise(crossing, encoded),
-      (withinLimit) =>
-        this.#readExactEncodedWithinLimit(
-          withinLimit,
-          cursor,
-          encoded
-        ),
+      (crossing) => this.#readExactEncodedBytewise(crossing, encoded),
+      (withinLimit) => this.#readExactEncodedWithinLimit(withinLimit, cursor, encoded),
       { hint: "unlikely" }
     );
   }
@@ -169,10 +130,13 @@ export class InstructionByteStream {
     const values = region.values;
     const address = values.binary("add", this.#instructionStart, cursor);
     const width = (encoded.byteLength * 8) as OperandWidth;
-    const resolution = this.#memory.bind(region).resolve({
-      start: address,
-      byteLength: values.const(encoded.byteLength)
-    }, "instructionFetch");
+    const resolution = this.#memory.bind(region).resolve(
+      {
+        start: address,
+        byteLength: values.const(encoded.byteLength)
+      },
+      "instructionFetch"
+    );
 
     // A failed range check is retried byte by byte so Memory identifies the
     // first unavailable instruction address, rather than only the range start.
@@ -180,12 +144,9 @@ export class InstructionByteStream {
       resolution.fault.condition,
       (fault) => this.#readExactEncodedBytewise(fault, encoded),
       (resolved) => {
-        const value = this.#memory.bind(resolved).load(
-          resolution.access,
-          resolved.values.const(0),
-          width,
-          { signed: encoded.signed }
-        );
+        const value = this.#memory
+          .bind(resolved)
+          .load(resolution.access, resolved.values.const(0), width, { signed: encoded.signed });
 
         this.#advance(resolved, cursor, encoded.byteLength);
         return value;
@@ -194,18 +155,14 @@ export class InstructionByteStream {
     );
   }
 
-  #readExactEncodedBytewise(
-    region: RegionBuilder,
-    encoded: EncodedValue
-  ): ValueId {
+  #readExactEncodedBytewise(region: RegionBuilder, encoded: EncodedValue): ValueId {
     let value = region.values.const(0);
 
     for (let index = 0; index < encoded.byteLength; index += 1) {
       const byte = this.#readExactByte(region);
       const shift = index * 8;
-      const part = shift === 0
-        ? byte
-        : region.values.binary("shl", byte, region.values.const(shift));
+      const part =
+        shift === 0 ? byte : region.values.binary("shl", byte, region.values.const(shift));
 
       value = region.values.binary("or", value, part);
     }
@@ -214,41 +171,22 @@ export class InstructionByteStream {
     return region.values.widthAdjusted(width, value, encoded.signed);
   }
 
-  #exitIfLengthLimitReached(
-    region: RegionBuilder,
-    cursor: ValueId
-  ): void {
+  #exitIfLengthLimitReached(region: RegionBuilder, cursor: ValueId): void {
     region.if(
-      region.values.compare(
-        32,
-        "ge_u",
-        cursor,
-        region.values.const(instructionLengthLimit)
-      ),
+      region.values.compare(32, "ge_u", cursor, region.values.const(instructionLengthLimit)),
       (tooLong) => {
         tooLong.return([
-          this.#buildExit(
-            tooLong.values,
-            exceptionExit(generalProtection(tooLong.values.const(0)))
-          )
+          this.#buildExit(tooLong.values, exceptionExit(generalProtection(tooLong.values.const(0))))
         ]);
       },
       { hint: "unlikely" }
     );
   }
 
-  #advance(
-    region: RegionBuilder,
-    cursor: ValueId,
-    byteLength: EncodedValue["byteLength"]
-  ): void {
+  #advance(region: RegionBuilder, cursor: ValueId, byteLength: EncodedValue["byteLength"]): void {
     region.write(
       this.#cursor,
-      region.values.binary(
-        "add",
-        cursor,
-        region.values.const(byteLength)
-      )
+      region.values.binary("add", cursor, region.values.const(byteLength))
     );
   }
 }

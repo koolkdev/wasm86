@@ -15,11 +15,7 @@ const fields = {
 const namedArrays = {
   bytes: new NamedArrayRef("host-view.arrays.bytes", "u8", ["first", "second"]),
   words: new NamedArrayRef("host-view.arrays.words", "u16", ["first", "second"]),
-  doubleWords: new NamedArrayRef(
-    "host-view.arrays.double-words",
-    "u32",
-    ["first", "second"]
-  )
+  doubleWords: new NamedArrayRef("host-view.arrays.double-words", "u32", ["first", "second"])
 } as const;
 
 const records = new ArrayRef("host-view.records.entries", {
@@ -51,10 +47,7 @@ test("layout host fields use their declared unsigned widths", () => {
 
   strictEqual(view.getUint8(layout.field(fields.byte).offset), 0xab);
   strictEqual(view.getUint16(layout.field(fields.word).offset, true), 0x2345);
-  strictEqual(
-    view.getUint32(layout.field(fields.doubleWord).offset, true),
-    0x2345_6789
-  );
+  strictEqual(view.getUint32(layout.field(fields.doubleWord).offset, true), 0x2345_6789);
 });
 
 test("layout host named arrays resolve typed element identities and widths", () => {
@@ -63,21 +56,14 @@ test("layout host named arrays resolve typed element identities and widths", () 
 
   storage.writeNamedArrayElement(namedArrays.bytes, "second", 0x1fe);
   storage.writeNamedArrayElement(namedArrays.words, "second", 0x1_abcd);
-  storage.writeNamedArrayElement(
-    namedArrays.doubleWords,
-    "second",
-    0x1_89ab_cdef
-  );
+  storage.writeNamedArrayElement(namedArrays.doubleWords, "second", 0x1_89ab_cdef);
 
   strictEqual(storage.readNamedArrayElement(namedArrays.bytes, "first"), 0);
   strictEqual(storage.readNamedArrayElement(namedArrays.bytes, "second"), 0xfe);
   strictEqual(storage.readNamedArrayElement(namedArrays.words, "first"), 0);
   strictEqual(storage.readNamedArrayElement(namedArrays.words, "second"), 0xabcd);
   strictEqual(storage.readNamedArrayElement(namedArrays.doubleWords, "first"), 0);
-  strictEqual(
-    storage.readNamedArrayElement(namedArrays.doubleWords, "second"),
-    0x89ab_cdef
-  );
+  strictEqual(storage.readNamedArrayElement(namedArrays.doubleWords, "second"), 0x89ab_cdef);
 
   const view = new DataView(memory.buffer);
   const bytes = layout.namedArray(namedArrays.bytes);
@@ -86,10 +72,7 @@ test("layout host named arrays resolve typed element identities and widths", () 
 
   strictEqual(view.getUint8(bytes.offset + bytes.stride), 0xfe);
   strictEqual(view.getUint16(words.offset + words.stride, true), 0xabcd);
-  strictEqual(
-    view.getUint32(doubleWords.offset + doubleWords.stride, true),
-    0x89ab_cdef
-  );
+  strictEqual(view.getUint32(doubleWords.offset + doubleWords.stride, true), 0x89ab_cdef);
 });
 
 test("layout host arrays access record-relative fields across memory growth", () => {

@@ -5,10 +5,7 @@ import { buildFunction } from "#compiler/ir/builder/function.js";
 import type { IrFunction } from "#compiler/ir/function.js";
 import type { Invocation } from "#compiler/ir/invocation.js";
 import { describeNode } from "#compiler/ir/node.js";
-import {
-  placeFunction,
-  type FunctionPlacement
-} from "#compiler/placement/place.js";
+import { placeFunction, type FunctionPlacement } from "#compiler/placement/place.js";
 import type { FunctionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { FunctionImport } from "./imports.js";
@@ -22,10 +19,7 @@ import type {
 import type { FunctionRef, TableRef } from "#compiler/ir/refs.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { MemoryImport, ProgramResources } from "./resources.js";
-import {
-  validateDeclaredFunctionEffects,
-  validateFunctionEffectCoverage
-} from "./validate.js";
+import { validateDeclaredFunctionEffects, validateFunctionEffectCoverage } from "./validate.js";
 
 type ReachableFunction = Readonly<{
   body: IrFunction;
@@ -43,14 +37,8 @@ export class DeclarationCollection<T extends Declaration> {
   add(declaration: T): void {
     const { ref } = declaration;
 
-    assert(
-      !this.#byRef.has(ref),
-      `duplicate program ${ref.kind} declaration: ${ref.id}`
-    );
-    assert(
-      !this.#byId.has(ref.id),
-      `duplicate program ${ref.kind} identity: ${ref.id}`
-    );
+    assert(!this.#byRef.has(ref), `duplicate program ${ref.kind} declaration: ${ref.id}`);
+    assert(!this.#byId.has(ref.id), `duplicate program ${ref.kind} identity: ${ref.id}`);
     this.#ordered.push(declaration);
     this.#byRef.set(ref, declaration);
     this.#byId.set(ref.id, declaration);
@@ -73,20 +61,10 @@ export function buildProgram(options: ProgramDeclarations): Program {
   const declarations = collectFunctionDeclarations(options);
 
   const liveImports = new Set<FunctionImport>();
-  const reachable = collectReachableFunctions(
-    options,
-    declarations,
-    liveImports,
-    roots
-  );
-  const functionImports = declaredImports.filter((imported) =>
-    liveImports.has(imported)
-  );
+  const reachable = collectReachableFunctions(options, declarations, liveImports, roots);
+  const functionImports = declaredImports.filter((imported) => liveImports.has(imported));
   const functions = createProgramFunctions(reachable);
-  const functionTypes = collectProgramFunctionTypes(
-    functions,
-    functionImports
-  );
+  const functionTypes = collectProgramFunctionTypes(functions, functionImports);
   const memoryImports = collectMemoryImports(options.resources, functions);
 
   if (buildDefinition.validation) {
@@ -122,8 +100,7 @@ function collectMemoryImports(
       used.add(resource);
     }
   }
-  return resources.memoryImports
-    .filter((memory) => used.has(memory.ref));
+  return resources.memoryImports.filter((memory) => used.has(memory.ref));
 }
 
 function retainFunctionImport(
@@ -244,10 +221,7 @@ function collectReachableFunctions(
       pending.push(definition);
     }
   };
-  const inspectInvocations = (
-    definition: FunctionDefinition,
-    analysis: FunctionAnalysis
-  ): void => {
+  const inspectInvocations = (definition: FunctionDefinition, analysis: FunctionAnalysis): void => {
     for (const site of analysis.invocations()) {
       const mustExecute = analysis.invocationMustExecute(site);
       const { target } = site.invocation;
@@ -320,23 +294,18 @@ function resourcesUsedBy(analysis: FunctionAnalysis): readonly ResourceRef[] {
   return unique(resources);
 }
 
-function liveInvocations(
-  analysis: FunctionAnalysis
-): readonly Invocation[] {
-  return analysis.invocations()
+function liveInvocations(analysis: FunctionAnalysis): readonly Invocation[] {
+  return analysis
+    .invocations()
     .filter((site) => analysis.invocationMustExecute(site))
     .map((site) => site.invocation);
 }
 
-function isFunctionDefinition(
-  declaration: FunctionDeclaration
-): declaration is FunctionDefinition {
+function isFunctionDefinition(declaration: FunctionDeclaration): declaration is FunctionDefinition {
   return declaration instanceof FunctionDefinition;
 }
 
-function isFunctionImport(
-  declaration: FunctionDeclaration
-): declaration is FunctionImport {
+function isFunctionImport(declaration: FunctionDeclaration): declaration is FunctionImport {
   return declaration instanceof FunctionImport;
 }
 

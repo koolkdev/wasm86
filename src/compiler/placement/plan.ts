@@ -7,10 +7,7 @@ import { planValueAnchors } from "./anchors.js";
 import { planLocals } from "./locals.js";
 import type { PlacementPlan, ValuePlacement } from "./model.js";
 
-export function planPlacement(
-  block: FunctionGraph,
-  analysis: FunctionAnalysis
-): PlacementPlan {
+export function planPlacement(block: FunctionGraph, analysis: FunctionAnalysis): PlacementPlan {
   const placements = planValueAnchors(block, analysis);
   const locals = planLocals(block, analysis, placements);
   const values = placements.map((placement, raw): ValuePlacement | undefined => {

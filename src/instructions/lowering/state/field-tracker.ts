@@ -1,18 +1,12 @@
 import { assert } from "#common/assert.js";
 import type { ResourceWriteArgs } from "#compiler/ir/operations/resource.js";
 import type { StorageAccess } from "#compiler/ir/effects.js";
-import type {
-  ResourceByteOperand,
-  ResourceEffect
-} from "#compiler/ir/resource.js";
+import type { ResourceByteOperand, ResourceEffect } from "#compiler/ir/resource.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import { type ValueId, type WidthBounds } from "#compiler/ir/values/types.js";
 import { isConcreteFlagStateField } from "#core/flags/layout.js";
 import { mayAlias } from "#compiler/ir/effects.js";
-import type {
-  BoundStateAccess,
-  StateAccess
-} from "#core/state/access.js";
+import type { BoundStateAccess, StateAccess } from "#core/state/access.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
 import type { StateWriteObserver } from "./write-log.js";
 import type { StateFieldChannel } from "./channels.js";
@@ -30,10 +24,7 @@ export class StateFieldTracker {
   readonly #inputReads = new Map<StateFieldChannel, ValueId>();
   readonly #writeObserver: StateWriteObserver | undefined;
 
-  constructor(
-    stateAccess: StateAccess,
-    writeObserver?: StateWriteObserver
-  ) {
+  constructor(stateAccess: StateAccess, writeObserver?: StateWriteObserver) {
     this.#stateAccess = stateAccess;
     this.#writeObserver = writeObserver;
   }
@@ -105,28 +96,19 @@ export class StateFieldTracker {
     }
   }
 
-  flushesForPath(
-    access: BoundStateAccess,
-    path: StatePathKind
-  ): readonly ResourceWriteArgs[] {
-    return this.#buffer.entriesForPath(path).map(
-      ([channel, value]) => this.writeback(access, channel, value)
-    );
+  flushesForPath(access: BoundStateAccess, path: StatePathKind): readonly ResourceWriteArgs[] {
+    return this.#buffer
+      .entriesForPath(path)
+      .map(([channel, value]) => this.writeback(access, channel, value));
   }
 
   // A generated function reads state directly, not through this buffer. Write
   // the values covered by its declared reads before calling it. Inside an
   // if/switch arm, each write must already have an instruction-boundary value;
   // input-backed flag reset sites discard newer lazy writes first.
-  publishForReads(
-    access: BoundStateAccess,
-    reads: readonly StorageAccess[]
-  ): void {
+  publishForReads(access: BoundStateAccess, reads: readonly StorageAccess[]): void {
     for (const [channel, entry] of this.#buffer.entries()) {
-      if (
-        entry.dirty &&
-        reads.some((read) => mayAlias(read, this.effect(channel)))
-      ) {
+      if (entry.dirty && reads.some((read) => mayAlias(read, this.effect(channel)))) {
         this.#publish(access, channel, entry.value);
       }
     }
@@ -152,10 +134,7 @@ export class StateFieldTracker {
     }
   }
 
-  #readState(
-    access: BoundStateAccess,
-    channel: StateFieldChannel
-  ): ValueId {
+  #readState(access: BoundStateAccess, channel: StateFieldChannel): ValueId {
     switch (channel.kind) {
       case "field":
         return access.readField(
@@ -169,14 +148,9 @@ export class StateFieldTracker {
     }
   }
 
-  #publish(
-    access: BoundStateAccess,
-    channel: StateFieldChannel,
-    value: ValueId
-  ): void {
+  #publish(access: BoundStateAccess, channel: StateFieldChannel, value: ValueId): void {
     if (!this.#buffer.boundaryHas(channel)) {
-      const previous = this.#inputReads.get(channel) ??
-        this.#readState(access, channel);
+      const previous = this.#inputReads.get(channel) ?? this.#readState(access, channel);
 
       this.#buffer.setBoundary(channel, previous);
     }
@@ -186,10 +160,7 @@ export class StateFieldTracker {
     this.#inputReads.delete(channel);
   }
 
-  #operandWith(
-    access: BoundStateAccess,
-    channel: StateFieldChannel
-  ): ResourceByteOperand {
+  #operandWith(access: BoundStateAccess, channel: StateFieldChannel): ResourceByteOperand {
     switch (channel.kind) {
       case "field":
         return access.field(channel);

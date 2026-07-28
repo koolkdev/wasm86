@@ -34,11 +34,7 @@ type CpuInputs = Readonly<{
   interpreter: CompiledInterpreter;
 }>;
 
-export function createCpu({
-  state: stateDefinition,
-  sharedMemories,
-  interpreter
-}: CpuInputs): Cpu {
+export function createCpu({ state: stateDefinition, sharedMemories, interpreter }: CpuInputs): Cpu {
   const { minPages, maxPages } = stateDefinition.memoryImport.limits;
   const cpuStateMemory = new WebAssembly.Memory({
     initial: minPages,
@@ -58,10 +54,7 @@ export function createCpu({
   });
   const entry = instance.functionExports.get(interpreter.entry);
 
-  assert(
-    entry !== undefined,
-    `missing Interpreter entry export ${interpreter.entry.id}`
-  );
+  assert(entry !== undefined, `missing Interpreter entry export ${interpreter.entry.id}`);
   assert(
     typeof entry === "function",
     `Interpreter entry export ${interpreter.entry.id} is not callable`
@@ -75,16 +68,11 @@ export function createCpu({
     state,
     run({ instructionBudget }): RunStop {
       assert(
-        instructionBudget >= 0 &&
-          instructionBudget <= maximumInstructionBudget,
-        `instructionBudget must be in the supported modular deadline range: ` +
-          instructionBudget
+        instructionBudget >= 0 && instructionBudget <= maximumInstructionBudget,
+        `instructionBudget must be in the supported modular deadline range: ` + instructionBudget
       );
 
-      storage.writeField(
-        instructionLimitField,
-        state.instructionCount + instructionBudget
-      );
+      storage.writeField(instructionLimitField, state.instructionCount + instructionBudget);
       const encodedExit = runInterpreter();
 
       return decodeExit(encodedExit);

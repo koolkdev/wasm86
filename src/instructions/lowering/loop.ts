@@ -1,18 +1,12 @@
 import type { ValueInput } from "#instructions/semantics/refs.js";
 import { type InstructionStateChannel } from "./state/channels.js";
 import type { ResourceEffect } from "#compiler/ir/resource.js";
-import {
-  resourceRead,
-  resourceWrite
-} from "#compiler/ir/operations/resource.js";
+import { resourceRead, resourceWrite } from "#compiler/ir/operations/resource.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import type { RegionNode } from "#compiler/ir/region.js";
 import { RegionBuilder, type RegionNodeSink } from "#compiler/ir/builder/region.js";
 import type { InstructionState } from "./state/state.js";
-import {
-  StateLoopScope,
-  type LoopCarriedState
-} from "./state/loop-scope.js";
+import { StateLoopScope, type LoopCarriedState } from "./state/loop-scope.js";
 
 export type LoopBuilderContext = Readonly<{
   state: InstructionState;
@@ -46,18 +40,13 @@ export class LoopBuilder {
     return this.#region;
   }
 
-  static begin(context: LoopBuilderContext, bodyWrites: readonly InstructionStateChannel[]): LoopBuilder {
-    const scope = new StateLoopScope(
-      context.parentRegion.values,
-      context.state,
-      bodyWrites
-    );
+  static begin(
+    context: LoopBuilderContext,
+    bodyWrites: readonly InstructionStateChannel[]
+  ): LoopBuilder {
+    const scope = new StateLoopScope(context.parentRegion.values, context.state, bodyWrites);
 
-    return new LoopBuilder(
-      context,
-      scope.begin(context.state.bind(context.parentRegion)),
-      scope
-    );
+    return new LoopBuilder(context, scope.begin(context.state.bind(context.parentRegion)), scope);
   }
 
   // Close while the semantic loop scope is current: state resolution belongs

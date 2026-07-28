@@ -104,11 +104,21 @@ function decimalLowAdjust(s: SemanticsBuilder, v: ValueBuilder, oldAl: ValueInpu
   );
 }
 
-function addSelectedByte(v: ValueBuilder, value: ValueInput, condition: ValueInput, amount: number): Value {
+function addSelectedByte(
+  v: ValueBuilder,
+  value: ValueInput,
+  condition: ValueInput,
+  amount: number
+): Value {
   return v.truncate(8, v.binary("add", value, v.select(condition, v.const(amount), v.const(0))));
 }
 
-function subSelectedByte(v: ValueBuilder, value: ValueInput, condition: ValueInput, amount: number): Value {
+function subSelectedByte(
+  v: ValueBuilder,
+  value: ValueInput,
+  condition: ValueInput,
+  amount: number
+): Value {
   return v.truncate(8, v.binary("sub", value, v.select(condition, v.const(amount), v.const(0))));
 }
 

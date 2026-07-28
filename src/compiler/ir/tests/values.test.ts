@@ -59,10 +59,7 @@ test("constant arithmetic folds to literal i32 results", () => {
     values.constValue(values.binary("mul", values.const(0x4000_0000), values.const(2))),
     -2_147_483_648
   );
-  strictEqual(
-    values.constValue(values.binary("div_s", values.const(-7), values.const(2))),
-    -3
-  );
+  strictEqual(values.constValue(values.binary("div_s", values.const(-7), values.const(2))), -3);
   strictEqual(
     values.constValue(values.binary("div_u", values.const(-1), values.const(2))),
     2_147_483_647
@@ -78,10 +75,7 @@ test("constant unary, comparison, and width operations fold literally", () => {
 
   strictEqual(values.constValue(values.unary("popcnt", values.const(0xf0f0))), 8);
   strictEqual(values.constValue(values.unary("ctz", values.const(0x100))), 8);
-  strictEqual(
-    values.constValue(values.compare(32, "lt_s", values.const(-1), values.const(1))),
-    1
-  );
+  strictEqual(values.constValue(values.compare(32, "lt_s", values.const(-1), values.const(1))), 1);
   strictEqual(values.constValue(values.truncate(8, values.const(-1))), 0xff);
   strictEqual(values.constValue(values.extend(8, values.const(0x80), true)), -0x80);
 });

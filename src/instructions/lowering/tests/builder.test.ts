@@ -1,25 +1,16 @@
 import { ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import {
-  staticInstructionLocation as loc
-} from "#instructions/lowering/builder.js";
-import {
-  immBinding,
-  regBinding
-} from "#instructions/lowering/bindings.js";
+import { staticInstructionLocation as loc } from "#instructions/lowering/builder.js";
+import { immBinding, regBinding } from "#instructions/lowering/bindings.js";
 import type { SemanticTemplate } from "#instructions/semantics/builder.js";
 import { jmpSemantic } from "#instructions/semantics/control.js";
 import { movSemantic } from "#instructions/semantics/mov.js";
 import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import {
-  buildInstructionFunction
-} from "./instruction-function.js";
-import {
-  testInstructionLowerer
-} from "#test/support/execution-model.js";
+import { buildInstructionFunction } from "./instruction-function.js";
+import { testInstructionLowerer } from "#test/support/execution-model.js";
 
 test("lower returns its fallthrough without dispatching", () => {
   const values = new ValueTable();
@@ -37,11 +28,7 @@ test("lower returns its fallthrough without dispatching", () => {
     },
     (builder) => {
       strictEqual(
-        builder.add(
-          movSemantic(32),
-          [regBinding("eax"), immBinding(1)],
-          loc(0x1000, 0x1005)
-        ),
+        builder.add(movSemantic(32), [regBinding("eax"), immBinding(1)], loc(0x1000, 0x1005)),
         true
       );
     }
@@ -54,18 +41,11 @@ test("lower returns its fallthrough without dispatching", () => {
 
 test("a terminating dynamic arm preserves the fallthrough path", () => {
   const conditionalJump: SemanticTemplate = (s, v) => {
-    s.if(
-      s.read(s.reg("eax"), { width: 32 }),
-      (then) => then.jump(v.const(0x2000))
-    );
+    s.if(s.read(s.reg("eax"), { width: 32 }), (then) => then.jump(v.const(0x2000)));
   };
   let continues: boolean | undefined;
   const block = buildInstructionFunction((builder) => {
-    continues = builder.add(
-      conditionalJump,
-      [],
-      loc(0x1000, 0x1005)
-    );
+    continues = builder.add(conditionalJump, [], loc(0x1000, 0x1005));
   });
 
   validateIrFunction(block);
@@ -83,11 +63,7 @@ test("two terminating dynamic arms complete the instruction path", () => {
   };
   let continues: boolean | undefined;
   const block = buildInstructionFunction((builder) => {
-    continues = builder.add(
-      trapEitherWay,
-      [],
-      loc(0x1000, 0x1005)
-    );
+    continues = builder.add(trapEitherWay, [], loc(0x1000, 0x1005));
   });
 
   validateIrFunction(block);
@@ -97,11 +73,7 @@ test("two terminating dynamic arms complete the instruction path", () => {
 test("a root jump completes the instruction path", () => {
   let continues: boolean | undefined;
   const block = buildInstructionFunction((builder) => {
-    continues = builder.add(
-      jmpSemantic(),
-      [immBinding(0x2000)],
-      loc(0x1000, 0x1005)
-    );
+    continues = builder.add(jmpSemantic(), [immBinding(0x2000)], loc(0x1000, 0x1005));
   });
 
   validateIrFunction(block);
@@ -121,23 +93,17 @@ test("a possible fault cannot be introduced after a memory write", () => {
       value: v.const(1)
     });
     s.memory.guard({
-      reference: s.memory.reference(
-        "ds",
-        s.read(s.reg("eax"), { width: 32 })
-      ),
+      reference: s.memory.reference("ds", s.read(s.reg("eax"), { width: 32 })),
       byteLength: v.const(4),
       intent: "read"
     });
   };
 
   throws(
-    () => buildInstructionFunction((builder) => {
-      builder.add(
-        storeThenGuard,
-        [],
-        loc(0x1000, 0x1001)
-      );
-    }),
+    () =>
+      buildInstructionFunction((builder) => {
+        builder.add(storeThenGuard, [], loc(0x1000, 0x1001));
+      }),
     /CPU exception cannot follow a memory write/
   );
 });

@@ -35,10 +35,7 @@ export function bitTestSemantic(
       return;
     }
 
-    const target = s.update(
-      dst,
-      memory === undefined ? { width } : { width, memory }
-    );
+    const target = s.update(dst, memory === undefined ? { width } : { width, memory });
     const value = v.truncate(width, target.read(s));
 
     writeBitTestResult(s, v, op, width, target, value, bitIndex);
@@ -132,7 +129,10 @@ function bitTestWriteResult(
     case "bts":
       return v.truncate(width, v.binary("or", value, mask));
     case "btr":
-      return v.truncate(width, v.binary("and", value, v.binary("xor", mask, v.const(widthMask(width)))));
+      return v.truncate(
+        width,
+        v.binary("and", value, v.binary("xor", mask, v.const(widthMask(width))))
+      );
     case "btc":
       return v.truncate(width, v.binary("xor", value, mask));
   }

@@ -1,17 +1,10 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import {
-  IndirectCallTarget,
-  Invocation,
-  invocationInputs
-} from "#compiler/ir/invocation.js";
+import { IndirectCallTarget, Invocation, invocationInputs } from "#compiler/ir/invocation.js";
 import { callOperation } from "#compiler/ir/operations/call.js";
 import { variableRead, variableWrite } from "#compiler/ir/operations/variables.js";
-import {
-  resourceRead,
-  resourceWrite
-} from "#compiler/ir/operations/resource.js";
+import { resourceRead, resourceWrite } from "#compiler/ir/operations/resource.js";
 import {
   DynamicByteOriginRef,
   resourceRef,
@@ -38,16 +31,13 @@ test("resource definitions describe their graph and resource interface", () => {
   const address = values.parameter(0, "i32");
   const stored = values.parameter(1, "i32");
   const source = byteOperand(resource, range, address, 6, 16);
-  const read = resourceRead.create(
-    { source, mode: { kind: "signed" } },
-    (result) => {
-      deepStrictEqual(result, {
-        type: "i32",
-        bounds: { unsignedBits: 32, signedBits: 16 }
-      });
-      return values.addNodeOutput(result.bounds);
-    }
-  );
+  const read = resourceRead.create({ source, mode: { kind: "signed" } }, (result) => {
+    deepStrictEqual(result, {
+      type: "i32",
+      bounds: { unsignedBits: 32, signedBits: 16 }
+    });
+    return values.addNodeOutput(result.bounds);
+  });
   const write = resourceWrite.create({
     destination: source,
     value: stored
@@ -60,10 +50,12 @@ test("resource definitions describe their graph and resource interface", () => {
   deepStrictEqual(describeNode(read), {
     inputs: [{ value: address, type: "i32" }],
     operands: [address],
-    results: [{
-      type: "i32",
-      bounds: { unsignedBits: 32, signedBits: 16 }
-    }],
+    results: [
+      {
+        type: "i32",
+        bounds: { unsignedBits: 32, signedBits: 16 }
+      }
+    ],
     outputs: [read.output],
     nestedBodies: [],
     effects: {
@@ -92,16 +84,11 @@ test("resource definitions describe their graph and resource interface", () => {
 test("resource read modes define their result bounds", () => {
   const values = new ValueTable();
   const resource = resourceRef("test.read-bounds");
-  const source = byteOperand(
-    resource,
-    { basis: { kind: "resource" } },
-    values.const(0),
-    0,
-    8
-  );
+  const source = byteOperand(resource, { basis: { kind: "resource" } }, values.const(0), 0, 8);
   const resultOf = (
-    mode?: { readonly kind: "signed" } |
-      { readonly kind: "unsigned"; readonly bounds: { unsignedBits: number; signedBits: number } }
+    mode?:
+      | { readonly kind: "signed" }
+      | { readonly kind: "unsigned"; readonly bounds: { unsignedBits: number; signedBits: number } }
   ) => {
     let result: unknown;
 
@@ -123,18 +110,15 @@ test("resource read modes define their result bounds", () => {
     type: "i32",
     bounds: { unsignedBits: 32, signedBits: 8 }
   });
-  deepStrictEqual(
-    resultOf({ kind: "unsigned", bounds: { unsignedBits: 1, signedBits: 2 } }),
-    {
-      type: "i32",
-      bounds: { unsignedBits: 1, signedBits: 2 }
-    }
-  );
+  deepStrictEqual(resultOf({ kind: "unsigned", bounds: { unsignedBits: 1, signedBits: 2 } }), {
+    type: "i32",
+    bounds: { unsignedBits: 1, signedBits: 2 }
+  });
   throws(
-    () => resourceRead.create(
-      { source: { ...source, width: 32 }, mode: { kind: "signed" } },
-      () => values.addNodeOutput()
-    ),
+    () =>
+      resourceRead.create({ source: { ...source, width: 32 }, mode: { kind: "signed" } }, () =>
+        values.addNodeOutput()
+      ),
     /32-bit resource read has no signed extension/
   );
 });
@@ -169,10 +153,12 @@ test("variable definitions describe typed accesses", () => {
     writes: [{ space: "variable", variable }]
   });
   strictEqual(write.initialization, "seed");
-  deepStrictEqual(describeNode(wideWrite).inputs, [{
-    value: wideStored,
-    type: "i64"
-  }]);
+  deepStrictEqual(describeNode(wideWrite).inputs, [
+    {
+      value: wideStored,
+      type: "i64"
+    }
+  ]);
 });
 
 test("ordinary calls validate arguments and carry target effects", () => {
@@ -183,33 +169,27 @@ test("ordinary calls validate arguments and carry target effects", () => {
     target,
     arguments: [{ value: argument, type: "i32" }]
   });
-  const operation = callOperation.create(
-    { invocation },
-    () => values.addNodeOutput()
-  );
+  const operation = callOperation.create({ invocation }, () => values.addNodeOutput());
 
   strictEqual(operation.invocation, invocation);
   deepStrictEqual(describeNode(operation).operands, [argument]);
   strictEqual(describeNode(operation).effects, target.effects);
   strictEqual(operation.output, describeNode(operation).outputs[0]);
-  throws(
-    () => Invocation.create({ target, arguments: [] }),
-    /expects 1 arguments, got 0/
-  );
+  throws(() => Invocation.create({ target, arguments: [] }), /expects 1 arguments, got 0/);
 
-  const multiResult = functionDefinition(
-    "test.call-multi-result",
-    [],
-    ["i32", "i64"]
-  );
+  const multiResult = functionDefinition("test.call-multi-result", [], ["i32", "i64"]);
 
   throws(
-    () => callOperation.create({
-      invocation: Invocation.create({
-        target: multiResult,
-        arguments: []
-      })
-    }, () => values.addNodeOutput()),
+    () =>
+      callOperation.create(
+        {
+          invocation: Invocation.create({
+            target: multiResult,
+            arguments: []
+          })
+        },
+        () => values.addNodeOutput()
+      ),
     /multiple call results are not supported/
   );
 });
@@ -231,10 +211,7 @@ test("indirect invocations include the table selector in their inputs", () => {
     target,
     arguments: [{ value: argument, type: "i64" }]
   });
-  const operation = callOperation.create(
-    { invocation },
-    () => values.addNodeOutput()
-  );
+  const operation = callOperation.create({ invocation }, () => values.addNodeOutput());
 
   deepStrictEqual(invocationInputs(invocation), [
     { value: argument, type: "i64" },
@@ -244,12 +221,13 @@ test("indirect invocations include the table selector in their inputs", () => {
   strictEqual(target.table, table);
   strictEqual(target.effects, effects);
   throws(
-    () => IndirectCallTarget.create({
-      table,
-      type,
-      effects,
-      elementIndex: { value: elementIndex, type: "i64" }
-    }),
+    () =>
+      IndirectCallTarget.create({
+        table,
+        type,
+        effects,
+        elementIndex: { value: elementIndex, type: "i64" }
+      }),
     /table element index must be i32, got i64/
   );
 });

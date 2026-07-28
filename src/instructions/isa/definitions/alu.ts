@@ -11,11 +11,7 @@ import {
   opReg
 } from "../dsl.js";
 import type { InstructionMnemonic, Reg3 } from "../spec.js";
-import {
-  aluSemantic,
-  type AluOp,
-  unaryAluSemantic
-} from "#instructions/semantics/alu.js";
+import { aluSemantic, type AluOp, unaryAluSemantic } from "#instructions/semantics/alu.js";
 import { cmpSemantic } from "#instructions/semantics/cmp.js";
 
 export const ADD = aluMnemonic("add", 0);
@@ -27,15 +23,8 @@ export const SUB = aluMnemonic("sub", 5);
 export const XOR = aluMnemonic("xor", 6);
 export const CMP = binaryAluMnemonic("cmp", 7, cmpSemantic);
 
-function aluMnemonic(
-  operation: AluOp,
-  group: Reg3
-): InstructionMnemonic {
-  return binaryAluMnemonic(
-    operation,
-    group,
-    (width) => aluSemantic(operation, width)
-  );
+function aluMnemonic(operation: AluOp, group: Reg3): InstructionMnemonic {
+  return binaryAluMnemonic(operation, group, (width) => aluSemantic(operation, width));
 }
 
 function binaryAluMnemonic(

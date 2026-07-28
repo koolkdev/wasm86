@@ -1,8 +1,5 @@
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import type {
-  IntegerWidth,
-  ValueId
-} from "#compiler/ir/values/types.js";
+import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import type { PageFault } from "#core/exceptions.js";
 import type { PhysicalAccess } from "./physical.js";
 
@@ -31,32 +28,26 @@ export type MemoryFault = Readonly<{
   exception: PageFault<ValueId>;
 }>;
 
-export type DirectMemoryAccess<
-  TIntent extends MemoryAccessIntent = MemoryAccessIntent
-> = Readonly<{
+export type DirectMemoryAccess<TIntent extends MemoryAccessIntent = MemoryAccessIntent> = Readonly<{
   intent: TIntent;
   physicalAccess: PhysicalAccess;
 }>;
 
-export type DirectMemoryResolution<
-  TIntent extends MemoryAccessIntent = MemoryAccessIntent
-> = Readonly<{
-  unavailable: ValueId;
-  access: DirectMemoryAccess<TIntent>;
-}>;
+export type DirectMemoryResolution<TIntent extends MemoryAccessIntent = MemoryAccessIntent> =
+  Readonly<{
+    unavailable: ValueId;
+    access: DirectMemoryAccess<TIntent>;
+  }>;
 
-export type ResolvedMemoryAccess<
-  TIntent extends MemoryAccessIntent = MemoryAccessIntent
-> = Readonly<{
-  range: LinearRange;
-  intent: TIntent;
-  scattered: ValueId;
-  physicalAccess: PhysicalAccess;
-}>;
+export type ResolvedMemoryAccess<TIntent extends MemoryAccessIntent = MemoryAccessIntent> =
+  Readonly<{
+    range: LinearRange;
+    intent: TIntent;
+    scattered: ValueId;
+    physicalAccess: PhysicalAccess;
+  }>;
 
-export type MemoryResolution<
-  TIntent extends MemoryAccessIntent = MemoryAccessIntent
-> = Readonly<{
+export type MemoryResolution<TIntent extends MemoryAccessIntent = MemoryAccessIntent> = Readonly<{
   access: ResolvedMemoryAccess<TIntent>;
   fault: MemoryFault;
 }>;

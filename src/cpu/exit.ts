@@ -2,40 +2,19 @@ import { assert } from "#common/assert.js";
 import { buildVariant } from "#compiler/ir/builder/variant.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import {
-  decodeVariant,
-  type VariantValue
-} from "#compiler/layout/variant-codec.js";
+import { decodeVariant, type VariantValue } from "#compiler/layout/variant-codec.js";
 import { createVariantLayout } from "#compiler/layout/variant.js";
-import {
-  coreExits,
-  coreExitFields,
-  coreExitSet
-} from "#core/exits.js";
-import {
-  divideError,
-  generalProtection,
-  invalidOpcode,
-  pageFault
-} from "#core/exceptions.js";
+import { coreExits, coreExitFields, coreExitSet } from "#core/exits.js";
+import { divideError, generalProtection, invalidOpcode, pageFault } from "#core/exceptions.js";
 import { segmentRegisters } from "#core/types.js";
-import {
-  interpreterExits,
-  interpreterExitSet
-} from "#interpreter/exits.js";
+import { interpreterExits, interpreterExitSet } from "#interpreter/exits.js";
 import type { RunStop } from "./cpu.js";
 
 // Cpu resolves every configured owner's true exits once. Guest transfers use
 // dispatch and never enter this layout.
-export const exitLayout = createVariantLayout("cpu.exit", [
-  coreExitSet,
-  interpreterExitSet
-]);
+export const exitLayout = createVariantLayout("cpu.exit", [coreExitSet, interpreterExitSet]);
 
-export function buildExit(
-  values: ValueTable,
-  exit: VariantValue<ValueId>
-): ValueId {
+export function buildExit(values: ValueTable, exit: VariantValue<ValueId>): ValueId {
   return buildVariant(values, exitLayout, exit);
 }
 
@@ -55,10 +34,7 @@ export function decodeExit(encoded: bigint): RunStop {
     const segmentIndex = result.value(coreExitFields.segment);
     const segment = segmentRegisters[segmentIndex];
 
-    assert(
-      segment !== undefined,
-      `segment-load exit has invalid segment index: ${segmentIndex}`
-    );
+    assert(segment !== undefined, `segment-load exit has invalid segment index: ${segmentIndex}`);
     return {
       kind: "segmentLoad",
       segment,

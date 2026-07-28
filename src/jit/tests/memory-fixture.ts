@@ -4,10 +4,7 @@ import { writeBackingBytes } from "#memory/bytes.js";
 import { guestMemoryMinimumPages } from "#memory/constants.js";
 
 // Guest-memory fixture shared by JIT decoding and compilation tests.
-export function jitMemoryWithBytes(
-  values: readonly number[],
-  baseAddress = 0
-): WebAssembly.Memory {
+export function jitMemoryWithBytes(values: readonly number[], baseAddress = 0): WebAssembly.Memory {
   const memory = new WebAssembly.Memory({ initial: guestMemoryMinimumPages });
   const firstFailingAddress = writeBackingBytes(memory, baseAddress, values);
 

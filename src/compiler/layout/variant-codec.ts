@@ -1,10 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { LayoutWidth } from "./handles.js";
-import {
-  type VariantFieldRef,
-  type VariantLayout,
-  type VariantRef
-} from "./variant.js";
+import type { VariantFieldRef, VariantLayout, VariantRef } from "./variant.js";
 
 export type VariantPayload<TValue> = readonly Readonly<{
   field: VariantFieldRef;
@@ -53,9 +49,7 @@ export function packVariant<TValue, TResult>(
     `variant ${variant.id} payload has ${payloadByField.size} fields; expected ${variant.fields.length}`
   );
 
-  let result = target.constant(
-    BigInt(placement.tag) << BigInt(layout.tagOffset * 8)
-  );
+  let result = target.constant(BigInt(placement.tag) << BigInt(layout.tagOffset * 8));
 
   for (const field of variant.fields) {
     const value = payloadByField.get(field);
@@ -73,19 +67,14 @@ export function packVariant<TValue, TResult>(
   return result;
 }
 
-export function encodeVariant(
-  layout: VariantLayout,
-  value: VariantValue<number>
-): bigint {
+export function encodeVariant(layout: VariantLayout, value: VariantValue<number>): bigint {
   const encoded = packVariant(layout, value, {
     constant: (value) => value,
     unsigned: (value, width) => {
       const maximum = widthMaximum(width);
 
       if (!Number.isInteger(value) || value < 0 || value > maximum) {
-        throw new RangeError(
-          `variant payload value does not fit ${width}: ${value}`
-        );
+        throw new RangeError(`variant payload value does not fit ${width}: ${value}`);
       }
       return BigInt(value);
     },
@@ -121,9 +110,7 @@ export function decodeVariant(layout: VariantLayout, encoded: bigint): DecodedVa
   }
 
   if ((value & ~usedMask) !== 0n) {
-    throw new RangeError(
-      `${layout.id} variant ${variant.id} has nonzero unused payload bits`
-    );
+    throw new RangeError(`${layout.id} variant ${variant.id} has nonzero unused payload bits`);
   }
 
   return {
@@ -134,8 +121,7 @@ export function decodeVariant(layout: VariantLayout, encoded: bigint): DecodedVa
         `field ${field.id} does not belong to decoded variant ${variant.id}`
       );
       const placement = layout.field(field);
-      const fieldValue = (value >> BigInt(placement.offset * 8)) &
-        byteMask(placement.byteLength);
+      const fieldValue = (value >> BigInt(placement.offset * 8)) & byteMask(placement.byteLength);
 
       return Number(fieldValue);
     }

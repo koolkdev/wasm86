@@ -27,11 +27,7 @@ test("Virtual resolution markers are outside the stored PTE encoding", () => {
     pageTableEntryFrameMask
   );
 
-  strictEqual(
-    resolutionResultAttr.LATER_DENIAL &
-      resolutionResultAttr.SCATTERED,
-    0
-  );
+  strictEqual(resolutionResultAttr.LATER_DENIAL & resolutionResultAttr.SCATTERED, 0);
   strictEqual(resolutionResultAttr.LATER_DENIAL & storedBits, 0);
   strictEqual(resolutionResultAttr.SCATTERED & storedBits, 0);
 });

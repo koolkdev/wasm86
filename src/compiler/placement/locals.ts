@@ -47,7 +47,9 @@ export function planLocals(
       end: localLifetimeEnd(analysis, placement),
       order: order++,
       local: -1,
-      assign(local) { valueLocals[value] = local; }
+      assign(local) {
+        valueLocals[value] = local;
+      }
     });
   }
 
@@ -65,17 +67,16 @@ export function planLocals(
       const end = analysis.regionEndSite(nested.body);
 
       for (const input of nested.scope.inputs) {
-        assert(
-          placements[input] === undefined,
-          `loop input ${input} has two local claims`
-        );
+        assert(placements[input] === undefined, `loop input ${input} has two local claims`);
         claims.push({
           type: block.values.valueType(input),
           start: site.id,
           end,
           order: order++,
           local: -1,
-          assign(local) { valueLocals[input] = local; }
+          assign(local) {
+            valueLocals[input] = local;
+          }
         });
       }
     }
@@ -91,7 +92,9 @@ export function planLocals(
       end: lifetime.end,
       order: order++,
       local: -1,
-      assign(local) { variableLocals.set(variable, local); }
+      assign(local) {
+        variableLocals.set(variable, local);
+      }
     });
   }
 
@@ -112,17 +115,11 @@ function variableLifetimes(
   const accesses: { variable: VariableRef; site: SiteId }[] = [];
 
   for (const { operation, site } of analysis.operations()) {
-    if (
-      operation.kind !== "variable.read" &&
-      operation.kind !== "variable.write"
-    ) {
+    if (operation.kind !== "variable.read" && operation.kind !== "variable.write") {
       continue;
     }
     accesses.push({ variable: operation.variable, site });
-    if (
-      operation.kind === "variable.write" &&
-      operation.initialization === "seed"
-    ) {
+    if (operation.kind === "variable.write" && operation.initialization === "seed") {
       seeds.set(operation.variable, site);
     }
   }

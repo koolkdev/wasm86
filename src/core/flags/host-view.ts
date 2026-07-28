@@ -1,9 +1,5 @@
 import type { LayoutHostView } from "#compiler/layout/host-view.js";
-import {
-  isX86StatusFlag,
-  x86StatusFlags,
-  type X86Flag
-} from "./definitions.js";
+import { isX86StatusFlag, x86StatusFlags, type X86Flag } from "./definitions.js";
 import { LAZY_FLAGS_KIND } from "./lazy/encoding.js";
 import { resolveLazyStatusFlagBytes } from "./lazy/host.js";
 import { flagStateFields } from "./layout.js";
@@ -18,9 +14,7 @@ export interface FlagStateHostView extends MutableFlagStateView {
   writeFlagByte(flag: X86Flag, value: number): void;
 }
 
-export function createFlagStateHostView(
-  storage: LayoutHostView
-): FlagStateHostView {
+export function createFlagStateHostView(storage: LayoutHostView): FlagStateHostView {
   return new FlagStateHostViewImpl(storage);
 }
 
@@ -66,15 +60,8 @@ class FlagStateHostViewImpl implements FlagStateHostView {
   readFlagByte(flag: X86Flag): number {
     const lazyKind = this.lazyKind;
 
-    if (
-      isX86StatusFlag(flag) &&
-      lazyKind !== LAZY_FLAGS_KIND.NONE
-    ) {
-      return resolveLazyStatusFlagBytes(
-        lazyKind,
-        this.lazyA,
-        this.lazyB
-      )[flag];
+    if (isX86StatusFlag(flag) && lazyKind !== LAZY_FLAGS_KIND.NONE) {
+      return resolveLazyStatusFlagBytes(lazyKind, this.lazyA, this.lazyB)[flag];
     }
 
     return this.#storage.readField(flagStateFields.concrete[flag]);
@@ -83,30 +70,17 @@ class FlagStateHostViewImpl implements FlagStateHostView {
   writeFlagByte(flag: X86Flag, value: number): void {
     const lazyKind = this.lazyKind;
 
-    if (
-      isX86StatusFlag(flag) &&
-      lazyKind !== LAZY_FLAGS_KIND.NONE
-    ) {
+    if (isX86StatusFlag(flag) && lazyKind !== LAZY_FLAGS_KIND.NONE) {
       const lazyA = this.lazyA;
       const lazyB = this.lazyB;
-      const resolved = resolveLazyStatusFlagBytes(
-        lazyKind,
-        lazyA,
-        lazyB
-      );
+      const resolved = resolveLazyStatusFlagBytes(lazyKind, lazyA, lazyB);
 
       for (const statusFlag of x86StatusFlags) {
-        this.#storage.writeField(
-          flagStateFields.concrete[statusFlag],
-          resolved[statusFlag]
-        );
+        this.#storage.writeField(flagStateFields.concrete[statusFlag], resolved[statusFlag]);
       }
       this.lazyKind = LAZY_FLAGS_KIND.NONE;
     }
 
-    this.#storage.writeField(
-      flagStateFields.concrete[flag],
-      value === 0 ? 0 : 1
-    );
+    this.#storage.writeField(flagStateFields.concrete[flag], value === 0 ? 0 : 1);
   }
 }

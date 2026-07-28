@@ -10,10 +10,7 @@ import type { StatusFlagValues } from "#core/flags/values.js";
 import type { CompareOperator } from "#compiler/ir/values/comparison.js";
 import type { RegionBuilder, SwitchArm } from "#compiler/ir/builder/region.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "#core/flags/lazy/encoding.js";
-import {
-  flagStateFields,
-  type FlagStateField
-} from "#core/flags/layout.js";
+import { flagStateFields, type FlagStateField } from "#core/flags/layout.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 
@@ -64,7 +61,8 @@ type LazyFlagRecordValues = Readonly<{
 const logicUndefFlagPolicy: UndefFlagPolicy = "zero";
 const lazyConditionWidths = [8, 16, 32] as const;
 type LazyConditionCaseSpec = Readonly<{
-  kind: typeof LAZY_FLAGS_KIND.ADD | typeof LAZY_FLAGS_KIND.SUB | typeof LAZY_FLAGS_KIND.LOGIC_RESULT;
+  kind:
+    typeof LAZY_FLAGS_KIND.ADD | typeof LAZY_FLAGS_KIND.SUB | typeof LAZY_FLAGS_KIND.LOGIC_RESULT;
   width: (typeof lazyConditionWidths)[number];
   operator: CompareOperator;
 }>;
@@ -106,10 +104,8 @@ export class StatusFlagTracker {
 
     const cache: SourceExpansionCache = new Map();
 
-    return this.#flagBoolExpr(
-      context,
-      CONDITIONS[cc].expr,
-      (flag) => this.#resolveFlagFrom(context, this.#current, flag, cache)
+    return this.#flagBoolExpr(context, CONDITIONS[cc].expr, (flag) =>
+      this.#resolveFlagFrom(context, this.#current, flag, cache)
     );
   }
 
@@ -143,11 +139,7 @@ export class StatusFlagTracker {
     }
   }
 
-  write(
-    context: StatusFlagContext,
-    targetFlag: X86StatusFlag,
-    value: ValueId
-  ): void {
+  write(context: StatusFlagContext, targetFlag: X86StatusFlag, value: ValueId): void {
     if (this.#isCurrentFlagValue(context, targetFlag, value)) {
       return;
     }
@@ -244,11 +236,7 @@ export class StatusFlagTracker {
     this.#state.write(flagStateFields.concrete[flag], value);
   }
 
-  #isCurrentFlagValue(
-    context: StatusFlagContext,
-    flag: X86StatusFlag,
-    value: ValueId
-  ): boolean {
+  #isCurrentFlagValue(context: StatusFlagContext, flag: X86StatusFlag, value: ValueId): boolean {
     const backing = getBacking(this.#current.backings, flag);
 
     switch (backing.kind) {
@@ -318,12 +306,7 @@ export class StatusFlagTracker {
     flag: X86StatusFlag,
     cache: SourceExpansionCache
   ): ValueId {
-    return this.#resolveBacking(
-      context,
-      flag,
-      getBacking(state.backings, flag),
-      cache
-    );
+    return this.#resolveBacking(context, flag, getBacking(state.backings, flag), cache);
   }
 
   #resolveBacking(
@@ -344,10 +327,7 @@ export class StatusFlagTracker {
     }
   }
 
-  #directCondition(
-    context: StatusFlagContext,
-    cc: ConditionCode
-  ): ValueId | undefined {
+  #directCondition(context: StatusFlagContext, cc: ConditionCode): ValueId | undefined {
     if (this.#current.directSource === undefined) {
       return undefined;
     }
@@ -369,10 +349,7 @@ export class StatusFlagTracker {
     }
   }
 
-  #lazyInputCondition(
-    context: StatusFlagContext,
-    cc: ConditionCode
-  ): ValueId | undefined {
+  #lazyInputCondition(context: StatusFlagContext, cc: ConditionCode): ValueId | undefined {
     const caseSpecs = lazyRuntimeConditionCaseSpecs(cc);
 
     if (caseSpecs.length === 0 || !this.#conditionReadsOnlyInputFlags(cc)) {
@@ -384,36 +361,30 @@ export class StatusFlagTracker {
     return context.region.switch(
       record.kind,
       caseSpecs.map((spec) => this.#lazyConditionArm(spec, record)),
-      (arm) => this.#lazyConditionDefault(
-        contextForRegion(context, arm),
-        CONDITIONS[cc].expr
-      )
+      (arm) => this.#lazyConditionDefault(contextForRegion(context, arm), CONDITIONS[cc].expr)
     );
   }
 
   #conditionReadsOnlyInputFlags(cc: ConditionCode): boolean {
-    return CONDITIONS[cc].reads.every((flag) => getBacking(this.#current.backings, flag).kind === "input");
+    return CONDITIONS[cc].reads.every(
+      (flag) => getBacking(this.#current.backings, flag).kind === "input"
+    );
   }
 
-  #lazyConditionArm(
-    spec: LazyConditionCaseSpec,
-    record: LazyFlagRecordValues
-  ): SwitchArm {
+  #lazyConditionArm(spec: LazyConditionCaseSpec, record: LazyFlagRecordValues): SwitchArm {
     return {
       match: lazyFlagsKindByte(spec.kind, spec.width),
-      build: (arm) => arm.values.compare(
-        spec.width,
-        spec.operator,
-        record.a,
-        spec.kind === LAZY_FLAGS_KIND.LOGIC_RESULT ? arm.values.const(0) : record.b
-      )
+      build: (arm) =>
+        arm.values.compare(
+          spec.width,
+          spec.operator,
+          record.a,
+          spec.kind === LAZY_FLAGS_KIND.LOGIC_RESULT ? arm.values.const(0) : record.b
+        )
     };
   }
 
-  #lazyConditionDefault(
-    context: StatusFlagContext,
-    expr: FlagBoolExpr
-  ): ValueId {
+  #lazyConditionDefault(context: StatusFlagContext, expr: FlagBoolExpr): ValueId {
     const flags = new Map<X86StatusFlag, ValueId>();
 
     return this.#flagBoolExpr(context, expr, (flag) => {
@@ -468,10 +439,7 @@ export class StatusFlagTracker {
     }
   }
 
-  #readInputFlag(
-    context: StatusFlagContext,
-    flag: X86StatusFlag
-  ): ValueId {
+  #readInputFlag(context: StatusFlagContext, flag: X86StatusFlag): ValueId {
     const cached = this.#inputFlags.get(flag);
 
     if (cached !== undefined) {
@@ -525,10 +493,7 @@ export class StatusFlagTracker {
     }
   }
 
-  #materializeSource(
-    context: StatusFlagContext,
-    source: SimpleFlagSource
-  ): StatusFlagValueIds {
+  #materializeSource(context: StatusFlagContext, source: SimpleFlagSource): StatusFlagValueIds {
     return statusFlagValuesForSource(context.region.values, source, {
       undefinedAF: this.#materializeUndef(context, logicUndefFlagPolicy)
     });
@@ -541,8 +506,16 @@ function initialBackings(): Map<X86StatusFlag, FlagBacking> {
 
 function lazyRuntimeConditionCaseSpecs(cc: ConditionCode): readonly LazyConditionCaseSpec[] {
   return lazyConditionWidths.flatMap((width) => [
-    ...lazyRuntimeConditionCase(LAZY_FLAGS_KIND.ADD, width, simpleFlagSourceConditionOperators.add[cc]),
-    ...lazyRuntimeConditionCase(LAZY_FLAGS_KIND.SUB, width, simpleFlagSourceConditionOperators.sub[cc]),
+    ...lazyRuntimeConditionCase(
+      LAZY_FLAGS_KIND.ADD,
+      width,
+      simpleFlagSourceConditionOperators.add[cc]
+    ),
+    ...lazyRuntimeConditionCase(
+      LAZY_FLAGS_KIND.SUB,
+      width,
+      simpleFlagSourceConditionOperators.sub[cc]
+    ),
     ...lazyRuntimeConditionCase(
       LAZY_FLAGS_KIND.LOGIC_RESULT,
       width,
@@ -566,10 +539,7 @@ function initialStatusFlagState(): StatusFlagTrackerState {
   };
 }
 
-function contextForRegion(
-  context: StatusFlagContext,
-  region: RegionBuilder
-): StatusFlagContext {
+function contextForRegion(context: StatusFlagContext, region: RegionBuilder): StatusFlagContext {
   return {
     region,
     access: context.access.forRegion(region)

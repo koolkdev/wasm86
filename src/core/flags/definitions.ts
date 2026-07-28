@@ -1,22 +1,6 @@
-export const x86StatusFlags = [
-  "CF",
-  "PF",
-  "AF",
-  "ZF",
-  "SF",
-  "OF"
-] as const;
-const x86NonStatusFlags = [
-  "TF",
-  "DF",
-  "NT",
-  "AC",
-  "ID"
-] as const;
-export const x86Flags = [
-  ...x86StatusFlags,
-  ...x86NonStatusFlags
-] as const;
+export const x86StatusFlags = ["CF", "PF", "AF", "ZF", "SF", "OF"] as const;
+const x86NonStatusFlags = ["TF", "DF", "NT", "AC", "ID"] as const;
+export const x86Flags = [...x86StatusFlags, ...x86NonStatusFlags] as const;
 
 export type X86StatusFlag = (typeof x86StatusFlags)[number];
 export type X86Flag = (typeof x86Flags)[number];

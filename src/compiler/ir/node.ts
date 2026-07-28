@@ -1,7 +1,5 @@
 import type { StorageEffects } from "#compiler/ir/effects.js";
-import {
-  describeControl
-} from "#compiler/ir/controls/index.js";
+import { describeControl } from "#compiler/ir/controls/index.js";
 import {
   describeOperation,
   type DerivedOperationDescription,
@@ -9,10 +7,7 @@ import {
   type OperationResult
 } from "#compiler/ir/operations/index.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
-import type {
-  ValueId,
-  ValueInput
-} from "#compiler/ir/values/types.js";
+import type { ValueId, ValueInput } from "#compiler/ir/values/types.js";
 import type { Region, RegionNode } from "./region.js";
 
 // A child region as seen by generic IR consumers. Loop bodies additionally
@@ -20,9 +15,7 @@ import type { Region, RegionNode } from "./region.js";
 export type NestedRegion = Readonly<{
   body: Region;
   role: string;
-  scope:
-    | Readonly<{ kind: "ordinary" }>
-    | Readonly<{ kind: "loop"; inputs: readonly ValueId[] }>;
+  scope: Readonly<{ kind: "ordinary" }> | Readonly<{ kind: "loop"; inputs: readonly ValueId[] }>;
 }>;
 
 export type NodeDescription = Readonly<{
@@ -33,20 +26,19 @@ export type NodeDescription = Readonly<{
   referencedResources: readonly ResourceRef[];
 }>;
 
-export type OperationDescription = NodeDescription & Readonly<{
-  inputs: readonly ValueInput[];
-  results: readonly OperationResult[];
-  nestedBodies: readonly [];
-}>;
+export type OperationDescription = NodeDescription &
+  Readonly<{
+    inputs: readonly ValueInput[];
+    results: readonly OperationResult[];
+    nestedBodies: readonly [];
+  }>;
 
 const noNestedBodies: readonly [] = [];
 const noReferencedResources: readonly [] = [];
 
 export function describeNode(node: Operation): OperationDescription;
 export function describeNode(node: RegionNode): NodeDescription;
-export function describeNode(
-  node: RegionNode
-): NodeDescription | OperationDescription {
+export function describeNode(node: RegionNode): NodeDescription | OperationDescription {
   switch (node.category) {
     case "control":
       return controlDescription(describeControl(node));
@@ -55,18 +47,14 @@ export function describeNode(
   }
 }
 
-function controlDescription(
-  description: ReturnType<typeof describeControl>
-): NodeDescription {
+function controlDescription(description: ReturnType<typeof describeControl>): NodeDescription {
   return {
     ...description,
     referencedResources: noReferencedResources
   };
 }
 
-function operationDescription(
-  description: DerivedOperationDescription
-): OperationDescription {
+function operationDescription(description: DerivedOperationDescription): OperationDescription {
   return {
     inputs: description.inputs,
     operands: description.inputs.map((input) => input.value),
@@ -74,7 +62,6 @@ function operationDescription(
     outputs: description.productions.map((production) => production.output),
     nestedBodies: noNestedBodies,
     effects: description.effects,
-    referencedResources:
-      description.referencedResources ?? noReferencedResources
+    referencedResources: description.referencedResources ?? noReferencedResources
   };
 }

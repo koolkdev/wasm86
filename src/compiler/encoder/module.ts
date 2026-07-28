@@ -62,9 +62,7 @@ export type WasmModuleDescription = Readonly<{
   functionExports: readonly WasmFunctionExport[];
 }>;
 
-export function encodeWasmModule(
-  description: WasmModuleDescription
-): Uint8Array<ArrayBuffer> {
+export function encodeWasmModule(description: WasmModuleDescription): Uint8Array<ArrayBuffer> {
   const module = new ByteSink();
 
   module.writeBytes(wasmMagic);
@@ -90,11 +88,7 @@ export function encodeWasmModule(
   });
   if (hasBranchHints(description.functions)) {
     module.writeSection(wasmSectionId.custom, (section) => {
-      writeBranchHintSection(
-        section,
-        description.functionImports.length,
-        description.functions
-      );
+      writeBranchHintSection(section, description.functionImports.length, description.functions);
     });
   }
   module.writeSection(wasmSectionId.code, (section) => {
@@ -105,15 +99,15 @@ export function encodeWasmModule(
 }
 
 function hasImports(description: WasmModuleDescription): boolean {
-  return description.functionImports.length +
-    description.memoryImports.length +
-    description.tableImports.length > 0;
+  return (
+    description.functionImports.length +
+      description.memoryImports.length +
+      description.tableImports.length >
+    0
+  );
 }
 
-function writeImportSection(
-  section: ByteSink,
-  description: WasmModuleDescription
-): void {
+function writeImportSection(section: ByteSink, description: WasmModuleDescription): void {
   section.writeVecLength(
     description.functionImports.length +
       description.memoryImports.length +
@@ -142,10 +136,7 @@ function writeImportSection(
   }
 }
 
-function writeTypeSection(
-  section: ByteSink,
-  functionTypes: readonly WasmFunctionType[]
-): void {
+function writeTypeSection(section: ByteSink, functionTypes: readonly WasmFunctionType[]): void {
   section.writeVecLength(functionTypes.length);
 
   for (const type of functionTypes) {
@@ -157,10 +148,7 @@ function writeTypeSection(
   }
 }
 
-function writeFunctionSection(
-  section: ByteSink,
-  functions: readonly WasmDefinedFunction[]
-): void {
+function writeFunctionSection(section: ByteSink, functions: readonly WasmDefinedFunction[]): void {
   section.writeVecLength(functions.length);
 
   for (const fn of functions) {
@@ -168,10 +156,7 @@ function writeFunctionSection(
   }
 }
 
-function writeGlobalSection(
-  section: ByteSink,
-  globals: readonly WasmGlobalDefinition[]
-): void {
+function writeGlobalSection(section: ByteSink, globals: readonly WasmGlobalDefinition[]): void {
   section.writeVecLength(globals.length);
 
   for (const global of globals) {
@@ -181,10 +166,7 @@ function writeGlobalSection(
   }
 }
 
-function writeExportSection(
-  section: ByteSink,
-  exports: readonly WasmFunctionExport[]
-): void {
+function writeExportSection(section: ByteSink, exports: readonly WasmFunctionExport[]): void {
   section.writeVecLength(exports.length);
 
   for (const entry of exports) {
@@ -194,10 +176,7 @@ function writeExportSection(
   }
 }
 
-function writeCodeSection(
-  section: ByteSink,
-  functions: readonly WasmDefinedFunction[]
-): void {
+function writeCodeSection(section: ByteSink, functions: readonly WasmDefinedFunction[]): void {
   section.writeVecLength(functions.length);
 
   for (const fn of functions) {
@@ -218,9 +197,7 @@ function writeBranchHintSection(
   functions: readonly WasmDefinedFunction[]
 ): void {
   section.writeName("metadata.code.branch_hint");
-  section.writeVecLength(
-    functions.filter((fn) => fn.body.branchHints.length > 0).length
-  );
+  section.writeVecLength(functions.filter((fn) => fn.body.branchHints.length > 0).length);
 
   for (let bodyIndex = 0; bodyIndex < functions.length; bodyIndex += 1) {
     const fn = functions[bodyIndex];
@@ -243,7 +220,11 @@ function writeTableType(section: ByteSink, limits: WasmTableLimits): void {
   writeResizableLimits(section, limits.minElements, limits.maxElements);
 }
 
-function writeResizableLimits(section: ByteSink, minimum: number, maximum: number | undefined): void {
+function writeResizableLimits(
+  section: ByteSink,
+  minimum: number,
+  maximum: number | undefined
+): void {
   if (maximum === undefined) {
     section.writeByte(0x00);
     section.writeU32(minimum);
@@ -270,10 +251,7 @@ function writeGlobalInit(section: ByteSink, global: WasmGlobalDefinition): void 
   writer.write(wasmInstruction.control.end);
 }
 
-function writeBranchHints(
-  section: ByteSink,
-  hints: EncodedWasmFunctionBody["branchHints"]
-): void {
+function writeBranchHints(section: ByteSink, hints: EncodedWasmFunctionBody["branchHints"]): void {
   section.writeVecLength(hints.length);
 
   for (const hint of hints) {

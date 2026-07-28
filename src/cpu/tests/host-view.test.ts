@@ -199,9 +199,7 @@ function createState(initial: WasmCpuStateInit): Readonly<{
 }
 
 function createStateHostView(memory: WebAssembly.Memory) {
-  return createCpuStateHostView(
-    createLayoutHostView(memory, testExecutionModel.cpuState.layout)
-  );
+  return createCpuStateHostView(createLayoutHostView(memory, testExecutionModel.cpuState.layout));
 }
 
 function seed(memory: WebAssembly.Memory, initial: WasmCpuStateInit): void {

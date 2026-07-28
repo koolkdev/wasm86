@@ -6,12 +6,13 @@ export function joinWidthBounds(bounds: Iterable<WidthBounds>): WidthBounds {
   let joined: WidthBounds | undefined;
 
   for (const bound of bounds) {
-    joined = joined === undefined
-      ? bound
-      : {
-          unsignedBits: Math.max(joined.unsignedBits, bound.unsignedBits),
-          signedBits: Math.max(joined.signedBits, bound.signedBits)
-        };
+    joined =
+      joined === undefined
+        ? bound
+        : {
+            unsignedBits: Math.max(joined.unsignedBits, bound.unsignedBits),
+            signedBits: Math.max(joined.signedBits, bound.signedBits)
+          };
   }
 
   return joined ?? unboundedWidthBounds;

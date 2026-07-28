@@ -19,19 +19,10 @@ import {
   resourceReadNode,
   resourceWriteNode
 } from "#test/support/storage-operations.js";
-import {
-  completedPlacementFunction,
-  terminalPlacementFunction
-} from "./function-fixture.js";
+import { completedPlacementFunction, terminalPlacementFunction } from "./function-fixture.js";
 
-function place(
-  block: FunctionGraph,
-  parameterCount = 0,
-  returned: readonly ValueId[] = []
-) {
-  return placeFunction(
-    completedPlacementFunction(block, parameterCount, returned)
-  );
+function place(block: FunctionGraph, parameterCount = 0, returned: readonly ValueId[] = []) {
+  return placeFunction(completedPlacementFunction(block, parameterCount, returned));
 }
 
 test("a producer used only in a selected body realizes at that use", () => {
@@ -44,10 +35,7 @@ test("a producer used only in a selected body realizes at that use", () => {
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [
-        resourceReadNode(values, output, 0),
-        ifControl.create({ condition, thenBody })
-      ]
+      nodes: [resourceReadNode(values, output, 0), ifControl.create({ condition, thenBody })]
     }
   };
   const { analysis, plan } = place(block, 1);
@@ -164,14 +152,18 @@ test("a return result is placed at its selected return", () => {
     values.const64(0x1200n)
   );
   const thenBody: Region = {
-    nodes: [returnControl.create({
-      source: { kind: "values", values: [result] }
-    })]
+    nodes: [
+      returnControl.create({
+        source: { kind: "values", values: [result] }
+      })
+    ]
   };
   const elseBody: Region = {
-    nodes: [returnControl.create({
-      source: { kind: "values", values: [values.const64(0n)] }
-    })]
+    nodes: [
+      returnControl.create({
+        source: { kind: "values", values: [values.const64(0n)] }
+      })
+    ]
   };
   const block: FunctionGraph = {
     values,
@@ -179,9 +171,7 @@ test("a return result is placed at its selected return", () => {
       nodes: [ifControl.create({ condition, thenBody, elseBody })]
     }
   };
-  const { analysis, plan } = placeFunction(
-    terminalPlacementFunction(block, 2, ["i64"])
-  );
+  const { analysis, plan } = placeFunction(terminalPlacementFunction(block, 2, ["i64"]));
   const returnSite = analysis.siteOf(thenBody, 0);
 
   deepStrictEqual(plan.values[result], {
@@ -196,18 +186,12 @@ test("an aliasing write captures a producer at its authored site", () => {
   const condition = values.parameter(0, "i32");
   const output = values.addNodeOutput();
   const thenBody: Region = {
-    nodes: [
-      resourceWriteNode(values, 0, values.const(5)),
-      resourceWriteNode(values, 1, output)
-    ]
+    nodes: [resourceWriteNode(values, 0, values.const(5)), resourceWriteNode(values, 1, output)]
   };
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [
-        resourceReadNode(values, output, 0),
-        ifControl.create({ condition, thenBody })
-      ]
+      nodes: [resourceReadNode(values, output, 0), ifControl.create({ condition, thenBody })]
     }
   };
   const { function: fn, analysis, plan, index } = place(block, 1);
@@ -275,10 +259,7 @@ test("a loop-invariant recipe captures at the loop entry", () => {
   const values = compilerTestValues();
   const invariant = values.binary("add", values.parameter(0, "i32"), values.const(1));
   const loopBody: Region = {
-    nodes: [
-      resourceWriteNode(values, 0, invariant),
-      loopContinueControl.create({ updates: [] })
-    ]
+    nodes: [resourceWriteNode(values, 0, invariant), loopContinueControl.create({ updates: [] })]
   };
   const block: FunctionGraph = {
     values,
@@ -311,10 +292,12 @@ test("a loop-input recipe remains inside the loop", () => {
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [loopControl.create({
-        carried: [{ seed: values.const(0), loopInput }],
-        body: loopBody
-      })]
+      nodes: [
+        loopControl.create({
+          carried: [{ seed: values.const(0), loopInput }],
+          body: loopBody
+        })
+      ]
     }
   };
   const { analysis, plan } = place(block);
@@ -391,17 +374,10 @@ test("a recipe over a loop-local control output remains inside the loop", () => 
 
 test("a transitively trapping recipe remains inside the loop", () => {
   const values = compilerTestValues();
-  const quotient = values.binary(
-    "div_u",
-    values.parameter(0, "i32"),
-    values.parameter(1, "i32")
-  );
+  const quotient = values.binary("div_u", values.parameter(0, "i32"), values.parameter(1, "i32"));
   const adjusted = values.binary("add", quotient, values.const(1));
   const loopBody: Region = {
-    nodes: [
-      resourceWriteNode(values, 0, adjusted),
-      loopContinueControl.create({ updates: [] })
-    ]
+    nodes: [resourceWriteNode(values, 0, adjusted), loopContinueControl.create({ updates: [] })]
   };
   const block: FunctionGraph = {
     values,
@@ -427,10 +403,7 @@ test("an invariant recipe in a selected loop region stays selected", () => {
     nodes: [resourceWriteNode(values, 0, invariant)]
   };
   const loopBody: Region = {
-    nodes: [
-      ifControl.create({ condition, thenBody }),
-      loopContinueControl.create({ updates: [] })
-    ]
+    nodes: [ifControl.create({ condition, thenBody }), loopContinueControl.create({ updates: [] })]
   };
   const block: FunctionGraph = {
     values,
@@ -488,10 +461,7 @@ test("an outer-loop recipe captures at an inner loop entry", () => {
   const outerInput = values.addLoopInput();
   const current = values.binary("add", outerInput, values.const(1));
   const innerBody: Region = {
-    nodes: [
-      resourceWriteNode(values, 0, current),
-      loopContinueControl.create({ updates: [] })
-    ]
+    nodes: [resourceWriteNode(values, 0, current), loopContinueControl.create({ updates: [] })]
   };
   const outerBody: Region = {
     nodes: [
@@ -502,10 +472,12 @@ test("an outer-loop recipe captures at an inner loop entry", () => {
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [loopControl.create({
-        carried: [{ seed: values.const(0), loopInput: outerInput }],
-        body: outerBody
-      })]
+      nodes: [
+        loopControl.create({
+          carried: [{ seed: values.const(0), loopInput: outerInput }],
+          body: outerBody
+        })
+      ]
     }
   };
   const { analysis, plan, index } = place(block);
@@ -527,10 +499,7 @@ test("an invariant recipe crosses nested loop entries", () => {
   const values = compilerTestValues();
   const invariant = values.binary("add", values.parameter(0, "i32"), values.const(1));
   const innerBody: Region = {
-    nodes: [
-      resourceWriteNode(values, 0, invariant),
-      loopContinueControl.create({ updates: [] })
-    ]
+    nodes: [resourceWriteNode(values, 0, invariant), loopContinueControl.create({ updates: [] })]
   };
   const outerBody: Region = {
     nodes: [
@@ -584,11 +553,7 @@ test("an if operand realizes at use before its nested replay", () => {
 
 test("an if can capture a contextually safe value after its condition", () => {
   const values = compilerTestValues();
-  const quotient = values.binary(
-    "div_u",
-    values.parameter(0, "i32"),
-    values.parameter(1, "i32")
-  );
+  const quotient = values.binary("div_u", values.parameter(0, "i32"), values.parameter(1, "i32"));
   const adjusted = values.binary("add", quotient, values.const(1));
   const thenBody: Region = {
     nodes: [resourceWriteNode(values, 0, adjusted)]
@@ -599,11 +564,13 @@ test("an if can capture a contextually safe value after its condition", () => {
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [ifControl.create({
-        condition: quotient,
-        thenBody,
-        elseBody
-      })]
+      nodes: [
+        ifControl.create({
+          condition: quotient,
+          thenBody,
+          elseBody
+        })
+      ]
     }
   };
   const { function: fn, analysis, plan, index } = place(block, 2);
@@ -637,11 +604,13 @@ test("an unreachable structured operand makes pending captures safe", () => {
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [ifControl.create({
-        condition: unreachable,
-        thenBody,
-        elseBody
-      })]
+      nodes: [
+        ifControl.create({
+          condition: unreachable,
+          thenBody,
+          elseBody
+        })
+      ]
     }
   };
   const { function: fn, analysis, plan, index } = place(block);
@@ -658,11 +627,7 @@ test("an unreachable structured operand makes pending captures safe", () => {
 
 test("an earlier captured trap frontier makes a later pre-evaluation safe", () => {
   const values = compilerTestValues();
-  const quotient = values.binary(
-    "div_u",
-    values.parameter(0, "i32"),
-    values.parameter(1, "i32")
-  );
+  const quotient = values.binary("div_u", values.parameter(0, "i32"), values.parameter(1, "i32"));
   const adjusted = values.binary("add", quotient, values.const(1));
   const condition = values.parameter(2, "i32");
   const thenBody: Region = {
@@ -701,11 +666,7 @@ test("an earlier captured trap frontier makes a later pre-evaluation safe", () =
 test("an unrelated trap shared by only some switch arms has no deadline", () => {
   const values = compilerTestValues();
   const selector = values.parameter(0, "i32");
-  const quotient = values.binary(
-    "div_u",
-    values.parameter(1, "i32"),
-    values.parameter(2, "i32")
-  );
+  const quotient = values.binary("div_u", values.parameter(1, "i32"), values.parameter(2, "i32"));
   const fallback = values.const(7);
   const output = values.addNodeOutput();
   const block: FunctionGraph = {
@@ -726,10 +687,7 @@ test("an unrelated trap shared by only some switch arms has no deadline", () => 
     }
   };
 
-  throws(
-    () => place(block, 3),
-    /trapping value .* has no legal capture deadline/
-  );
+  throws(() => place(block, 3), /trapping value .* has no legal capture deadline/);
 });
 
 test("a loop input carries its local without an evaluation anchor", () => {
@@ -742,10 +700,12 @@ test("a loop input carries its local without an evaluation anchor", () => {
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [loopControl.create({
-        carried: [{ seed, loopInput }],
-        body: loopBody
-      })]
+      nodes: [
+        loopControl.create({
+          carried: [{ seed, loopInput }],
+          body: loopBody
+        })
+      ]
     }
   };
   const { plan } = place(block);
@@ -797,12 +757,14 @@ test("a live join counts an unreachable arm only at its region end", () => {
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [ifControl.create({
-        condition,
-        output,
-        thenBody,
-        elseBody
-      })]
+      nodes: [
+        ifControl.create({
+          condition,
+          output,
+          thenBody,
+          elseBody
+        })
+      ]
     }
   };
   const { analysis, plan } = place(block, 1, [output]);

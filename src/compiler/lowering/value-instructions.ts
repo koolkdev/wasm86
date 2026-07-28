@@ -1,9 +1,6 @@
 import { wasmInstruction } from "#compiler/encoder/instructions.js";
 import type { WasmInstructionWriter } from "#compiler/encoder/instruction-writer.js";
-import type {
-  IntegerWidth,
-  ValueType
-} from "#compiler/ir/values/types.js";
+import type { IntegerWidth, ValueType } from "#compiler/ir/values/types.js";
 import type { ValueNode } from "#compiler/ir/values/table.js";
 
 export function emitValueNode(
@@ -33,12 +30,7 @@ export function emitValueNode(
       body.write(wasmInstruction[node.type][node.operator]);
       return;
     case "extend":
-      emitExtensionInstruction(
-        body,
-        node.resultType,
-        node.width,
-        node.signed
-      );
+      emitExtensionInstruction(body, node.resultType, node.width, node.signed);
       return;
     case "select":
       body.write(wasmInstruction.parametric.select);
@@ -83,10 +75,7 @@ function emitTruncationInstruction(
 }
 
 // These emitters consume the i32 already on the Wasm stack.
-function emitUnsignedWidth(
-  body: WasmInstructionWriter,
-  width: IntegerWidth
-): void {
+function emitUnsignedWidth(body: WasmInstructionWriter, width: IntegerWidth): void {
   switch (width) {
     case 32:
       return;
@@ -101,10 +90,7 @@ function emitUnsignedWidth(
   }
 }
 
-function emitSignedWidth(
-  body: WasmInstructionWriter,
-  width: IntegerWidth
-): void {
+function emitSignedWidth(body: WasmInstructionWriter, width: IntegerWidth): void {
   switch (width) {
     case 32:
       return;

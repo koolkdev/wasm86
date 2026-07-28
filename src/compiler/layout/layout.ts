@@ -167,9 +167,7 @@ export function createLayout(space: string, structures: readonly LayoutStructure
     }
   }
 
-  const orderedStructures = [...structures].sort((left, right) =>
-    compareIds(left.id, right.id)
-  );
+  const orderedStructures = [...structures].sort((left, right) => compareIds(left.id, right.id));
   const fields = new Map<FieldRef, LayoutField>();
   const namedArrays = new Map<NamedArrayRef, LayoutNamedArray>();
   const arrays = new Map<ArrayRef, LayoutArray>();
@@ -241,9 +239,7 @@ export function createLayout(space: string, structures: readonly LayoutStructure
     alignment,
     structures: orderedStructures.map((structure) => ({
       id: structure.id,
-      members: structure.members.map((member) =>
-        memberRecord(member, fields, namedArrays, arrays)
-      )
+      members: structure.members.map((member) => memberRecord(member, fields, namedArrays, arrays))
     }))
   };
 

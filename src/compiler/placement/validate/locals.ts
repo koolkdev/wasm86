@@ -53,13 +53,7 @@ export function validatePlacementLocals(
         const placement = plan.values[input];
 
         assert(placement?.kind === "loopInput", `loop input ${input} has no local`);
-        claim(
-          placement.local,
-          block.values.valueType(input),
-          site.id,
-          end,
-          `loop input ${input}`
-        );
+        claim(placement.local, block.values.valueType(input), site.id, end, `loop input ${input}`);
       }
     }
   }
@@ -108,22 +102,13 @@ export function validatePlacementLocals(
 function claimVariableLocals(
   analysis: FunctionAnalysis,
   plan: PlacementPlan,
-  claim: (
-    local: number,
-    type: ValueType,
-    start: SiteId,
-    end: SiteId,
-    owner: string
-  ) => void
+  claim: (local: number, type: ValueType, start: SiteId, end: SiteId, owner: string) => void
 ): void {
   const seeds = new Map<VariableRef, SiteId>();
   const accesses = new Map<VariableRef, SiteId[]>();
 
   for (const { operation, site } of analysis.operations()) {
-    if (
-      operation.kind !== "variable.read" &&
-      operation.kind !== "variable.write"
-    ) {
+    if (operation.kind !== "variable.read" && operation.kind !== "variable.write") {
       continue;
     }
     const sites = accesses.get(operation.variable);
@@ -133,10 +118,7 @@ function claimVariableLocals(
     } else {
       sites.push(site);
     }
-    if (
-      operation.kind === "variable.write" &&
-      operation.initialization === "seed"
-    ) {
+    if (operation.kind === "variable.write" && operation.initialization === "seed") {
       seeds.set(operation.variable, site);
     }
   }
@@ -151,13 +133,7 @@ function claimVariableLocals(
     index += 1;
     assert(local !== undefined, "referenced variable has no local");
     assert(seed !== undefined, `${owner} has no seed in this block`);
-    claim(
-      local,
-      variable.type,
-      seed,
-      variableLifetimeEnd(analysis, seed, sites, owner),
-      owner
-    );
+    claim(local, variable.type, seed, variableLifetimeEnd(analysis, seed, sites, owner), owner);
   }
 }
 

@@ -1,10 +1,7 @@
 import { assert } from "#common/assert.js";
 import { ByteSink } from "./byte-sink.js";
 import { wasmInstruction } from "./instructions.js";
-import {
-  createWasmInstructionWriter,
-  type WasmInstructionWriter
-} from "./instruction-writer.js";
+import { createWasmInstructionWriter, type WasmInstructionWriter } from "./instruction-writer.js";
 import type { WasmValueType } from "./types.js";
 
 const maximumWasmIndex = 0xffff_ffff;
@@ -32,17 +29,12 @@ export type WasmLocalResolver = (local: number) => number;
 
 export function encodeWasmFunctionBody(
   layout: WasmFunctionBodyLayout,
-  emit: (
-    writer: WasmInstructionWriter,
-    resolveLocal: WasmLocalResolver
-  ) => void
+  emit: (writer: WasmInstructionWriter, resolveLocal: WasmLocalResolver) => void
 ): EncodedWasmFunctionBody {
   const { parameterCount, localTypes } = layout;
 
   assert(
-    Number.isInteger(parameterCount) &&
-      parameterCount >= 0 &&
-      parameterCount <= maximumWasmIndex,
+    Number.isInteger(parameterCount) && parameterCount >= 0 && parameterCount <= maximumWasmIndex,
     `Wasm function parameter count out of range: ${parameterCount}`
   );
   assert(
@@ -71,10 +63,7 @@ export function encodeWasmFunctionBody(
   };
 }
 
-function writeLocalDeclarations(
-  body: ByteSink,
-  locals: readonly WasmValueType[]
-): void {
+function writeLocalDeclarations(body: ByteSink, locals: readonly WasmValueType[]): void {
   const groups = localGroups(locals);
 
   body.writeVecLength(groups.length);

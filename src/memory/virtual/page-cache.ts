@@ -13,12 +13,7 @@ export function createCachedPageTableAccess(
   return {
     effect: source.effect,
     read: (region, page) => {
-      const hit = region.values.compare(
-        32,
-        "eq",
-        page,
-        region.read(cachedPage)
-      );
+      const hit = region.values.compare(32, "eq", page, region.read(cachedPage));
 
       return region.ifValue(
         hit,

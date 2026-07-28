@@ -34,13 +34,9 @@ export const descriptorAttr = {
 } as const;
 
 export const descriptorTargetAttrMask =
-  descriptorAttr.LOAD_DATA |
-  descriptorAttr.LOAD_STACK |
-  descriptorAttr.LOAD_CODE;
+  descriptorAttr.LOAD_DATA | descriptorAttr.LOAD_STACK | descriptorAttr.LOAD_CODE;
 export const descriptorAccessAttrMask =
-  descriptorAttr.READ |
-  descriptorAttr.WRITE |
-  descriptorAttr.EXECUTE;
+  descriptorAttr.READ | descriptorAttr.WRITE | descriptorAttr.EXECUTE;
 export const descriptorDefinedAttrMask =
   descriptorAttr.DEFINED |
   descriptorAttr.PRESENT |
@@ -57,12 +53,7 @@ export function descriptorKey(selector: number): number {
 }
 
 export function validateDescriptor(descriptor: DescriptorRecord): boolean {
-  for (const value of [
-    descriptor.attrs,
-    descriptor.base,
-    descriptor.limit,
-    descriptor.reserved
-  ]) {
+  for (const value of [descriptor.attrs, descriptor.base, descriptor.limit, descriptor.reserved]) {
     if (!Number.isInteger(value) || value < 0 || value > maxU32) {
       // Every stored field must be a u32.
       return false;

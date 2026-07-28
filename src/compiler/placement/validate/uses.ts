@@ -1,9 +1,5 @@
 import { assert } from "#common/assert.js";
-import type {
-  FunctionAnalysis,
-  SiteId,
-  ValueDemand
-} from "#compiler/analysis/model.js";
+import type { FunctionAnalysis, SiteId, ValueDemand } from "#compiler/analysis/model.js";
 import { describeNode } from "#compiler/ir/node.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -113,8 +109,7 @@ function validatePlacementShape(
   }
 
   const mode = block.values.captureMode(value);
-  const needsPlacement = analysis.isLive(value) &&
-    (mode === "compute" || mode === "producer");
+  const needsPlacement = analysis.isLive(value) && (mode === "compute" || mode === "producer");
 
   assert(
     (placement !== undefined) === needsPlacement,
@@ -195,7 +190,5 @@ function collectLoopInputs(analysis: FunctionAnalysis): Set<ValueId> {
 }
 
 function placementAnchor(placement: ValuePlacement | undefined): SiteId | undefined {
-  return placement === undefined || placement.kind === "loopInput"
-    ? undefined
-    : placement.anchor;
+  return placement === undefined || placement.kind === "loopInput" ? undefined : placement.anchor;
 }

@@ -9,28 +9,19 @@ import {
 } from "#instructions/isa/spec.js";
 import { registerAlias } from "#core/registers.js";
 import { defaultSegmentForBase } from "#core/segments.js";
-import {
-  segmentRegisters,
-  type OperandWidth,
-  type SegmentRegister
-} from "#core/types.js";
-import type {
-  DecodeOperand,
-  EncodedValue,
-  InstructionForm,
-  SegmentSelection
-} from "./types.js";
+import { segmentRegisters, type OperandWidth, type SegmentRegister } from "#core/types.js";
+import type { DecodeOperand, EncodedValue, InstructionForm, SegmentSelection } from "./types.js";
 
 export function buildInstructionForms(
   instructions: readonly InstructionSpec[]
 ): readonly InstructionForm[] {
-  const forms = instructions.flatMap((instruction) =>
-    expandInstructionSpec(instruction).map((expanded) => buildForm(
-      expanded.spec,
-      expanded.opcode,
-      expanded.opcodeLowBits
-    ))
-  ).sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  const forms = instructions
+    .flatMap((instruction) =>
+      expandInstructionSpec(instruction).map((expanded) =>
+        buildForm(expanded.spec, expanded.opcode, expanded.opcodeLowBits)
+      )
+    )
+    .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
 
   return forms;
 }
@@ -42,9 +33,7 @@ function buildForm(
 ): InstructionForm {
   const operands = (instruction.operands ?? []).map(buildOperand);
 
-  const opcodeIdentity = opcode
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const opcodeIdentity = opcode.map((byte) => byte.toString(16).padStart(2, "0")).join("");
 
   return {
     id: `${instruction.id}@${opcodeIdentity}`,
@@ -66,9 +55,7 @@ function acceptedModRmBytes(
   const memoryOnly = operands.some(
     (operand) => operand.kind === "modrm.rm" && operand.form === "memory"
   );
-  const hasSegmentRegister = operands.some(
-    (operand) => operand.kind === "modrm.sreg"
-  );
+  const hasSegmentRegister = operands.some((operand) => operand.kind === "modrm.sreg");
 
   return Array.from({ length: 256 }, (_, byte) => {
     const mod = byte >>> 6;
@@ -105,9 +92,10 @@ function buildOperand(operand: OperandSpec): DecodeOperand {
         accessWidth: operand.width,
         base: operand.base,
         disp: operand.disp,
-        segment: operand.segment === undefined
-          ? overrideOrDefault(defaultSegmentForBase(operand.base))
-          : { kind: "fixed", segment: operand.segment }
+        segment:
+          operand.segment === undefined
+            ? overrideOrDefault(defaultSegmentForBase(operand.base))
+            : { kind: "fixed", segment: operand.segment }
       };
     case "moffs":
       return {
@@ -176,16 +164,11 @@ function buildRmOperand(
   }
 }
 
-function overrideOrDefault(
-  defaultSegment: SegmentRegister
-): SegmentSelection {
+function overrideOrDefault(defaultSegment: SegmentRegister): SegmentSelection {
   return { kind: "overrideOrDefault", defaultSegment };
 }
 
-function encodedValue(
-  width: OperandWidth,
-  signed: boolean
-): EncodedValue {
+function encodedValue(width: OperandWidth, signed: boolean): EncodedValue {
   switch (width) {
     case 8:
       return { byteLength: 1, signed };

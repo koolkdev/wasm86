@@ -3,9 +3,7 @@ import type { Reg32, SegmentRegister } from "#core/types.js";
 import { coreStateFields } from "./layout.js";
 import type { MutableCoreStateView } from "./view.js";
 
-export function createCoreStateHostView(
-  storage: LayoutHostView
-): MutableCoreStateView {
+export function createCoreStateHostView(storage: LayoutHostView): MutableCoreStateView {
   return new CoreStateHostViewImpl(storage);
 }
 

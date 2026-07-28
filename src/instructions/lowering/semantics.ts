@@ -1,10 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
-import {
-  isX86StatusFlag,
-  type X86Flag
-} from "#core/flags/definitions.js";
+import { isX86StatusFlag, type X86Flag } from "#core/flags/definitions.js";
 import type { SimpleFlagSource } from "#core/flags/lazy/sources.js";
 import type {
   IfBody,
@@ -54,10 +51,7 @@ export interface InstructionSemanticsSession {
     hint?: SemanticBranchHint
   ): void;
   loop(scope: SemanticRegionScope, body: LoopBody): void;
-  cpuException(
-    scope: SemanticRegionScope,
-    exception: CpuException<ValueInput>
-  ): void;
+  cpuException(scope: SemanticRegionScope, exception: CpuException<ValueInput>): void;
   hostTrap(scope: SemanticRegionScope, vector: ValueInput): void;
 }
 
@@ -71,31 +65,30 @@ export class InstructionSemantics implements SemanticsBuilder {
   readonly #operands: OperandResolver;
   readonly memory: SemanticMemoryOps;
 
-  constructor(context: Readonly<{
-    session: InstructionSemanticsSession;
-    scope: SemanticRegionScope;
-    storage: ScopedInstructionStorage;
-    state: InstructionState;
-    operands: OperandResolver;
-  }>) {
+  constructor(
+    context: Readonly<{
+      session: InstructionSemanticsSession;
+      scope: SemanticRegionScope;
+      storage: ScopedInstructionStorage;
+      state: InstructionState;
+      operands: OperandResolver;
+    }>
+  ) {
     this.#session = context.session;
     this.#scope = context.scope;
     this.#storage = context.storage;
     this.#state = context.state;
     this.#operands = context.operands;
     this.memory = {
-      reference: (segment, offset) =>
-        this.#active().memory.reference(segment, offset),
+      reference: (segment, offset) => this.#active().memory.reference(segment, offset),
       operand: (operandRef, addressOffset) => {
         this.#assertOperandSupported(operandRef);
         return this.#active().memory.operand(operandRef, addressOffset);
       },
       guard: (options) => this.#active().memory.guard(options),
       resolve: (options) => this.#active().memory.resolve(options),
-      read: (reference, options) =>
-        this.#active().memory.read(reference, options),
-      write: (reference, options) =>
-        this.#active().memory.write(reference, options),
+      read: (reference, options) => this.#active().memory.read(reference, options),
+      write: (reference, options) => this.#active().memory.write(reference, options),
       load: (access, options) => this.#active().memory.load(access, options),
       store: (access, options) => this.#active().memory.store(access, options)
     };
@@ -133,19 +126,12 @@ export class InstructionSemantics implements SemanticsBuilder {
     return this.#active().read(source, options);
   }
 
-  write(
-    target: StorageInput,
-    value: ValueInput,
-    options: SemanticWriteOptions
-  ): void {
+  write(target: StorageInput, value: ValueInput, options: SemanticWriteOptions): void {
     this.#assertStorageSupported(target);
     this.#active().write(target, value, options);
   }
 
-  update(
-    target: StorageInput,
-    options: SemanticWriteOptions
-  ): SemanticUpdate {
+  update(target: StorageInput, options: SemanticWriteOptions): SemanticUpdate {
     this.#assertStorageSupported(target);
     return this.#active().update(target, options);
   }
@@ -179,8 +165,7 @@ export class InstructionSemantics implements SemanticsBuilder {
 
   condition(cc: ConditionCode): Value {
     assert(
-      !this.#scope.insideLoop ||
-        !this.#state.statusFlags.conditionReadsInputFlags(cc),
+      !this.#scope.insideLoop || !this.#state.statusFlags.conditionReadsInputFlags(cc),
       "input-backed conditions inside a loop body are unsupported"
     );
     return this.#active().condition(cc);
@@ -190,11 +175,7 @@ export class InstructionSemantics implements SemanticsBuilder {
     this.#session.jump(this.#scope, target);
   }
 
-  if(
-    condition: ValueInput,
-    thenBuild: IfBody,
-    hint?: SemanticBranchHint
-  ): void {
+  if(condition: ValueInput, thenBuild: IfBody, hint?: SemanticBranchHint): void {
     this.#session.if(this.#scope, condition, thenBuild, hint);
   }
 
@@ -204,13 +185,7 @@ export class InstructionSemantics implements SemanticsBuilder {
     elseBuild: IfBody,
     hint?: SemanticBranchHint
   ): void {
-    this.#session.ifElse(
-      this.#scope,
-      condition,
-      thenBuild,
-      elseBuild,
-      hint
-    );
+    this.#session.ifElse(this.#scope, condition, thenBuild, elseBuild, hint);
   }
 
   loop(body: LoopBody): void {
@@ -243,8 +218,7 @@ export class InstructionSemantics implements SemanticsBuilder {
 
   #assertOperandSupported(operandRef: OperandInput): void {
     assert(
-      !this.#scope.insideLoop ||
-        !this.#operands.operandUsesDynamicGpr(operandRef.index),
+      !this.#scope.insideLoop || !this.#operands.operandUsesDynamicGpr(operandRef.index),
       "dynamic register operands inside a loop body are unsupported"
     );
   }

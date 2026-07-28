@@ -1,10 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { Region, RegionNode } from "#compiler/ir/region.js";
-import type {
-  RegionPathStep,
-  RegionSite,
-  SiteId
-} from "./model.js";
+import type { RegionPathStep, RegionSite, SiteId } from "./model.js";
 
 type RegionInfo = Readonly<{
   sites: SiteId[];
@@ -47,10 +43,7 @@ export class FunctionGeometry {
     const ancestorPath = ancestorInfo?.ancestry;
     const descendantPath = descendantInfo?.ancestry;
 
-    if (
-      ancestorPath === undefined ||
-      descendantPath?.[ancestorPath.length - 1] !== ancestor
-    ) {
+    if (ancestorPath === undefined || descendantPath?.[ancestorPath.length - 1] !== ancestor) {
       return undefined;
     }
     const result: RegionPathStep[] = [];
@@ -91,11 +84,7 @@ export class FunctionGeometry {
     return this.#regions.get(region)?.isLoop === true;
   }
 
-  registerNested(
-    region: Region,
-    owner: SiteId,
-    isLoop = false
-  ): void {
+  registerNested(region: Region, owner: SiteId, isLoop = false): void {
     assert(!this.#regions.has(region), "region object has more than one owner");
     const ownerRegion = this.site(owner).region;
     const ownerInfo = this.#regions.get(ownerRegion);

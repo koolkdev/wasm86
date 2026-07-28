@@ -18,10 +18,7 @@ export class LoopAnchors {
     private readonly block: FunctionGraph,
     private readonly analysis: FunctionAnalysis
   ) {
-    const addScoped = (
-      value: ValueId,
-      loops: readonly LoopBoundary[]
-    ): void => {
+    const addScoped = (value: ValueId, loops: readonly LoopBoundary[]): void => {
       for (const loop of loops) {
         loop.scoped.add(value);
       }
@@ -103,8 +100,7 @@ export class LoopAnchors {
     assert(site !== undefined && site.id === anchor, `unknown placement site ${anchor}`);
     const loop = this.#loops.get(site.region);
 
-    return loop !== undefined &&
-        !valueDependsOn(this.block.values, value, loop.scoped)
+    return loop !== undefined && !valueDependsOn(this.block.values, value, loop.scoped)
       ? loop.owner
       : undefined;
   }

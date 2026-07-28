@@ -10,17 +10,11 @@ import {
   returnControl,
   switchControl
 } from "#compiler/ir/controls/index.js";
-import {
-  IndirectCallTarget,
-  Invocation
-} from "#compiler/ir/invocation.js";
+import { IndirectCallTarget, Invocation } from "#compiler/ir/invocation.js";
 import { callOperation } from "#compiler/ir/operations/index.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import {
-  type RegionNode,
-  type Region
-} from "#compiler/ir/region.js";
+import { type RegionNode, type Region } from "#compiler/ir/region.js";
 import type { FunctionGraph, IrFunction } from "#compiler/ir/function.js";
 import { functionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
@@ -41,21 +35,21 @@ function functionBlock(
   parameterCount = 0,
   returned: readonly ValueId[] = []
 ): IrFunction {
-  const parameters = Array.from(
-    { length: parameterCount },
-    (_, index) => block.values.parameter(index, "i32")
+  const parameters = Array.from({ length: parameterCount }, (_, index) =>
+    block.values.parameter(index, "i32")
   );
-  const body = returned.length === 0
-    ? block.body
-    : {
-        ...block.body,
-        nodes: [
-          ...block.body.nodes,
-          returnControl.create({
-            source: { kind: "values", values: returned }
-          })
-        ]
-      };
+  const body =
+    returned.length === 0
+      ? block.body
+      : {
+          ...block.body,
+          nodes: [
+            ...block.body.nodes,
+            returnControl.create({
+              source: { kind: "values", values: returned }
+            })
+          ]
+        };
 
   return {
     ...block,
@@ -98,25 +92,21 @@ test("region geometry relates nested bodies to their owning controls", () => {
   const branchSite = analysis.siteOf(body, 0);
   const loopSite = analysis.siteOf(body, 1);
 
-  deepStrictEqual(analysis.path(body, loopBody), [{
-    region: loopBody,
-    owner: loopSite
-  }]);
+  deepStrictEqual(analysis.path(body, loopBody), [
+    {
+      region: loopBody,
+      owner: loopSite
+    }
+  ]);
   deepStrictEqual(analysis.path(loopBody, thenBody), undefined);
   strictEqual(analysis.isLoopRegion(loopBody), true);
   strictEqual(analysis.isLoopRegion(thenBody), false);
   strictEqual(
-    analysis.dominatingSite([
-      analysis.siteOf(thenBody, 0),
-      analysis.siteOf(loopBody, 0)
-    ]),
+    analysis.dominatingSite([analysis.siteOf(thenBody, 0), analysis.siteOf(loopBody, 0)]),
     branchSite
   );
 
-  deepStrictEqual(
-    analysis.writesAt(analysis.siteOf(body, 0)),
-    [compilerTestResourceEffect(1)]
-  );
+  deepStrictEqual(analysis.writesAt(analysis.siteOf(body, 0)), [compilerTestResourceEffect(1)]);
   deepStrictEqual(analysis.writesAt(analysis.regionEndSite(thenBody)), []);
   deepStrictEqual(analysis.operations(), [
     { operation: nestedWrite, site: analysis.siteOf(thenBody, 0) }
@@ -150,10 +140,13 @@ test("semantic producer inputs are charged once however often the output is used
   const read = memoryReadOperation(loaded, address, 32);
   const firstWrite = resourceWriteNode(values, 0, loaded);
   const secondWrite = resourceWriteNode(values, 1, loaded);
-  const analysis = analyzeFunction({
-    values,
-    body: { nodes: [read, firstWrite, secondWrite] }
-  }, 1);
+  const analysis = analyzeFunction(
+    {
+      values,
+      body: { nodes: [read, firstWrite, secondWrite] }
+    },
+    1
+  );
 
   strictEqual(analysis.useCount(loaded), 2);
   strictEqual(analysis.useCount(address), 1);
@@ -167,10 +160,13 @@ test("each semantic operation input contributes one use", () => {
   const stored = values.parameter(0, "i32");
   const address = values.parameter(1, "i32");
   const write = memoryWriteOperation(address, stored, 32);
-  const analysis = analyzeFunction({
-    values,
-    body: { nodes: [write] }
-  }, 2);
+  const analysis = analyzeFunction(
+    {
+      values,
+      body: { nodes: [write] }
+    },
+    2
+  );
 
   strictEqual(analysis.useCount(address), 1);
   strictEqual(analysis.useCount(stored), 1);
@@ -201,19 +197,22 @@ test("selected-body uses count separately while their shared recipe runs once", 
   const read = values.addNodeOutput();
   const one = values.const(1);
   const sum = values.binary("add", read, one);
-  const analysis = analyzeFunction({
-    values,
-    body: {
-      nodes: [
-        resourceReadNode(values, read, 0),
-        ifControl.create({
-          condition,
-          thenBody: { nodes: [resourceWriteNode(values, 1, sum)] },
-          elseBody: { nodes: [resourceWriteNode(values, 2, sum)] }
-        })
-      ]
-    }
-  }, 1);
+  const analysis = analyzeFunction(
+    {
+      values,
+      body: {
+        nodes: [
+          resourceReadNode(values, read, 0),
+          ifControl.create({
+            condition,
+            thenBody: { nodes: [resourceWriteNode(values, 1, sum)] },
+            elseBody: { nodes: [resourceWriteNode(values, 2, sum)] }
+          })
+        ]
+      }
+    },
+    1
+  );
 
   strictEqual(analysis.useCount(condition), 1);
   strictEqual(analysis.useCount(sum), 2);
@@ -308,9 +307,7 @@ test("an unreachable arm result executes even when its join is dead", () => {
   });
   const block: FunctionGraph = { values, body: { nodes: [control] } };
   const analysis = analyzeFunction(block, 1);
-  const unreachableRoot = analysis.roots().find(
-    (root) => root.value === unreachableResult
-  );
+  const unreachableRoot = analysis.roots().find((root) => root.value === unreachableResult);
   const dependencies = analysis.controlDependencies(output);
 
   strictEqual(analysis.isLive(condition), true);
@@ -344,18 +341,22 @@ test("a switch retains arm recipes exactly when its output is live", () => {
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [switchControl.create({
-        selector,
-        output,
-        cases: [{
-          matches: [0],
-          body: {
-            nodes: [resourceReadNode(values, read, 0)],
-            result: firstResult
-          }
-        }],
-        defaultBody: { nodes: [], result: defaultResult }
-      })]
+      nodes: [
+        switchControl.create({
+          selector,
+          output,
+          cases: [
+            {
+              matches: [0],
+              body: {
+                nodes: [resourceReadNode(values, read, 0)],
+                result: firstResult
+              }
+            }
+          ],
+          defaultBody: { nodes: [], result: defaultResult }
+        })
+      ]
     }
   };
   const dead = analyzeFunction(block, 1);
@@ -389,14 +390,18 @@ test("a control-only switch retains selector and arm effects without a join outp
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [switchControl.create({
-        selector,
-        cases: [{
-          matches: [1, 3, 5],
-          body: selectedBody
-        }],
-        defaultBody
-      })]
+      nodes: [
+        switchControl.create({
+          selector,
+          cases: [
+            {
+              matches: [1, 3, 5],
+              body: selectedBody
+            }
+          ],
+          defaultBody
+        })
+      ]
     }
   };
   const analysis = analyzeFunction(block, 1);
@@ -404,10 +409,10 @@ test("a control-only switch retains selector and arm effects without a join outp
   strictEqual(analysis.isLive(selector), true);
   strictEqual(analysis.isLive(selectedValue), true);
   strictEqual(analysis.isLive(fallbackValue), true);
-  deepStrictEqual(
-    analysis.writesAt(analysis.siteOf(block.body, 0)),
-    [compilerTestResourceEffect(0), compilerTestResourceEffect(1)]
-  );
+  deepStrictEqual(analysis.writesAt(analysis.siteOf(block.body, 0)), [
+    compilerTestResourceEffect(0),
+    compilerTestResourceEffect(1)
+  ]);
 });
 
 test("pure call execution follows result liveness", () => {
@@ -430,12 +435,16 @@ test("pure call execution follows result liveness", () => {
     value,
     type: "i32" as const
   }));
-  const call = (output: ValueId) => callOperation.create({
-    invocation: Invocation.create({
-      target,
-      arguments: args
-    })
-  }, () => output);
+  const call = (output: ValueId) =>
+    callOperation.create(
+      {
+        invocation: Invocation.create({
+          target,
+          arguments: args
+        })
+      },
+      () => output
+    );
   const firstCall = call(first);
   const secondCall = call(second);
   const deadCall = call(dead);

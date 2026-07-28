@@ -55,11 +55,7 @@ export function cmpxchg8bSemantic(): SemanticTemplate {
     const oldHi = s.memory.load(access, { width: 32, byteOffset: v.const(4) });
     const oldEax = s.read(s.reg("eax"), { width: 32 });
     const oldEdx = s.read(s.reg("edx"), { width: 32 });
-    const equal = and(
-      v,
-      v.compare(32, "eq", oldEax, oldLo),
-      v.compare(32, "eq", oldEdx, oldHi)
-    );
+    const equal = and(v, v.compare(32, "eq", oldEax, oldLo), v.compare(32, "eq", oldEdx, oldHi));
 
     s.writeFlag("ZF", equal);
     s.if(equal, (then, thenValues) => {

@@ -2,16 +2,10 @@ import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import type { RunStop } from "#cpu/cpu.js";
 import { decodeExit } from "#cpu/exit.js";
-import {
-  instructionCountField,
-  instructionLimitField
-} from "#cpu/instruction-count.js";
+import { instructionCountField, instructionLimitField } from "#cpu/instruction-count.js";
 import { compileInterpreterProgram } from "#interpreter/program.js";
 import type { WasmCpuStateSnapshot } from "#test/support/cpu-state.js";
-import {
-  readWasmCpuStateSnapshot,
-  writeWasmCpuStateSnapshot
-} from "#test/support/cpu-state.js";
+import { readWasmCpuStateSnapshot, writeWasmCpuStateSnapshot } from "#test/support/cpu-state.js";
 import { testExecutionModel } from "#test/support/execution-model.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 
@@ -33,28 +27,21 @@ type GuestMemoryBytes = Readonly<{
   bytes: readonly number[];
 }>;
 
-let compiledInterpreter:
-  | ReturnType<typeof compileInterpreterProgram>
-  | undefined;
+let compiledInterpreter: ReturnType<typeof compileInterpreterProgram> | undefined;
 
 export function instantiateInterpreter(): InterpreterHarness {
   compiledInterpreter ??= compileInterpreterProgram(testExecutionModel);
   const memories = createTestWasmMemories();
   const stateView = new DataView(memories.cpuStateMemory.buffer);
   const guestView = new DataView(memories.guestMemory.buffer);
-  const instance = instantiateCompiledProgram(
-    compiledInterpreter.program,
-    {
-      memories: memories.programMemories,
-      functions: new Map()
-    }
-  );
+  const instance = instantiateCompiledProgram(compiledInterpreter.program, {
+    memories: memories.programMemories,
+    functions: new Map()
+  });
   const run = instance.functionExports.get(compiledInterpreter.entry);
 
   if (typeof run !== "function") {
-    throw new Error(
-      `expected callable Interpreter entry ${compiledInterpreter.entry.id}`
-    );
+    throw new Error(`expected callable Interpreter entry ${compiledInterpreter.entry.id}`);
   }
   const stateStorage = createLayoutHostView(
     memories.cpuStateMemory,
@@ -94,11 +81,7 @@ export function executeInstruction(
   return { exit, state, guestView: interpreter.guestView };
 }
 
-export function writeGuestBytes(
-  view: DataView,
-  address: number,
-  bytes: readonly number[]
-): void {
+export function writeGuestBytes(view: DataView, address: number, bytes: readonly number[]): void {
   for (let index = 0; index < bytes.length; index += 1) {
     view.setUint8(address + index, bytes[index] ?? 0);
   }

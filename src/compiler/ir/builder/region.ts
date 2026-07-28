@@ -1,11 +1,7 @@
 import { assert } from "#common/assert.js";
 import { VariableRef } from "#compiler/ir/variable.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
-import {
-  IndirectCallTarget,
-  Invocation,
-  type CallTarget
-} from "#compiler/ir/invocation.js";
+import { IndirectCallTarget, Invocation, type CallTarget } from "#compiler/ir/invocation.js";
 import { variableRead, variableWrite } from "#compiler/ir/operations/variables.js";
 import { callOperation } from "#compiler/ir/operations/call.js";
 import {
@@ -18,9 +14,7 @@ import {
   type LoopCarriedValue
 } from "#compiler/ir/controls/index.js";
 import type { Region, RegionNode } from "../region.js";
-import {
-  describeNode
-} from "#compiler/ir/node.js";
+import { describeNode } from "#compiler/ir/node.js";
 import {
   type Operation,
   type OperationDefinition,
@@ -29,11 +23,7 @@ import {
 } from "#compiler/ir/operations/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { joinWidthBounds } from "#compiler/ir/values/width-bounds.js";
-import type {
-  ValueId,
-  ValueType,
-  WidthBounds
-} from "#compiler/ir/values/types.js";
+import type { ValueId, ValueType, WidthBounds } from "#compiler/ir/values/types.js";
 import type { FunctionType } from "#compiler/ir/function.js";
 import type { TableRef } from "#compiler/ir/refs.js";
 
@@ -106,21 +96,11 @@ export class RegionBuilder {
     });
   }
 
-  operation<
-    CreateArgs,
-    Entry extends Operation
-  >(
-    definition: OperationDefinition<
-      CreateArgs,
-      Entry,
-      readonly [OperationProduction]
-    >,
+  operation<CreateArgs, Entry extends Operation>(
+    definition: OperationDefinition<CreateArgs, Entry, readonly [OperationProduction]>,
     args: CreateArgs
   ): ValueId;
-  operation<
-    CreateArgs,
-    Entry extends Operation
-  >(
+  operation<CreateArgs, Entry extends Operation>(
     definition: OperationDefinition<CreateArgs, Entry, readonly []>,
     args: CreateArgs
   ): void;
@@ -132,10 +112,7 @@ export class RegionBuilder {
     definition: OperationDefinition<CreateArgs, Entry, Productions>,
     args: CreateArgs
   ): void | ValueId {
-    const operation = definition.create(
-      args,
-      (result) => this.#allocateOperationOutput(result)
-    );
+    const operation = definition.create(args, (result) => this.#allocateOperationOutput(result));
     const outputs = describeNode(operation).outputs;
 
     this.#emit(operation);
@@ -144,10 +121,7 @@ export class RegionBuilder {
       return;
     }
 
-    assert(
-      outputs.length === 1,
-      `${definition.kind} has unsupported multiple results`
-    );
+    assert(outputs.length === 1, `${definition.kind} has unsupported multiple results`);
     return outputs[0];
   }
 
@@ -165,9 +139,8 @@ export class RegionBuilder {
 
   call(target: CallTarget, args: readonly ValueId[]): readonly ValueId[] {
     const invocation = this.#invocation(target, args);
-    const operation = callOperation.create(
-      { invocation },
-      (result) => this.#allocateOperationOutput(result)
+    const operation = callOperation.create({ invocation }, (result) =>
+      this.#allocateOperationOutput(result)
     );
 
     this.#emit(operation);
@@ -187,9 +160,11 @@ export class RegionBuilder {
       "call results do not match the enclosing function"
     );
 
-    this.#emit(returnControl.create({
-      source: { kind: "invocation", invocation }
-    }));
+    this.#emit(
+      returnControl.create({
+        source: { kind: "invocation", invocation }
+      })
+    );
   }
 
   // Escape hatch for an already-built body node.
@@ -205,14 +180,17 @@ export class RegionBuilder {
 
   if(condition: ValueId, thenBuild: BuildBody, options: IfOptions = {}): void {
     const thenBody = this.#childBody(thenBuild);
-    const elseBody = options.elseBuild === undefined ? undefined : this.#childBody(options.elseBuild);
+    const elseBody =
+      options.elseBuild === undefined ? undefined : this.#childBody(options.elseBuild);
 
-    this.#emit(ifControl.create({
-      condition,
-      ...(options.hint !== undefined ? { hint: options.hint } : {}),
-      thenBody,
-      ...(elseBody !== undefined ? { elseBody } : {})
-    }));
+    this.#emit(
+      ifControl.create({
+        condition,
+        ...(options.hint !== undefined ? { hint: options.hint } : {}),
+        thenBody,
+        ...(elseBody !== undefined ? { elseBody } : {})
+      })
+    );
   }
 
   ifValue(
@@ -225,30 +203,25 @@ export class RegionBuilder {
     const elseBody = this.#childResultBody(elseBuild);
     const output = this.#addControlOutput([thenBody, elseBody]);
 
-    this.#emit(ifControl.create({
-      condition,
-      ...(options.hint !== undefined ? { hint: options.hint } : {}),
-      output,
-      thenBody,
-      elseBody
-    }));
+    this.#emit(
+      ifControl.create({
+        condition,
+        ...(options.hint !== undefined ? { hint: options.hint } : {}),
+        output,
+        thenBody,
+        elseBody
+      })
+    );
     return output;
   }
 
-  switch(
-    selector: ValueId,
-    arms: readonly SwitchArm[],
-    defaultBuild: BuildResult
-  ): ValueId {
+  switch(selector: ValueId, arms: readonly SwitchArm[], defaultBuild: BuildResult): ValueId {
     const cases = arms.map(({ match, build }) => ({
       matches: [match],
       body: this.#childResultBody(build)
     }));
     const defaultBody = this.#childResultBody(defaultBuild);
-    const output = this.#addControlOutput([
-      ...cases.map((entry) => entry.body),
-      defaultBody
-    ]);
+    const output = this.#addControlOutput([...cases.map((entry) => entry.body), defaultBody]);
 
     this.#emit(switchControl.create({ selector, output, cases, defaultBody }));
     return output;
@@ -272,9 +245,11 @@ export class RegionBuilder {
   }
 
   return(results: readonly ValueId[]): void {
-    this.#emit(returnControl.create({
-      source: { kind: "values", values: results }
-    }));
+    this.#emit(
+      returnControl.create({
+        source: { kind: "values", values: results }
+      })
+    );
   }
 
   loop(carried: readonly LoopCarriedValue[], bodyBuild: BuildBody): void {
@@ -313,10 +288,7 @@ export class RegionBuilder {
       const result = body.result;
 
       assert(result !== undefined, "value-producing control body has no result");
-      assert(
-        this.values.valueType(result) === "i32",
-        "only i32 control results are supported"
-      );
+      assert(this.values.valueType(result) === "i32", "only i32 control results are supported");
       if (!this.values.isUnreachable(result)) {
         bounds.push(this.values.widthBounds(result));
       }
@@ -331,10 +303,7 @@ export class RegionBuilder {
       : this.values.addNodeOutput(result.bounds);
   }
 
-  #invocation(
-    target: CallTarget,
-    args: readonly ValueId[]
-  ): Invocation {
+  #invocation(target: CallTarget, args: readonly ValueId[]): Invocation {
     return Invocation.create({
       target,
       arguments: args.map((value) => ({

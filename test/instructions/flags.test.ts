@@ -199,12 +199,7 @@ const sahfCases: readonly FlagCase[] = [
   }
 ];
 
-for (const entry of [
-  ...carryControlCases,
-  ...directionControlCases,
-  ...lahfCases,
-  ...sahfCases
-]) {
+for (const entry of [...carryControlCases, ...directionControlCases, ...lahfCases, ...sahfCases]) {
   test(entry.name, async () => {
     await assertFlagCase(entry);
   });

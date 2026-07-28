@@ -2,12 +2,8 @@ import { assert } from "#common/assert.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import {
-  type CpuException
-} from "#core/exceptions.js";
-import {
-  type StatusFlagResolverFamily
-} from "#core/flags/lazy/resolvers.js";
+import { type CpuException } from "#core/exceptions.js";
+import { type StatusFlagResolverFamily } from "#core/flags/lazy/resolvers.js";
 import type { StateAccess } from "#core/state/access.js";
 import type {
   AccessFault,
@@ -16,39 +12,20 @@ import type {
   SemanticBranchHint,
   SemanticTemplate
 } from "#instructions/semantics/builder.js";
-import type {
-  TargetInput,
-  Value,
-  ValueInput
-} from "#instructions/semantics/refs.js";
+import type { TargetInput, Value, ValueInput } from "#instructions/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
 import { RegionBuilder } from "#compiler/ir/builder/region.js";
-import type {
-  MemoryAccess
-} from "#memory/types.js";
-import type {
-  OperandBinding,
-  SegmentOperandBinding
-} from "./bindings.js";
+import type { MemoryAccess } from "#memory/types.js";
+import type { OperandBinding, SegmentOperandBinding } from "./bindings.js";
 import { ControlEmitter, type IfOutcome } from "./control.js";
 import { LoopBuilder } from "./loop.js";
 import { SemanticScopeStack, type SemanticRegionScope } from "./scope.js";
-import {
-  InstructionSemantics,
-  type InstructionSemanticsSession
-} from "./semantics.js";
+import { InstructionSemantics, type InstructionSemanticsSession } from "./semantics.js";
 import { emitSegmentLoad } from "./segments.js";
-import {
-  InstructionStorage,
-  type ScopedInstructionStorage
-} from "./storage.js";
+import { InstructionStorage, type ScopedInstructionStorage } from "./storage.js";
 import { type InstructionStateChannel } from "./state/channels.js";
 import { StateWriteLog } from "./state/write-log.js";
-import {
-  InstructionTerminator,
-  type BuildExit,
-  type InstructionTerminals
-} from "./terminal.js";
+import { InstructionTerminator, type BuildExit, type InstructionTerminals } from "./terminal.js";
 export type InstructionLocation =
   | Readonly<{ kind: "static"; eip: number; nextEip: number }>
   | Readonly<{ kind: "value"; eip: ValueId; nextEip: ValueId }>;
@@ -84,10 +61,7 @@ export function staticInstructionLocation(eip: number, nextEip: number): Instruc
   return { kind: "static", eip, nextEip };
 }
 
-export function valueInstructionLocation(
-  eip: ValueId,
-  nextEip: ValueId
-): InstructionLocation {
+export function valueInstructionLocation(eip: ValueId, nextEip: ValueId): InstructionLocation {
   return { kind: "value", eip, nextEip };
 }
 
@@ -126,11 +100,8 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
       instructionCountField: options.instructionCountField,
       writeObserver: stateWriteLog
     });
-    this.#control = new ControlEmitter(
-      this.#storage.state,
-      stateWriteLog,
-      this.#scopes,
-      (scope) => this.#semantics(scope)
+    this.#control = new ControlEmitter(this.#storage.state, stateWriteLog, this.#scopes, (scope) =>
+      this.#semantics(scope)
     );
     this.#terminator = new InstructionTerminator(
       this.#storage.state,
@@ -139,12 +110,9 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     );
   }
 
-  build(
-    addInstructions: (builder: InstructionBuilder) => void
-  ): ValueId | undefined {
+  build(addInstructions: (builder: InstructionBuilder) => void): ValueId | undefined {
     const facade: InstructionBuilder = {
-      add: (template, bindings, location) =>
-        this.add(template, bindings, location)
+      add: (template, bindings, location) => this.add(template, bindings, location)
     };
 
     try {
@@ -162,15 +130,16 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   ): boolean {
     assert(!this.#closed, "cannot add instructions to a closed instruction builder");
     assert(this.#blockEnd === "fallthrough", "cannot add instructions after a block terminator");
-    assert(this.#instructionLocation === undefined, "instruction builder has an incomplete instruction");
+    assert(
+      this.#instructionLocation === undefined,
+      "instruction builder has an incomplete instruction"
+    );
 
     this.#scopes.root.reset();
     this.#instructionLocation = this.#locationValues(location);
     this.#storage.beginInstruction(bindings, this.#location().eip());
 
-    this.#scopes.root.run(() => (
-      template(this.#semantics(this.#scopes.root), this.#values)
-    ));
+    this.#scopes.root.run(() => template(this.#semantics(this.#scopes.root), this.#values));
 
     if (!this.#scopes.root.isTerminated()) {
       this.#completeRootFallthrough();
@@ -184,13 +153,19 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   }
 
   #complete(): ValueId | undefined {
-    assert(this.#instructionLocation === undefined, "instruction builder has an incomplete instruction");
+    assert(
+      this.#instructionLocation === undefined,
+      "instruction builder has an incomplete instruction"
+    );
 
     switch (this.#blockEnd) {
       case "fallthrough": {
         const storage = this.#storageFor(this.#scopes.root);
 
-        assert(this.#storage.state.eip.has(), "instruction builder did not advance eip; no instructions were added");
+        assert(
+          this.#storage.state.eip.has(),
+          "instruction builder did not advance eip; no instructions were added"
+        );
         const nextEip = this.#storage.state.eip.read(storage.access);
 
         this.#terminator.publishCompletedState(this.#region, storage.access);
@@ -199,7 +174,10 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
       case "jump": {
         const storage = this.#storageFor(this.#scopes.root);
 
-        assert(this.#storage.state.eip.has(), "instruction builder did not advance eip; no instructions were added");
+        assert(
+          this.#storage.state.eip.has(),
+          "instruction builder did not advance eip; no instructions were added"
+        );
         const targetEip = this.#storage.state.eip.read(storage.access);
 
         this.#terminator.dispatch(this.#region, storage.access, targetEip);
@@ -239,10 +217,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     hint?: SemanticBranchHint
   ): void {
     this.assertActive(scope);
-    this.#completeIf(
-      scope,
-      this.#control.if(scope, condition, thenBuild, hint)
-    );
+    this.#completeIf(scope, this.#control.if(scope, condition, thenBuild, hint));
   }
 
   ifElse(
@@ -253,10 +228,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     hint?: SemanticBranchHint
   ): void {
     this.assertActive(scope);
-    this.#completeIf(
-      scope,
-      this.#control.ifElse(scope, condition, thenBuild, elseBuild, hint)
-    );
+    this.#completeIf(scope, this.#control.ifElse(scope, condition, thenBuild, elseBuild, hint));
   }
 
   // Opens a loop: body-written channels become loop-carried values held in
@@ -265,31 +237,25 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   loop(scope: SemanticRegionScope, body: LoopBody): void {
     this.assertActive(scope);
     const bodyWrites = this.#deriveLoopWrites(body);
-    const loop = LoopBuilder.begin({
-      state: this.#storage.state,
-      parentRegion: scope.region
-    }, bodyWrites);
-
-    this.#control.runLoopBody(
-      scope,
-      loop.region,
-      body,
-      (condition) => loop.close(condition)
+    const loop = LoopBuilder.begin(
+      {
+        state: this.#storage.state,
+        parentRegion: scope.region
+      },
+      bodyWrites
     );
+
+    this.#control.runLoopBody(scope, loop.region, body, (condition) => loop.close(condition));
   }
 
-  cpuException(
-    scope: SemanticRegionScope,
-    exception: CpuException<ValueInput>
-  ): void {
+  cpuException(scope: SemanticRegionScope, exception: CpuException<ValueInput>): void {
     this.assertActive(scope);
-    assert(!scope.wroteMemory(), "a CPU exception cannot follow a memory write in the same instruction");
-    this.#markTerminated(scope);
-    this.#terminator.cpuException(
-      scope.region,
-      this.#storageFor(scope).access,
-      exception
+    assert(
+      !scope.wroteMemory(),
+      "a CPU exception cannot follow a memory write in the same instruction"
     );
+    this.#markTerminated(scope);
+    this.#terminator.cpuException(scope.region, this.#storageFor(scope).access, exception);
     this.#endBlock(scope, "terminated");
     scope.complete();
   }
@@ -298,11 +264,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   hostTrap(scope: SemanticRegionScope, vector: ValueInput): void {
     this.assertActive(scope);
     this.#completeInstruction(scope, this.#location().nextEip());
-    this.#terminator.hostTrap(
-      scope.region,
-      this.#storageFor(scope).access,
-      vector
-    );
+    this.#terminator.hostTrap(scope.region, this.#storageFor(scope).access, vector);
     this.#endBlock(scope, "terminated");
     scope.complete();
   }
@@ -315,8 +277,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     }
 
     const storage = this.#storage.bind(scope, {
-      raiseAccessFault: (fault) =>
-        this.#raiseAccessFault(scope, fault),
+      raiseAccessFault: (fault) => this.#raiseAccessFault(scope, fault),
       writeSegmentSelector: (binding, value, width) =>
         this.#writeSegmentSelector(scope, binding, value, width)
     });
@@ -374,19 +335,11 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
       writeLog,
       scratchValues
     );
-    scratch.#storage.beginInstruction(
-      this.#storage.currentBindings(),
-      scratch.#values.const(0)
-    );
+    scratch.#storage.beginInstruction(this.#storage.currentBindings(), scratch.#values.const(0));
 
     try {
       return writeLog.captureWrittenChannels(() => {
-        scratch.#control.runLoopBody(
-          scratch.#scopes.root,
-          scratch.#region,
-          body,
-          () => {}
-        );
+        scratch.#control.runLoopBody(scratch.#scopes.root, scratch.#region, body, () => {});
       });
     } finally {
       scratch.#storage.endInstruction();
@@ -426,19 +379,13 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
 
   // Only the root flow's terminator ends the block; an arm's terminator is
   // local to its own body.
-  #endBlock(
-    scope: SemanticRegionScope,
-    end: "fallthrough" | "jump" | "terminated"
-  ): void {
+  #endBlock(scope: SemanticRegionScope, end: "fallthrough" | "jump" | "terminated"): void {
     if (scope.kind === "root") {
       this.#blockEnd = end;
     }
   }
 
-  #raiseAccessFault(
-    scope: SemanticRegionScope,
-    fault: AccessFault
-  ): void {
+  #raiseAccessFault(scope: SemanticRegionScope, fault: AccessFault): void {
     this.assertActive(scope);
     this.#control.if(
       scope,
@@ -492,7 +439,10 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   }
 
   #location(): InstructionLocationValues {
-    assert(this.#instructionLocation !== undefined, "instruction builder has no current instruction");
+    assert(
+      this.#instructionLocation !== undefined,
+      "instruction builder has no current instruction"
+    );
     return this.#instructionLocation;
   }
 }

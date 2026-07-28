@@ -8,22 +8,29 @@ import { createTestModuleDescription } from "#compiler/encoder/tests/module-fixt
 import { wasmValueType } from "#compiler/encoder/types.js";
 
 test("ordered module description uses declared numeric positions", async () => {
-  const bytes = encodeWasmModule(createTestModuleDescription({
-    functionTypes: [
-      { params: [], results: [] },
-      { params: [], results: [wasmValueType.i32] }
-    ],
-    functions: [{
-      typeIndex: 1,
-      body: encodeWasmFunctionBody({
-        parameterCount: 0,
-        localTypes: []
-      }, (writer) => {
-        writer.write(wasmInstruction.i32.const, 42);
-      })
-    }],
-    functionExports: [{ name: "answer", functionIndex: 0 }]
-  }));
+  const bytes = encodeWasmModule(
+    createTestModuleDescription({
+      functionTypes: [
+        { params: [], results: [] },
+        { params: [], results: [wasmValueType.i32] }
+      ],
+      functions: [
+        {
+          typeIndex: 1,
+          body: encodeWasmFunctionBody(
+            {
+              parameterCount: 0,
+              localTypes: []
+            },
+            (writer) => {
+              writer.write(wasmInstruction.i32.const, 42);
+            }
+          )
+        }
+      ],
+      functionExports: [{ name: "answer", functionIndex: 0 }]
+    })
+  );
   const instance = await WebAssembly.instantiate(bytes);
   const answer = instance.instance.exports.answer;
 

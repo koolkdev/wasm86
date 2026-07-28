@@ -176,7 +176,11 @@ export const LOOPNE = mnemonic("loopne", [
 export const JCC: readonly InstructionMnemonic[] = CONDITION_CODE_DESCRIPTORS.map(jccMnemonic);
 
 function jccMnemonic(descriptor: ConditionCodeDescriptor): InstructionMnemonic {
-  return mnemonic(`j${descriptor.suffix}`, [jccRel8(descriptor), jccRel16(descriptor), jccRel32(descriptor)]);
+  return mnemonic(`j${descriptor.suffix}`, [
+    jccRel8(descriptor),
+    jccRel16(descriptor),
+    jccRel32(descriptor)
+  ]);
 }
 
 function jccRel8(descriptor: ConditionCodeDescriptor): InstructionForm {

@@ -55,10 +55,13 @@ export function writeShiftFlags(
     result: ValueInput;
   }>
 ): void {
-  writeStatusFlagValues(s, shiftStatusFlagValues(v, {
-    ...input,
-    oldFlags: readStatusFlags(s)
-  }));
+  writeStatusFlagValues(
+    s,
+    shiftStatusFlagValues(v, {
+      ...input,
+      oldFlags: readStatusFlags(s)
+    })
+  );
 }
 
 export function writeRotateFlags(
@@ -74,13 +77,16 @@ export function writeRotateFlags(
     oldCf?: ValueInput;
   }>
 ): void {
-  writeStatusFlagValues(s, rotateStatusFlagValues(v, {
-    ...input,
-    oldFlags: {
-      CF: input.oldCf ?? s.readFlag("CF"),
-      OF: s.readFlag("OF")
-    }
-  }));
+  writeStatusFlagValues(
+    s,
+    rotateStatusFlagValues(v, {
+      ...input,
+      oldFlags: {
+        CF: input.oldCf ?? s.readFlag("CF"),
+        OF: s.readFlag("OF")
+      }
+    })
+  );
 }
 
 export function writeIncFlags(

@@ -25,10 +25,7 @@ export const PageFaultErrorCode = {
   INSTRUCTION_FETCH: 1 << 4
 } as const;
 
-export type PageFaultAccess =
-  | "read"
-  | "write"
-  | "instructionFetch";
+export type PageFaultAccess = "read" | "write" | "instructionFetch";
 
 export function divideError<T = never>(): CpuException<T> {
   return { kind: "DE" };
@@ -57,10 +54,7 @@ export function mapCpuException<TSource, TTarget>(
     case "GP":
       return generalProtection(mapValue(exception.errorCode));
     case "PF":
-      return pageFault(
-        mapValue(exception.linearAddress),
-        mapValue(exception.errorCode)
-      );
+      return pageFault(mapValue(exception.linearAddress), mapValue(exception.errorCode));
   }
 }
 

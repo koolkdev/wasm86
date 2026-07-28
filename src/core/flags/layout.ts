@@ -23,13 +23,10 @@ export const flagStateFields = {
   concrete: concreteFlagFields
 } as const;
 
-export type ConcreteFlagStateField =
-  (typeof flagStateFields.concrete)[X86Flag];
+export type ConcreteFlagStateField = (typeof flagStateFields.concrete)[X86Flag];
 
 export type LazyFlagStateField =
-  | typeof flagStateFields.lazyKind
-  | typeof flagStateFields.lazyA
-  | typeof flagStateFields.lazyB;
+  typeof flagStateFields.lazyKind | typeof flagStateFields.lazyA | typeof flagStateFields.lazyB;
 
 export type FlagStateField = ConcreteFlagStateField | LazyFlagStateField;
 
@@ -42,9 +39,7 @@ const lazyFlagStateFields: ReadonlySet<FieldRef> = new Set([
   flagStateFields.lazyB
 ]);
 
-export function isConcreteFlagStateField(
-  field: FieldRef
-): field is ConcreteFlagStateField {
+export function isConcreteFlagStateField(field: FieldRef): field is ConcreteFlagStateField {
   return concreteFlagStateFields.has(field);
 }
 

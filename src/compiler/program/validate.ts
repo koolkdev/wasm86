@@ -1,23 +1,13 @@
 import { assert } from "#common/assert.js";
 import type { FunctionAnalysis } from "#compiler/analysis/model.js";
-import {
-  covers,
-  type StorageAccess,
-  type StorageEffects
-} from "#compiler/ir/effects.js";
+import { covers, type StorageAccess, type StorageEffects } from "#compiler/ir/effects.js";
 import { describeNode } from "#compiler/ir/node.js";
 import { validateStorageEffectRanges } from "#compiler/ir/validate/resource.js";
 import { FunctionImport } from "./imports.js";
-import type {
-  FunctionDeclaration,
-  ProgramDeclarations,
-  ProgramFunction
-} from "./program.js";
+import type { FunctionDeclaration, ProgramDeclarations, ProgramFunction } from "./program.js";
 import type { ProgramResources } from "./resources.js";
 
-export function validateProgramDeclarations(
-  declarations: ProgramDeclarations
-): void {
+export function validateProgramDeclarations(declarations: ProgramDeclarations): void {
   for (const fn of declarations.functions) {
     validateDeclaredFunctionEffects(declarations.resources, fn);
   }
@@ -27,18 +17,14 @@ export function validateDeclaredFunctionEffects(
   resources: ProgramResources,
   declaration: FunctionDeclaration
 ): void {
-  const label = declaration instanceof FunctionImport
-    ? `function import ${declaration.ref.id} declared`
-    : `function ${declaration.ref.id} declared`;
+  const label =
+    declaration instanceof FunctionImport
+      ? `function import ${declaration.ref.id} declared`
+      : `function ${declaration.ref.id} declared`;
 
   validateStorageEffectRanges(declaration.effects, label);
 
-  for (
-    const access of [
-      ...declaration.effects.reads,
-      ...declaration.effects.writes
-    ]
-  ) {
+  for (const access of [...declaration.effects.reads, ...declaration.effects.writes]) {
     if (access.space !== "resource") {
       continue;
     }
@@ -69,10 +55,7 @@ function inferEffects(analysis: FunctionAnalysis): StorageEffects {
     }
     const node = site.node;
 
-    if (
-      node.category === "operation" &&
-      !analysis.operationMustExecute(node)
-    ) {
+    if (node.category === "operation" && !analysis.operationMustExecute(node)) {
       continue;
     }
     const { effects } = describeNode(node);
@@ -83,10 +66,7 @@ function inferEffects(analysis: FunctionAnalysis): StorageEffects {
   return { reads: [...reads], writes: [...writes] };
 }
 
-function addExternalEffects(
-  effects: readonly StorageAccess[],
-  target: Set<StorageAccess>
-): void {
+function addExternalEffects(effects: readonly StorageAccess[], target: Set<StorageAccess>): void {
   for (const effect of effects) {
     if (effect.space !== "variable") {
       target.add(effect);

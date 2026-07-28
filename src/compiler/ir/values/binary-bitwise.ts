@@ -1,25 +1,12 @@
 import { i32 } from "#common/numeric.js";
-import type {
-  BinaryBoundsCase,
-  BinaryDefinition,
-  BinaryFoldCase
-} from "./binary.js";
+import type { BinaryBoundsCase, BinaryDefinition, BinaryFoldCase } from "./binary.js";
 import type { WidthBounds } from "./types.js";
 import { clampedBounds, fitsUnsigned, unboundedWidthBounds } from "./width-bounds.js";
 
 export type BinaryBitwiseOperator =
-  | "xor"
-  | "or"
-  | "and"
-  | "shl"
-  | "rotl"
-  | "rotr"
-  | "shr_s"
-  | "shr_u";
+  "xor" | "or" | "and" | "shl" | "rotl" | "rotr" | "shr_s" | "shr_u";
 
-export const binaryBitwise: Readonly<
-  Record<BinaryBitwiseOperator, BinaryDefinition>
-> = {
+export const binaryBitwise: Readonly<Record<BinaryBitwiseOperator, BinaryDefinition>> = {
   xor: {
     evaluate: (a, b) => a ^ b,
     fold: ({ context, a, b, left, right }) => {
@@ -31,9 +18,7 @@ export const binaryBitwise: Readonly<
         return b;
       }
 
-      return a === b
-        ? context.constant(0)
-        : undefined;
+      return a === b ? context.constant(0) : undefined;
     },
     bounds: bitwiseBounds
   },
@@ -52,9 +37,7 @@ export const binaryBitwise: Readonly<
         return context.constant(-1);
       }
 
-      return left === -1
-        ? context.constant(-1)
-        : undefined;
+      return left === -1 ? context.constant(-1) : undefined;
     },
     bounds: bitwiseBounds
   },
@@ -73,9 +56,7 @@ export const binaryBitwise: Readonly<
         return context.constant(0);
       }
 
-      return left === 0
-        ? context.constant(0)
-        : undefined;
+      return left === 0 ? context.constant(0) : undefined;
     },
     bounds: ({ context, a, b }) => {
       const left = context.widthBounds(a);
@@ -144,7 +125,5 @@ function foldShift({ context, a, left, right }: BinaryFoldCase) {
     return a;
   }
 
-  return left === 0
-    ? context.constant(0)
-    : undefined;
+  return left === 0 ? context.constant(0) : undefined;
 }

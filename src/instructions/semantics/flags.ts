@@ -30,10 +30,7 @@ export function sahfSemantic(): SemanticTemplate {
 
 export function xlatSemantic(): SemanticTemplate {
   return (s) => {
-    const reference = s.memory.operand(
-      s.operand(0),
-      s.read(s.reg("al"), { width: 8 })
-    );
+    const reference = s.memory.operand(s.operand(0), s.read(s.reg("al"), { width: 8 }));
 
     s.write(s.reg("al"), s.memory.read(reference, { width: 8 }), { width: 8 });
   };

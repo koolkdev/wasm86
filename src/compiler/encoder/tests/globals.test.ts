@@ -15,22 +15,28 @@ test("a mutable i32 global initializes and round-trips through set/get", async (
     functions: [
       {
         typeIndex: 0,
-        body: encodeWasmFunctionBody({
-          parameterCount: 0,
-          localTypes: []
-        }, (writer) => {
-          writer.write(wasmInstruction.global.get, 0);
-        })
+        body: encodeWasmFunctionBody(
+          {
+            parameterCount: 0,
+            localTypes: []
+          },
+          (writer) => {
+            writer.write(wasmInstruction.global.get, 0);
+          }
+        )
       },
       {
         typeIndex: 1,
-        body: encodeWasmFunctionBody({
-          parameterCount: 1,
-          localTypes: []
-        }, (writer) => {
-          writer.write(wasmInstruction.local.get, 0);
-          writer.write(wasmInstruction.global.set, 0);
-        })
+        body: encodeWasmFunctionBody(
+          {
+            parameterCount: 1,
+            localTypes: []
+          },
+          (writer) => {
+            writer.write(wasmInstruction.local.get, 0);
+            writer.write(wasmInstruction.global.set, 0);
+          }
+        )
       }
     ],
     globals: [{ type: wasmValueType.i32, mutable: true, initialValue: 7 }],
@@ -52,15 +58,20 @@ test("an i64 global keeps its full-width initial value", async () => {
   const expected = 0x0006_0000_1234_5678n;
   const bytes = encodeTestModule({
     functionTypes: [{ params: [], results: [wasmValueType.i64] }],
-    functions: [{
-      typeIndex: 0,
-      body: encodeWasmFunctionBody({
-        parameterCount: 0,
-        localTypes: []
-      }, (writer) => {
-        writer.write(wasmInstruction.global.get, 0);
-      })
-    }],
+    functions: [
+      {
+        typeIndex: 0,
+        body: encodeWasmFunctionBody(
+          {
+            parameterCount: 0,
+            localTypes: []
+          },
+          (writer) => {
+            writer.write(wasmInstruction.global.get, 0);
+          }
+        )
+      }
+    ],
     globals: [{ type: wasmValueType.i64, mutable: false, initialValue: expected }],
     functionExports: [{ name: "get", functionIndex: 0 }]
   });
@@ -69,7 +80,10 @@ test("an i64 global keeps its full-width initial value", async () => {
   strictEqual(exportedFunction(instance, "get")(), expected);
 });
 
-function exportedFunction(instance: WebAssembly.Instance, name: string): (...args: number[]) => unknown {
+function exportedFunction(
+  instance: WebAssembly.Instance,
+  name: string
+): (...args: number[]) => unknown {
   const value = instance.exports[name];
 
   if (typeof value !== "function") {

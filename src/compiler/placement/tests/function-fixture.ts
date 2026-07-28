@@ -7,9 +7,8 @@ export function completedPlacementFunction(
   parameterCount = 0,
   returned: readonly ValueId[] = []
 ): IrFunction {
-  const parameters = Array.from(
-    { length: parameterCount },
-    (_, index) => graph.values.parameter(index, "i32")
+  const parameters = Array.from({ length: parameterCount }, (_, index) =>
+    graph.values.parameter(index, "i32")
   );
 
   return {
@@ -36,14 +35,16 @@ export function terminalPlacementFunction(
   parameterCount: number,
   results: readonly ValueType[]
 ): IrFunction {
-  const parameters = Array.from(
-    { length: parameterCount },
-    (_, index) => graph.values.parameter(index, "i32")
+  const parameters = Array.from({ length: parameterCount }, (_, index) =>
+    graph.values.parameter(index, "i32")
   );
 
   return {
     ...graph,
-    type: functionType(parameters.map(() => "i32"), results),
+    type: functionType(
+      parameters.map(() => "i32"),
+      results
+    ),
     parameters
   };
 }

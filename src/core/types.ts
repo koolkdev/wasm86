@@ -26,10 +26,11 @@ export type EffectiveAddress = Readonly<{
   disp: number;
 }>;
 
-export type MemOperand = EffectiveAddress & Readonly<{
-  kind: "mem";
-  accessWidth: MemoryOperandWidth;
-}>;
+export type MemOperand = EffectiveAddress &
+  Readonly<{
+    kind: "mem";
+    accessWidth: MemoryOperandWidth;
+  }>;
 
 export type Mem32Operand = MemOperand & Readonly<{ accessWidth: 32 }>;
 

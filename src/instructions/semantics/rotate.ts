@@ -201,18 +201,11 @@ function rotateThroughCarry64(
 
   return {
     result: v.truncate64(32, rotated),
-    carry: lowBit(
-      v,
-      v.truncate64(32, v.binary64("shr_u", rotated, extendU64(v, v.const(32))))
-    )
+    carry: lowBit(v, v.truncate64(32, v.binary64("shr_u", rotated, extendU64(v, v.const(32)))))
   };
 }
 
-function buildThroughCarryRing64(
-  v: ValueBuilder,
-  value: Value,
-  carry: Value
-): Value {
+function buildThroughCarryRing64(v: ValueBuilder, value: Value, carry: Value): Value {
   return v.binary64(
     "or",
     extendU64(v, value),

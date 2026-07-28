@@ -8,11 +8,7 @@ import {
   readWasmCpuStateSnapshot,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import {
-  executeInstruction,
-  instantiateInterpreter,
-  writeGuestBytes
-} from "./harness.js";
+import { executeInstruction, instantiateInterpreter, writeGuestBytes } from "./harness.js";
 
 test("the generated decoder binds opcode registers including a high-byte alias", () => {
   const initialState = createWasmCpuStateSnapshot({
@@ -20,10 +16,7 @@ test("the generated decoder binds opcode registers including a high-byte alias",
     eip: startAddress,
     instructionCount: 7
   });
-  const edi = executeInstruction(
-    [0xbf, 0x01, 0x00, 0x00, 0x00],
-    initialState
-  );
+  const edi = executeInstruction([0xbf, 0x01, 0x00, 0x00, 0x00], initialState);
 
   deepStrictEqual(edi.exit, { kind: "instructionLimit" });
   strictEqual(edi.state.edi, 1);
@@ -111,10 +104,12 @@ test("a dynamic ESP base is read after POP increments the stack pointer", () => 
       eip: startAddress,
       instructionCount: 7
     }),
-    [{
-      address: 0x100,
-      bytes: [0x78, 0x56, 0x34, 0x12, 0, 0, 0, 0]
-    }]
+    [
+      {
+        address: 0x100,
+        bytes: [0x78, 0x56, 0x34, 0x12, 0, 0, 0, 0]
+      }
+    ]
   );
 
   deepStrictEqual(exit, { kind: "instructionLimit" });
@@ -175,19 +170,7 @@ test("a same-page 15-byte instruction executes", () => {
 });
 
 test("the generated decoder accepts its 11-byte form at byte 15 and rejects byte 16", () => {
-  const absoluteDwordStore = [
-    0xc7,
-    0x04,
-    0x25,
-    0x00,
-    0x20,
-    0x00,
-    0x00,
-    0x78,
-    0x56,
-    0x34,
-    0x12
-  ];
+  const absoluteDwordStore = [0xc7, 0x04, 0x25, 0x00, 0x20, 0x00, 0x00, 0x78, 0x56, 0x34, 0x12];
   const initialState = createWasmCpuStateSnapshot({
     eip: startAddress,
     instructionCount: 7
@@ -317,12 +300,7 @@ test("mapped instruction demands beyond byte 15 return general protection", () =
     },
     {
       name: "two-byte immediate",
-      bytes: [
-        ...new Array<number>(13).fill(0x66),
-        0xb8,
-        0x34,
-        0x12
-      ]
+      bytes: [...new Array<number>(13).fill(0x66), 0xb8, 0x34, 0x12]
     }
   ] as const;
 
@@ -332,15 +310,16 @@ test("mapped instruction demands beyond byte 15 return general protection", () =
       eip: startAddress,
       instructionCount: 7
     });
-    const { exit, state } = executeInstruction(
-      entry.bytes,
-      initialState
-    );
+    const { exit, state } = executeInstruction(entry.bytes, initialState);
 
-    deepStrictEqual(exit, {
-      kind: "cpuException",
-      exception: { kind: "GP", errorCode: 0 }
-    }, entry.name);
+    deepStrictEqual(
+      exit,
+      {
+        kind: "cpuException",
+        exception: { kind: "GP", errorCode: 0 }
+      },
+      entry.name
+    );
     deepStrictEqual(state, initialState, entry.name);
   }
 });
@@ -364,11 +343,7 @@ test("a fetch fault below offset 15 precedes an overlength fault", () => {
     {
       name: "only forbidden byte 15 is unavailable",
       eip: boundary - 15,
-      bytes: [
-        ...new Array<number>(13).fill(0x66),
-        0xb8,
-        0x34
-      ],
+      bytes: [...new Array<number>(13).fill(0x66), 0xb8, 0x34],
       expectedExit: {
         kind: "cpuException",
         exception: { kind: "GP", errorCode: 0 }
@@ -387,16 +362,8 @@ test("a fetch fault below offset 15 precedes an overlength fault", () => {
     writeWasmCpuStateSnapshot(interpreter.stateView, initialState);
     writeGuestBytes(interpreter.guestView, entry.eip, entry.bytes);
 
-    deepStrictEqual(
-      interpreter.runFor(1),
-      entry.expectedExit,
-      entry.name
-    );
-    deepStrictEqual(
-      readWasmCpuStateSnapshot(interpreter.stateView),
-      initialState,
-      entry.name
-    );
+    deepStrictEqual(interpreter.runFor(1), entry.expectedExit, entry.name);
+    deepStrictEqual(readWasmCpuStateSnapshot(interpreter.stateView), initialState, entry.name);
   }
 });
 
@@ -456,11 +423,14 @@ test("the generated decoder selects the zero-trip REP form", () => {
 });
 
 test("the generated decoder rejects unsupported opcode and prefix paths", () => {
-  for (const bytes of [
+  // prettier-ignore
+  const invalidEncodings = [
     [0x62],
     [0x0f, 0x0b],
     [0xf3, 0x90]
-  ] as const) {
+  ] as const;
+
+  for (const bytes of invalidEncodings) {
     const initialState = createWasmCpuStateSnapshot({
       eax: 0x1122_3344,
       eip: startAddress,
@@ -483,10 +453,7 @@ test("an invalid ModRM group is decisive before its address tail", () => {
     eip,
     instructionCount: 7
   });
-  const { exit, state } = executeInstruction(
-    [0xf7, 0x0d],
-    initialState
-  );
+  const { exit, state } = executeInstruction([0xf7, 0x0d], initialState);
 
   deepStrictEqual(exit, {
     kind: "cpuException",
@@ -536,18 +503,18 @@ test("truncated decoder fields fault at the first unavailable byte", () => {
     writeWasmCpuStateSnapshot(interpreter.stateView, initialState);
     writeGuestBytes(interpreter.guestView, entry.eip, entry.bytes);
 
-    deepStrictEqual(interpreter.runFor(1), {
-      kind: "cpuException",
-      exception: {
-        kind: "PF",
-        linearAddress: boundary,
-        errorCode: 16
-      }
-    }, entry.name);
     deepStrictEqual(
-      readWasmCpuStateSnapshot(interpreter.stateView),
-      initialState,
+      interpreter.runFor(1),
+      {
+        kind: "cpuException",
+        exception: {
+          kind: "PF",
+          linearAddress: boundary,
+          errorCode: 16
+        }
+      },
       entry.name
     );
+    deepStrictEqual(readWasmCpuStateSnapshot(interpreter.stateView), initialState, entry.name);
   }
 });

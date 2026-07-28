@@ -1,12 +1,6 @@
 import { defaultSegmentForBase } from "#core/segments.js";
 import type { Reg32 } from "#core/types.js";
-import type {
-  AddressBase,
-  Displacement,
-  MemoryAddress,
-  ModRm32Model,
-  ModRmMode
-} from "./types.js";
+import type { AddressBase, Displacement, MemoryAddress, ModRm32Model, ModRmMode } from "./types.js";
 
 const noDisplacement = { byteLength: 0, signed: false } as const;
 const signedDisp8 = { byteLength: 1, signed: true } as const;
@@ -21,27 +15,16 @@ export function buildModRm32(): ModRm32Model {
       memoryMode(signedDisp32, signedDisp32),
       { kind: "register" }
     ],
-    sibIndexes: [
-      "eax",
-      "ecx",
-      "edx",
-      "ebx",
-      undefined,
-      "ebp",
-      "esi",
-      "edi"
-    ],
+    sibIndexes: ["eax", "ecx", "edx", "ebx", undefined, "ebp", "esi", "edi"],
     sibScales: [1, 2, 4, 8]
   };
 }
 
-function memoryMode(
-  displacement: Displacement,
-  baseLessDisplacement: Displacement
-): ModRmMode {
-  const encodedBase5 = displacement.byteLength === 0
-    ? addressBase(undefined, baseLessDisplacement)
-    : addressBase("ebp", displacement);
+function memoryMode(displacement: Displacement, baseLessDisplacement: Displacement): ModRmMode {
+  const encodedBase5 =
+    displacement.byteLength === 0
+      ? addressBase(undefined, baseLessDisplacement)
+      : addressBase("ebp", displacement);
 
   return {
     kind: "memory",
@@ -70,17 +53,11 @@ function memoryMode(
   };
 }
 
-function directAddress(
-  base: Reg32 | undefined,
-  displacement: Displacement
-): MemoryAddress {
+function directAddress(base: Reg32 | undefined, displacement: Displacement): MemoryAddress {
   return { kind: "base", address: addressBase(base, displacement) };
 }
 
-function addressBase(
-  base: Reg32 | undefined,
-  displacement: Displacement
-): AddressBase {
+function addressBase(base: Reg32 | undefined, displacement: Displacement): AddressBase {
   return {
     base,
     displacement,

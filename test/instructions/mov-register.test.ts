@@ -240,6 +240,7 @@ for (const entry of [
 test("MOVSX word result is visible through later byte, word, and dword MOV aliases", async () => {
   await assertMovRegisterCase({
     name: "MOVSX alias sequence",
+    // prettier-ignore
     bytes: [
       0x66, 0x0f, 0xbe, 0xd8, // movsx bx, al
       0x8a, 0xcb, // mov cl, bl
@@ -266,6 +267,7 @@ test("MOVSX word result is visible through later byte, word, and dword MOV alias
 test("MOVSX reads a word value written by a preceding narrow MOV", async () => {
   await assertMovRegisterCase({
     name: "MOV to MOVSX dependency",
+    // prettier-ignore
     bytes: [
       0x66, 0x89, 0xd8, // mov ax, bx
       0x0f, 0xbf, 0xc8 // movsx ecx, ax

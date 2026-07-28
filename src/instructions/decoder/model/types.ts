@@ -102,9 +102,11 @@ export type InstructionForm = Readonly<{
   opcode: readonly number[];
   opcodeLowBits: number | undefined;
   operands: readonly DecodeOperand[];
-  modrm: Readonly<{
-    acceptedBytes: readonly boolean[];
-  }> | undefined;
+  modrm:
+    | Readonly<{
+        acceptedBytes: readonly boolean[];
+      }>
+    | undefined;
 }>;
 
 export type Displacement = Readonly<{

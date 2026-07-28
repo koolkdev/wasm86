@@ -1,9 +1,5 @@
 import { assert } from "#common/assert.js";
-import type {
-  FunctionAnalysis,
-  RegionSite,
-  SiteId
-} from "#compiler/analysis/model.js";
+import type { FunctionAnalysis, RegionSite, SiteId } from "#compiler/analysis/model.js";
 import { describeNode } from "#compiler/ir/node.js";
 import type { VariableRef } from "#compiler/ir/variable.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
@@ -32,15 +28,17 @@ export class ValueEmitter {
   readonly #realized: Uint8Array;
   readonly #sites: SiteId[] = [];
 
-  constructor(context: Readonly<{
-    body: WasmInstructionWriter;
-    values: ValueTable;
-    analysis: FunctionAnalysis;
-    plan: PlacementPlan;
-    index: PlacementIndex;
-    resolveLocal: WasmLocalResolver;
-    bindings: ModuleBindings;
-  }>) {
+  constructor(
+    context: Readonly<{
+      body: WasmInstructionWriter;
+      values: ValueTable;
+      analysis: FunctionAnalysis;
+      plan: PlacementPlan;
+      index: PlacementIndex;
+      resolveLocal: WasmLocalResolver;
+      bindings: ModuleBindings;
+    }>
+  ) {
     assert(
       context.index.captures.length === context.analysis.sites().length,
       "placement capture index does not match its sites"
@@ -104,17 +102,11 @@ export class ValueEmitter {
     }
 
     assert(placement.kind === "atUse", `value ${value} used before its ${placement.kind} deadline`);
-    assert(
-      placement.anchor === this.#currentSite(),
-      `value ${value} realized outside its anchor`
-    );
+    assert(placement.anchor === this.#currentSite(), `value ${value} realized outside its anchor`);
     this.#emitSource(value);
 
     if (placement.local !== undefined) {
-      this.#body.write(
-        wasmInstruction.local.tee,
-        this.#resolveLocal(placement.local)
-      );
+      this.#body.write(wasmInstruction.local.tee, this.#resolveLocal(placement.local));
     }
     this.#realized[value] = 1;
   }
@@ -123,8 +115,7 @@ export class ValueEmitter {
     const placement = this.#plan.values[value];
 
     assert(
-      placement?.kind === "control" &&
-        this.#analysis.controlProducer(value) !== undefined,
+      placement?.kind === "control" && this.#analysis.controlProducer(value) !== undefined,
       `value ${value} is not a control output`
     );
     assert(
@@ -178,9 +169,7 @@ export class ValueEmitter {
     const site = this.#currentSite();
 
     assert(
-      site === deadline &&
-        placement?.kind === "capture" &&
-        placement.anchor === deadline,
+      site === deadline && placement?.kind === "capture" && placement.anchor === deadline,
       `value ${value} has the wrong capture deadline`
     );
     assert(this.#realized[value] === 0, `value ${value} was realized twice`);
@@ -237,6 +226,5 @@ export function wasmTypeForValue(type: ValueType): WasmValueType {
 }
 
 function capturesAfterOperands(site: RegionSite): boolean {
-  return site.kind === "node" &&
-    describeNode(site.node).nestedBodies.length !== 0;
+  return site.kind === "node" && describeNode(site.node).nestedBodies.length !== 0;
 }

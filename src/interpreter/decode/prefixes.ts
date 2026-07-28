@@ -12,9 +12,7 @@ export type SegmentOverrideState = Readonly<{
   registerIndex: VariableRef;
 }>;
 
-export type ExactInstructionFallback = (
-  region: RegionBuilder
-) => void;
+export type ExactInstructionFallback = (region: RegionBuilder) => void;
 
 type PrefixDecodeMode =
   | Readonly<{ kind: "exact" }>
@@ -24,8 +22,7 @@ type PrefixDecodeMode =
     }>;
 
 const maximumDirectPrefixCount =
-  X86_32_DECODE_MODEL.instructionLengthLimit -
-  X86_32_DECODE_MODEL.maximumUnprefixedByteLength;
+  X86_32_DECODE_MODEL.instructionLengthLimit - X86_32_DECODE_MODEL.maximumUnprefixedByteLength;
 
 assert(
   maximumDirectPrefixCount >= 0,
@@ -39,11 +36,7 @@ export class PrefixDecoder {
   readonly #firstOpcodeByte: VariableRef;
   readonly #mode: PrefixDecodeMode;
 
-  constructor(
-    region: RegionBuilder,
-    stream: InstructionByteStream,
-    mode: PrefixDecodeMode
-  ) {
+  constructor(region: RegionBuilder, stream: InstructionByteStream, mode: PrefixDecodeMode) {
     const zero = region.values.const(0);
 
     this.#stream = stream;
@@ -69,10 +62,7 @@ export class PrefixDecoder {
             // Direct reads deliberately omit per-read bounds checks. Exact
             // mode already enforces the architectural limit on every read.
             if (this.#mode.kind === "direct") {
-              this.#guardDirectPrefixLimit(
-                prefix,
-                this.#mode.fallbackToExact
-              );
+              this.#guardDirectPrefixLimit(prefix, this.#mode.fallbackToExact);
             }
             this.#apply(prefix, effect);
             prefix.loopContinue([]);
@@ -92,10 +82,7 @@ export class PrefixDecoder {
     return region.read(this.#firstOpcodeByte);
   }
 
-  #guardDirectPrefixLimit(
-    region: RegionBuilder,
-    fallback: ExactInstructionFallback
-  ): void {
+  #guardDirectPrefixLimit(region: RegionBuilder, fallback: ExactInstructionFallback): void {
     const values = region.values;
 
     region.if(
@@ -118,11 +105,7 @@ export class PrefixDecoder {
       case "operandSize":
         region.write(
           this.#flags,
-          values.binary(
-            "or",
-            region.read(this.#flags),
-            values.const(bits.operandSizeOverride)
-          )
+          values.binary("or", region.read(this.#flags), values.const(bits.operandSizeOverride))
         );
         return;
       case "repeat": {
@@ -130,16 +113,12 @@ export class PrefixDecoder {
         const cleared = values.binary(
           "and",
           region.read(this.#flags),
-          values.const((~repeatMask) >>> 0)
+          values.const(~repeatMask >>> 0)
         );
 
         region.write(
           this.#flags,
-          values.binary(
-            "or",
-            cleared,
-            values.const(effect.value === "rep" ? bits.rep : bits.repne)
-          )
+          values.binary("or", cleared, values.const(effect.value === "rep" ? bits.rep : bits.repne))
         );
         return;
       }

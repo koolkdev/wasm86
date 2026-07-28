@@ -4,10 +4,7 @@ import type { DirectCallTarget } from "#compiler/ir/invocation.js";
 import type { FunctionType } from "#compiler/ir/function.js";
 import { functionRef, type FunctionRef } from "#compiler/ir/refs.js";
 
-export type BuildFunction = (
-  fn: FunctionBuilder,
-  self: FunctionDefinition
-) => void;
+export type BuildFunction = (fn: FunctionBuilder, self: FunctionDefinition) => void;
 
 export type FunctionDefinitionOptions = Readonly<{
   ref: FunctionRef;

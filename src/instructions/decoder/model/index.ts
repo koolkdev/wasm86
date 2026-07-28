@@ -37,9 +37,7 @@ const prefixFlagBits = {
   repne: 1 << 2
 } as const;
 const prefixFlagMask =
-  prefixFlagBits.operandSizeOverride |
-  prefixFlagBits.rep |
-  prefixFlagBits.repne;
+  prefixFlagBits.operandSizeOverride | prefixFlagBits.rep | prefixFlagBits.repne;
 const prefixBucketCount = prefixFlagMask + 1;
 
 const prefixes: PrefixModel = {
@@ -53,29 +51,21 @@ const maximumModRmEncodingByteLength = 1 + 1 + 4;
 
 export const X86_32_DECODE_MODEL: X86DecodeModel = {
   instructionLengthLimit: X86_32_CORE.instructionLengthLimit,
-  maximumUnprefixedByteLength:
-    findMaximumUnprefixedByteLength(forms),
+  maximumUnprefixedByteLength: findMaximumUnprefixedByteLength(forms),
   prefixes,
   opcodeRoot: buildOpcodeTree(forms),
   addressForms: buildModRm32(),
   forms
 };
 
-function findMaximumUnprefixedByteLength(
-  instructionForms: readonly InstructionForm[]
-): number {
+function findMaximumUnprefixedByteLength(instructionForms: readonly InstructionForm[]): number {
   let maximum = 0;
 
   for (const form of instructionForms) {
     const byteLength =
       form.opcode.length +
-      (form.modrm === undefined
-        ? 0
-        : maximumModRmEncodingByteLength) +
-      form.operands.reduce(
-        (sum, operand) => sum + encodedOperandByteLength(operand),
-        0
-      );
+      (form.modrm === undefined ? 0 : maximumModRmEncodingByteLength) +
+      form.operands.reduce((sum, operand) => sum + encodedOperandByteLength(operand), 0);
 
     maximum = Math.max(maximum, byteLength);
   }
@@ -136,10 +126,7 @@ function buildOpcodeTree(forms: readonly InstructionForm[]): OpcodeNode {
   return root;
 }
 
-function addFormToLeaf(
-  leaf: MutableDecodeOpcodeLeaf,
-  form: InstructionForm
-): void {
+function addFormToLeaf(leaf: MutableDecodeOpcodeLeaf, form: InstructionForm): void {
   const prefixIndex = prefixFlagsFor(form.instruction);
   const forms = leaf.formsByPrefix[prefixIndex];
 
@@ -169,10 +156,7 @@ function buildCandidate(forms: readonly InstructionForm[]): DecodeCandidate {
   const byByte = new Array<InstructionForm | undefined>(256);
 
   for (const form of forms) {
-    assert(
-      form.modrm !== undefined,
-      `opcode mixes ModRM and plain forms: ${form.id}`
-    );
+    assert(form.modrm !== undefined, `opcode mixes ModRM and plain forms: ${form.id}`);
     for (let byte = 0; byte <= 0xff; byte += 1) {
       if (form.modrm.acceptedBytes[byte] !== true) {
         continue;
@@ -198,9 +182,8 @@ function mutableOpcodeNode(): MutableDecodeOpcodeNode {
 }
 
 function prefixFlagsFor(instruction: InstructionSpec): number {
-  let flags = instruction.prefixes?.operandSize === "override"
-    ? prefixFlagBits.operandSizeOverride
-    : 0;
+  let flags =
+    instruction.prefixes?.operandSize === "override" ? prefixFlagBits.operandSizeOverride : 0;
 
   switch (instruction.prefixes?.rep) {
     case undefined:

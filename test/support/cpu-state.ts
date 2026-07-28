@@ -1,10 +1,12 @@
 import { ok, strictEqual } from "node:assert";
 
+import { flagStateFields, isConcreteFlagStateField } from "#core/flags/layout.js";
 import {
-  flagStateFields,
-  isConcreteFlagStateField
-} from "#core/flags/layout.js";
-import { x86StatusFlags, x86Flags, type X86Flag, type X86StatusFlag } from "#core/flags/definitions.js";
+  x86StatusFlags,
+  x86Flags,
+  type X86Flag,
+  type X86StatusFlag
+} from "#core/flags/definitions.js";
 import type { SegmentStateField } from "#core/state/channels.js";
 import { coreStateFields } from "#core/state/layout.js";
 import { registerAlias } from "#core/registers.js";
@@ -82,17 +84,12 @@ export const wasmCpuStateFields = [
 export type WasmCpuStateField = (typeof wasmCpuStateFields)[number];
 export type WasmCpuStateSnapshot = Record<WasmCpuStateField, number>;
 export type WasmCpuStateInit = Partial<WasmCpuStateSnapshot>;
-type WasmCpuLazyFlagStateField =
-  | "lazyFlagsKind"
-  | "lazyFlagsA"
-  | "lazyFlagsB";
+type WasmCpuLazyFlagStateField = "lazyFlagsKind" | "lazyFlagsA" | "lazyFlagsB";
 export type WasmCpuArchitecturalStateSnapshot = Omit<
   WasmCpuStateSnapshot,
   WasmCpuLazyFlagStateField
 >;
-export type WasmCpuArchitecturalStateInit = Partial<
-  WasmCpuArchitecturalStateSnapshot
->;
+export type WasmCpuArchitecturalStateInit = Partial<WasmCpuArchitecturalStateSnapshot>;
 export type WasmCpuStatusFlag = X86StatusFlag;
 
 const lazyFlagKindBytes = {
@@ -128,9 +125,7 @@ export function createWasmCpuStateSnapshot(overrides: WasmCpuStateInit = {}): Wa
 export function createWasmCpuArchitecturalStateSnapshot(
   overrides: WasmCpuArchitecturalStateInit = {}
 ): WasmCpuArchitecturalStateSnapshot {
-  return wasmCpuArchitecturalStateOf(
-    createWasmCpuStateSnapshot(overrides)
-  );
+  return wasmCpuArchitecturalStateOf(createWasmCpuStateSnapshot(overrides));
 }
 
 export function readWasmCpuStateSnapshot(view: DataView): WasmCpuStateSnapshot {
@@ -143,14 +138,12 @@ export function readWasmCpuStateSnapshot(view: DataView): WasmCpuStateSnapshot {
   return state;
 }
 
-export function wasmCpuArchitecturalStateOf(
-  {
-    lazyFlagsKind: _lazyFlagsKind,
-    lazyFlagsA: _lazyFlagsA,
-    lazyFlagsB: _lazyFlagsB,
-    ...state
-  }: WasmCpuStateSnapshot
-): WasmCpuArchitecturalStateSnapshot {
+export function wasmCpuArchitecturalStateOf({
+  lazyFlagsKind: _lazyFlagsKind,
+  lazyFlagsA: _lazyFlagsA,
+  lazyFlagsB: _lazyFlagsB,
+  ...state
+}: WasmCpuStateSnapshot): WasmCpuArchitecturalStateSnapshot {
   return state;
 }
 
@@ -169,7 +162,9 @@ export function readWasmCpuStateField(view: DataView, field: WasmCpuStateField):
 function writeWasmCpuStateField(view: DataView, field: WasmCpuStateField, value: number): void {
   const resolved = wasmCpuStateFieldLocations[field];
   const normalized = (x86Flags as readonly string[]).includes(field)
-    ? (value === 0 ? 0 : 1)
+    ? value === 0
+      ? 0
+      : 1
     : value;
 
   writeUnsigned(view, resolved.offset, resolved.byteLength, normalized);
@@ -180,13 +175,14 @@ export function assertLazyFlagState(
   expected: WasmCpuExpectedLazyFlagState,
   label = "lazy flags"
 ): void {
-  const actual = state instanceof DataView
-    ? {
-        lazyFlagsKind: readWasmCpuStateField(state, "lazyFlagsKind"),
-        lazyFlagsA: readWasmCpuStateField(state, "lazyFlagsA"),
-        lazyFlagsB: readWasmCpuStateField(state, "lazyFlagsB")
-      }
-    : state;
+  const actual =
+    state instanceof DataView
+      ? {
+          lazyFlagsKind: readWasmCpuStateField(state, "lazyFlagsKind"),
+          lazyFlagsA: readWasmCpuStateField(state, "lazyFlagsA"),
+          lazyFlagsB: readWasmCpuStateField(state, "lazyFlagsB")
+        }
+      : state;
 
   strictEqual(
     actual.lazyFlagsKind,
@@ -209,7 +205,11 @@ export function readWasmCpuStateChannel(view: DataView, channel: InstructionStat
   return readUnsigned(view, resolved.offset, resolved.byteLength);
 }
 
-export function writeWasmCpuStateChannel(view: DataView, channel: InstructionStateChannel, value: number): void {
+export function writeWasmCpuStateChannel(
+  view: DataView,
+  channel: InstructionStateChannel,
+  value: number
+): void {
   if (channel.kind === "field" && isConcreteFlagStateField(channel)) {
     const resolved = fieldLocation(channel);
 
@@ -338,12 +338,7 @@ function readUnsigned(view: DataView, offset: number, byteLength: 1 | 2 | 4): nu
   }
 }
 
-function writeUnsigned(
-  view: DataView,
-  offset: number,
-  byteLength: 1 | 2 | 4,
-  value: number
-): void {
+function writeUnsigned(view: DataView, offset: number, byteLength: 1 | 2 | 4, value: number): void {
   switch (byteLength) {
     case 1:
       view.setUint8(offset, (value >>> 0) & 0xff);

@@ -1,14 +1,7 @@
-import {
-  deepStrictEqual,
-  notDeepStrictEqual,
-  strictEqual
-} from "node:assert";
+import { deepStrictEqual, notDeepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import {
-  decodeVariant,
-  encodeVariant
-} from "#compiler/layout/variant-codec.js";
+import { decodeVariant, encodeVariant } from "#compiler/layout/variant-codec.js";
 import {
   VariantFieldRef,
   VariantRef,
@@ -93,10 +86,7 @@ test("resolution assigns nonzero tags and naturally aligned overlaid payloads", 
 
   strictEqual(layout.variant(definition.empty).tag > 0, true);
   strictEqual(layout.variant(definition.mixed).tag > 0, true);
-  notDeepStrictEqual(
-    layout.variant(definition.empty).tag,
-    layout.variant(definition.mixed).tag
-  );
+  notDeepStrictEqual(layout.variant(definition.empty).tag, layout.variant(definition.mixed).tag);
   deepStrictEqual(layout.field(definition.byte), { offset: 0, byteLength: 1 });
   deepStrictEqual(layout.field(definition.word), { offset: 2, byteLength: 2 });
   strictEqual(layout.variant(definition.mixed).payloadByteLength, 4);

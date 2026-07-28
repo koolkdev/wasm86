@@ -1,9 +1,6 @@
 import { subFlagSource } from "#core/flags/lazy/sources.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type {
-  SemanticOps,
-  SemanticTemplate
-} from "#instructions/semantics/builder.js";
+import type { SemanticOps, SemanticTemplate } from "#instructions/semantics/builder.js";
 import type { Value } from "#instructions/semantics/refs.js";
 import type { OperandWidth, RegName } from "#core/types.js";
 
@@ -124,10 +121,7 @@ function scasUnit(width: OperandWidth): StringUnit {
     stepRegister(s, v, "edi", delta);
   };
 }
-function repSemantic(
-  unit: StringUnit,
-  condition?: "E" | "NE"
-): SemanticTemplate {
+function repSemantic(unit: StringUnit, condition?: "E" | "NE"): SemanticTemplate {
   return (s, v) => {
     const ecx = s.read(s.reg("ecx"), { width: 32 });
     const enter = v.compare(32, "ne", ecx, v.const(0));
@@ -164,9 +158,7 @@ function repBranchPredicate(
   condition: "E" | "NE" | undefined,
   nonzero: Value
 ): Value {
-  return condition === undefined
-    ? nonzero
-    : v.binary("and", nonzero, s.condition(condition));
+  return condition === undefined ? nonzero : v.binary("and", nonzero, s.condition(condition));
 }
 
 function stringDelta(s: SemanticOps, v: ValueBuilder, width: OperandWidth) {
@@ -175,12 +167,13 @@ function stringDelta(s: SemanticOps, v: ValueBuilder, width: OperandWidth) {
   return v.select(s.readFlag("DF"), v.const(-byteLength), v.const(byteLength));
 }
 
-function stepRegister(s: SemanticOps, v: ValueBuilder, reg: "esi" | "edi", delta: ReturnType<typeof stringDelta>): void {
-  s.write(
-    s.reg(reg),
-    v.binary("add", s.read(s.reg(reg), { width: 32 }), delta),
-    { width: 32 }
-  );
+function stepRegister(
+  s: SemanticOps,
+  v: ValueBuilder,
+  reg: "esi" | "edi",
+  delta: ReturnType<typeof stringDelta>
+): void {
+  s.write(s.reg(reg), v.binary("add", s.read(s.reg(reg), { width: 32 }), delta), { width: 32 });
 }
 
 function accumulator(width: OperandWidth): RegName {

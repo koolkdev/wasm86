@@ -1,9 +1,6 @@
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
-import {
-  pageFault,
-  pageFaultErrorCode
-} from "#core/exceptions.js";
+import { pageFault, pageFaultErrorCode } from "#core/exceptions.js";
 import type { MachineMemoryDefinition } from "../machine-memory.js";
 import type { PhysicalAddressSpaceDefinition } from "../physical.js";
 import type {
@@ -16,14 +13,8 @@ import type {
 } from "../types.js";
 import { pageTableEntryAttr } from "./layout.js";
 import { createCachedPageTableAccess } from "./page-cache.js";
-import {
-  createScatteredLoadStore,
-  type ScatteredLoadStore
-} from "./scattered-load-store.js";
-import {
-  createPageTableAccess,
-  type PageTableAccess
-} from "./page-table.js";
+import { createScatteredLoadStore, type ScatteredLoadStore } from "./scattered-load-store.js";
+import { createPageTableAccess, type PageTableAccess } from "./page-table.js";
 import { VirtualRangeResolver } from "./resolution.js";
 import { bindVirtualLoadStore } from "./load-store.js";
 
@@ -40,15 +31,9 @@ export function createVirtualAccessDefinition(
   const rangeResolver = new VirtualRangeResolver(pageTable);
   const scattered = createScatteredLoadStore(physical, pageTable);
   const createAccess = (firstEntrySource: PageTableAccess): MemoryAccess => ({
-    bind: (region) => bindVirtualAccess(
-      region,
-      physical,
-      rangeResolver,
-      firstEntrySource,
-      scattered
-    ),
-    withCache: (root) =>
-      createAccess(createCachedPageTableAccess(root, pageTable))
+    bind: (region) =>
+      bindVirtualAccess(region, physical, rangeResolver, firstEntrySource, scattered),
+    withCache: (root) => createAccess(createCachedPageTableAccess(root, pageTable))
   });
 
   return {

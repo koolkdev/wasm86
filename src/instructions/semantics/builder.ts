@@ -4,10 +4,7 @@ import type { SimpleFlagSource } from "#core/flags/lazy/sources.js";
 import type { X86Flag } from "#core/flags/definitions.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type { VariableRef } from "#compiler/ir/variable.js";
-import type {
-  MemoryDataAccessIntent,
-  ResolvedMemoryAccess
-} from "#memory/types.js";
+import type { MemoryDataAccessIntent, ResolvedMemoryAccess } from "#memory/types.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type {
   MemRef,
@@ -52,16 +49,13 @@ export type AccessFault = Readonly<{
   exception: CpuException<Value>;
 }>;
 
-export type AccessResolution<
-  TIntent extends MemoryDataAccessIntent = MemoryDataAccessIntent
-> = Readonly<{
-  access: ResolvedMemoryAccess<TIntent>;
-  fault: AccessFault;
-}>;
+export type AccessResolution<TIntent extends MemoryDataAccessIntent = MemoryDataAccessIntent> =
+  Readonly<{
+    access: ResolvedMemoryAccess<TIntent>;
+    fault: AccessFault;
+  }>;
 
-export type SemanticMemoryAccessOptions<
-  TIntent extends MemoryDataAccessIntent
-> = Readonly<{
+export type SemanticMemoryAccessOptions<TIntent extends MemoryDataAccessIntent> = Readonly<{
   reference: MemRef;
   byteLength: ValueInput;
   intent: TIntent;
@@ -77,13 +71,15 @@ export type SemanticMemoryWriteOptions = Readonly<{
   value: ValueInput;
 }>;
 
-export type SemanticMemoryLoadOptions = SemanticMemoryReadOptions & Readonly<{
-  byteOffset?: ValueInput;
-}>;
+export type SemanticMemoryLoadOptions = SemanticMemoryReadOptions &
+  Readonly<{
+    byteOffset?: ValueInput;
+  }>;
 
-export type SemanticMemoryStoreOptions = SemanticMemoryWriteOptions & Readonly<{
-  byteOffset?: ValueInput;
-}>;
+export type SemanticMemoryStoreOptions = SemanticMemoryWriteOptions &
+  Readonly<{
+    byteOffset?: ValueInput;
+  }>;
 
 export interface SemanticMemoryOps {
   reference(segment: SegmentRegister, offset: ValueInput): MemRef;
@@ -99,14 +95,8 @@ export interface SemanticMemoryOps {
   read(reference: MemRef, options: SemanticMemoryReadOptions): Value;
   write(reference: MemRef, options: SemanticMemoryWriteOptions): void;
   // Loads and stores consume an existing access without selecting its fault.
-  load(
-    access: ResolvedMemoryAccess,
-    options: SemanticMemoryLoadOptions
-  ): Value;
-  store(
-    access: ResolvedMemoryAccess<"write">,
-    options: SemanticMemoryStoreOptions
-  ): void;
+  load(access: ResolvedMemoryAccess, options: SemanticMemoryLoadOptions): Value;
+  store(access: ResolvedMemoryAccess<"write">, options: SemanticMemoryStoreOptions): void;
 }
 
 export interface SemanticOps {
@@ -147,15 +137,9 @@ export interface LoopSemanticsBuilder extends SemanticOps {
   ): void;
 }
 
-export type LoopBody = (
-  builder: LoopSemanticsBuilder,
-  values: ValueBuilder
-) => ValueInput;
+export type LoopBody = (builder: LoopSemanticsBuilder, values: ValueBuilder) => ValueInput;
 
-export type SemanticTemplate = (
-  builder: SemanticsBuilder,
-  values: ValueBuilder
-) => void;
+export type SemanticTemplate = (builder: SemanticsBuilder, values: ValueBuilder) => void;
 
 export interface SemanticsBuilder extends SemanticOps {
   currentEip(): Value;

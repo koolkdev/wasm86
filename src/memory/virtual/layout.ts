@@ -26,15 +26,9 @@ export const pageTableEntryLayout = {
   alignment: 4
 } as const;
 
-export const pageTableEntries = new ArrayRef(
-  "memory.virtual.page-table",
-  {
-    count: virtualPageCount,
-    element: pageTableEntryLayout
-  }
-);
+export const pageTableEntries = new ArrayRef("memory.virtual.page-table", {
+  count: virtualPageCount,
+  element: pageTableEntryLayout
+});
 
-export const pageTableLayout = layoutStructure(
-  "memory.virtual",
-  [pageTableEntries]
-);
+export const pageTableLayout = layoutStructure("memory.virtual", [pageTableEntries]);

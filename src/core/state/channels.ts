@@ -27,9 +27,10 @@ export type SegmentChannel<
 const gprChannels = new Map<RegName, GprChannel>(
   [...reg32, ...reg16, ...reg8].map((reg) => [reg, { kind: "gpr", reg }])
 );
-const segmentSelectorChannels = new Map<SegmentRegister, SegmentChannel<SegmentRegister, "selector">>(
-  segmentRegisters.map((reg) => [reg, { kind: "segment", reg, field: "selector" }])
-);
+const segmentSelectorChannels = new Map<
+  SegmentRegister,
+  SegmentChannel<SegmentRegister, "selector">
+>(segmentRegisters.map((reg) => [reg, { kind: "segment", reg, field: "selector" }]));
 const segmentBaseChannels = new Map<SegmentRegister, SegmentChannel<SegmentRegister, "base">>(
   segmentRegisters.map((reg) => [reg, { kind: "segment", reg, field: "base" }])
 );

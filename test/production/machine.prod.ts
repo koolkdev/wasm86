@@ -7,6 +7,7 @@ test("the default public Machine executes a short program", () => {
   const machine = createMachine({ memoryByteLength: 0x1_1000 });
   const start = machine.memory.buffer.byteLength - 0x1000;
 
+  // prettier-ignore
   new Uint8Array(machine.memory.buffer).set([
     0xb8, 0x78, 0x56, 0x34, 0x12,
     0xcd, 0x2e

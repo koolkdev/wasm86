@@ -9,10 +9,7 @@ export type PlacementIndex = Readonly<{
   captures: readonly (readonly ValueId[] | undefined)[];
 }>;
 
-export function indexPlacement(
-  analysis: FunctionAnalysis,
-  plan: PlacementPlan
-): PlacementIndex {
+export function indexPlacement(analysis: FunctionAnalysis, plan: PlacementPlan): PlacementIndex {
   const captures = new Array<ValueId[] | undefined>(analysis.sites().length);
 
   // Value ids are topological, so this scan also orders same-site captures

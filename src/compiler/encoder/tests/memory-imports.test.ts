@@ -74,47 +74,56 @@ function encodeImportedMemoryTestModule(): Uint8Array<ArrayBuffer> {
     functions: [
       {
         typeIndex: 0,
-        body: encodeWasmFunctionBody({
-          parameterCount: 1,
-          localTypes: []
-        }, (writer) => {
-          writer.write(wasmInstruction.local.get, 0);
-          writer.write(wasmInstruction.i32.const, 0x1234_5678);
-          writer.write(wasmInstruction.i32.store, {
-            align: 2,
-            memoryIndex: 0,
-            offset: 0
-          });
-        })
+        body: encodeWasmFunctionBody(
+          {
+            parameterCount: 1,
+            localTypes: []
+          },
+          (writer) => {
+            writer.write(wasmInstruction.local.get, 0);
+            writer.write(wasmInstruction.i32.const, 0x1234_5678);
+            writer.write(wasmInstruction.i32.store, {
+              align: 2,
+              memoryIndex: 0,
+              offset: 0
+            });
+          }
+        )
       },
       {
         typeIndex: 1,
-        body: encodeWasmFunctionBody({
-          parameterCount: 2,
-          localTypes: []
-        }, (writer) => {
-          writer.write(wasmInstruction.local.get, 0);
-          writer.write(wasmInstruction.local.get, 1);
-          writer.write(wasmInstruction.i32.store, {
-            align: 2,
-            memoryIndex: 1,
-            offset: 0
-          });
-        })
+        body: encodeWasmFunctionBody(
+          {
+            parameterCount: 2,
+            localTypes: []
+          },
+          (writer) => {
+            writer.write(wasmInstruction.local.get, 0);
+            writer.write(wasmInstruction.local.get, 1);
+            writer.write(wasmInstruction.i32.store, {
+              align: 2,
+              memoryIndex: 1,
+              offset: 0
+            });
+          }
+        )
       },
       {
         typeIndex: 2,
-        body: encodeWasmFunctionBody({
-          parameterCount: 1,
-          localTypes: []
-        }, (writer) => {
-          writer.write(wasmInstruction.local.get, 0);
-          writer.write(wasmInstruction.i32.load, {
-            align: 2,
-            memoryIndex: 1,
-            offset: 0
-          });
-        })
+        body: encodeWasmFunctionBody(
+          {
+            parameterCount: 1,
+            localTypes: []
+          },
+          (writer) => {
+            writer.write(wasmInstruction.local.get, 0);
+            writer.write(wasmInstruction.i32.load, {
+              align: 2,
+              memoryIndex: 1,
+              offset: 0
+            });
+          }
+        )
       }
     ],
     functionExports: [
@@ -125,7 +134,10 @@ function encodeImportedMemoryTestModule(): Uint8Array<ArrayBuffer> {
   });
 }
 
-function readExportedFunction(instance: WebAssembly.Instance, name: string): (...args: number[]) => unknown {
+function readExportedFunction(
+  instance: WebAssembly.Instance,
+  name: string
+): (...args: number[]) => unknown {
   const value = instance.exports[name];
 
   if (typeof value !== "function") {

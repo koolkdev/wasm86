@@ -22,11 +22,14 @@ export function staticOperandBinding(operand: IsaOperandBinding): OperandBinding
       // The decoder already resolved the absolute target.
       return immBinding(operand.target);
     case "mem":
-      return memBinding({
-        base: operand.base,
-        index: operand.index,
-        scale: operand.scale,
-        disp: operand.disp
-      }, staticMemSegment(operand.segment ?? defaultSegmentForBase(operand.base)));
+      return memBinding(
+        {
+          base: operand.base,
+          index: operand.index,
+          scale: operand.scale,
+          disp: operand.disp
+        },
+        staticMemSegment(operand.segment ?? defaultSegmentForBase(operand.base))
+      );
   }
 }

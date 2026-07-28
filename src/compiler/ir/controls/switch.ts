@@ -2,10 +2,7 @@ import { assert } from "#common/assert.js";
 import { noStorageEffects } from "#compiler/ir/effects.js";
 import type { Region } from "#compiler/ir/region.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type {
-  ControlDefinition,
-  ControlNodeBase
-} from "./definition.js";
+import type { ControlDefinition, ControlNodeBase } from "./definition.js";
 
 export type SwitchCase = Readonly<{
   // Every match routes to this one body without repeating it.
@@ -27,18 +24,16 @@ export type SwitchControlArgs = Readonly<{
   defaultBody: Region;
 }>;
 
-export type SwitchControl = ControlNodeBase & Readonly<{
-  kind: "switch";
-  selector: ValueId;
-  output?: ValueId;
-  cases: readonly SwitchCase[];
-  defaultBody: Region;
-}>;
+export type SwitchControl = ControlNodeBase &
+  Readonly<{
+    kind: "switch";
+    selector: ValueId;
+    output?: ValueId;
+    cases: readonly SwitchCase[];
+    defaultBody: Region;
+  }>;
 
-export const switchControl: ControlDefinition<
-  SwitchControlArgs,
-  SwitchControl
-> = {
+export const switchControl: ControlDefinition<SwitchControlArgs, SwitchControl> = {
   kind: "switch",
   create: ({ selector, output, cases, defaultBody }) => {
     const matches = new Set<number>();
@@ -81,15 +76,16 @@ export const switchControl: ControlDefinition<
     ],
     effects: noStorageEffects
   }),
-  mapBodies: (control, map) => switchControl.create({
-    selector: control.selector,
-    ...(control.output === undefined ? {} : { output: control.output }),
-    cases: control.cases.map((entry) => ({
-      matches: entry.matches,
-      body: map(entry.body)
-    })),
-    defaultBody: map(control.defaultBody)
-  }),
+  mapBodies: (control, map) =>
+    switchControl.create({
+      selector: control.selector,
+      ...(control.output === undefined ? {} : { output: control.output }),
+      cases: control.cases.map((entry) => ({
+        matches: entry.matches,
+        body: map(entry.body)
+      })),
+      defaultBody: map(control.defaultBody)
+    }),
   completes: (control, context) =>
     control.cases.every((entry) => context.regionCompletes(entry.body)) &&
     context.regionCompletes(control.defaultBody)

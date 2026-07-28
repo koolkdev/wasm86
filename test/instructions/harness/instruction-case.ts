@@ -12,10 +12,7 @@ import {
   type WasmCpuArchitecturalStateInit
 } from "#test/support/cpu-state.js";
 
-type InstructionState = Omit<
-  WasmCpuArchitecturalStateInit,
-  "eip" | "instructionCount"
->;
+type InstructionState = Omit<WasmCpuArchitecturalStateInit, "eip" | "instructionCount">;
 
 export type InstructionMemoryImage = Readonly<{
   address: number;
@@ -47,9 +44,7 @@ export async function assertInstructionCase(
   const result = await runCompiledInstructions({
     bytes: entry.bytes,
     initialState,
-    ...(entry.memoryPatches === undefined
-      ? {}
-      : { memoryPatches: entry.memoryPatches }),
+    ...(entry.memoryPatches === undefined ? {} : { memoryPatches: entry.memoryPatches }),
     ...(entry.expectedMemory === undefined
       ? {}
       : {

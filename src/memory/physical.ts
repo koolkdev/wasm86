@@ -1,10 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import {
-  resourceRead,
-  resourceWrite
-} from "#compiler/ir/operations/resource.js";
+import { resourceRead, resourceWrite } from "#compiler/ir/operations/resource.js";
 import {
   DynamicByteOriginRef,
   resourceRef,
@@ -13,10 +10,7 @@ import {
   type ResourceEffect,
   type ResourceRef
 } from "#compiler/ir/resource.js";
-import type {
-  IntegerWidth,
-  ValueId
-} from "#compiler/ir/values/types.js";
+import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
 import { wasmPageByteLength } from "#compiler/program/limits.js";
 import type { MemoryImport } from "#compiler/program/resources.js";
@@ -45,12 +39,7 @@ export type PhysicalAccessOperations = Readonly<{
     width: IntegerWidth,
     options?: PhysicalLoadOptions
   ): ValueId;
-  store(
-    access: PhysicalAccess,
-    byteOffset: ValueId,
-    value: ValueId,
-    width: IntegerWidth
-  ): void;
+  store(access: PhysicalAccess, byteOffset: ValueId, value: ValueId, width: IntegerWidth): void;
 }>;
 
 export type PhysicalAccessConstruction = Readonly<{
@@ -71,9 +60,11 @@ export type PhysicalAddressSpaceDefinition = Readonly<{
   resources: readonly MemoryImport[];
   access: PhysicalAccessConstruction;
   effects: StorageEffects;
-  bindHost(bindings: Readonly<{
-    ram: WebAssembly.Memory;
-  }>): BoundPhysicalAddressSpace;
+  bindHost(
+    bindings: Readonly<{
+      ram: WebAssembly.Memory;
+    }>
+  ): BoundPhysicalAddressSpace;
 }>;
 
 const physicalAddressSpaceByteLength = 0x1_0000_0000;
@@ -107,8 +98,7 @@ function bindPhysicalAddressSpace(
   ram: WebAssembly.Memory,
   ramImport: MemoryImport
 ): BoundPhysicalAddressSpace {
-  const minimumByteLength =
-    ramImport.limits.minPages * wasmPageByteLength;
+  const minimumByteLength = ramImport.limits.minPages * wasmPageByteLength;
 
   if (ram.buffer.byteLength < minimumByteLength) {
     throw new RangeError(
@@ -146,37 +136,18 @@ class DirectRamAccessBuilder implements PhysicalAccessOperations {
     options: PhysicalLoadOptions = {}
   ): ValueId {
     const region = this.#region;
-    const source = physicalRamOperand(
-      this.#ramResource,
-      region,
-      access,
-      byteOffset,
-      width
-    );
+    const source = physicalRamOperand(this.#ramResource, region, access, byteOffset, width);
     const signed = options.signed === true && width !== 32;
 
     return region.operation(
       resourceRead,
-      signed
-        ? { source, mode: { kind: "signed" } }
-        : { source }
+      signed ? { source, mode: { kind: "signed" } } : { source }
     );
   }
 
-  store(
-    access: PhysicalAccess,
-    byteOffset: ValueId,
-    value: ValueId,
-    width: IntegerWidth
-  ): void {
+  store(access: PhysicalAccess, byteOffset: ValueId, value: ValueId, width: IntegerWidth): void {
     const region = this.#region;
-    const destination = physicalRamOperand(
-      this.#ramResource,
-      region,
-      access,
-      byteOffset,
-      width
-    );
+    const destination = physicalRamOperand(this.#ramResource, region, access, byteOffset, width);
 
     region.operation(resourceWrite, { destination, value });
   }
@@ -208,15 +179,11 @@ function physicalRamOperand(
       staticByteOffset + byteLength <= staticAccessByteLength,
     `${width}-bit physical RAM access at byte offset ${String(staticByteOffset)} exceeds ${String(staticAccessByteLength)}-byte resolution`
   );
-  const range = physicalRamRange(
-    region,
-    access,
-    staticByteOffset,
-    byteLength
-  );
-  const base = staticByteOffset === undefined
-    ? values.binary("add", access.range.start, byteOffset)
-    : access.range.start;
+  const range = physicalRamRange(region, access, staticByteOffset, byteLength);
+  const base =
+    staticByteOffset === undefined
+      ? values.binary("add", access.range.start, byteOffset)
+      : access.range.start;
 
   return {
     effect: { space: "resource", resource: ramResource, range },

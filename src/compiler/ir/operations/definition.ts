@@ -1,11 +1,6 @@
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
-import type {
-  ValueId,
-  ValueInput,
-  ValueType,
-  WidthBounds
-} from "#compiler/ir/values/types.js";
+import type { ValueId, ValueInput, ValueType, WidthBounds } from "#compiler/ir/values/types.js";
 
 export type OperationNodeBase = Readonly<{
   category: "operation";
@@ -14,8 +9,7 @@ export type OperationNodeBase = Readonly<{
 
 // i64 results structurally carry no i32 width bounds.
 export type OperationResult =
-  | Readonly<{ type: "i32"; bounds?: WidthBounds }>
-  | Readonly<{ type: "i64" }>;
+  Readonly<{ type: "i32"; bounds?: WidthBounds }> | Readonly<{ type: "i64" }>;
 
 export function operationResult(type: ValueType): OperationResult {
   switch (type) {
@@ -34,8 +28,7 @@ export type OperationProduction = Readonly<{
 }>;
 
 export type DerivedOperationDescription<
-  Productions extends readonly OperationProduction[] =
-    readonly OperationProduction[]
+  Productions extends readonly OperationProduction[] = readonly OperationProduction[]
 > = Readonly<{
   // Typed dependencies in eager evaluation order.
   inputs: readonly ValueInput[];
@@ -58,7 +51,5 @@ export type OperationDefinition<
       ? [allocateOutput?: OperationOutputAllocator]
       : [allocateOutput: OperationOutputAllocator]
   ) => Entry;
-  describe: (
-    operation: Entry
-  ) => DerivedOperationDescription<Productions>;
+  describe: (operation: Entry) => DerivedOperationDescription<Productions>;
 }>;

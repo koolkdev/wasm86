@@ -12,6 +12,7 @@ test("ByteSink prefixes section content and UTF-8 names", () => {
     section.writeU32(128);
   });
 
+  // prettier-ignore
   deepStrictEqual([...sink.toBytes()], [
     0x03, 0x07,
     0x00,

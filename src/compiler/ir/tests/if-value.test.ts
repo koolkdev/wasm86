@@ -12,21 +12,14 @@ import { functionType } from "#compiler/ir/function.js";
 import { describeNode } from "#compiler/ir/node.js";
 import { compilerTestResourceEffect } from "#test/support/storage-operations.js";
 
-function readArgs(
-  values: ValueTable,
-  region: number,
-  width: IntegerWidth,
-  signed?: true
-) {
+function readArgs(values: ValueTable, region: number, width: IntegerWidth, signed?: true) {
   const source = {
     effect: compilerTestResourceEffect(region, width / 8),
     address: { base: values.const(0), displacement: region * 4 },
     width
   };
 
-  return signed === true
-    ? { source, mode: { kind: "signed" as const } }
-    : { source };
+  return signed === true ? { source, mode: { kind: "signed" as const } } : { source };
 }
 
 test("ifValue joins its arm results into one output", () => {
@@ -39,14 +32,9 @@ test("ifValue joins its arm results into one output", () => {
     ok(condition !== undefined);
     output = fn.region.ifValue(
       condition,
-      (then) => (thenResult = then.operation(
-        resourceRead,
-        readArgs(then.values, 0, 8)
-      )),
-      (otherwise) => (elseResult = otherwise.operation(
-        resourceRead,
-        readArgs(otherwise.values, 0, 16, true)
-      )),
+      (then) => (thenResult = then.operation(resourceRead, readArgs(then.values, 0, 8))),
+      (otherwise) =>
+        (elseResult = otherwise.operation(resourceRead, readArgs(otherwise.values, 0, 16, true))),
       { hint: "unlikely" }
     );
     fn.return([]);
@@ -92,25 +80,21 @@ test("validation rejects a control output narrower than an arm result", () => {
     const armResult = fn.values.addNodeOutput();
     const output = fn.values.addNodeOutput(fitsUnsigned(8));
 
-    fn.region.push(ifControl.create({
-      condition,
-      output,
-      thenBody: {
-        nodes: [resourceRead.create(
-          readArgs(fn.values, 0, 32),
-          () => armResult
-        )],
-        result: armResult
-      },
-      elseBody: { nodes: [], result: fallback }
-    }));
+    fn.region.push(
+      ifControl.create({
+        condition,
+        output,
+        thenBody: {
+          nodes: [resourceRead.create(readArgs(fn.values, 0, 32), () => armResult)],
+          result: armResult
+        },
+        elseBody: { nodes: [], result: fallback }
+      })
+    );
     fn.return([]);
   });
 
-  throws(
-    () => validateIrFunction(block),
-    /result bounds exceed its owner output bounds/
-  );
+  throws(() => validateIrFunction(block), /result bounds exceed its owner output bounds/);
 });
 
 test("a value-producing if requires an else body and arm results", () => {
@@ -120,11 +104,12 @@ test("a value-producing if requires an else body and arm results", () => {
   const output = values.addNodeOutput();
 
   throws(
-    () => ifControl.create({
-      condition,
-      output,
-      thenBody: { nodes: [], result }
-    }),
+    () =>
+      ifControl.create({
+        condition,
+        output,
+        thenBody: { nodes: [], result }
+      }),
     /value-producing if is missing its else body/
   );
 
@@ -142,8 +127,5 @@ test("a value-producing if requires an else body and arm results", () => {
     fn.return([]);
   });
 
-  throws(
-    () => validateIrFunction(missingResultFn),
-    /thenBody must carry a result/
-  );
+  throws(() => validateIrFunction(missingResultFn), /thenBody must carry a result/);
 });

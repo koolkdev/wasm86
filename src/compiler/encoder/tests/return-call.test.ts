@@ -65,10 +65,12 @@ async function instantiateReturnCallModule(
 
 function encodeReturnCallModule(targetBody: EncodedWasmFunctionBody): Uint8Array<ArrayBuffer> {
   return encodeTestModule({
-    functionTypes: [{
-      params: [wasmValueType.i32],
-      results: [wasmValueType.i64]
-    }],
+    functionTypes: [
+      {
+        params: [wasmValueType.i32],
+        results: [wasmValueType.i64]
+      }
+    ],
     memoryImports: moduleMemoryImports(),
     functions: [
       { typeIndex: 0, body: targetBody },
@@ -94,42 +96,54 @@ function moduleMemoryImports() {
 }
 
 function returnCallEntryBody(targetFunctionIndex: number): EncodedWasmFunctionBody {
-  return encodeWasmFunctionBody({
-    parameterCount: 1,
-    localTypes: []
-  }, (writer) => {
-    writer.write(wasmInstruction.local.get, 0);
-    writer.write(wasmInstruction.returnCall.direct, targetFunctionIndex);
-  });
+  return encodeWasmFunctionBody(
+    {
+      parameterCount: 1,
+      localTypes: []
+    },
+    (writer) => {
+      writer.write(wasmInstruction.local.get, 0);
+      writer.write(wasmInstruction.returnCall.direct, targetFunctionIndex);
+    }
+  );
 }
 
 function constantTargetBody(result: bigint): EncodedWasmFunctionBody {
-  return encodeWasmFunctionBody({
-    parameterCount: 1,
-    localTypes: []
-  }, (writer) => {
-    writer.write(wasmInstruction.i64.const, result);
-  });
+  return encodeWasmFunctionBody(
+    {
+      parameterCount: 1,
+      localTypes: []
+    },
+    (writer) => {
+      writer.write(wasmInstruction.i64.const, result);
+    }
+  );
 }
 
 function statePayloadTargetBody(): EncodedWasmFunctionBody {
-  return encodeWasmFunctionBody({
-    parameterCount: 1,
-    localTypes: []
-  }, (writer) => {
-    writer.write(wasmInstruction.local.get, 0);
-    writer.write(wasmInstruction.i32.load, {
-      align: u32Align,
-      memoryIndex: 0,
-      offset: statePayloadOffset
-    });
-    writer.write(wasmInstruction.i64.extendI32U);
-    writer.write(wasmInstruction.i64.const, statePayloadPrefix);
-    writer.write(wasmInstruction.i64.or);
-  });
+  return encodeWasmFunctionBody(
+    {
+      parameterCount: 1,
+      localTypes: []
+    },
+    (writer) => {
+      writer.write(wasmInstruction.local.get, 0);
+      writer.write(wasmInstruction.i32.load, {
+        align: u32Align,
+        memoryIndex: 0,
+        offset: statePayloadOffset
+      });
+      writer.write(wasmInstruction.i64.extendI32U);
+      writer.write(wasmInstruction.i64.const, statePayloadPrefix);
+      writer.write(wasmInstruction.i64.or);
+    }
+  );
 }
 
-function exportedFunction(instance: WebAssembly.Instance, name: string): (cpuStatePtr: number) => unknown {
+function exportedFunction(
+  instance: WebAssembly.Instance,
+  name: string
+): (cpuStatePtr: number) => unknown {
   const value = instance.exports[name];
 
   if (typeof value !== "function") {

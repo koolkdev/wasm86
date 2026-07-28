@@ -73,6 +73,7 @@ const repetitionCases = [
     memoryPatches: [
       {
         address: sourceAddress,
+        // prettier-ignore
         bytes: [
           0x22, 0x22, 0x11, 0x11,
           0x44, 0x44, 0x33, 0x33,
@@ -81,6 +82,7 @@ const repetitionCases = [
       },
       {
         address: destinationAddress - 1,
+        // prettier-ignore
         bytes: [
           0xaa,
           0x00, 0x00, 0x00, 0x00,
@@ -93,6 +95,7 @@ const repetitionCases = [
     expectedMemory: [
       {
         address: destinationAddress - 1,
+        // prettier-ignore
         bytes: [
           0xaa,
           0x22, 0x22, 0x11, 0x11,
@@ -118,6 +121,7 @@ const repetitionCases = [
     memoryPatches: [
       {
         address: sourceAddress,
+        // prettier-ignore
         bytes: [
           0x22, 0x22, 0x11, 0x11,
           0x44, 0x44, 0x33, 0x33,
@@ -126,6 +130,7 @@ const repetitionCases = [
       },
       {
         address: destinationAddress,
+        // prettier-ignore
         bytes: [
           0x00, 0x00, 0x00, 0x00,
           0x00, 0x00, 0x00, 0x00,
@@ -136,6 +141,7 @@ const repetitionCases = [
     expectedMemory: [
       {
         address: destinationAddress,
+        // prettier-ignore
         bytes: [
           0x22, 0x22, 0x11, 0x11,
           0x44, 0x44, 0x33, 0x33,
@@ -157,12 +163,8 @@ const repetitionCases = [
     },
     expectedState: { ecx: 0, edi: 0x203 },
     instructionCount: 3,
-    memoryPatches: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0x00, 0x00, 0x00, 0xbb] }
-    ],
-    expectedMemory: [
-      { address: destinationAddress - 1, bytes: [0xaa, 0x5a, 0x5a, 0x5a, 0xbb] }
-    ]
+    memoryPatches: [{ address: destinationAddress - 1, bytes: [0xaa, 0x00, 0x00, 0x00, 0xbb] }],
+    expectedMemory: [{ address: destinationAddress - 1, bytes: [0xaa, 0x5a, 0x5a, 0x5a, 0xbb] }]
   },
   {
     name: "REP LODSW walks backward and leaves the last loaded word in AX",
@@ -177,12 +179,8 @@ const repetitionCases = [
     },
     expectedState: { eax: 0xaaaa_1111, ecx: 0, esi: 0xfe },
     instructionCount: 3,
-    memoryPatches: [
-      { address: sourceAddress, bytes: [0x11, 0x11, 0x22, 0x22, 0x33, 0x33] }
-    ],
-    expectedMemory: [
-      { address: sourceAddress, bytes: [0x11, 0x11, 0x22, 0x22, 0x33, 0x33] }
-    ]
+    memoryPatches: [{ address: sourceAddress, bytes: [0x11, 0x11, 0x22, 0x22, 0x33, 0x33] }],
+    expectedMemory: [{ address: sourceAddress, bytes: [0x11, 0x11, 0x22, 0x22, 0x33, 0x33] }]
   },
   {
     name: "the last REP prefix replaces an earlier REPNE prefix",
@@ -221,12 +219,8 @@ const repetitionCases = [
     },
     expectedState: { ecx: 0, esi: 0x106, edi: 0x206 },
     instructionCount: 3,
-    memoryPatches: [
-      { address: sourceAddress, bytes: [0x22, 0x11, 0x44, 0x33, 0x66, 0x55] }
-    ],
-    expectedMemory: [
-      { address: destinationAddress, bytes: [0x22, 0x11, 0x44, 0x33, 0x66, 0x55] }
-    ]
+    memoryPatches: [{ address: sourceAddress, bytes: [0x22, 0x11, 0x44, 0x33, 0x66, 0x55] }],
+    expectedMemory: [{ address: destinationAddress, bytes: [0x22, 0x11, 0x44, 0x33, 0x66, 0x55] }]
   },
   {
     name: "REP before operand-size also selects REP MOVSW",
@@ -240,12 +234,8 @@ const repetitionCases = [
     },
     expectedState: { ecx: 0, esi: 0x106, edi: 0x206 },
     instructionCount: 3,
-    memoryPatches: [
-      { address: sourceAddress, bytes: [0x22, 0x11, 0x44, 0x33, 0x66, 0x55] }
-    ],
-    expectedMemory: [
-      { address: destinationAddress, bytes: [0x22, 0x11, 0x44, 0x33, 0x66, 0x55] }
-    ]
+    memoryPatches: [{ address: sourceAddress, bytes: [0x22, 0x11, 0x44, 0x33, 0x66, 0x55] }],
+    expectedMemory: [{ address: destinationAddress, bytes: [0x22, 0x11, 0x44, 0x33, 0x66, 0x55] }]
   },
   {
     name: "REPE CMPSB stops after the first mismatch and exposes that comparison",
@@ -290,12 +280,8 @@ const repetitionCases = [
       ...equalFlags
     },
     instructionCount: 3,
-    memoryPatches: [
-      { address: destinationAddress, bytes: [0x01, 0x02, 0x03, 0x04] }
-    ],
-    expectedMemory: [
-      { address: destinationAddress, bytes: [0x01, 0x02, 0x03, 0x04] }
-    ]
+    memoryPatches: [{ address: destinationAddress, bytes: [0x01, 0x02, 0x03, 0x04] }],
+    expectedMemory: [{ address: destinationAddress, bytes: [0x01, 0x02, 0x03, 0x04] }]
   }
 ] as const satisfies readonly InstructionCase[];
 
@@ -327,6 +313,7 @@ test("REP MOVSD with zero ECX completes without touching invalid source or desti
 test("a pending zero loaded into ECX still takes the REP MOVSD zero-trip path", async () => {
   await assertInstructionCase({
     name: "dirty ECX REP MOVSD zero trip",
+    // prettier-ignore
     bytes: [
       0x8b, 0x0d, 0x50, 0x00, 0x00, 0x00,
       0xf3, 0xa5
@@ -525,6 +512,7 @@ test("retrying REP MOVSD resumes from committed progress after source translatio
     {
       address: 0x300,
       byteLength: 8,
+      // prettier-ignore
       bytes: [
         0x22, 0x22, 0x11, 0x11,
         0x44, 0x44, 0x33, 0x33

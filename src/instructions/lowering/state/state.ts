@@ -3,10 +3,7 @@ import type { ResourceWriteArgs } from "#compiler/ir/operations/resource.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { ResourceEffect } from "#compiler/ir/resource.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
-import {
-  type BoundStateAccess,
-  type StateAccess
-} from "#core/state/access.js";
+import { type BoundStateAccess, type StateAccess } from "#core/state/access.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { StatusFlagTracker } from "#core/flags/lazy/tracker.js";
 import type { StatusFlagResolverFamily } from "#core/flags/lazy/resolvers.js";
@@ -70,10 +67,7 @@ export class InstructionState {
     );
     this.segments = new SegmentState(this.#fields);
     this.eip = new EipState(this.#fields);
-    this.instructionCount = new InstructionCountState(
-      this.#fields,
-      instructionCountField
-    );
+    this.instructionCount = new InstructionCountState(this.#fields, instructionCountField);
   }
 
   bind(region: RegionBuilder): BoundStateAccess {
@@ -91,14 +85,8 @@ export class InstructionState {
     this.#fields.beginInstruction();
   }
 
-  flushesForPath(
-    access: BoundStateAccess,
-    path: StatePathKind
-  ): readonly ResourceWriteArgs[] {
-    return [
-      ...this.gpr.flushesForPath(access, path),
-      ...this.#fields.flushesForPath(access, path)
-    ];
+  flushesForPath(access: BoundStateAccess, path: StatePathKind): readonly ResourceWriteArgs[] {
+    return [...this.gpr.flushesForPath(access, path), ...this.#fields.flushesForPath(access, path)];
   }
 
   enterScope<T>(build: () => T): T {
@@ -124,10 +112,7 @@ export class InstructionState {
     this.#fields.invalidate(channel);
   }
 
-  readChannel(
-    access: BoundStateAccess,
-    channel: InstructionStateChannel
-  ): ValueId {
+  readChannel(access: BoundStateAccess, channel: InstructionStateChannel): ValueId {
     return channel.kind === "gpr"
       ? this.gpr.readChannel(access, channel)
       : this.#fields.read(access, channel);
@@ -139,11 +124,7 @@ export class InstructionState {
       : this.#fields.isDirty(channel);
   }
 
-  writeChannel(
-    access: BoundStateAccess,
-    channel: InstructionStateChannel,
-    value: ValueId
-  ): void {
+  writeChannel(access: BoundStateAccess, channel: InstructionStateChannel, value: ValueId): void {
     switch (channel.kind) {
       case "gpr":
         this.gpr.writeChannel(access, channel, value);
@@ -171,9 +152,7 @@ export class InstructionState {
   }
 
   effect(channel: InstructionStateChannel): ResourceEffect {
-    return channel.kind === "gpr"
-      ? this.gpr.effect(channel)
-      : this.#fields.effect(channel);
+    return channel.kind === "gpr" ? this.gpr.effect(channel) : this.#fields.effect(channel);
   }
 
   owns(effect: ResourceEffect): boolean {
@@ -192,7 +171,9 @@ export class InstructionState {
     return this.channelCovers(a, b) && this.channelCovers(b, a);
   }
 
-  dedupeDisjointChannels(input: readonly InstructionStateChannel[]): readonly InstructionStateChannel[] {
+  dedupeDisjointChannels(
+    input: readonly InstructionStateChannel[]
+  ): readonly InstructionStateChannel[] {
     const channels: InstructionStateChannel[] = [];
 
     for (const channel of input) {

@@ -1,27 +1,15 @@
 import { assert } from "#common/assert.js";
 import { buildDefinition } from "#build";
 import type { StorageEffects } from "#compiler/ir/effects.js";
-import {
-  type BuildFunction,
-  FunctionDefinition
-} from "#compiler/program/functions.js";
-import {
-  FunctionImport,
-  type FunctionImportDeclaration
-} from "./imports.js";
+import { type BuildFunction, FunctionDefinition } from "#compiler/program/functions.js";
+import { FunctionImport, type FunctionImportDeclaration } from "./imports.js";
 import { buildProgram, DeclarationCollection } from "./closure.js";
 import type { FunctionType } from "#compiler/ir/function.js";
-import type {
-  FunctionDeclaration,
-  Program
-} from "./program.js";
+import type { FunctionDeclaration, Program } from "./program.js";
 import type { FunctionExport } from "./exports.js";
 import type { FunctionRef } from "#compiler/ir/refs.js";
 import type { ProgramResources, TableImport } from "./resources.js";
-import {
-  maximumWasmTableElements,
-  type TableLimits
-} from "./limits.js";
+import { maximumWasmTableElements, type TableLimits } from "./limits.js";
 import { validateProgramDeclarations } from "./validate.js";
 
 export class ProgramBuilder {
@@ -88,10 +76,7 @@ export class ProgramBuilder {
 
   exportFunction(declaration: FunctionExport): void {
     this.#assertOpen();
-    assert(
-      declaration.name.length > 0,
-      "empty program function export name"
-    );
+    assert(declaration.name.length > 0, "empty program function export name");
     assert(
       !this.#exportNames.has(declaration.name),
       `duplicate program export name: ${declaration.name}`
@@ -155,9 +140,7 @@ export class ProgramBuilder {
     );
   }
 
-  #recordExternalImport(
-    imported: Readonly<{ moduleName: string; name: string }>
-  ): void {
+  #recordExternalImport(imported: Readonly<{ moduleName: string; name: string }>): void {
     const names = this.#externalImportNames.get(imported.moduleName);
 
     if (names === undefined) {

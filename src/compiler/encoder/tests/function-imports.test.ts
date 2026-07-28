@@ -1,7 +1,4 @@
-import {
-  deepStrictEqual,
-  strictEqual
-} from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { encodeWasmFunctionBody } from "#compiler/encoder/function-body.js";
@@ -14,37 +11,47 @@ const importFunctionName = "increment";
 
 test("function imports prefix defined indexes and direct calls", async () => {
   const bytes = encodeTestModule({
-    functionTypes: [{
-      params: [wasmValueType.i32],
-      results: [wasmValueType.i32]
-    }],
-    functionImports: [{
-      moduleName: importModuleName,
-      name: importFunctionName,
-      typeIndex: 0
-    }],
+    functionTypes: [
+      {
+        params: [wasmValueType.i32],
+        results: [wasmValueType.i32]
+      }
+    ],
+    functionImports: [
+      {
+        moduleName: importModuleName,
+        name: importFunctionName,
+        typeIndex: 0
+      }
+    ],
     functions: [
       {
         typeIndex: 0,
-        body: encodeWasmFunctionBody({
-          parameterCount: 1,
-          localTypes: []
-        }, (writer) => {
-          writer.write(wasmInstruction.local.get, 0);
-          writer.write(wasmInstruction.call.direct, 0);
-          writer.write(wasmInstruction.i32.const, 1);
-          writer.write(wasmInstruction.i32.add);
-        })
+        body: encodeWasmFunctionBody(
+          {
+            parameterCount: 1,
+            localTypes: []
+          },
+          (writer) => {
+            writer.write(wasmInstruction.local.get, 0);
+            writer.write(wasmInstruction.call.direct, 0);
+            writer.write(wasmInstruction.i32.const, 1);
+            writer.write(wasmInstruction.i32.add);
+          }
+        )
       },
       {
         typeIndex: 0,
-        body: encodeWasmFunctionBody({
-          parameterCount: 1,
-          localTypes: []
-        }, (writer) => {
-          writer.write(wasmInstruction.local.get, 0);
-          writer.write(wasmInstruction.returnCall.direct, 0);
-        })
+        body: encodeWasmFunctionBody(
+          {
+            parameterCount: 1,
+            localTypes: []
+          },
+          (writer) => {
+            writer.write(wasmInstruction.local.get, 0);
+            writer.write(wasmInstruction.returnCall.direct, 0);
+          }
+        )
       }
     ],
     functionExports: [
@@ -54,11 +61,13 @@ test("function imports prefix defined indexes and direct calls", async () => {
   });
   const compiled = new WebAssembly.Module(bytes);
 
-  deepStrictEqual(WebAssembly.Module.imports(compiled), [{
-    module: importModuleName,
-    name: importFunctionName,
-    kind: "function"
-  }]);
+  deepStrictEqual(WebAssembly.Module.imports(compiled), [
+    {
+      module: importModuleName,
+      name: importFunctionName,
+      kind: "function"
+    }
+  ]);
 
   const instance = await WebAssembly.instantiate(compiled, {
     [importModuleName]: {
@@ -75,37 +84,42 @@ test("function imports prefix defined indexes and direct calls", async () => {
 test("branch hints use imported-function-prefixed indexes", () => {
   const bytes = encodeTestModule({
     functionTypes: [{ params: [], results: [] }],
-    functionImports: [{
-      moduleName: importModuleName,
-      name: importFunctionName,
-      typeIndex: 0
-    }],
+    functionImports: [
+      {
+        moduleName: importModuleName,
+        name: importFunctionName,
+        typeIndex: 0
+      }
+    ],
     functions: [
       {
         typeIndex: 0,
-        body: encodeWasmFunctionBody({
-          parameterCount: 0,
-          localTypes: []
-        }, () => {})
+        body: encodeWasmFunctionBody(
+          {
+            parameterCount: 0,
+            localTypes: []
+          },
+          () => {}
+        )
       },
       {
         typeIndex: 0,
-        body: encodeWasmFunctionBody({
-          parameterCount: 0,
-          localTypes: []
-        }, (writer) => {
-          writer.write(wasmInstruction.i32.const, 1);
-          writer.write(wasmInstruction.control.if, { hint: "likely" });
-          writer.write(wasmInstruction.control.end);
-        })
+        body: encodeWasmFunctionBody(
+          {
+            parameterCount: 0,
+            localTypes: []
+          },
+          (writer) => {
+            writer.write(wasmInstruction.i32.const, 1);
+            writer.write(wasmInstruction.control.if, { hint: "likely" });
+            writer.write(wasmInstruction.control.end);
+          }
+        )
       }
     ]
   });
   const compiled = new WebAssembly.Module(bytes);
-  const sections = WebAssembly.Module.customSections(
-    compiled,
-    "metadata.code.branch_hint"
-  );
+  const sections = WebAssembly.Module.customSections(compiled, "metadata.code.branch_hint");
 
   strictEqual(sections.length, 1);
   const section = sections[0];
@@ -113,6 +127,7 @@ test("branch hints use imported-function-prefixed indexes", () => {
   if (section === undefined) {
     throw new Error("missing branch-hint section");
   }
+  // prettier-ignore
   deepStrictEqual([...new Uint8Array(section)], [
     0x01,
     0x02,

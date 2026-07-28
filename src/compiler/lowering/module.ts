@@ -1,9 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { EncodedWasmFunctionBody } from "#compiler/encoder/function-body.js";
-import {
-  encodeWasmModule,
-  type WasmModuleDescription
-} from "#compiler/encoder/module.js";
+import { encodeWasmModule, type WasmModuleDescription } from "#compiler/encoder/module.js";
 import {
   wasmValueType,
   type WasmFunctionType,
@@ -17,17 +14,11 @@ import { emitFunction } from "./function.js";
 
 // Realizes a completed symbolic Program into an already-indexed description,
 // then delegates byte serialization to the encoder.
-export function emitModule(
-  program: Program,
-  layout: ModuleLayout
-): Uint8Array<ArrayBuffer> {
+export function emitModule(program: Program, layout: ModuleLayout): Uint8Array<ArrayBuffer> {
   return encodeWasmModule(moduleDescription(program, layout));
 }
 
-function moduleDescription(
-  program: Program,
-  layout: ModuleLayout
-): WasmModuleDescription {
+function moduleDescription(program: Program, layout: ModuleLayout): WasmModuleDescription {
   return {
     functionTypes: layout.types.map(encodeFunctionType),
     functionImports: program.functionImports.map((imported) => ({
@@ -57,24 +48,13 @@ function moduleDescription(
   };
 }
 
-function emitProgramFunction(
-  layout: ModuleLayout,
-  fn: ProgramFunction
-): EncodedWasmFunctionBody {
+function emitProgramFunction(layout: ModuleLayout, fn: ProgramFunction): EncodedWasmFunctionBody {
   return emitFunction(fn.body, {
     bindings: createModuleBindings({
-      functions: selectIndices(
-        layout.functionIndices,
-        fn.directFunctions,
-        "called function"
-      ),
+      functions: selectIndices(layout.functionIndices, fn.directFunctions, "called function"),
       types: selectIndices(layout.typeIndices, fn.indirectTypes, "indirect call type"),
       tables: selectIndices(layout.tableIndices, fn.tables, "referenced table"),
-      resources: selectIndices(
-        layout.memoryIndices,
-        fn.resources,
-        "referenced resource"
-      )
+      resources: selectIndices(layout.memoryIndices, fn.resources, "referenced resource")
     }),
     placement: fn.placement
   });
@@ -100,11 +80,7 @@ function requireTypeIndex(layout: ModuleLayout, type: FunctionType): number {
   return requireIndex(layout.typeIndices, type, "function type");
 }
 
-function requireIndex<Key>(
-  indices: ReadonlyMap<Key, number>,
-  key: Key,
-  label: string
-): number {
+function requireIndex<Key>(indices: ReadonlyMap<Key, number>, key: Key, label: string): number {
   const index = indices.get(key);
 
   assert(index !== undefined, `missing module layout for ${label}`);

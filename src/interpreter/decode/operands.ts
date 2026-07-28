@@ -22,9 +22,7 @@ import {
 import { registerAliasByIndex } from "#core/registers.js";
 import { segmentRegisterIndex } from "#core/segments.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import type {
-  DecodedMemoryAddress
-} from "./address.js";
+import type { DecodedMemoryAddress } from "./address.js";
 import type { SegmentOverrideState } from "./prefixes.js";
 import { InstructionByteStream } from "./stream.js";
 
@@ -58,9 +56,7 @@ export class OperandDecoder {
     form: InstructionForm,
     rm: DecodedRm
   ): readonly OperandBinding[] {
-    return form.operands.map((operand) =>
-      this.#buildBinding(region, form, operand, rm)
-    );
+    return form.operands.map((operand) => this.#buildBinding(region, form, operand, rm));
   }
 
   #buildBinding(
@@ -73,11 +69,13 @@ export class OperandDecoder {
       case "modrm.reg": {
         const modRmByte = region.read(this.#modRmByte);
 
-        return regDynamicBinding(region.values.binary(
-          "and",
-          region.values.binary("shr_u", modRmByte, region.values.const(3)),
-          region.values.const(0b111)
-        ));
+        return regDynamicBinding(
+          region.values.binary(
+            "and",
+            region.values.binary("shr_u", modRmByte, region.values.const(3)),
+            region.values.const(0b111)
+          )
+        );
       }
       case "modrm.sreg": {
         const modRmByte = region.read(this.#modRmByte);
@@ -87,46 +85,44 @@ export class OperandDecoder {
           region.values.const(0b111)
         );
 
-        return segmentDynamicBinding(region.switch(
-          encodedIndex,
-          operand.registers.map((segment, match) => ({
-            match,
-            build: (arm) => arm.values.const(segmentRegisterIndex(segment))
-          })),
-          (invalid) => invalid.values.unreachable()
-        ));
+        return segmentDynamicBinding(
+          region.switch(
+            encodedIndex,
+            operand.registers.map((segment, match) => ({
+              match,
+              build: (arm) => arm.values.const(segmentRegisterIndex(segment))
+            })),
+            (invalid) => invalid.values.unreachable()
+          )
+        );
       }
       case "modrm.rm":
         return this.#rmBinding(region, rm);
       case "opcode.reg":
-        return regBinding(
-          registerAliasByIndex(operand.width, form.opcodeLowBits!).name
-        );
+        return regBinding(registerAliasByIndex(operand.width, form.opcodeLowBits!).name);
       case "implicit.reg":
         return regBinding(operand.alias.name);
       case "implicit.sreg":
         return segmentBinding(operand.reg);
       case "implicit.mem":
-        return memBinding({
-          base: operand.base,
-          index: undefined,
-          scale: 1,
-          disp: operand.disp
-        }, this.#segmentBinding(region, operand.segment));
+        return memBinding(
+          {
+            base: operand.base,
+            index: undefined,
+            scale: 1,
+            disp: operand.disp
+          },
+          this.#segmentBinding(region, operand.segment)
+        );
       case "moffs":
         return memOffsetBinding(
           this.#stream.readEncoded(region, operand.address),
           this.#segmentBinding(region, operand.segment)
         );
       case "immediate":
-        return immDynamicBinding(
-          this.#stream.readEncoded(region, operand.value)
-        );
+        return immDynamicBinding(this.#stream.readEncoded(region, operand.value));
       case "relative": {
-        const displacement = this.#stream.readEncoded(
-          region,
-          operand.displacement
-        );
+        const displacement = this.#stream.readEncoded(region, operand.displacement);
         const nextEip = region.values.binary(
           "add",
           this.#instructionStart,
@@ -143,18 +139,12 @@ export class OperandDecoder {
     }
   }
 
-  #rmBinding(
-    region: RegionBuilder,
-    rm: DecodedRm
-  ): OperandBinding {
+  #rmBinding(region: RegionBuilder, rm: DecodedRm): OperandBinding {
     switch (rm.kind) {
       case "register":
         return regDynamicBinding(rm.registerIndex);
       case "baseLess":
-        return memOffsetBinding(
-          rm.offset,
-          dynamicMemSegment(rm.segmentIndex)
-        );
+        return memOffsetBinding(rm.offset, dynamicMemSegment(rm.segmentIndex));
       case "dynamicBase":
         return memDynamicBaseBinding(
           rm.baseRegisterIndex,
@@ -166,10 +156,7 @@ export class OperandDecoder {
     }
   }
 
-  #segmentBinding(
-    region: RegionBuilder,
-    selection: SegmentSelection
-  ): SegmentBindingSelection {
+  #segmentBinding(region: RegionBuilder, selection: SegmentSelection): SegmentBindingSelection {
     switch (selection.kind) {
       case "fixed":
         return staticMemSegment(selection.segment);

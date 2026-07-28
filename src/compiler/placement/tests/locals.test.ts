@@ -1,14 +1,7 @@
-import {
-  ok,
-  strictEqual,
-  throws
-} from "node:assert";
+import { ok, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import {
-  ifControl,
-  loopControl
-} from "#compiler/ir/controls/index.js";
+import { ifControl, loopControl } from "#compiler/ir/controls/index.js";
 import { VariableRef } from "#compiler/ir/variable.js";
 import { variableRead, variableWrite } from "#compiler/ir/operations/variables.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -70,10 +63,7 @@ test("variable locals are allocated when a variable has only writes", () => {
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [
-        write(variable, values.const(0), "seed"),
-        write(variable, values.const(1), "update")
-      ]
+      nodes: [write(variable, values.const(0), "seed"), write(variable, values.const(1), "update")]
     }
   };
   const { plan } = place(block);
@@ -90,10 +80,7 @@ test("distinct variables receive distinct locals with their scalar types", () =>
   const block: FunctionGraph = {
     values,
     body: {
-      nodes: [
-        write(narrow, values.const(1), "seed"),
-        write(wide, values.const64(2n), "seed")
-      ]
+      nodes: [write(narrow, values.const(1), "seed"), write(wide, values.const64(2n), "seed")]
     }
   };
   const { plan } = place(block);
@@ -170,10 +157,11 @@ test("a variable never shares a local with an overlapping value temporary", () =
     /referenced variable has no local/
   );
   throws(
-    () => validatePlacement(fn, analysis, {
-      ...plan,
-      variableLocals: new Map([[variable, valuePlacement.local]])
-    }),
+    () =>
+      validatePlacement(fn, analysis, {
+        ...plan,
+        variableLocals: new Map([[variable, valuePlacement.local]])
+      }),
     /overlap in local/
   );
 });
@@ -205,10 +193,14 @@ test("placement validation rejects overlapping and mistyped variable locals", ()
   ok(secondLocal !== undefined);
   strictEqual(firstLocal === secondLocal, false);
   throws(
-    () => validatePlacement(fn, analysis, {
-      ...plan,
-      variableLocals: new Map([[first, firstLocal], [second, firstLocal]])
-    }),
+    () =>
+      validatePlacement(fn, analysis, {
+        ...plan,
+        variableLocals: new Map([
+          [first, firstLocal],
+          [second, firstLocal]
+        ])
+      }),
     /overlap in local/
   );
 

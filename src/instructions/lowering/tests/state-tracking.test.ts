@@ -1,8 +1,4 @@
-import {
-  doesNotThrow,
-  strictEqual,
-  throws
-} from "node:assert";
+import { doesNotThrow, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
 import { covers } from "#compiler/ir/effects.js";
@@ -34,11 +30,7 @@ type PendingHarness = Readonly<{
   isDirty(channel: InstructionStateChannel): boolean;
   beginInstruction(): void;
   flushesForPath(path: StatePathKind): readonly ResourceWriteArgs[];
-  readDynamicGpr(
-    index: ValueId,
-    width: OperandWidth,
-    options?: GprReadOptions
-  ): ValueId;
+  readDynamicGpr(index: ValueId, width: OperandWidth, options?: GprReadOptions): ValueId;
   writeDynamicGpr(index: ValueId, width: OperandWidth, value: ValueId): void;
 }>;
 
@@ -53,9 +45,10 @@ function createHarness(): Harness {
   return {
     values,
     pending: {
-      read: (channel, options) => channel.kind === "gpr"
-        ? gpr.readChannel(access, channel, options)
-        : fields.read(access, channel),
+      read: (channel, options) =>
+        channel.kind === "gpr"
+          ? gpr.readChannel(access, channel, options)
+          : fields.read(access, channel),
       write: (channel, value) => {
         if (channel.kind === "gpr") {
           gpr.writeChannel(access, channel, value);
@@ -64,11 +57,9 @@ function createHarness(): Harness {
 
         fields.write(channel, value);
       },
-      has: (channel) =>
-        channel.kind === "gpr" ? gpr.has(channel) : fields.has(channel),
-      isDirty: (channel) => channel.kind === "gpr"
-        ? gpr.isChannelDirty(channel)
-        : fields.isDirty(channel),
+      has: (channel) => (channel.kind === "gpr" ? gpr.has(channel) : fields.has(channel)),
+      isDirty: (channel) =>
+        channel.kind === "gpr" ? gpr.isChannelDirty(channel) : fields.isDirty(channel),
       beginInstruction: () => {
         gpr.beginInstruction();
         fields.beginInstruction();
@@ -77,10 +68,8 @@ function createHarness(): Harness {
         ...gpr.flushesForPath(access, path),
         ...fields.flushesForPath(access, path)
       ],
-      readDynamicGpr: (index, width, options) =>
-        gpr.readDynamic(access, index, width, options),
-      writeDynamicGpr: (index, width, value) =>
-        gpr.writeDynamic(access, index, width, value)
+      readDynamicGpr: (index, width, options) => gpr.readDynamic(access, index, width, options),
+      writeDynamicGpr: (index, width, value) => gpr.writeDynamic(access, index, width, value)
     }
   };
 }
@@ -92,17 +81,14 @@ function hasWriteback(
 ): boolean {
   const effect = stateEffect(values, channel);
 
-  return writebacks.some((writeback) =>
-    covers(effect, writeback.destination.effect) &&
-    covers(writeback.destination.effect, effect)
+  return writebacks.some(
+    (writeback) =>
+      covers(effect, writeback.destination.effect) && covers(writeback.destination.effect, effect)
   );
 }
 
 test("writing an input value back cancels pending state", () => {
-  for (const channel of [
-    gprChannel("eax"),
-    flagStateFields.concrete.ZF
-  ] as const) {
+  for (const channel of [gprChannel("eax"), flagStateFields.concrete.ZF] as const) {
     const { values, pending } = createHarness();
     const input = pending.read(channel);
 
@@ -221,11 +207,7 @@ test("dynamic GPR writes invalidate tracked GPRs without disturbing other channe
   pending.write(gprChannel("eax"), values.const(0x77));
   pending.write(coreStateFields.eip, values.const(0x1000));
 
-  pending.writeDynamicGpr(
-    values.parameter(0, "i32"),
-    8,
-    values.const(0x22)
-  );
+  pending.writeDynamicGpr(values.parameter(0, "i32"), 8, values.const(0x22));
 
   strictEqual(pending.has(gprChannel("eax")), false);
   strictEqual(pending.has(coreStateFields.eip), true);
@@ -240,24 +222,12 @@ test("dynamic GPR barriers make new instruction writes unrestorable", () => {
     32,
     dynamicWrite.values.const(1)
   );
-  throws(
-    () => dynamicWrite.pending.flushesForPath("fault"),
-    /unrestorable/
-  );
+  throws(() => dynamicWrite.pending.flushesForPath("fault"), /unrestorable/);
 
   const dynamicRead = createHarness();
 
   dynamicRead.pending.beginInstruction();
-  dynamicRead.pending.write(
-    gprChannel("ebx"),
-    dynamicRead.values.const(1)
-  );
-  dynamicRead.pending.readDynamicGpr(
-    dynamicRead.values.parameter(0, "i32"),
-    32
-  );
-  throws(
-    () => dynamicRead.pending.flushesForPath("fault"),
-    /unrestorable/
-  );
+  dynamicRead.pending.write(gprChannel("ebx"), dynamicRead.values.const(1));
+  dynamicRead.pending.readDynamicGpr(dynamicRead.values.parameter(0, "i32"), 32);
+  throws(() => dynamicRead.pending.flushesForPath("fault"), /unrestorable/);
 });

@@ -1,14 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { CpuException } from "#core/exceptions.js";
-import {
-  exceptionExit,
-  segmentExit,
-  trapExit
-} from "#core/exits.js";
-import {
-  resourceWrite,
-  type ResourceWriteArgs
-} from "#compiler/ir/operations/resource.js";
+import { exceptionExit, segmentExit, trapExit } from "#core/exits.js";
+import { resourceWrite, type ResourceWriteArgs } from "#compiler/ir/operations/resource.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { StatePathKind } from "./state/pending-buffer.js";
 import type { InstructionState } from "./state/state.js";
@@ -17,10 +10,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { VariantValue } from "#compiler/layout/variant-codec.js";
 
-export type BuildExit = (
-  values: ValueTable,
-  exit: VariantValue<ValueId>
-) => ValueId;
+export type BuildExit = (values: ValueTable, exit: VariantValue<ValueId>) => ValueId;
 
 export type InstructionTerminals = Readonly<{
   dispatch(region: RegionBuilder, targetEip: ValueId): void;
@@ -35,11 +25,7 @@ export class InstructionTerminator {
   readonly #buildExit: BuildExit;
   readonly #terminals: InstructionTerminals;
 
-  constructor(
-    state: InstructionState,
-    buildExit: BuildExit,
-    terminals: InstructionTerminals
-  ) {
+  constructor(state: InstructionState, buildExit: BuildExit, terminals: InstructionTerminals) {
     this.#state = state;
     this.#buildExit = buildExit;
     this.#terminals = terminals;
@@ -50,45 +36,21 @@ export class InstructionTerminator {
     access: BoundStateAccess,
     exception: CpuException<ValueId>
   ): void {
-    this.#exit(
-      region,
-      access,
-      this.#buildExit(
-        region.values,
-        exceptionExit(exception)
-      ),
-      "fault"
-    );
+    this.#exit(region, access, this.#buildExit(region.values, exceptionExit(exception)), "fault");
   }
 
-  dispatch(
-    region: RegionBuilder,
-    access: BoundStateAccess,
-    targetEip: ValueId
-  ): void {
+  dispatch(region: RegionBuilder, access: BoundStateAccess, targetEip: ValueId): void {
     this.publishCompletedState(region, access);
     this.#terminals.dispatch(region, targetEip);
   }
 
-  publishCompletedState(
-    region: RegionBuilder,
-    access: BoundStateAccess
-  ): void {
+  publishCompletedState(region: RegionBuilder, access: BoundStateAccess): void {
     assert(this.#state.eip.has(), "completion requires a completed pending eip");
     this.#emitWritebacks(region, this.#state.flushesForPath(access, "completed"));
   }
 
-  hostTrap(
-    region: RegionBuilder,
-    access: BoundStateAccess,
-    vector: ValueId
-  ): void {
-    this.#exit(
-      region,
-      access,
-      this.#buildExit(region.values, trapExit(vector)),
-      "completed"
-    );
+  hostTrap(region: RegionBuilder, access: BoundStateAccess, vector: ValueId): void {
+    this.#exit(region, access, this.#buildExit(region.values, trapExit(vector)), "completed");
   }
 
   segmentLoad(
@@ -115,10 +77,7 @@ export class InstructionTerminator {
     this.#terminals.returnExit(region, result);
   }
 
-  #emitWritebacks(
-    region: RegionBuilder,
-    writebacks: readonly ResourceWriteArgs[]
-  ): void {
+  #emitWritebacks(region: RegionBuilder, writebacks: readonly ResourceWriteArgs[]): void {
     for (const writeback of writebacks) {
       region.operation(resourceWrite, writeback);
     }

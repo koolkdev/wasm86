@@ -5,8 +5,7 @@ import { OperandScope } from "./operand-resolver.js";
 export type SemanticScopeKind = "root" | "arm" | "loop";
 
 export type SemanticScopeOutcome<T> =
-  | Readonly<{ kind: "fallthrough"; result: T }>
-  | Readonly<{ kind: "complete" }>;
+  Readonly<{ kind: "fallthrough"; result: T }> | Readonly<{ kind: "complete" }>;
 
 export class SemanticRegionScope {
   readonly region: RegionBuilder;
@@ -19,11 +18,7 @@ export class SemanticRegionScope {
   #terminated = false;
   #wroteMemory: boolean;
 
-  constructor(
-    region: RegionBuilder,
-    kind: SemanticScopeKind,
-    parent?: SemanticRegionScope
-  ) {
+  constructor(region: RegionBuilder, kind: SemanticScopeKind, parent?: SemanticRegionScope) {
     this.region = region;
     this.kind = kind;
     this.insideLoop = kind === "loop" || (parent?.insideLoop ?? false);

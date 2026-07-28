@@ -48,5 +48,4 @@ export type IsaDecodeExceptionResult = Readonly<{
 }>;
 
 export type IsaDecodeResult =
-  | Readonly<{ kind: "instruction"; instruction: IsaDecodedInstruction }>
-  | IsaDecodeExceptionResult;
+  Readonly<{ kind: "instruction"; instruction: IsaDecodedInstruction }> | IsaDecodeExceptionResult;

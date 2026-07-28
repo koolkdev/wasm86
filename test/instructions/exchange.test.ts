@@ -328,19 +328,24 @@ test("CMPXCHG8B stores EBX:ECX on success and changes only ZF", async () => {
       ...mixedFlags
     },
     expectedState: { ZF: 1 },
-    memoryPatches: [{
-      address,
-      bytes: [...dwordBytes(0x1111_1111), ...dwordBytes(0x2222_2222)]
-    }],
-    expectedMemory: [{
-      address,
-      bytes: [...dwordBytes(0x3333_3333), ...dwordBytes(0x4444_4444)]
-    }]
+    memoryPatches: [
+      {
+        address,
+        bytes: [...dwordBytes(0x1111_1111), ...dwordBytes(0x2222_2222)]
+      }
+    ],
+    expectedMemory: [
+      {
+        address,
+        bytes: [...dwordBytes(0x3333_3333), ...dwordBytes(0x4444_4444)]
+      }
+    ]
   });
 });
 
 test("CMPXCHG8B loads EDX:EAX and leaves memory unchanged on failure", async () => {
   const address = 0x2d00;
+  // prettier-ignore
   const initialMemory = [
     ...dwordBytes(0x1111_1111),
     ...dwordBytes(0x2222_2222)
@@ -396,10 +401,5 @@ test("CMPXCHG8B validates the full qword write before publishing any half", asyn
 });
 
 function dwordBytes(value: number): readonly number[] {
-  return [
-    value & 0xff,
-    (value >>> 8) & 0xff,
-    (value >>> 16) & 0xff,
-    (value >>> 24) & 0xff
-  ];
+  return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
 }

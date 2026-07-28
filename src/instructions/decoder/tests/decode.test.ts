@@ -2,11 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { decodeIsaInstructionFromReader } from "#instructions/decoder/decode.js";
-import {
-  ByteArrayDecodeReader,
-  decodeBytes,
-  startAddress
-} from "./byte-reader-fixture.js";
+import { ByteArrayDecodeReader, decodeBytes, startAddress } from "./byte-reader-fixture.js";
 
 test("decodes instruction metadata, an opcode register, and a 32-bit immediate", () => {
   const values = [0xbb, 0x78, 0x56, 0x34, 0x12];
@@ -133,13 +129,9 @@ test("ModRM register operands respect direction, operand size, and high-byte ali
 });
 
 test("ModRM and SIB memory operands decode base, index, scale, and signed displacement", () => {
-  const sibResult = decodeBytes([
-    0x8b, 0x84, 0x88, 0x10, 0x00, 0x00, 0x00
-  ]);
+  const sibResult = decodeBytes([0x8b, 0x84, 0x88, 0x10, 0x00, 0x00, 0x00]);
   const negativeDisp8Result = decodeBytes([0x8b, 0x45, 0xfc]);
-  const negativeDisp32Result = decodeBytes([
-    0x8b, 0x83, 0xff, 0xff, 0xff, 0xff
-  ]);
+  const negativeDisp32Result = decodeBytes([0x8b, 0x83, 0xff, 0xff, 0xff, 0xff]);
 
   strictEqual(sibResult.kind, "instruction");
   strictEqual(negativeDisp8Result.kind, "instruction");
@@ -253,19 +245,12 @@ test("SIB fields select architectural bases, indexes, and scales", () => {
 });
 
 test("base-free ModRM and SIB addresses retain unsigned disp32 values", () => {
-  const modRmResult = decodeBytes([
-    0x8b, 0x05, 0x00, 0x20, 0x40, 0x80
-  ]);
-  const sibResult = decodeBytes([
-    0x8b, 0x04, 0x8d, 0x00, 0x20, 0x40, 0x80
-  ]);
+  const modRmResult = decodeBytes([0x8b, 0x05, 0x00, 0x20, 0x40, 0x80]);
+  const sibResult = decodeBytes([0x8b, 0x04, 0x8d, 0x00, 0x20, 0x40, 0x80]);
 
   strictEqual(modRmResult.kind, "instruction");
   strictEqual(sibResult.kind, "instruction");
-  if (
-    modRmResult.kind !== "instruction" ||
-    sibResult.kind !== "instruction"
-  ) {
+  if (modRmResult.kind !== "instruction" || sibResult.kind !== "instruction") {
     return;
   }
 
@@ -298,10 +283,7 @@ test("immediate operands preserve encoded width and explicit sign extension", ()
 
   strictEqual(enterResult.kind, "instruction");
   strictEqual(subtractResult.kind, "instruction");
-  if (
-    enterResult.kind !== "instruction" ||
-    subtractResult.kind !== "instruction"
-  ) {
+  if (enterResult.kind !== "instruction" || subtractResult.kind !== "instruction") {
     return;
   }
 
@@ -336,10 +318,7 @@ test("immediate operands preserve encoded width and explicit sign extension", ()
 
 test("relative targets sign-extend each displacement width and wrap where x86 requires", () => {
   const shortResult = decodeBytes([0xeb, 0xfe]);
-  const wordWrapResult = decodeBytes(
-    [0x66, 0xe9, 0x02, 0x00],
-    0xfffe
-  );
+  const wordWrapResult = decodeBytes([0x66, 0xe9, 0x02, 0x00], 0xfffe);
   const nearResult = decodeBytes([0xe9, 0xfb, 0xff, 0xff, 0xff]);
 
   strictEqual(shortResult.kind, "instruction");
@@ -399,11 +378,7 @@ test("group dispatch and memory-only operands reject non-matching ModRM forms", 
     return;
   }
 
-  for (const decoded of [
-    unregisteredGroup,
-    registerLea,
-    registerCompareExchange
-  ]) {
+  for (const decoded of [unregisteredGroup, registerLea, registerCompareExchange]) {
     deepStrictEqual(decoded.exception, { kind: "UD" });
     strictEqual(decoded.instructionStart, startAddress);
   }

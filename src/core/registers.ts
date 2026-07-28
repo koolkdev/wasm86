@@ -34,7 +34,9 @@ export const registerAliasesByWidth = {
 } as const satisfies Readonly<Record<OperandWidth, readonly RegisterAlias[]>>;
 
 const registerAliasesByName = new Map<RegName, RegisterAlias>(
-  Object.values(registerAliasesByWidth).flatMap((aliases) => aliases.map((alias) => [alias.name, alias]))
+  Object.values(registerAliasesByWidth).flatMap((aliases) =>
+    aliases.map((alias) => [alias.name, alias])
+  )
 );
 
 export function registerAlias(name: RegName): RegisterAlias {

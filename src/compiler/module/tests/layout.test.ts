@@ -20,21 +20,27 @@ test("module layout owns type, function, and export ordering", () => {
     moduleName: "test",
     name: "imported"
   });
-  const first = program.defineFunction({
-    ref: functionRef("test.layout.first"),
-    type: firstType,
-    effects: { reads: [], writes: [] }
-  }, (fn) => {
-    const [result] = fn.region.call(imported, []);
+  const first = program.defineFunction(
+    {
+      ref: functionRef("test.layout.first"),
+      type: firstType,
+      effects: { reads: [], writes: [] }
+    },
+    (fn) => {
+      const [result] = fn.region.call(imported, []);
 
-    ok(result !== undefined);
-    fn.return([result]);
-  });
-  const second = program.defineFunction({
-    ref: functionRef("test.layout.second"),
-    type: secondType,
-    effects: { reads: [], writes: [] }
-  }, (fn) => fn.return([fn.values.const(42)]));
+      ok(result !== undefined);
+      fn.return([result]);
+    }
+  );
+  const second = program.defineFunction(
+    {
+      ref: functionRef("test.layout.second"),
+      type: secondType,
+      effects: { reads: [], writes: [] }
+    },
+    (fn) => fn.return([fn.values.const(42)])
+  );
 
   program.exportFunction({
     ref: functionExportRef("test.layout.second-export"),

@@ -19,10 +19,7 @@ export type MachineMemoryDefinition = Readonly<{
 
 export function createMachineMemoryDefinition(): MachineMemoryDefinition {
   const resource = resourceRef(machineMemoryResourceDefinition.id);
-  const layout = createLayout(
-    "machine-memory",
-    [pageTableLayout]
-  );
+  const layout = createLayout("machine-memory", [pageTableLayout]);
   const memoryImport: MemoryImport = {
     ref: resource,
     moduleName: programImportModuleName,

@@ -17,10 +17,7 @@ export class InstructionCountState {
   #base: ValueId | undefined;
   #completed = 0;
 
-  constructor(
-    state: StateFieldTracker,
-    field: FieldRef<"u32">
-  ) {
+  constructor(state: StateFieldTracker, field: FieldRef<"u32">) {
     this.#state = state;
     this.#field = field;
   }
@@ -35,10 +32,7 @@ export class InstructionCountState {
   }
 
   add(access: BoundStateAccess, value: ValueId): void {
-    this.#state.write(
-      this.#field,
-      access.values.binary("add", this.read(access), value)
-    );
+    this.#state.write(this.#field, access.values.binary("add", this.read(access), value));
     this.#rebase();
   }
 
@@ -67,10 +61,6 @@ export class InstructionCountState {
   #advancedValue(access: BoundStateAccess): ValueId {
     this.#base ??= this.#state.read(access, this.#field);
 
-    return access.values.binary(
-      "add",
-      this.#base,
-      access.values.const(this.#completed)
-    );
+    return access.values.binary("add", this.#base, access.values.const(this.#completed));
   }
 }

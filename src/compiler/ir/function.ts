@@ -25,7 +25,8 @@ export type FunctionGraph = Readonly<{
   values: ValueTable;
 }>;
 
-export type IrFunction = FunctionGraph & Readonly<{
-  type: FunctionType;
-  parameters: readonly ValueId[];
-}>;
+export type IrFunction = FunctionGraph &
+  Readonly<{
+    type: FunctionType;
+    parameters: readonly ValueId[];
+  }>;

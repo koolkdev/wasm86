@@ -1,8 +1,5 @@
 import { assert } from "#common/assert.js";
-import {
-  Invocation,
-  invocationInputs
-} from "#compiler/ir/invocation.js";
+import { Invocation, invocationInputs } from "#compiler/ir/invocation.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import {
   operationResult,
@@ -15,11 +12,12 @@ export type CallOperationArgs = Readonly<{
   invocation: Invocation;
 }>;
 
-export type CallOperation = OperationNodeBase & Readonly<{
-  kind: "call";
-  invocation: Invocation;
-  output?: ValueId;
-}>;
+export type CallOperation = OperationNodeBase &
+  Readonly<{
+    kind: "call";
+    invocation: Invocation;
+    output?: ValueId;
+  }>;
 
 export const callOperation: OperationDefinition<
   CallOperationArgs,
@@ -49,12 +47,15 @@ export const callOperation: OperationDefinition<
   },
   describe: (operation) => {
     const resultType = operation.invocation.target.type.results[0];
-    const productions = resultType === undefined || operation.output === undefined
-      ? []
-      : [{
-          result: operationResult(resultType),
-          output: operation.output
-        }];
+    const productions =
+      resultType === undefined || operation.output === undefined
+        ? []
+        : [
+            {
+              result: operationResult(resultType),
+              output: operation.output
+            }
+          ];
 
     return {
       inputs: invocationInputs(operation.invocation),

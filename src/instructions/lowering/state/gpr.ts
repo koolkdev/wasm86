@@ -4,10 +4,7 @@ import type { ResourceEffect } from "#compiler/ir/resource.js";
 import type { OperandWidth, RegName } from "#core/types.js";
 import { registerAlias } from "#core/registers.js";
 import { gprChannel, type GprChannel } from "#core/state/channels.js";
-import type {
-  BoundStateAccess,
-  StateAccess
-} from "#core/state/access.js";
+import type { BoundStateAccess, StateAccess } from "#core/state/access.js";
 import { covers, mayAlias } from "#compiler/ir/effects.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { PendingBuffer, type PendingBufferSnapshot, type StatePathKind } from "./pending-buffer.js";
@@ -31,10 +28,7 @@ export class GprState {
   readonly #writeObserver: StateWriteObserver | undefined;
   #unrestorableStore = false;
 
-  constructor(
-    stateAccess: StateAccess,
-    writeObserver?: StateWriteObserver
-  ) {
+  constructor(stateAccess: StateAccess, writeObserver?: StateWriteObserver) {
     this.#stateAccess = stateAccess;
     this.#writeObserver = writeObserver;
   }
@@ -46,7 +40,8 @@ export class GprState {
     options: GprReadOptions = {}
   ): ValueId {
     const channel = this.#channel(reg);
-    const readOptions = typeof accessWidthOrOptions === "number" ? options : accessWidthOrOptions ?? {};
+    const readOptions =
+      typeof accessWidthOrOptions === "number" ? options : (accessWidthOrOptions ?? {});
 
     if (typeof accessWidthOrOptions === "number") {
       this.#assertAccessWidth("get from", channel, accessWidthOrOptions);
@@ -77,10 +72,7 @@ export class GprState {
 
     this.#flushDirty(access);
 
-    return access.read(
-      access.dynamicGpr(index, width),
-      signed ? { kind: "signed" } : undefined
-    );
+    return access.read(access.dynamicGpr(index, width), signed ? { kind: "signed" } : undefined);
   }
 
   writeDynamic(
@@ -105,11 +97,7 @@ export class GprState {
     return this.#readChannel(access, channel, options);
   }
 
-  writeChannel(
-    access: BoundStateAccess,
-    channel: GprChannel,
-    value: ValueId
-  ): void {
+  writeChannel(access: BoundStateAccess, channel: GprChannel, value: ValueId): void {
     this.#writeChannel(access, channel, value);
   }
 
@@ -144,11 +132,7 @@ export class GprState {
     return output;
   }
 
-  #writeChannel(
-    access: BoundStateAccess,
-    channel: GprChannel,
-    value: ValueId
-  ): void {
+  #writeChannel(access: BoundStateAccess, channel: GprChannel, value: ValueId): void {
     this.#writeObserver?.recordStateWrite(channel);
 
     for (const [other] of this.#buffer.entries()) {
@@ -229,10 +213,7 @@ export class GprState {
     this.#unrestorableStore = snapshot.unrestorableStore;
   }
 
-  flushesForPath(
-    access: BoundStateAccess,
-    path: StatePathKind
-  ): readonly ResourceWriteArgs[] {
+  flushesForPath(access: BoundStateAccess, path: StatePathKind): readonly ResourceWriteArgs[] {
     if (path === "fault") {
       assert(
         !this.#unrestorableStore,
@@ -240,16 +221,12 @@ export class GprState {
       );
     }
 
-    return this.#buffer.entriesForPath(path).map(([channel, value]) =>
-      this.writeback(access, channel, value)
-    );
+    return this.#buffer
+      .entriesForPath(path)
+      .map(([channel, value]) => this.writeback(access, channel, value));
   }
 
-  writeback(
-    access: BoundStateAccess,
-    channel: GprChannel,
-    value: ValueId
-  ): ResourceWriteArgs {
+  writeback(access: BoundStateAccess, channel: GprChannel, value: ValueId): ResourceWriteArgs {
     return {
       destination: access.gprChannel(channel),
       value
@@ -285,22 +262,11 @@ export class GprState {
     this.#invalidateReadsOverlapping(channel);
   }
 
-  #readState(
-    access: BoundStateAccess,
-    channel: GprChannel,
-    signed: boolean
-  ): ValueId {
-    return access.read(
-      access.gprChannel(channel),
-      signed ? { kind: "signed" } : undefined
-    );
+  #readState(access: BoundStateAccess, channel: GprChannel, signed: boolean): ValueId {
+    return access.read(access.gprChannel(channel), signed ? { kind: "signed" } : undefined);
   }
 
-  #writeState(
-    access: BoundStateAccess,
-    channel: GprChannel,
-    value: ValueId
-  ): void {
+  #writeState(access: BoundStateAccess, channel: GprChannel, value: ValueId): void {
     access.write(access.gprChannel(channel), value);
   }
 
@@ -325,17 +291,11 @@ export class GprState {
   }
 
   #overlaps(a: GprChannel, b: GprChannel): boolean {
-    return mayAlias(
-      this.#stateAccess.gprEffect(a),
-      this.#stateAccess.gprEffect(b)
-    );
+    return mayAlias(this.#stateAccess.gprEffect(a), this.#stateAccess.gprEffect(b));
   }
 
   #covers(covering: GprChannel, covered: GprChannel): boolean {
-    return covers(
-      this.#stateAccess.gprEffect(covering),
-      this.#stateAccess.gprEffect(covered)
-    );
+    return covers(this.#stateAccess.gprEffect(covering), this.#stateAccess.gprEffect(covered));
   }
 
   #channel(reg: RegName | GprChannel): GprChannel {
@@ -374,9 +334,7 @@ export class GprState {
       return value;
     }
 
-    return signed
-      ? access.values.extend(bits, value, true)
-      : access.values.truncate(bits, value);
+    return signed ? access.values.extend(bits, value, true) : access.values.truncate(bits, value);
   }
 }
 

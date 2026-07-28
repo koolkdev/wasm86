@@ -62,11 +62,14 @@
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "format": "prettier --write src test package.json package-lock.json tsconfig.json .prettierrc.json",
+    "format:check": "prettier --check src test package.json package-lock.json tsconfig.json .prettierrc.json",
     "typecheck": "tsc --noEmit",
     "test": "npm run clean && tsc -p tsconfig.json && node --conditions=test --test 'dist/src/**/tests/*.test.js' 'dist/test/**/*.test.js' && node --test 'dist/test/production/*.prod.js'"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "prettier": "3.9.6",
     "typescript": "^6.0.3"
   }
 }

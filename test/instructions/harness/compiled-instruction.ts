@@ -18,25 +18,14 @@ import type {
   IsaDecodeReadResult,
   IsaDecodeReader
 } from "#instructions/decoder/types.js";
-import {
-  x86StatusFlags,
-  type X86StatusFlag
-} from "#core/flags/definitions.js";
-import {
-  staticInstructionLocation
-} from "#instructions/lowering/builder.js";
-import {
-  createInstructionLowerer
-} from "#instructions/lowering/lowerer.js";
+import { x86StatusFlags, type X86StatusFlag } from "#core/flags/definitions.js";
+import { staticInstructionLocation } from "#instructions/lowering/builder.js";
+import { createInstructionLowerer } from "#instructions/lowering/lowerer.js";
 import { staticOperandBinding } from "#instructions/lowering/static-binding.js";
 import type { InstructionTerminals } from "#instructions/lowering/terminal.js";
 import type { RunStop } from "#cpu/cpu.js";
 import { createCpuStateHostView } from "#cpu/host-view.js";
-import {
-  buildExit,
-  decodeExit,
-  exitLayout
-} from "#cpu/exit.js";
+import { buildExit, decodeExit, exitLayout } from "#cpu/exit.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import {
   cpuState,
@@ -56,17 +45,10 @@ import {
 } from "#test/support/cpu-state.js";
 import { createTestWasmMemories } from "#test/support/wasm-memories.js";
 
-const compiledInstructionExport = functionExportRef(
-  "test.compiled-instruction.entry-export"
-);
+const compiledInstructionExport = functionExportRef("test.compiled-instruction.entry-export");
 const compiledInstructionExportName = "run";
-const compiledInstructionDispatchRef = functionRef(
-  "test.compiled-instruction.dispatch"
-);
-const compiledInstructionDispatchStop = encodeVariant(
-  exitLayout,
-  instructionLimitExit()
-);
+const compiledInstructionDispatchRef = functionRef("test.compiled-instruction.dispatch");
+const compiledInstructionDispatchStop = encodeVariant(exitLayout, instructionLimitExit());
 
 export type CompiledInstructionMemoryPatch = Readonly<{
   address: number;
@@ -78,9 +60,10 @@ export type CompiledInstructionMemoryRange = Readonly<{
   byteLength: number;
 }>;
 
-export type CompiledInstructionMemorySnapshot = CompiledInstructionMemoryRange & Readonly<{
-  bytes: readonly number[];
-}>;
+export type CompiledInstructionMemorySnapshot = CompiledInstructionMemoryRange &
+  Readonly<{
+    bytes: readonly number[];
+  }>;
 
 export type RunCompiledInstructionsInput = Readonly<{
   bytes: readonly number[];
@@ -127,25 +110,27 @@ export async function runCompiledInstructions(
   const built = buildInstructionProgram(instructions);
   const program = compileProgram(built.program);
   const dispatchTargets: number[] = [];
-  const instance = instantiateCompiledProgram(
-    program,
-    {
-      memories: memories.programMemories,
-      functions: new Map([[
+  const instance = instantiateCompiledProgram(program, {
+    memories: memories.programMemories,
+    functions: new Map([
+      [
         built.dispatch.ref,
         (targetEip: number): bigint => {
           dispatchTargets.push(targetEip >>> 0);
           return compiledInstructionDispatchStop;
         }
-      ]])
-    }
-  );
+      ]
+    ])
+  });
   const entry = instance.functionExports.get(compiledInstructionExport);
 
   ok(typeof entry === "function", "compiled instruction entry export is missing");
   const encodedExit: unknown = entry();
 
-  ok(typeof encodedExit === "bigint", `compiled instruction returned ${typeof encodedExit}, expected bigint`);
+  ok(
+    typeof encodedExit === "bigint",
+    `compiled instruction returned ${typeof encodedExit}, expected bigint`
+  );
   const rawState = readWasmCpuStateSnapshot(stateView);
   const architecturalFlags = readArchitecturalStatusFlags(memories.cpuStateMemory);
   const state = {
@@ -160,11 +145,12 @@ export async function runCompiledInstructions(
     `compiled instruction dispatched ${dispatchTargets.length} times`
   );
   const dispatchedTarget = dispatchTargets[0];
-  const completion: CompiledInstructionCompletion = stop.kind === "instructionLimit"
-    ? dispatchedTarget === undefined
-      ? { kind: "completed", targetEip: state.eip }
-      : { kind: "dispatched", targetEip: dispatchedTarget }
-    : stop;
+  const completion: CompiledInstructionCompletion =
+    stop.kind === "instructionLimit"
+      ? dispatchedTarget === undefined
+        ? { kind: "completed", targetEip: state.eip }
+        : { kind: "dispatched", targetEip: dispatchedTarget }
+      : stop;
 
   return {
     completion,
@@ -179,9 +165,7 @@ export async function runCompiledInstructions(
 function readArchitecturalStatusFlags(
   memory: WebAssembly.Memory
 ): Readonly<Record<X86StatusFlag, 0 | 1>> {
-  const flags = createCpuStateHostView(
-    createLayoutHostView(memory, cpuState.layout)
-  ).flags;
+  const flags = createCpuStateHostView(createLayoutHostView(memory, cpuState.layout)).flags;
   const result = {} as Record<X86StatusFlag, 0 | 1>;
 
   for (const flag of x86StatusFlags) {
@@ -191,9 +175,7 @@ function readArchitecturalStatusFlags(
   return result;
 }
 
-function buildInstructionProgram(
-  instructions: readonly IsaDecodedInstruction[]
-) {
+function buildInstructionProgram(instructions: readonly IsaDecodedInstruction[]) {
   const program = new ProgramBuilder(testExecutionModel.resources);
   const instructionLowerer = createInstructionLowerer({
     stateAccess: cpuStateAccess,
@@ -211,38 +193,46 @@ function buildInstructionProgram(
     moduleName: programImportModuleName,
     name: "dispatch"
   });
-  const fallthrough = program.defineFunction({
-    ref: functionRef("test.compiled-instruction.fallthrough"),
-    type: dispatchType,
-    effects: noEffects
-  }, (fn) => {
-    fn.return([buildVariant(fn.values, exitLayout, instructionLimitExit())]);
-  });
-  const entry = program.defineFunction({
-    ref: functionRef("test.compiled-instruction.entry"),
-    type: entryType,
-    effects: compiledInstructionEffects
-  }, (fn) => {
-    const finalFallthrough = instructionLowerer.lower(
-      fn.region,
-      instructionFunctionTerminals(dispatch),
-      (builder) => {
-        for (const instruction of instructions) {
-          if (!builder.add(
-            instruction.spec.semantics,
-            instruction.operands.map(staticOperandBinding),
-            staticInstructionLocation(instruction.address, instruction.nextEip)
-          )) {
-            break;
+  const fallthrough = program.defineFunction(
+    {
+      ref: functionRef("test.compiled-instruction.fallthrough"),
+      type: dispatchType,
+      effects: noEffects
+    },
+    (fn) => {
+      fn.return([buildVariant(fn.values, exitLayout, instructionLimitExit())]);
+    }
+  );
+  const entry = program.defineFunction(
+    {
+      ref: functionRef("test.compiled-instruction.entry"),
+      type: entryType,
+      effects: compiledInstructionEffects
+    },
+    (fn) => {
+      const finalFallthrough = instructionLowerer.lower(
+        fn.region,
+        instructionFunctionTerminals(dispatch),
+        (builder) => {
+          for (const instruction of instructions) {
+            if (
+              !builder.add(
+                instruction.spec.semantics,
+                instruction.operands.map(staticOperandBinding),
+                staticInstructionLocation(instruction.address, instruction.nextEip)
+              )
+            ) {
+              break;
+            }
           }
         }
-      }
-    );
+      );
 
-    if (finalFallthrough !== undefined) {
-      fn.returnCall(fallthrough, [finalFallthrough]);
+      if (finalFallthrough !== undefined) {
+        fn.returnCall(fallthrough, [finalFallthrough]);
+      }
     }
-  });
+  );
 
   program.exportFunction({
     ref: compiledInstructionExport,
@@ -252,9 +242,7 @@ function buildInstructionProgram(
   return { program: program.finish(), dispatch };
 }
 
-function instructionFunctionTerminals(
-  dispatch: CallTarget
-): InstructionTerminals {
+function instructionFunctionTerminals(dispatch: CallTarget): InstructionTerminals {
   return {
     dispatch: (body, targetEip) => body.returnCall(dispatch, [targetEip]),
     returnExit: (body, result) => body.return([result])
@@ -275,7 +263,10 @@ const compiledInstructionEffects: StorageEffects = {
 class FiniteInstructionReader implements IsaDecodeReader {
   readonly #bytes: Uint8Array<ArrayBuffer>;
 
-  constructor(bytes: readonly number[], readonly baseAddress: number) {
+  constructor(
+    bytes: readonly number[],
+    readonly baseAddress: number
+  ) {
     this.#bytes = Uint8Array.from(bytes);
   }
 
@@ -334,7 +325,10 @@ function readMemoryRange(
     const address = range.address + index;
     const value = readBackingByte(memory, address);
 
-    ok(value !== undefined, `compiled instruction memory range is out of bounds at 0x${address.toString(16)}`);
+    ok(
+      value !== undefined,
+      `compiled instruction memory range is out of bounds at 0x${address.toString(16)}`
+    );
     bytes.push(value);
   }
 

@@ -1,8 +1,5 @@
 import type { ByteSink } from "./byte-sink.js";
-import {
-  type WasmBranchHint,
-  type WasmInstructionDescriptor
-} from "./instructions.js";
+import type { WasmBranchHint, WasmInstructionDescriptor } from "./instructions.js";
 
 type EncodedBranchHint = Readonly<{
   offset: number;
@@ -16,9 +13,7 @@ export type WasmInstructionWriter = Readonly<{
   ) => void;
 }>;
 
-export function createWasmInstructionWriter(
-  body: ByteSink
-): Readonly<{
+export function createWasmInstructionWriter(body: ByteSink): Readonly<{
   writer: WasmInstructionWriter;
   branchHints: readonly EncodedBranchHint[];
 }> {

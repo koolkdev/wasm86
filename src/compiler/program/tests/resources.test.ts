@@ -2,10 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { resourceRef } from "#compiler/ir/resource.js";
-import {
-  createProgramResources,
-  type MemoryImport
-} from "#compiler/program/resources.js";
+import { createProgramResources, type MemoryImport } from "#compiler/program/resources.js";
 
 test("program resources retain owner-provided memory imports", () => {
   const state = memoryImport("test.state", "state");
@@ -34,10 +31,7 @@ test("memory imports may reuse a field name in different modules", () => {
     moduleName: "second"
   };
 
-  deepStrictEqual(
-    createProgramResources([first, second]).memoryImports,
-    [first, second]
-  );
+  deepStrictEqual(createProgramResources([first, second]).memoryImports, [first, second]);
 });
 
 function memoryImport(id: string, name: string): MemoryImport {

@@ -1,9 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { StorageAccess } from "#compiler/ir/effects.js";
 import type { Control, ReturnControl } from "#compiler/ir/controls/index.js";
-import type {
-  Operation
-} from "#compiler/ir/operations/index.js";
+import type { Operation } from "#compiler/ir/operations/index.js";
 import { describeNode } from "#compiler/ir/node.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
@@ -51,10 +49,7 @@ class FunctionAnalyzer implements FunctionAnalysis {
   readonly #operations: OperationSite[] = [];
   readonly #operationSet = new Set<Operation>();
   readonly #invocations: InvocationSite[] = [];
-  readonly #operationByInvocationSite = new Map<
-    InvocationSite,
-    Operation | null
-  >();
+  readonly #operationByInvocationSite = new Map<InvocationSite, Operation | null>();
 
   constructor(fn: IrFunction) {
     this.#function = fn;
@@ -151,8 +146,10 @@ class FunctionAnalyzer implements FunctionAnalysis {
     const description = describeNode(operation);
 
     // An operation must execute when an output is used or it writes.
-    return description.outputs.some((output) => this.#useCounts[output] !== 0) ||
-      description.effects.writes.length !== 0;
+    return (
+      description.outputs.some((output) => this.#useCounts[output] !== 0) ||
+      description.effects.writes.length !== 0
+    );
   }
 
   invocationMustExecute(site: InvocationSite): boolean {
@@ -188,10 +185,7 @@ class FunctionAnalyzer implements FunctionAnalysis {
 
     this.#writesBySite.push(noWrites);
 
-    if (
-      region.result !== undefined &&
-      this.#function.values.isUnreachable(region.result)
-    ) {
+    if (region.result !== undefined && this.#function.values.isUnreachable(region.result)) {
       mandatoryResult = {
         value: region.result,
         consumedAt: endSite
@@ -233,10 +227,7 @@ class FunctionAnalyzer implements FunctionAnalysis {
       this.#recordControlOutput(outputs[0]!, node, site, regions, walked);
     }
 
-    return mergeWrites([
-      description.effects.writes,
-      ...walked.map((result) => result.writes)
-    ]);
+    return mergeWrites([description.effects.writes, ...walked.map((result) => result.writes)]);
   }
 
   #walkOperation(
@@ -284,11 +275,7 @@ class FunctionAnalyzer implements FunctionAnalysis {
     this.#operationByInvocationSite.set(invocationSite, null);
   }
 
-  #walkNestedRegion(
-    region: Region,
-    owner: SiteId,
-    isLoop = false
-  ): RegionWalkResult {
+  #walkNestedRegion(region: Region, owner: SiteId, isLoop = false): RegionWalkResult {
     this.#geometry.registerNested(region, owner, isLoop);
     return this.#walkRegion(region);
   }

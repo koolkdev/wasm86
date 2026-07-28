@@ -27,9 +27,20 @@ export type OperandSpec =
   | Readonly<{ kind: "opcode.reg"; type: RegOperandType }>
   | Readonly<{ kind: "implicit.reg"; reg: RegName; type: RegOperandType }>
   | Readonly<{ kind: "implicit.sreg"; reg: SegmentRegister }>
-  | Readonly<{ kind: "implicit.mem"; width: OperandWidth; base: Reg32; disp: number; segment?: SegmentRegister }>
+  | Readonly<{
+      kind: "implicit.mem";
+      width: OperandWidth;
+      base: Reg32;
+      disp: number;
+      segment?: SegmentRegister;
+    }>
   | Readonly<{ kind: "moffs"; width: OperandWidth }>
-  | Readonly<{ kind: "imm"; width: OperandWidth; semanticWidth?: OperandWidth; extension?: ImmediateExtension }>
+  | Readonly<{
+      kind: "imm";
+      width: OperandWidth;
+      semanticWidth?: OperandWidth;
+      extension?: ImmediateExtension;
+    }>
   | Readonly<{ kind: "rel"; width: 8 | 16 | 32 }>;
 
 export type ModRmMatch = Readonly<{
@@ -100,9 +111,7 @@ export function instructionReadsModRm(spec: InstructionSpec): boolean {
   return spec.modrm?.match !== undefined || (spec.operands ?? []).some(isModRmOperand);
 }
 
-export function expandInstructionSpec(
-  spec: InstructionSpec
-): readonly ExpandedInstructionSpec[] {
+export function expandInstructionSpec(spec: InstructionSpec): readonly ExpandedInstructionSpec[] {
   return expandOpcodePath(spec.opcode).map(({ bytes, lowBits }) => {
     if (lowBits === undefined) {
       return { spec, opcode: bytes };
@@ -135,7 +144,9 @@ export function expandOpcodePath(path: OpcodePath): readonly ExpandedOpcode[] {
 }
 
 function isModRmOperand(operand: OperandSpec): boolean {
-  return operand.kind === "modrm.reg" || operand.kind === "modrm.sreg" || operand.kind === "modrm.rm";
+  return (
+    operand.kind === "modrm.reg" || operand.kind === "modrm.sreg" || operand.kind === "modrm.rm"
+  );
 }
 
 function expandOpcodePart(part: OpcodePathPart): readonly ExpandedOpcodePart[] {

@@ -7,10 +7,7 @@ import {
   readWasmCpuStateSnapshot,
   writeWasmCpuStateSnapshot
 } from "#test/support/cpu-state.js";
-import {
-  instantiateInterpreter,
-  writeGuestBytes
-} from "./harness.js";
+import { instantiateInterpreter, writeGuestBytes } from "./harness.js";
 
 test("a zero instruction budget returns the limit without changing state", () => {
   const interpreter = instantiateInterpreter();
@@ -23,23 +20,28 @@ test("a zero instruction budget returns the limit without changing state", () =>
   writeWasmCpuStateSnapshot(interpreter.stateView, initialState);
 
   deepStrictEqual(interpreter.runFor(0), { kind: "instructionLimit" });
-  deepStrictEqual(
-    readWasmCpuStateSnapshot(interpreter.stateView),
-    initialState
-  );
+  deepStrictEqual(readWasmCpuStateSnapshot(interpreter.stateView), initialState);
 });
 
 test("the instruction deadline wraps with the u32 instruction count", () => {
   const interpreter = instantiateInterpreter();
 
-  writeWasmCpuStateSnapshot(interpreter.stateView, createWasmCpuStateSnapshot({
-    eip: startAddress,
-    instructionCount: 0xffff_fffe
-  }));
-  writeGuestBytes(interpreter.guestView, startAddress, [
-    0xb8, 0x01, 0x00, 0x00, 0x00,
-    0xbb, 0x02, 0x00, 0x00, 0x00
-  ]);
+  writeWasmCpuStateSnapshot(
+    interpreter.stateView,
+    createWasmCpuStateSnapshot({
+      eip: startAddress,
+      instructionCount: 0xffff_fffe
+    })
+  );
+  writeGuestBytes(
+    interpreter.guestView,
+    startAddress,
+    // prettier-ignore
+    [
+      0xb8, 0x01, 0x00, 0x00, 0x00,
+      0xbb, 0x02, 0x00, 0x00, 0x00
+    ]
+  );
 
   deepStrictEqual(interpreter.runFor(2), { kind: "instructionLimit" });
   const state = readWasmCpuStateSnapshot(interpreter.stateView);
@@ -53,15 +55,23 @@ test("the instruction deadline wraps with the u32 instruction count", () => {
 test("the run loop continues from a jump while its budget remains", () => {
   const interpreter = instantiateInterpreter();
 
-  writeWasmCpuStateSnapshot(interpreter.stateView, createWasmCpuStateSnapshot({
-    eip: startAddress,
-    instructionCount: 7
-  }));
-  writeGuestBytes(interpreter.guestView, startAddress, [
-    0xeb, 0x02,
-    0x00, 0x00,
-    0xb8, 0x78, 0x56, 0x34, 0x12
-  ]);
+  writeWasmCpuStateSnapshot(
+    interpreter.stateView,
+    createWasmCpuStateSnapshot({
+      eip: startAddress,
+      instructionCount: 7
+    })
+  );
+  writeGuestBytes(
+    interpreter.guestView,
+    startAddress,
+    // prettier-ignore
+    [
+      0xeb, 0x02,
+      0x00, 0x00,
+      0xb8, 0x78, 0x56, 0x34, 0x12
+    ]
+  );
 
   deepStrictEqual(interpreter.runFor(2), { kind: "instructionLimit" });
   const state = readWasmCpuStateSnapshot(interpreter.stateView);

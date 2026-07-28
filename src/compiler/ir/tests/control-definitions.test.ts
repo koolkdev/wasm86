@@ -1,15 +1,7 @@
-import {
-  deepStrictEqual,
-  notStrictEqual,
-  strictEqual,
-  throws
-} from "node:assert";
+import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import {
-  Invocation,
-  invocationInputs
-} from "#compiler/ir/invocation.js";
+import { Invocation, invocationInputs } from "#compiler/ir/invocation.js";
 import {
   controlCompletes,
   ifControl,
@@ -74,11 +66,13 @@ test("loops expose carried values and their loop-scoped body", () => {
   const description = describeNode(loop);
 
   deepStrictEqual(description.operands, [seed]);
-  deepStrictEqual(description.nestedBodies, [{
-    body,
-    role: "body",
-    scope: { kind: "loop", inputs: [loopInput] }
-  }]);
+  deepStrictEqual(description.nestedBodies, [
+    {
+      body,
+      role: "body",
+      scope: { kind: "loop", inputs: [loopInput] }
+    }
+  ]);
   const continuation = body.nodes[0];
 
   strictEqual(continuation?.kind, "loopContinue");
@@ -101,10 +95,12 @@ test("control-only switches share one body across all matches", () => {
 
   deepStrictEqual(description.operands, [selector]);
   deepStrictEqual(description.outputs, []);
-  deepStrictEqual(selection.cases, [{
-    matches: [1, 3, 5],
-    body: selected
-  }]);
+  deepStrictEqual(selection.cases, [
+    {
+      matches: [1, 3, 5],
+      body: selected
+    }
+  ]);
   deepStrictEqual(
     description.nestedBodies.map((entry) => entry.body),
     [selected, fallback]
@@ -118,22 +114,24 @@ test("switch definitions reject duplicate and out-of-range matches", () => {
   const defaultBody: Region = { nodes: [] };
 
   throws(
-    () => switchControl.create({
-      selector,
-      cases: [
-        { matches: [1], body },
-        { matches: [1], body }
-      ],
-      defaultBody
-    }),
+    () =>
+      switchControl.create({
+        selector,
+        cases: [
+          { matches: [1], body },
+          { matches: [1], body }
+        ],
+        defaultBody
+      }),
     /duplicate case match/
   );
   throws(
-    () => switchControl.create({
-      selector,
-      cases: [{ matches: [256], body }],
-      defaultBody
-    }),
+    () =>
+      switchControl.create({
+        selector,
+        cases: [{ matches: [256], body }],
+        defaultBody
+      }),
     /not an integer/
   );
 });
@@ -148,10 +146,7 @@ test("body mapping replaces owned bodies without changing switch matches", () =>
     cases: [{ matches: [2, 4], body: selected }],
     defaultBody: fallback
   });
-  const mapped = mapControlBodies(
-    selection,
-    (body) => body === selected ? replacement : body
-  );
+  const mapped = mapControlBodies(selection, (body) => (body === selected ? replacement : body));
 
   notStrictEqual(mapped, selection);
   strictEqual(mapped.kind, "switch");
@@ -168,30 +163,39 @@ test("structured controls complete only when every reachable arm completes", () 
     regionCompletes: (body: Region) => body === completed
   };
 
-  strictEqual(controlCompletes(
-    ifControl.create({
-      condition: values.const(1),
-      thenBody: completed,
-      elseBody: completed
-    }),
-    completion
-  ), true);
-  strictEqual(controlCompletes(
-    ifControl.create({
-      condition: values.const(1),
-      thenBody: completed,
-      elseBody: incomplete
-    }),
-    completion
-  ), false);
-  strictEqual(controlCompletes(
-    switchControl.create({
-      selector: values.const(0),
-      cases: [{ matches: [0], body: completed }],
-      defaultBody: completed
-    }),
-    completion
-  ), true);
+  strictEqual(
+    controlCompletes(
+      ifControl.create({
+        condition: values.const(1),
+        thenBody: completed,
+        elseBody: completed
+      }),
+      completion
+    ),
+    true
+  );
+  strictEqual(
+    controlCompletes(
+      ifControl.create({
+        condition: values.const(1),
+        thenBody: completed,
+        elseBody: incomplete
+      }),
+      completion
+    ),
+    false
+  );
+  strictEqual(
+    controlCompletes(
+      switchControl.create({
+        selector: values.const(0),
+        cases: [{ matches: [0], body: completed }],
+        defaultBody: completed
+      }),
+      completion
+    ),
+    true
+  );
 });
 
 test("return controls snapshot their result list", () => {
@@ -232,14 +236,13 @@ test("invocation returns expose their argument and callee effects", () => {
   });
   const description = describeNode(returned);
 
-  deepStrictEqual(invocationInputs(invocation), [{
-    value: argument,
-    type: "i32"
-  }]);
+  deepStrictEqual(invocationInputs(invocation), [
+    {
+      value: argument,
+      type: "i32"
+    }
+  ]);
   deepStrictEqual(description.operands, [argument]);
   deepStrictEqual(description.effects, target.effects);
-  strictEqual(controlCompletes(
-    returned,
-    { regionCompletes: () => false }
-  ), true);
+  strictEqual(controlCompletes(returned, { regionCompletes: () => false }), true);
 });

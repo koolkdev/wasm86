@@ -1,8 +1,5 @@
 import { ifControl } from "./if.js";
-import {
-  loopContinueControl,
-  loopControl
-} from "./loop.js";
+import { loopContinueControl, loopControl } from "./loop.js";
 import { returnControl } from "./return.js";
 import { switchControl } from "./switch.js";
 import type {
@@ -12,13 +9,7 @@ import type {
 } from "./definition.js";
 import type { Region } from "../region.js";
 
-export {
-  ifControl,
-  loopContinueControl,
-  loopControl,
-  returnControl,
-  switchControl
-};
+export { ifControl, loopContinueControl, loopControl, returnControl, switchControl };
 export type {
   BranchHint,
   ControlCompletionContext,
@@ -26,24 +17,10 @@ export type {
   ControlNodeBase,
   DerivedControlDescription
 } from "./definition.js";
-export type {
-  IfControl,
-  IfControlArgs
-} from "./if.js";
-export type {
-  LoopContinueControl,
-  LoopContinueControlArgs
-} from "./loop.js";
-export type {
-  LoopCarriedValue,
-  LoopControl,
-  LoopControlArgs
-} from "./loop.js";
-export type {
-  ReturnControl,
-  ReturnControlArgs,
-  ReturnSource
-} from "./return.js";
+export type { IfControl, IfControlArgs } from "./if.js";
+export type { LoopContinueControl, LoopContinueControlArgs } from "./loop.js";
+export type { LoopCarriedValue, LoopControl, LoopControlArgs } from "./loop.js";
+export type { ReturnControl, ReturnControlArgs, ReturnSource } from "./return.js";
 export {
   maxSwitchMatch,
   type SwitchCase,
@@ -59,14 +36,11 @@ const declaredControlDefinitions = {
   return: returnControl
 } as const;
 
-type DeclaredControlDefinition = (
-  typeof declaredControlDefinitions
-)[keyof typeof declaredControlDefinitions];
+type DeclaredControlDefinition =
+  (typeof declaredControlDefinitions)[keyof typeof declaredControlDefinitions];
 
 type ControlDefinitions = {
-  [
-    Definition in DeclaredControlDefinition as Definition["kind"]
-  ]: Definition;
+  [Definition in DeclaredControlDefinition as Definition["kind"]]: Definition;
 };
 
 const controlDefinitions: ControlDefinitions = declaredControlDefinitions;
@@ -74,9 +48,7 @@ const controlDefinitions: ControlDefinitions = declaredControlDefinitions;
 type ControlKind = keyof ControlDefinitions;
 
 type ControlsByKind = {
-  [Kind in ControlKind]: ReturnType<
-    ControlDefinitions[Kind]["create"]
-  >;
+  [Kind in ControlKind]: ReturnType<ControlDefinitions[Kind]["create"]>;
 };
 
 export type Control = ControlsByKind[ControlKind];
@@ -90,23 +62,15 @@ type ControlMechanisms = {
 
 const controlMechanisms: ControlMechanisms = controlDefinitions;
 
-export function describeControl(
-  control: Control
-): DerivedControlDescription {
+export function describeControl(control: Control): DerivedControlDescription {
   return describeControlKind(control.kind, control);
 }
 
-export function mapControlBodies(
-  control: Control,
-  map: (body: Region) => Region
-): Control {
+export function mapControlBodies(control: Control, map: (body: Region) => Region): Control {
   return mapControlBodiesKind(control.kind, control, map);
 }
 
-export function controlCompletes(
-  control: Control,
-  context: ControlCompletionContext
-): boolean {
+export function controlCompletes(control: Control, context: ControlCompletionContext): boolean {
   return controlKindCompletes(control.kind, control, context);
 }
 

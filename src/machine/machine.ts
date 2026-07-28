@@ -1,14 +1,8 @@
 import { wasmPagesForByteLength } from "#compiler/program/limits.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import { createCpu, type Cpu } from "#cpu/cpu.js";
-import {
-  createExecutionModel,
-  type ExecutionModel
-} from "#execution/model.js";
-import {
-  compileInterpreterProgram,
-  type CompiledInterpreter
-} from "#interpreter/program.js";
+import { createExecutionModel, type ExecutionModel } from "#execution/model.js";
+import { compileInterpreterProgram, type CompiledInterpreter } from "#interpreter/program.js";
 
 export type MachineOptions = Readonly<{
   memoryByteLength: number;
@@ -40,7 +34,7 @@ export function createMachine(options: MachineOptions): Machine {
   ) {
     throw new RangeError(
       `memoryByteLength must be a positive 4 KiB-aligned integer no greater than 4 GiB: ` +
-      memoryByteLength
+        memoryByteLength
     );
   }
 
@@ -52,8 +46,7 @@ export function createMachine(options: MachineOptions): Machine {
   const maximumPages = physical.ramImport.limits.maxPages;
 
   const memory = createWasmMemory(initialPages, maximumPages);
-  const { minPages, maxPages } =
-    machineMemoryDefinition.memoryImport.limits;
+  const { minPages, maxPages } = machineMemoryDefinition.memoryImport.limits;
   const machineMemory = createWasmMemory(minPages, maxPages);
   const boundMemory = memoryDefinition.bindHost({
     ram: memory,
@@ -90,13 +83,6 @@ function getInterpreterCompilation(): InterpreterCompilation {
   return interpreterCompilation;
 }
 
-function createWasmMemory(
-  initial: number,
-  maximum: number | undefined
-): WebAssembly.Memory {
-  return new WebAssembly.Memory(
-    maximum === undefined
-      ? { initial }
-      : { initial, maximum }
-  );
+function createWasmMemory(initial: number, maximum: number | undefined): WebAssembly.Memory {
+  return new WebAssembly.Memory(maximum === undefined ? { initial } : { initial, maximum });
 }

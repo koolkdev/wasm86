@@ -2,11 +2,7 @@ import { assert } from "#common/assert.js";
 import type { IntegerWidth } from "./types.js";
 import { binaryValue, type BinaryOperator } from "./binary.js";
 import type { ValueBuilder } from "./builder.js";
-import {
-  compareIsSigned,
-  comparisonValue,
-  type CompareOperator
-} from "./comparison.js";
+import { compareIsSigned, comparisonValue, type CompareOperator } from "./comparison.js";
 import {
   type ValueBoundsContext,
   type ValueCaptureMode,
@@ -27,12 +23,7 @@ import { unaryValue, type UnaryOperator } from "./unary.js";
 import { extendValue } from "./extend.js";
 import { truncateValue } from "./truncate.js";
 import { valueId } from "./id.js";
-import {
-  type ValueId,
-  type ValueInput,
-  type ValueType,
-  type WidthBounds
-} from "./types.js";
+import { type ValueId, type ValueInput, type ValueType, type WidthBounds } from "./types.js";
 import { unboundedWidthBounds } from "./width-bounds.js";
 
 type AnyValueDefinition =
@@ -76,9 +67,7 @@ class StoredValueEntry<Args, Node extends ValueNode> implements StoredValue {
     private readonly intrinsicMayTrap: boolean,
     private readonly nonTrapping: boolean
   ) {
-    this.#children = inputs.length === 0
-      ? noChildren
-      : inputs.map((input) => input.value);
+    this.#children = inputs.length === 0 ? noChildren : inputs.map((input) => input.value);
   }
 
   children(): readonly ValueId[] {
@@ -393,14 +382,7 @@ export class ValueTable implements ValueBuilder {
       }
     }
 
-    return this.#intern(
-      this.#scopedInterning.table,
-      definition,
-      node,
-      inputs,
-      key,
-      initialBounds
-    );
+    return this.#intern(this.#scopedInterning.table, definition, node, inputs, key, initialBounds);
   }
 
   #intern<Args, Node extends ValueNode>(
@@ -454,13 +436,7 @@ export class ValueTable implements ValueBuilder {
     const mayTrap = definition.mayTrap?.(node, this.#foldContext) ?? false;
     const nonTrapping = !mayTrap && inputs.every((input) => this.isNonTrapping(input.value));
 
-    this.#arena.values.push(new StoredValueEntry(
-      definition,
-      node,
-      inputs,
-      mayTrap,
-      nonTrapping
-    ));
+    this.#arena.values.push(new StoredValueEntry(definition, node, inputs, mayTrap, nonTrapping));
     this.#arena.widthBounds.push(initialBounds);
     return id;
   }
@@ -490,25 +466,19 @@ function internNode(): InternNode {
 
 function cloneInternNode(source: InternNode): InternNode {
   return {
-    children: new Map(
-      [...source.children].map(([key, child]) => [key, cloneInternNode(child)])
-    ),
+    children: new Map([...source.children].map(([key, child]) => [key, cloneInternNode(child)])),
     value: source.value
   };
 }
 
 function cloneInternTable(source: InternTable): InternTable {
-  return new Map(
-    [...source].map(([definition, root]) => [definition, cloneInternNode(root)])
-  );
+  return new Map([...source].map(([definition, root]) => [definition, cloneInternNode(root)]));
 }
 
 function cloneScopedInterning(source: ScopedInterning): ScopedInterning {
   return {
     table: cloneInternTable(source.table),
-    ...(source.parent === undefined
-      ? {}
-      : { parent: cloneScopedInterning(source.parent) })
+    ...(source.parent === undefined ? {} : { parent: cloneScopedInterning(source.parent) })
   };
 }
 

@@ -1,9 +1,6 @@
 import type { Operation } from "#compiler/ir/operations/index.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import {
-  controlCompletes,
-  type Control
-} from "#compiler/ir/controls/index.js";
+import { controlCompletes, type Control } from "#compiler/ir/controls/index.js";
 
 export type RegionNode = Operation | Control;
 
@@ -17,6 +14,5 @@ export type Region = Readonly<{
 export function regionCompletes(body: Region): boolean {
   const last = body.nodes[body.nodes.length - 1];
 
-  return last?.category === "control" &&
-    controlCompletes(last, { regionCompletes });
+  return last?.category === "control" && controlCompletes(last, { regionCompletes });
 }

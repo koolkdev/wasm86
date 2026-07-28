@@ -182,14 +182,18 @@ const movSegmentCases = [
       gsSelector: 0x5555,
       gsBase: 0x3000
     },
-    memoryPatches: [{
-      address: guestMemoryMinimumByteLength - 2,
-      bytes: [0xef, 0xbe]
-    }],
-    expectedMemory: [{
-      address: guestMemoryMinimumByteLength - 2,
-      bytes: [0xef, 0xbe]
-    }],
+    memoryPatches: [
+      {
+        address: guestMemoryMinimumByteLength - 2,
+        bytes: [0xef, 0xbe]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: guestMemoryMinimumByteLength - 2,
+        bytes: [0xef, 0xbe]
+      }
+    ],
     expectedCompletion: {
       kind: "segmentLoad",
       segment: "gs",
@@ -206,14 +210,18 @@ const movSegmentCases = [
       fsSelector: 0x4444,
       fsBase: 0x2000
     },
-    memoryPatches: [{
-      address: guestMemoryMinimumByteLength - 1,
-      bytes: [0x7a]
-    }],
-    expectedMemory: [{
-      address: guestMemoryMinimumByteLength - 1,
-      bytes: [0x7a]
-    }],
+    memoryPatches: [
+      {
+        address: guestMemoryMinimumByteLength - 1,
+        bytes: [0x7a]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: guestMemoryMinimumByteLength - 1,
+        bytes: [0x7a]
+      }
+    ],
     expectedCompletion: {
       kind: "cpuException",
       exception: {
@@ -343,14 +351,18 @@ const popSegmentBoundaryCases = [
     },
     expectedEip: startAddress,
     instructionCount: 0,
-    memoryPatches: [{
-      address: guestMemoryMinimumByteLength - 4,
-      bytes: [0x68, 0x24, 0xaa, 0xbb]
-    }],
-    expectedMemory: [{
-      address: guestMemoryMinimumByteLength - 4,
-      bytes: [0x68, 0x24, 0xaa, 0xbb]
-    }]
+    memoryPatches: [
+      {
+        address: guestMemoryMinimumByteLength - 4,
+        bytes: [0x68, 0x24, 0xaa, 0xbb]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: guestMemoryMinimumByteLength - 4,
+        bytes: [0x68, 0x24, 0xaa, 0xbb]
+      }
+    ]
   },
   {
     name: "66 POP GS word cell succeeds at the last valid word",
@@ -368,14 +380,18 @@ const popSegmentBoundaryCases = [
     },
     expectedEip: startAddress,
     instructionCount: 0,
-    memoryPatches: [{
-      address: guestMemoryMinimumByteLength - 2,
-      bytes: [0x57, 0x13]
-    }],
-    expectedMemory: [{
-      address: guestMemoryMinimumByteLength - 2,
-      bytes: [0x57, 0x13]
-    }]
+    memoryPatches: [
+      {
+        address: guestMemoryMinimumByteLength - 2,
+        bytes: [0x57, 0x13]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: guestMemoryMinimumByteLength - 2,
+        bytes: [0x57, 0x13]
+      }
+    ]
   },
   {
     name: "POP DS dword cell faults on a trailing partial read",
@@ -395,14 +411,18 @@ const popSegmentBoundaryCases = [
     },
     expectedEip: startAddress,
     instructionCount: 0,
-    memoryPatches: [{
-      address: guestMemoryMinimumByteLength - 2,
-      bytes: [0x34, 0x12]
-    }],
-    expectedMemory: [{
-      address: guestMemoryMinimumByteLength - 2,
-      bytes: [0x34, 0x12]
-    }]
+    memoryPatches: [
+      {
+        address: guestMemoryMinimumByteLength - 2,
+        bytes: [0x34, 0x12]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: guestMemoryMinimumByteLength - 2,
+        bytes: [0x34, 0x12]
+      }
+    ]
   },
   {
     name: "66 POP ES word cell faults on a trailing partial read",
@@ -422,14 +442,18 @@ const popSegmentBoundaryCases = [
     },
     expectedEip: startAddress,
     instructionCount: 0,
-    memoryPatches: [{
-      address: guestMemoryMinimumByteLength - 1,
-      bytes: [0x34]
-    }],
-    expectedMemory: [{
-      address: guestMemoryMinimumByteLength - 1,
-      bytes: [0x34]
-    }]
+    memoryPatches: [
+      {
+        address: guestMemoryMinimumByteLength - 1,
+        bytes: [0x34]
+      }
+    ],
+    expectedMemory: [
+      {
+        address: guestMemoryMinimumByteLength - 1,
+        bytes: [0x34]
+      }
+    ]
   }
 ] as const satisfies readonly InstructionCase[];
 
@@ -440,10 +464,5 @@ for (const entry of popSegmentBoundaryCases) {
 }
 
 function disp32(value: number): readonly number[] {
-  return [
-    value & 0xff,
-    (value >>> 8) & 0xff,
-    (value >>> 16) & 0xff,
-    (value >>> 24) & 0xff
-  ];
+  return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
 }

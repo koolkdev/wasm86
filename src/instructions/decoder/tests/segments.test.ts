@@ -53,12 +53,8 @@ test("memory operands select DS or SS from their encoded base", () => {
 });
 
 test("segment overrides replace the default and compose with operand-size prefixes", () => {
-  const overriddenDefaultResult = decodeBytes([
-    0x64, 0x8b, 0x45, 0x00
-  ]);
-  const operandSizeFirstResult = decodeBytes([
-    0x66, 0x65, 0x8b, 0x03
-  ]);
+  const overriddenDefaultResult = decodeBytes([0x64, 0x8b, 0x45, 0x00]);
+  const operandSizeFirstResult = decodeBytes([0x66, 0x65, 0x8b, 0x03]);
 
   strictEqual(overriddenDefaultResult.kind, "instruction");
   strictEqual(operandSizeFirstResult.kind, "instruction");
@@ -87,16 +83,11 @@ test("segment overrides replace the default and compose with operand-size prefix
 
 test("the last segment override wins and also applies to moffs", () => {
   const repeatedResult = decodeBytes([0x64, 0x65, 0x8b, 0x03]);
-  const moffsResult = decodeBytes([
-    0x64, 0xa1, 0x78, 0x56, 0x34, 0x12
-  ]);
+  const moffsResult = decodeBytes([0x64, 0xa1, 0x78, 0x56, 0x34, 0x12]);
 
   strictEqual(repeatedResult.kind, "instruction");
   strictEqual(moffsResult.kind, "instruction");
-  if (
-    repeatedResult.kind !== "instruction" ||
-    moffsResult.kind !== "instruction"
-  ) {
+  if (repeatedResult.kind !== "instruction" || moffsResult.kind !== "instruction") {
     return;
   }
 
@@ -106,10 +97,7 @@ test("the last segment override wins and also applies to moffs", () => {
   strictEqual(repeated.operands[1]?.kind, "mem");
   strictEqual(moffs.operands[1]?.kind, "mem");
 
-  if (
-    repeated.operands[1]?.kind === "mem" &&
-    moffs.operands[1]?.kind === "mem"
-  ) {
+  if (repeated.operands[1]?.kind === "mem" && moffs.operands[1]?.kind === "mem") {
     strictEqual(repeated.operands[1].segment, "gs");
     deepStrictEqual(moffs.operands[1], {
       kind: "mem",

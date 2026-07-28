@@ -33,31 +33,19 @@ export function movToSregSemantic(): SemanticTemplate {
     const csLoad = segmentTargetIsCs(v, s.segment(dst));
 
     if (csLoad !== undefined) {
-      s.if(
-        csLoad,
-        (failure) => failure.cpuException(invalidOpcode()),
-        "unlikely"
-      );
+      s.if(csLoad, (failure) => failure.cpuException(invalidOpcode()), "unlikely");
     }
 
     s.write(dst, s.read(src, { width: 16 }), { width: 16 });
   };
 }
 
-function segmentTargetIsCs(
-  v: ValueBuilder,
-  segment: SegmentRef
-): Value | undefined {
+function segmentTargetIsCs(v: ValueBuilder, segment: SegmentRef): Value | undefined {
   switch (segment.kind) {
     case "static":
       return segment.reg === "cs" ? v.const(1) : undefined;
     case "dynamic":
-      return v.compare(
-        32,
-        "eq",
-        segment.index,
-        v.const(segmentRegisterIndex("cs"))
-      );
+      return v.compare(32, "eq", segment.index, v.const(segmentRegisterIndex("cs")));
   }
 }
 

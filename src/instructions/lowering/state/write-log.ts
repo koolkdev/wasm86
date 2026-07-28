@@ -55,7 +55,9 @@ export class StateWriteLog implements StateWriteObserver {
     return this.writtenChannelsSince(checkpoint);
   }
 
-  writtenChannelsSince(checkpoint: StateWriteObserverCheckpoint): readonly InstructionStateChannel[] {
+  writtenChannelsSince(
+    checkpoint: StateWriteObserverCheckpoint
+  ): readonly InstructionStateChannel[] {
     return [
       ...this.#gprWrites.slice(checkpoint.gprWrites),
       ...this.#statusFlagWritesSince(checkpoint),
@@ -63,13 +65,11 @@ export class StateWriteLog implements StateWriteObserver {
     ];
   }
 
-  #statusFlagWritesSince(checkpoint: StateWriteObserverCheckpoint): readonly InstructionStateChannel[] {
+  #statusFlagWritesSince(
+    checkpoint: StateWriteObserverCheckpoint
+  ): readonly InstructionStateChannel[] {
     return this.#statusFlagSources === checkpoint.statusFlagSources
       ? []
-      : [
-          flagStateFields.lazyKind,
-          flagStateFields.lazyA,
-          flagStateFields.lazyB
-        ];
+      : [flagStateFields.lazyKind, flagStateFields.lazyA, flagStateFields.lazyB];
   }
 }

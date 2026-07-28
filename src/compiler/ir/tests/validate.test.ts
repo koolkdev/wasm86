@@ -10,11 +10,7 @@ import {
   switchControl,
   type SwitchControlArgs
 } from "#compiler/ir/controls/index.js";
-import {
-  functionType,
-  type FunctionGraph,
-  type IrFunction
-} from "#compiler/ir/function.js";
+import { functionType, type FunctionGraph, type IrFunction } from "#compiler/ir/function.js";
 import { Invocation } from "#compiler/ir/invocation.js";
 import { variableRead, variableWrite } from "#compiler/ir/operations/variables.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";
@@ -33,24 +29,14 @@ import {
 } from "#compiler/ir/resource.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import type {
-  IntegerWidth,
-  ValueId,
-  ValueType
-} from "#compiler/ir/values/types.js";
+import type { IntegerWidth, ValueId, ValueType } from "#compiler/ir/values/types.js";
 import { signExtended } from "#compiler/ir/values/width-bounds.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
-import {
-  resourceReadNode,
-  resourceWriteNode
-} from "#test/support/storage-operations.js";
+import { resourceReadNode, resourceWriteNode } from "#test/support/storage-operations.js";
 
 const validationResource = resourceRef("test.validation-resource");
 
-function entryBlock(
-  values: ValueTable,
-  nodes: readonly RegionNode[]
-): FunctionGraph {
+function entryBlock(values: ValueTable, nodes: readonly RegionNode[]): FunctionGraph {
   return { values, body: { nodes } };
 }
 
@@ -60,10 +46,7 @@ function exitReturn(values: ValueTable): RegionNode {
   });
 }
 
-function validateFunctionBlock(
-  block: FunctionGraph,
-  parameters: readonly ValueId[] = []
-): void {
+function validateFunctionBlock(block: FunctionGraph, parameters: readonly ValueId[] = []): void {
   validateIrFunction({
     ...block,
     type: functionType(
@@ -95,13 +78,9 @@ function resourceOperand(
   };
 }
 
-function allocateOutput(
-  values: ValueTable
-): (result: OperationResult) => ValueId {
+function allocateOutput(values: ValueTable): (result: OperationResult) => ValueId {
   return (result) =>
-    result.type === "i64"
-      ? values.addNodeOutput64()
-      : values.addNodeOutput(result.bounds);
+    result.type === "i64" ? values.addNodeOutput64() : values.addNodeOutput(result.bounds);
 }
 
 function blockWithResourceOperation(
@@ -126,19 +105,14 @@ function testFunctionDefinition(
 }
 
 function switchBlock(
-  buildOverrides:
-    | Partial<SwitchControlArgs>
-    | ((values: ValueTable) => Partial<SwitchControlArgs>)
+  buildOverrides: Partial<SwitchControlArgs> | ((values: ValueTable) => Partial<SwitchControlArgs>)
 ): FunctionGraph {
   const values = new ValueTable();
   const selector = values.const(0);
   const first = values.const(1);
   const second = values.const(2);
   const fallback = values.const(3);
-  const overrides =
-    typeof buildOverrides === "function"
-      ? buildOverrides(values)
-      : buildOverrides;
+  const overrides = typeof buildOverrides === "function" ? buildOverrides(values) : buildOverrides;
   const selection = switchControl.create({
     selector,
     output: values.addNodeOutput(),
@@ -155,11 +129,7 @@ function switchBlock(
 
 test("a returned invocation must match the enclosing result shape", () => {
   const values = new ValueTable();
-  const target = testFunctionDefinition(
-    "validation.return-result",
-    [],
-    ["i64"]
-  );
+  const target = testFunctionDefinition("validation.return-result", [], ["i64"]);
   const fn: IrFunction = {
     type: functionType([], ["i32"]),
     parameters: [],
@@ -176,10 +146,7 @@ test("a returned invocation must match the enclosing result shape", () => {
     }
   };
 
-  throws(
-    () => validateIrFunction(fn),
-    /invocation results do not match/
-  );
+  throws(() => validateIrFunction(fn), /invocation results do not match/);
 });
 
 test("a terminal control must be the final node in its body", () => {
@@ -188,10 +155,7 @@ test("a terminal control must be the final node in its body", () => {
   throws(
     () =>
       validateFunctionBlock(
-        entryBlock(values, [
-          exitReturn(values),
-          resourceWriteNode(values, 0, values.const(1))
-        ])
+        entryBlock(values, [exitReturn(values), resourceWriteNode(values, 0, values.const(1))])
       ),
     /nodes after its terminal return/
   );
@@ -202,11 +166,7 @@ test("the root body must complete", () => {
 
   throws(
     () =>
-      validateFunctionBlock(
-        entryBlock(values, [
-          resourceWriteNode(values, 0, values.const(1))
-        ])
-      ),
+      validateFunctionBlock(entryBlock(values, [resourceWriteNode(values, 0, values.const(1))])),
     /root body does not complete/
   );
 });
@@ -234,11 +194,7 @@ test("valid narrow resource operations and conservative slices validate", () => 
     value
   });
 
-  doesNotThrow(() =>
-    validateFunctionBlock(
-      entryBlock(values, [read, write, exitReturn(values)])
-    )
-  );
+  doesNotThrow(() => validateFunctionBlock(entryBlock(values, [read, write, exitReturn(values)])));
 });
 
 test("a resource slice must contain its transfer", () => {
@@ -259,10 +215,7 @@ test("a resource slice must contain its transfer", () => {
   );
 
   throws(
-    () =>
-      validateFunctionBlock(
-        blockWithResourceOperation(values, operation)
-      ),
+    () => validateFunctionBlock(blockWithResourceOperation(values, operation)),
     /must contain its 32-bit transfer/
   );
 });
@@ -299,10 +252,7 @@ test("a variable read must follow its seed", () => {
   });
 
   throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [read, seedNode, exitReturn(values)])
-      ),
+    () => validateFunctionBlock(entryBlock(values, [read, seedNode, exitReturn(values)])),
     /before its seed/
   );
 });
@@ -323,10 +273,7 @@ test("a variable has one seed in a function graph", () => {
   });
 
   throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [first, second, exitReturn(values)])
-      ),
+    () => validateFunctionBlock(entryBlock(values, [first, second, exitReturn(values)])),
     /seeds the same variable more than once/
   );
 });
@@ -338,10 +285,7 @@ test("a variable access must have a seed in the same function graph", () => {
   throws(
     () =>
       validateFunctionBlock(
-        entryBlock(values, [
-          variableReadNode(values.addNodeOutput(), variable),
-          exitReturn(values)
-        ])
+        entryBlock(values, [variableReadNode(values.addNodeOutput(), variable), exitReturn(values)])
       ),
     /variable with no seed/
   );
@@ -383,9 +327,7 @@ test("loopContinue belongs to a loop and aligns with its carried inputs", () => 
   throws(
     () =>
       validateFunctionBlock(
-        entryBlock(outsideValues, [
-          loopContinueControl.create({ updates: [] })
-        ])
+        entryBlock(outsideValues, [loopContinueControl.create({ updates: [] })])
       ),
     /outside any loop body/
   );
@@ -401,10 +343,7 @@ test("loopContinue belongs to a loop and aligns with its carried inputs", () => 
   });
 
   throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [loop, exitReturn(values)])
-      ),
+    () => validateFunctionBlock(entryBlock(values, [loop, exitReturn(values)])),
     /updates do not align/
   );
 });
@@ -421,11 +360,7 @@ test("a loop input is scoped to one owning loop body", () => {
   throws(
     () =>
       validateFunctionBlock(
-        entryBlock(values, [
-          first,
-          resourceWriteNode(values, 0, loopInput),
-          exitReturn(values)
-        ])
+        entryBlock(values, [first, resourceWriteNode(values, 0, loopInput), exitReturn(values)])
       ),
     /outside its owning loop body/
   );
@@ -436,10 +371,7 @@ test("a loop input is scoped to one owning loop body", () => {
   });
 
   throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [first, second, exitReturn(values)])
-      ),
+    () => validateFunctionBlock(entryBlock(values, [first, second, exitReturn(values)])),
     /reuses loop input/
   );
 });
@@ -449,10 +381,7 @@ test("every node output has exactly one producer", () => {
 
   missingValues.addNodeOutput();
   throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(missingValues, [exitReturn(missingValues)])
-      ),
+    () => validateFunctionBlock(entryBlock(missingValues, [exitReturn(missingValues)])),
     /has no producer/
   );
 
@@ -502,22 +431,10 @@ test("a producer must dominate same-body and sibling-body uses", () => {
           ifControl.create({
             condition,
             thenBody: {
-              nodes: [
-                resourceReadNode(
-                  siblingValues,
-                  siblingOutput,
-                  0
-                )
-              ]
+              nodes: [resourceReadNode(siblingValues, siblingOutput, 0)]
             },
             elseBody: {
-              nodes: [
-                resourceWriteNode(
-                  siblingValues,
-                  0,
-                  siblingOutput
-                )
-              ]
+              nodes: [resourceWriteNode(siblingValues, 0, siblingOutput)]
             }
           }),
           exitReturn(siblingValues)
@@ -557,10 +474,7 @@ test("a control output cannot depend on itself", () => {
   });
 
   throws(
-    () =>
-      validateFunctionBlock(
-        entryBlock(values, [selection, exitReturn(values)])
-      ),
+    () => validateFunctionBlock(entryBlock(values, [selection, exitReturn(values)])),
     /does not dominate/
   );
 });
@@ -605,11 +519,7 @@ test("a body-local producer can feed its body result", () => {
   const selector = values.const(0);
   const fallback = values.const(7);
   const armOutput = values.addNodeOutput();
-  const formula = values.binary(
-    "add",
-    armOutput,
-    values.const(1)
-  );
+  const formula = values.binary("add", armOutput, values.const(1));
   const selectionOutput = values.addNodeOutput();
 
   doesNotThrow(() =>

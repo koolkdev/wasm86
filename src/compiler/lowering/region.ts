@@ -1,10 +1,6 @@
 import type { IrFunction } from "#compiler/ir/function.js";
 import { describeNode } from "#compiler/ir/node.js";
-import {
-  regionCompletes,
-  type Region,
-  type RegionNode
-} from "#compiler/ir/region.js";
+import { regionCompletes, type Region, type RegionNode } from "#compiler/ir/region.js";
 import type { ModuleBindings } from "#compiler/module/bindings.js";
 import type { FunctionPlacement } from "#compiler/placement/place.js";
 import type { WasmLocalResolver } from "#compiler/encoder/function-body.js";
@@ -21,10 +17,7 @@ export type RegionEmitContext = Readonly<{
   resolveLocal: WasmLocalResolver;
 }>;
 
-export function emitFunctionRegions(
-  fn: IrFunction,
-  context: RegionEmitContext
-): void {
+export function emitFunctionRegions(fn: IrFunction, context: RegionEmitContext): void {
   const { body, bindings, placement, resolveLocal } = context;
   const { analysis, plan, index } = placement;
   const valueEmitter = new ValueEmitter({
@@ -44,11 +37,7 @@ export function emitFunctionRegions(
     emitBody
   });
 
-  function emitAtSite(
-    region: Region,
-    nodeIndex: number,
-    emit: () => void
-  ): void {
+  function emitAtSite(region: Region, nodeIndex: number, emit: () => void): void {
     const site = analysis.siteOf(region, nodeIndex);
 
     valueEmitter.withSite(site, emit);
@@ -64,10 +53,7 @@ export function emitFunctionRegions(
     // Required operations with no live result execute at their structural site.
     const { outputs } = describeNode(node);
 
-    if (
-      !outputs.some((output) => analysis.isLive(output)) &&
-      analysis.operationMustExecute(node)
-    ) {
+    if (!outputs.some((output) => analysis.isLive(output)) && analysis.operationMustExecute(node)) {
       emitOperation(body, bindings, valueEmitter, node);
       for (const _output of outputs) {
         body.write(wasmInstruction.parametric.drop);

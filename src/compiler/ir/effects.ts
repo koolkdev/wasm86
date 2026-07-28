@@ -1,9 +1,7 @@
 import type { VariableRef } from "#compiler/ir/variable.js";
 import type { ByteRange, ResourceEffect } from "./resource.js";
 
-export type StorageAccess =
-  | Readonly<{ space: "variable"; variable: VariableRef }>
-  | ResourceEffect;
+export type StorageAccess = Readonly<{ space: "variable"; variable: VariableRef }> | ResourceEffect;
 
 export type StorageEffects = Readonly<{
   reads: readonly StorageAccess[];
@@ -28,8 +26,7 @@ export function mayAlias(a: StorageAccess, b: StorageAccess): boolean {
 export function covers(covering: StorageAccess, covered: StorageAccess): boolean {
   switch (covering.space) {
     case "variable":
-      return covered.space === "variable" &&
-        covering.variable === covered.variable;
+      return covered.space === "variable" && covering.variable === covered.variable;
     case "resource":
       return covered.space === "resource" && resourceEffectCovers(covering, covered);
   }
@@ -42,10 +39,7 @@ function resourceEffectsMayAlias(a: ResourceEffect, b: ResourceEffect): boolean 
   return byteRangesMayAlias(a.range, b.range);
 }
 
-function resourceEffectCovers(
-  covering: ResourceEffect,
-  covered: ResourceEffect
-): boolean {
+function resourceEffectCovers(covering: ResourceEffect, covered: ResourceEffect): boolean {
   if (covering.resource !== covered.resource) {
     return false;
   }
@@ -117,6 +111,5 @@ function intervalContains(
   innerStart: number,
   innerByteLength: number
 ): boolean {
-  return outerStart <= innerStart &&
-    innerStart + innerByteLength <= outerStart + outerByteLength;
+  return outerStart <= innerStart && innerStart + innerByteLength <= outerStart + outerByteLength;
 }

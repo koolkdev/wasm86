@@ -28,9 +28,7 @@ export function layoutProgram(program: Program): ModuleLayout {
   const typeIndices = new Map<FunctionType, number>();
 
   for (const type of program.functionTypes) {
-    let index = types.findIndex((candidate) =>
-      functionTypesEqual(candidate, type)
-    );
+    let index = types.findIndex((candidate) => functionTypesEqual(candidate, type));
 
     if (index === -1) {
       index = types.length;
@@ -41,10 +39,9 @@ export function layoutProgram(program: Program): ModuleLayout {
 
   const functionIndices = new Map([
     ...program.functionImports.map((fn, index) => [fn.ref, index] as const),
-    ...program.functions.map((fn, index) => [
-      fn.ref,
-      program.functionImports.length + index
-    ] as const)
+    ...program.functions.map(
+      (fn, index) => [fn.ref, program.functionImports.length + index] as const
+    )
   ]);
   const functionExports = program.exports.map((exported): ModuleFunctionExport => {
     const functionIndex = functionIndices.get(exported.target);
@@ -64,28 +61,16 @@ export function layoutProgram(program: Program): ModuleLayout {
     types,
     typeIndices,
     functionIndices,
-    memoryIndices: new Map(
-      program.memoryImports.map((memory, index) => [memory.ref, index])
-    ),
-    tableIndices: new Map(
-      program.tables.map((table, index) => [table.ref, index])
-    ),
+    memoryIndices: new Map(program.memoryImports.map((memory, index) => [memory.ref, index])),
+    tableIndices: new Map(program.tables.map((table, index) => [table.ref, index])),
     functionExports
   };
 }
 
-function functionTypesEqual(
-  a: FunctionType,
-  b: FunctionType
-): boolean {
-  return valueTypesEqual(a.parameters, b.parameters) &&
-    valueTypesEqual(a.results, b.results);
+function functionTypesEqual(a: FunctionType, b: FunctionType): boolean {
+  return valueTypesEqual(a.parameters, b.parameters) && valueTypesEqual(a.results, b.results);
 }
 
-function valueTypesEqual<T>(
-  a: readonly T[],
-  b: readonly T[]
-): boolean {
-  return a.length === b.length &&
-    a.every((value, index) => value === b[index]);
+function valueTypesEqual<T>(a: readonly T[], b: readonly T[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }

@@ -51,7 +51,5 @@ function snapshotRegion(region: Region): Region {
     node.category === "operation" ? node : mapControlBodies(node, snapshotRegion)
   );
 
-  return region.result === undefined
-    ? { nodes }
-    : { nodes, result: region.result };
+  return region.result === undefined ? { nodes } : { nodes, result: region.result };
 }

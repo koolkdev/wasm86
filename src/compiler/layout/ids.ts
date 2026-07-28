@@ -8,10 +8,7 @@ export function assertId(id: string, kind: string): void {
 }
 
 export function assertScopedId(id: string, kind: string): void {
-  assert(
-    scopedIdPattern.test(id),
-    `${kind} must be a stable namespaced id: ${id}`
-  );
+  assert(scopedIdPattern.test(id), `${kind} must be a stable namespaced id: ${id}`);
 }
 
 export function compareIds(left: string, right: string): number {

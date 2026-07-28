@@ -64,24 +64,31 @@ function encodeIndirectCallModule(
   entryBody: (blockType: number, tableIndex: number) => EncodedWasmFunctionBody
 ): Uint8Array<ArrayBuffer> {
   return encodeTestModule({
-    functionTypes: [{
-      params: [wasmValueType.i32],
-      results: [wasmValueType.i64]
-    }],
-    tableImports: [{
-      moduleName: importNamespace,
-      name: tableImportName,
-      limits: { minElements: 1 }
-    }],
+    functionTypes: [
+      {
+        params: [wasmValueType.i32],
+        results: [wasmValueType.i64]
+      }
+    ],
+    tableImports: [
+      {
+        moduleName: importNamespace,
+        name: tableImportName,
+        limits: { minElements: 1 }
+      }
+    ],
     functions: [
       {
         typeIndex: 0,
-        body: encodeWasmFunctionBody({
-          parameterCount: 1,
-          localTypes: []
-        }, (writer) => {
-          writer.write(wasmInstruction.i64.const, forwardedResult);
-        })
+        body: encodeWasmFunctionBody(
+          {
+            parameterCount: 1,
+            localTypes: []
+          },
+          (writer) => {
+            writer.write(wasmInstruction.i64.const, forwardedResult);
+          }
+        )
       },
       { typeIndex: 0, body: entryBody(0, 0) }
     ],
@@ -92,33 +99,41 @@ function encodeIndirectCallModule(
   });
 }
 
-function returnCallIndirectEntryBody(blockType: number, tableIndex: number): EncodedWasmFunctionBody {
-  return encodeWasmFunctionBody({
-    parameterCount: 1,
-    localTypes: []
-  }, (writer) => {
-    writer.write(wasmInstruction.local.get, 0);
-    writer.write(wasmInstruction.i32.const, 0);
-    writer.write(
-      wasmInstruction.returnCall.indirect,
-      blockType,
-      tableIndex
-    );
-  });
+function returnCallIndirectEntryBody(
+  blockType: number,
+  tableIndex: number
+): EncodedWasmFunctionBody {
+  return encodeWasmFunctionBody(
+    {
+      parameterCount: 1,
+      localTypes: []
+    },
+    (writer) => {
+      writer.write(wasmInstruction.local.get, 0);
+      writer.write(wasmInstruction.i32.const, 0);
+      writer.write(wasmInstruction.returnCall.indirect, blockType, tableIndex);
+    }
+  );
 }
 
 function callIndirectEntryBody(blockType: number, tableIndex: number): EncodedWasmFunctionBody {
-  return encodeWasmFunctionBody({
-    parameterCount: 1,
-    localTypes: []
-  }, (writer) => {
-    writer.write(wasmInstruction.local.get, 0);
-    writer.write(wasmInstruction.i32.const, 0);
-    writer.write(wasmInstruction.call.indirect, blockType, tableIndex);
-  });
+  return encodeWasmFunctionBody(
+    {
+      parameterCount: 1,
+      localTypes: []
+    },
+    (writer) => {
+      writer.write(wasmInstruction.local.get, 0);
+      writer.write(wasmInstruction.i32.const, 0);
+      writer.write(wasmInstruction.call.indirect, blockType, tableIndex);
+    }
+  );
 }
 
-function exportedFunction(instance: WebAssembly.Instance, name: string): (...args: number[]) => unknown {
+function exportedFunction(
+  instance: WebAssembly.Instance,
+  name: string
+): (...args: number[]) => unknown {
   const value = instance.exports[name];
 
   if (typeof value !== "function") {

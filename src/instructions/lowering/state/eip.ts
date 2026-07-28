@@ -21,5 +21,4 @@ export class EipState {
   has(): boolean {
     return this.#state.has(coreStateFields.eip);
   }
-
 }

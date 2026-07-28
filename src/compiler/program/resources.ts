@@ -1,11 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { TableRef } from "#compiler/ir/refs.js";
-import {
-  maximumWasmMemoryPages,
-  type MemoryLimits,
-  type TableLimits
-} from "./limits.js";
+import { maximumWasmMemoryPages, type MemoryLimits, type TableLimits } from "./limits.js";
 
 export type MemoryImport = Readonly<{
   ref: ResourceRef;
@@ -25,9 +21,7 @@ export type ProgramResources = Readonly<{
   memoryImports: readonly MemoryImport[];
 }>;
 
-export function createProgramResources(
-  memoryImports: readonly MemoryImport[]
-): ProgramResources {
+export function createProgramResources(memoryImports: readonly MemoryImport[]): ProgramResources {
   const resourceRefs = new Set<ResourceRef>();
   const fieldNamesByModule = new Map<string, Set<string>>();
 
@@ -40,10 +34,7 @@ export function createProgramResources(
       memory.moduleName.length > 0,
       `memory ${memory.ref.id} has an empty external module name`
     );
-    assert(
-      memory.name.length > 0,
-      `memory ${memory.ref.id} has an empty external field name`
-    );
+    assert(memory.name.length > 0, `memory ${memory.ref.id} has an empty external field name`);
     const fieldNames = fieldNamesByModule.get(memory.moduleName);
 
     assert(

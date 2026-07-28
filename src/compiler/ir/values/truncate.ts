@@ -25,9 +25,7 @@ export const truncateValue: ValueDefinition<TruncateArgs, TruncateNode> = {
   widthBounds: (node, context) => {
     switch (node.inputType) {
       case "i32":
-        return fitsUnsigned(
-          Math.min(node.width, context.widthBounds(node.value).unsignedBits)
-        );
+        return fitsUnsigned(Math.min(node.width, context.widthBounds(node.value).unsignedBits));
       case "i64":
         return fitsUnsigned(node.width);
     }

@@ -501,17 +501,25 @@ test("logic and TEST apply the project's undefined AF policy as zero", async () 
       initialState
     });
 
-    deepStrictEqual(result.completion, {
-      kind: "completed",
-      targetEip: startAddress + entry.bytes.length
-    }, entry.op);
-    deepStrictEqual(result.state, {
-      ...initialState,
-      eax: entry.expectedEax,
-      ...entry.expectedFlags,
-      eip: startAddress + entry.bytes.length,
-      instructionCount: 8
-    }, entry.op);
+    deepStrictEqual(
+      result.completion,
+      {
+        kind: "completed",
+        targetEip: startAddress + entry.bytes.length
+      },
+      entry.op
+    );
+    deepStrictEqual(
+      result.state,
+      {
+        ...initialState,
+        eax: entry.expectedEax,
+        ...entry.expectedFlags,
+        eip: startAddress + entry.bytes.length,
+        instructionCount: 8
+      },
+      entry.op
+    );
     deepStrictEqual(result.memory, [], entry.op);
   }
 });
@@ -550,17 +558,25 @@ test("INC and DEC preserve clear and set incoming CF", async () => {
       initialState
     });
 
-    deepStrictEqual(result.completion, {
-      kind: "completed",
-      targetEip: startAddress + 1
-    }, entry.name);
-    deepStrictEqual(result.state, {
-      ...initialState,
-      ecx: entry.expectedResult,
-      ...entry.expectedFlags,
-      eip: startAddress + 1,
-      instructionCount: 8
-    }, entry.name);
+    deepStrictEqual(
+      result.completion,
+      {
+        kind: "completed",
+        targetEip: startAddress + 1
+      },
+      entry.name
+    );
+    deepStrictEqual(
+      result.state,
+      {
+        ...initialState,
+        ecx: entry.expectedResult,
+        ...entry.expectedFlags,
+        eip: startAddress + 1,
+        instructionCount: 8
+      },
+      entry.name
+    );
     deepStrictEqual(result.memory, [], entry.name);
   }
 });
@@ -642,17 +658,25 @@ for (const entry of unaryCases) {
     });
     const result = await runCompiledInstructions({ bytes: entry.bytes, initialState });
 
-    deepStrictEqual(result.completion, {
-      kind: "completed",
-      targetEip: startAddress + entry.bytes.length
-    }, entry.name);
-    deepStrictEqual(result.state, {
-      ...initialState,
-      eax: entry.expectedEax,
-      ...entry.expectedFlags,
-      eip: startAddress + entry.bytes.length,
-      instructionCount: 8
-    }, entry.name);
+    deepStrictEqual(
+      result.completion,
+      {
+        kind: "completed",
+        targetEip: startAddress + entry.bytes.length
+      },
+      entry.name
+    );
+    deepStrictEqual(
+      result.state,
+      {
+        ...initialState,
+        eax: entry.expectedEax,
+        ...entry.expectedFlags,
+        eip: startAddress + entry.bytes.length,
+        instructionCount: 8
+      },
+      entry.name
+    );
     deepStrictEqual(result.memory, [], entry.name);
   });
 }
@@ -686,11 +710,13 @@ test("register and memory binary forms read and write the selected owner", async
     eip: startAddress + readBytes.length,
     instructionCount: 8
   });
-  deepStrictEqual(read.memory, [{
-    address,
-    byteLength: 4,
-    bytes: dwordBytes(1)
-  }]);
+  deepStrictEqual(read.memory, [
+    {
+      address,
+      byteLength: 4,
+      bytes: dwordBytes(1)
+    }
+  ]);
 
   const writeInitial = createWasmCpuArchitecturalStateSnapshot({
     eax: 1,
@@ -718,11 +744,13 @@ test("register and memory binary forms read and write the selected owner", async
     eip: startAddress + writeBytes.length,
     instructionCount: 8
   });
-  deepStrictEqual(write.memory, [{
-    address,
-    byteLength: 4,
-    bytes: dwordBytes(0)
-  }]);
+  deepStrictEqual(write.memory, [
+    {
+      address,
+      byteLength: 4,
+      bytes: dwordBytes(0)
+    }
+  ]);
 });
 
 test("CMP and TEST memory sources publish flags without a destination or memory write", async () => {
@@ -759,21 +787,35 @@ test("CMP and TEST memory sources publish flags without a destination or memory 
       memoryRanges: [{ address, byteLength: 4 }]
     });
 
-    deepStrictEqual(result.completion, {
-      kind: "completed",
-      targetEip: startAddress + entry.bytes.length
-    }, entry.op);
-    deepStrictEqual(result.state, {
-      ...initialState,
-      ...entry.expectedFlags,
-      eip: startAddress + entry.bytes.length,
-      instructionCount: 8
-    }, entry.op);
-    deepStrictEqual(result.memory, [{
-      address,
-      byteLength: 4,
-      bytes: dwordBytes(entry.memoryValue)
-    }], entry.op);
+    deepStrictEqual(
+      result.completion,
+      {
+        kind: "completed",
+        targetEip: startAddress + entry.bytes.length
+      },
+      entry.op
+    );
+    deepStrictEqual(
+      result.state,
+      {
+        ...initialState,
+        ...entry.expectedFlags,
+        eip: startAddress + entry.bytes.length,
+        instructionCount: 8
+      },
+      entry.op
+    );
+    deepStrictEqual(
+      result.memory,
+      [
+        {
+          address,
+          byteLength: 4,
+          bytes: dwordBytes(entry.memoryValue)
+        }
+      ],
+      entry.op
+    );
   }
 });
 
@@ -803,11 +845,13 @@ test("faulting ALU source reads publish neither destination nor flag writes", as
     }
   });
   deepStrictEqual(result.state, initialState);
-  deepStrictEqual(result.memory, [{
-    address: faultAddress,
-    byteLength: 3,
-    bytes: initialBytes
-  }]);
+  deepStrictEqual(result.memory, [
+    {
+      address: faultAddress,
+      byteLength: 3,
+      bytes: initialBytes
+    }
+  ]);
 });
 
 test("faulting ALU read-modify-writes publish neither flags nor guest bytes", async () => {
@@ -841,11 +885,13 @@ test("faulting ALU read-modify-writes publish neither flags nor guest bytes", as
     }
   });
   deepStrictEqual(result.state, initialState);
-  deepStrictEqual(result.memory, [{
-    address: faultAddress,
-    byteLength: 3,
-    bytes: initialBytes
-  }]);
+  deepStrictEqual(result.memory, [
+    {
+      address: faultAddress,
+      byteLength: 3,
+      bytes: initialBytes
+    }
+  ]);
 });
 
 async function assertRegisterAluCase(entry: RegisterAluCase): Promise<void> {
@@ -860,17 +906,25 @@ async function assertRegisterAluCase(entry: RegisterAluCase): Promise<void> {
   });
   const result = await runCompiledInstructions({ bytes: entry.bytes, initialState });
 
-  deepStrictEqual(result.completion, {
-    kind: "completed",
-    targetEip: startAddress + entry.bytes.length
-  }, entry.name);
-  deepStrictEqual(result.state, {
-    ...initialState,
-    eax: entry.expectedEax,
-    ...entry.expectedFlags,
-    eip: startAddress + entry.bytes.length,
-    instructionCount: 8
-  }, entry.name);
+  deepStrictEqual(
+    result.completion,
+    {
+      kind: "completed",
+      targetEip: startAddress + entry.bytes.length
+    },
+    entry.name
+  );
+  deepStrictEqual(
+    result.state,
+    {
+      ...initialState,
+      eax: entry.expectedEax,
+      ...entry.expectedFlags,
+      eip: startAddress + entry.bytes.length,
+      instructionCount: 8
+    },
+    entry.name
+  );
   deepStrictEqual(result.memory, [], entry.name);
 }
 
@@ -886,12 +940,7 @@ function flags(...set: readonly WasmCpuStatusFlag[]): AluFlags {
 }
 
 function dwordBytes(value: number): readonly number[] {
-  return [
-    value & 0xff,
-    (value >>> 8) & 0xff,
-    (value >>> 16) & 0xff,
-    (value >>> 24) & 0xff
-  ];
+  return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
 }
 
 function disp32(value: number): readonly number[] {

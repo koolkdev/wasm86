@@ -11,16 +11,11 @@ import { flagStateFields } from "../layout.js";
 import { LAZY_FLAGS_KIND, lazyFlagsKindByte } from "./encoding.js";
 import { statusFlagValuesForSource } from "./sources.js";
 
-export const statusFlagResolverType = functionType(
-  [],
-  ["i32"]
-);
+export const statusFlagResolverType = functionType([], ["i32"]);
 
 export type StatusFlagResolverFamily = FunctionFamily<X86StatusFlag>;
 
-export function createStatusFlagResolvers(
-  stateAccess: StateAccess
-): StatusFlagResolverFamily {
+export function createStatusFlagResolvers(stateAccess: StateAccess): StatusFlagResolverFamily {
   return new FunctionFamily<X86StatusFlag>({
     type: statusFlagResolverType,
     effects: (flag) => ({
@@ -46,10 +41,10 @@ function buildStatusFlagResolver(
   const lazyKind = state.readField(flagStateFields.lazyKind);
   const lazyA = state.readField(flagStateFields.lazyA);
   const lazyB = state.readField(flagStateFields.lazyB);
-  const concreteValue = state.readField(
-    flagStateFields.concrete[flag],
-    { kind: "unsigned", bounds: fitsUnsigned(1) }
-  );
+  const concreteValue = state.readField(flagStateFields.concrete[flag], {
+    kind: "unsigned",
+    bounds: fitsUnsigned(1)
+  });
 
   const result = fn.region.switch(
     lazyKind,
@@ -82,31 +77,34 @@ function binaryArm(
   right: ValueId
 ): SwitchArm {
   return {
-    match: lazyFlagsKindByte(
-      kind === "add" ? LAZY_FLAGS_KIND.ADD : LAZY_FLAGS_KIND.SUB,
-      width
-    ),
-    build: (arm) => statusFlagValuesForSource(arm.values, {
-      kind,
-      width,
-      left,
-      right,
-      result: arm.values.binary(kind, left, right)
-    }, { undefinedAF: arm.values.const(0) })[flag]
+    match: lazyFlagsKindByte(kind === "add" ? LAZY_FLAGS_KIND.ADD : LAZY_FLAGS_KIND.SUB, width),
+    build: (arm) =>
+      statusFlagValuesForSource(
+        arm.values,
+        {
+          kind,
+          width,
+          left,
+          right,
+          result: arm.values.binary(kind, left, right)
+        },
+        { undefinedAF: arm.values.const(0) }
+      )[flag]
   };
 }
 
-function logicArm(
-  flag: X86StatusFlag,
-  width: OperandWidth,
-  result: ValueId
-): SwitchArm {
+function logicArm(flag: X86StatusFlag, width: OperandWidth, result: ValueId): SwitchArm {
   return {
     match: lazyFlagsKindByte(LAZY_FLAGS_KIND.LOGIC_RESULT, width),
-    build: (arm) => statusFlagValuesForSource(arm.values, {
-      kind: "logic",
-      width,
-      result
-    }, { undefinedAF: arm.values.const(0) })[flag]
+    build: (arm) =>
+      statusFlagValuesForSource(
+        arm.values,
+        {
+          kind: "logic",
+          width,
+          result
+        },
+        { undefinedAF: arm.values.const(0) }
+      )[flag]
   };
 }

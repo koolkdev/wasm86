@@ -79,9 +79,7 @@ export class Invocation {
   }
 }
 
-export function invocationInputs(
-  invocation: Invocation
-): readonly ValueInput[] {
+export function invocationInputs(invocation: Invocation): readonly ValueInput[] {
   return invocation.target.kind === "direct"
     ? invocation.arguments
     : [...invocation.arguments, invocation.target.elementIndex];
