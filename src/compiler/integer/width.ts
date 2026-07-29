@@ -17,3 +17,7 @@ export function integerTypeForWidth<Width extends IntegerWidth>(
 ): IntegerTypeForWidth<Width> {
   return integerTypeByWidth[width];
 }
+
+export function effectiveShiftAmount(width: IntegerWidth, value: bigint): number {
+  return Number(value & (width === 64 ? 63n : 31n));
+}
