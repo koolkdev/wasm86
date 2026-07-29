@@ -18,10 +18,12 @@ import { constantValue } from "../graph/leaves.js";
 import type { ValueNode } from "../graph/node.js";
 import { zeroTestValue } from "../graph/zero-test.js";
 import {
+  boundExpression,
   operationExpression,
   type ValueExpression,
   type ValueOperation,
-  type ValueResolutionContext
+  type ValueResolutionContext,
+  type ValueScopeRequirement
 } from "../expression.js";
 import { signednessView } from "./signed.js";
 import { truncateInteger } from "./width.js";
@@ -44,6 +46,13 @@ export function operationValue<Width extends IntegerWidth, Input, Args, Node ext
   input: NoInfer<Input>
 ): Integer<Width> {
   return new IntegerValue(width, operationExpression(operation, input));
+}
+
+export function boundValue<Width extends IntegerWidth>(
+  width: Width,
+  requirement: ValueScopeRequirement
+): Integer<Width> {
+  return new IntegerValue(width, boundExpression(requirement));
 }
 
 class IntegerValue<Width extends IntegerWidth> implements Integer<Width> {
