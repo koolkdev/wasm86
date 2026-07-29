@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { CompareOperator } from "#compiler/integer/operators.js";
 import type { ValueOperation } from "../expression.js";
 import { signedInteger } from "./integer.js";
-import type { ValueWidth } from "#compiler/integer/width.js";
+import type { IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId, ValueType } from "#compiler/value.js";
 import type { ValueHandle } from "../handle.js";
 
@@ -66,7 +66,7 @@ export const comparisonValue: ValueOperation<ComparisonInput, ComparisonArgs, Co
 
 function evaluateComparison(
   operator: CompareOperator,
-  width: ValueWidth,
+  width: IntegerWidth,
   left: bigint,
   right: bigint
 ): boolean {

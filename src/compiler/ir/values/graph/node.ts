@@ -12,7 +12,7 @@ import type {
 import type { SelectNode } from "./select.js";
 import type { TruncateNode } from "./truncate.js";
 import type { ZeroTestNode } from "./zero-test.js";
-import type { ValueWidth } from "#compiler/integer/width.js";
+import type { IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId, ValueType } from "#compiler/value.js";
 
 export type ValueNode =
@@ -35,7 +35,7 @@ export interface ValueGraph {
   node(id: ValueId): ValueNode;
   size(): number;
   children(id: ValueId): readonly ValueId[];
-  bitWidth(id: ValueId): ValueWidth;
+  bitWidth(id: ValueId): IntegerWidth;
   valueType(id: ValueId): ValueType;
   isUnreachable(id: ValueId): boolean;
   constant(id: ValueId): bigint | undefined;

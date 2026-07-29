@@ -1,4 +1,4 @@
-import type { ValueWidth } from "#compiler/integer/width.js";
+import type { IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId, ValueType } from "#compiler/value.js";
 import type { ValueDefinition } from "./graph/definition.js";
 import type { ValueNode } from "./graph/node.js";
@@ -19,7 +19,7 @@ export type ValueResolutionContext = ValueInputs &
       definition: ValueDefinition<Args, Node>,
       args: Args
     ): ValueId;
-    bitWidth(id: ValueId): ValueWidth;
+    bitWidth(id: ValueId): IntegerWidth;
   }>;
 
 export interface ValueExpression {

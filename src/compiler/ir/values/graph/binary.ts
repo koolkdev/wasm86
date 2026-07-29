@@ -3,7 +3,7 @@ import type { BinaryOperator } from "#compiler/integer/operators.js";
 import type { ValueFoldContext } from "./definition.js";
 import type { ValueOperation } from "../expression.js";
 import { normalizeInteger, signedInteger } from "./integer.js";
-import { effectiveShiftAmount, type ValueWidth } from "#compiler/integer/width.js";
+import { effectiveShiftAmount, type IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId, ValueType } from "#compiler/value.js";
 import type { ValueHandle } from "../handle.js";
 
@@ -133,7 +133,7 @@ function foldBinary(node: BinaryNode, context: ValueFoldContext): ValueId | unde
 
 function evaluateNonTrappingBinary(
   operator: BinaryOperator,
-  width: ValueWidth,
+  width: IntegerWidth,
   left: bigint,
   right: bigint
 ): bigint {
@@ -183,7 +183,7 @@ function evaluateNonTrappingBinary(
 
 function binaryConstantTraps(
   operator: BinaryOperator,
-  width: ValueWidth,
+  width: IntegerWidth,
   left: bigint,
   right: bigint
 ): boolean {
@@ -204,11 +204,11 @@ function binaryConstantTraps(
   }
 }
 
-function rotateAmount(width: ValueWidth, value: bigint): number {
+function rotateAmount(width: IntegerWidth, value: bigint): number {
   return Number(value % BigInt(width));
 }
 
-function rotateLeft(width: ValueWidth, value: bigint, count: number): bigint {
+function rotateLeft(width: IntegerWidth, value: bigint, count: number): bigint {
   if (count === 0) {
     return normalizeInteger(width, value);
   }
@@ -216,7 +216,7 @@ function rotateLeft(width: ValueWidth, value: bigint, count: number): bigint {
   return normalizeInteger(width, (value << BigInt(count)) | (value >> BigInt(width - count)));
 }
 
-function rotateRight(width: ValueWidth, value: bigint, count: number): bigint {
+function rotateRight(width: IntegerWidth, value: bigint, count: number): bigint {
   if (count === 0) {
     return normalizeInteger(width, value);
   }
@@ -224,6 +224,6 @@ function rotateRight(width: ValueWidth, value: bigint, count: number): bigint {
   return normalizeInteger(width, (value >> BigInt(count)) | (value << BigInt(width - count)));
 }
 
-function minimumSigned(width: ValueWidth): bigint {
+function minimumSigned(width: IntegerWidth): bigint {
   return -(1n << BigInt(width - 1));
 }

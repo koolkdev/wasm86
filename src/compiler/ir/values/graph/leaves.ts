@@ -2,27 +2,27 @@ import { assert } from "#common/assert.js";
 import type { ValueDefinition } from "./definition.js";
 import type { ValueOperation } from "../expression.js";
 import { normalizeInteger } from "./integer.js";
-import type { ValueWidth } from "#compiler/integer/width.js";
+import type { IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueType } from "#compiler/value.js";
 
 type ConstantArgs = Readonly<{
-  width: ValueWidth;
+  width: IntegerWidth;
   value: number | bigint;
 }>;
 
 export type ConstantNode = Readonly<{
   kind: "const";
-  width: ValueWidth;
+  width: IntegerWidth;
   value: bigint;
 }>;
 
-type UnreachableArgs = Readonly<{ width: ValueWidth }>;
+type UnreachableArgs = Readonly<{ width: IntegerWidth }>;
 export type UnreachableNode = Readonly<UnreachableArgs & { kind: "unreachable" }>;
 
-type NodeOutputArgs = Readonly<{ width: ValueWidth }>;
+type NodeOutputArgs = Readonly<{ width: IntegerWidth }>;
 export type NodeOutputNode = Readonly<NodeOutputArgs & { kind: "nodeOutput" }>;
 
-type LoopInputArgs = Readonly<{ width: ValueWidth }>;
+type LoopInputArgs = Readonly<{ width: IntegerWidth }>;
 export type LoopInputNode = Readonly<LoopInputArgs & { kind: "loopInput" }>;
 
 type ParameterArgs = Readonly<{

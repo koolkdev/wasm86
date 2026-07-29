@@ -15,7 +15,7 @@ import {
   type ScopedInterning
 } from "./interning.js";
 import { createValueEntry, type ValueEntry } from "./entry.js";
-import { carrierTypeForWidth, type ValueWidth } from "#compiler/integer/width.js";
+import { carrierTypeForWidth, type IntegerWidth } from "#compiler/integer/width.js";
 
 type ValueStorage = Readonly<{
   entries: ValueEntry[];
@@ -88,7 +88,7 @@ export class ValueArena implements ValueGraph {
     return this.#entry(id).children;
   }
 
-  bitWidth(id: ValueId): ValueWidth {
+  bitWidth(id: ValueId): IntegerWidth {
     return this.#entry(id).bitWidth;
   }
 
@@ -159,7 +159,7 @@ export class ValueArena implements ValueGraph {
     definition: ValueDefinition<Args, Node>,
     node: Node,
     children: readonly ValueId[],
-    width: ValueWidth
+    width: IntegerWidth
   ): ValueId {
     const id = valueId(this.#storage.entries.length);
 
