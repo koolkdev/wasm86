@@ -1,5 +1,5 @@
 import type { BitCountOperator } from "#compiler/integer/operators.js";
-import type { IntegerWidth } from "#compiler/integer/width.js";
+import type { ValueWidth } from "#compiler/integer/width.js";
 import type { ValueId, ValueType } from "#compiler/value.js";
 import type { ValueHandle } from "../handle.js";
 import type { ValueOperation } from "../expression.js";
@@ -38,7 +38,7 @@ export const bitCountValue: ValueOperation<BitCountInput, BitCountArgs, BitCount
   }
 };
 
-function evaluateBitCount(operator: BitCountOperator, width: IntegerWidth, value: bigint): bigint {
+function evaluateBitCount(operator: BitCountOperator, width: ValueWidth, value: bigint): bigint {
   switch (operator) {
     case "popcnt": {
       let remaining = value;

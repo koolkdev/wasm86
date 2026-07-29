@@ -37,7 +37,7 @@ export const selectValue: ValueOperation<SelectInput, SelectArgs, SelectNode> = 
     const trueWidth = context.bitWidth(node.whenTrue);
     const falseWidth = context.bitWidth(node.whenFalse);
 
-    assert(conditionWidth !== 64, "select condition must be an i32 value");
+    assert(conditionWidth === 1, `select condition must be 1 bit, got ${conditionWidth}`);
     assert(
       falseWidth === trueWidth,
       `select alternatives must have one width, got ${trueWidth} and ${falseWidth}`

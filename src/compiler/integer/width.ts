@@ -2,22 +2,24 @@ import type { ValueType } from "#compiler/value.js";
 
 export type I32Width = 8 | 16 | 32;
 export type IntegerWidth = I32Width | 64;
+export type ValueWidth = 1 | IntegerWidth;
 
-const integerTypeByWidth = {
+const carrierTypeByWidth = {
+  1: "i32",
   8: "i32",
   16: "i32",
   32: "i32",
   64: "i64"
-} as const satisfies Readonly<Record<IntegerWidth, ValueType>>;
+} as const satisfies Readonly<Record<ValueWidth, ValueType>>;
 
-export type IntegerTypeForWidth<Width extends IntegerWidth> = (typeof integerTypeByWidth)[Width];
+export type CarrierTypeForWidth<Width extends ValueWidth> = (typeof carrierTypeByWidth)[Width];
 
-export function integerTypeForWidth<Width extends IntegerWidth>(
+export function carrierTypeForWidth<Width extends ValueWidth>(
   width: Width
-): IntegerTypeForWidth<Width> {
-  return integerTypeByWidth[width];
+): CarrierTypeForWidth<Width> {
+  return carrierTypeByWidth[width];
 }
 
-export function effectiveShiftAmount(width: IntegerWidth, value: bigint): number {
+export function effectiveShiftAmount(width: ValueWidth, value: bigint): number {
   return Number(value & (width === 64 ? 63n : 31n));
 }

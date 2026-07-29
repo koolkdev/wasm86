@@ -1,6 +1,6 @@
 import type { ValueDefinition } from "./definition.js";
 import type { ValueNode } from "./node.js";
-import type { IntegerWidth } from "#compiler/integer/width.js";
+import type { ValueWidth } from "#compiler/integer/width.js";
 import type { ValueId } from "#compiler/value.js";
 
 const noChildren: readonly ValueId[] = [];
@@ -8,7 +8,7 @@ const noChildren: readonly ValueId[] = [];
 type ValueEntryData<Node extends ValueNode> = Readonly<{
   node: Node;
   children: readonly ValueId[];
-  bitWidth: IntegerWidth;
+  bitWidth: ValueWidth;
 }>;
 
 export type ValueEntry = ValueEntryData<ValueNode> &

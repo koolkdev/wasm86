@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { CompareOperator } from "#compiler/integer/operators.js";
 import type { ValueOperation } from "../expression.js";
 import { signedInteger } from "./integer.js";
-import type { IntegerWidth } from "#compiler/integer/width.js";
+import type { ValueWidth } from "#compiler/integer/width.js";
 import type { ValueId, ValueType } from "#compiler/value.js";
 import type { ValueHandle } from "../handle.js";
 
@@ -29,7 +29,7 @@ export const comparisonValue: ValueOperation<ComparisonInput, ComparisonArgs, Co
     key: (node) => [node.operator, node.a, node.b]
   },
   children: (node) => [node.a, node.b],
-  bitWidth: () => 32,
+  bitWidth: () => 1,
   validate: (node, context) => {
     const left = context.bitWidth(node.a);
     const right = context.bitWidth(node.b);
@@ -43,19 +43,21 @@ export const comparisonValue: ValueOperation<ComparisonInput, ComparisonArgs, Co
 
     if (left !== undefined && right !== undefined) {
       return context.constantValue(
-        32,
+        1,
         evaluateComparison(node.operator, width, left, right) ? 1n : 0n
       );
     }
     if (node.a === node.b) {
-      return context.constantValue(32, sameValueResult(node.operator) ? 1n : 0n);
+      return context.constantValue(1, sameValueResult(node.operator) ? 1n : 0n);
     }
-    if (node.operator === "eq") {
+    if (node.operator === "eq" || node.operator === "ne") {
+      const zeroTest = node.operator === "eq" ? context.eqz : context.nonzero;
+
       if (left === 0n) {
-        return context.eqz(node.b);
+        return zeroTest(node.b);
       }
       if (right === 0n) {
-        return context.eqz(node.a);
+        return zeroTest(node.a);
       }
     }
     return undefined;
@@ -64,7 +66,7 @@ export const comparisonValue: ValueOperation<ComparisonInput, ComparisonArgs, Co
 
 function evaluateComparison(
   operator: CompareOperator,
-  width: IntegerWidth,
+  width: ValueWidth,
   left: bigint,
   right: bigint
 ): boolean {

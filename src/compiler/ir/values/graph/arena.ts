@@ -3,7 +3,7 @@ import type { ValueDefinition, ValueFoldContext, ValueQuery } from "./definition
 import type { ValueGraph, ValueNode } from "./node.js";
 import { valueId, type ValueId, type ValueType } from "#compiler/value.js";
 import { constantValue, unreachableValue } from "./leaves.js";
-import { eqzValue } from "./eqz.js";
+import { zeroTestValue } from "./zero-test.js";
 import {
   cloneInternTable,
   cloneScopedInterning,
@@ -15,7 +15,7 @@ import {
   type ScopedInterning
 } from "./interning.js";
 import { createValueEntry, type ValueEntry } from "./entry.js";
-import { integerTypeForWidth, type IntegerWidth } from "#compiler/integer/width.js";
+import { carrierTypeForWidth, type ValueWidth } from "#compiler/integer/width.js";
 
 type ValueStorage = Readonly<{
   entries: ValueEntry[];
@@ -40,7 +40,8 @@ export class ValueArena implements ValueGraph {
     ...this.#query,
     constantValue: (width, value) => this.create(constantValue, { width, value }),
     unreachable: (width) => this.create(unreachableValue, { width }),
-    eqz: (value) => this.create(eqzValue, { value })
+    eqz: (value) => this.create(zeroTestValue, { operator: "eqz", value }),
+    nonzero: (value) => this.create(zeroTestValue, { operator: "nonzero", value })
   };
 
   constructor(state?: ArenaState) {
@@ -87,12 +88,12 @@ export class ValueArena implements ValueGraph {
     return this.#entry(id).children;
   }
 
-  bitWidth(id: ValueId): IntegerWidth {
+  bitWidth(id: ValueId): ValueWidth {
     return this.#entry(id).bitWidth;
   }
 
   valueType(id: ValueId): ValueType {
-    return integerTypeForWidth(this.bitWidth(id));
+    return carrierTypeForWidth(this.bitWidth(id));
   }
 
   isUnreachable(id: ValueId): boolean {
@@ -158,7 +159,7 @@ export class ValueArena implements ValueGraph {
     definition: ValueDefinition<Args, Node>,
     node: Node,
     children: readonly ValueId[],
-    width: IntegerWidth
+    width: ValueWidth
   ): ValueId {
     const id = valueId(this.#storage.entries.length);
 
