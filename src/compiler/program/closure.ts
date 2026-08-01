@@ -1,11 +1,14 @@
 import { assert } from "#common/assert.js";
 import { buildDefinition } from "#build";
-import type { FunctionAnalysis } from "#compiler/analysis/model.js";
+import type { FunctionAnalysis } from "#compiler/wasm/legacy/analysis/model.js";
 import { buildFunction } from "#compiler/ir/builder/function.js";
 import type { IrFunction } from "#compiler/ir/function.js";
 import type { Invocation } from "#compiler/ir/invocation.js";
 import { describeNode } from "#compiler/ir/node.js";
-import { placeFunction, type FunctionPlacement } from "#compiler/placement/place.js";
+import {
+  placeFunction,
+  type FunctionPlacement
+} from "#compiler/wasm/legacy/placement/place.js";
 import type { FunctionType } from "#compiler/ir/function.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { FunctionImport } from "./imports.js";

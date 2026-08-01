@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { FunctionAnalysis } from "#compiler/analysis/model.js";
+import type { FunctionAnalysis } from "#compiler/wasm/legacy/analysis/model.js";
 import { covers, type StorageAccess, type StorageEffects } from "#compiler/ir/effects.js";
 import { describeNode } from "#compiler/ir/node.js";
 import { validateStorageEffectRanges } from "#compiler/ir/validate/resource.js";

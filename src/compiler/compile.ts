@@ -1,6 +1,6 @@
-import { emitModule } from "#compiler/lowering/module.js";
+import { emitModule } from "#compiler/wasm/legacy/emission/module.js";
 import type { FunctionRef } from "#compiler/reference.js";
-import { layoutProgram } from "#compiler/module/layout.js";
+import { layoutProgram } from "#compiler/wasm/module/layout.js";
 import type { FunctionExportRef } from "#compiler/program/exports.js";
 import type { Program } from "#compiler/program/program.js";
 import type { MemoryImport } from "#compiler/program/resources.js";
