@@ -4,34 +4,20 @@ import type { ValueGraph, ValueNode } from "./node.js";
 import { valueId, type ValueId, type ValueType } from "#compiler/value.js";
 import { constantValue, unreachableValue } from "./leaves.js";
 import { zeroTestValue } from "./zero-test.js";
-import {
-  cloneInternTable,
-  cloneScopedInterning,
-  createInternTable,
-  createScopedInterning,
-  internScopedValue,
-  internValue,
-  type InternTable,
-  type ScopedInterning
-} from "./interning.js";
+import { ValueInterner } from "./interner.js";
 import { createValueEntry, type ValueEntry } from "./entry.js";
 import { carrierTypeForWidth, type IntegerWidth } from "#compiler/integer/width.js";
 
-type ValueStorage = Readonly<{
-  entries: ValueEntry[];
-  canonicalInterned: InternTable;
-}>;
-
 type ArenaState = Readonly<{
-  storage: ValueStorage;
-  scopedInterning: ScopedInterning;
+  entries: ValueEntry[];
+  interner: ValueInterner;
 }>;
 
 const noChildren: readonly ValueId[] = [];
 
 export class ValueArena implements ValueGraph {
-  readonly #storage: ValueStorage;
-  readonly #scopedInterning: ScopedInterning;
+  readonly #entries: ValueEntry[];
+  readonly #interner: ValueInterner;
   readonly #query: ValueQuery = {
     bitWidth: (id) => this.bitWidth(id),
     constant: (id) => this.constant(id)
@@ -45,35 +31,29 @@ export class ValueArena implements ValueGraph {
   };
 
   constructor(state?: ArenaState) {
-    this.#storage = state?.storage ?? {
-      entries: [],
-      canonicalInterned: createInternTable()
-    };
-    this.#scopedInterning = state?.scopedInterning ?? createScopedInterning();
+    this.#entries = state?.entries ?? [];
+    this.#interner = state?.interner ?? new ValueInterner();
   }
 
   childScope(): ValueArena {
     return new ValueArena({
-      storage: this.#storage,
-      scopedInterning: createScopedInterning(this.#scopedInterning)
+      entries: this.#entries,
+      interner: this.#interner.childScope()
     });
   }
 
   // Forks preserve the existing graph prefix while isolating later allocation.
   fork(): ValueArena {
     return new ValueArena({
-      storage: {
-        entries: [...this.#storage.entries],
-        canonicalInterned: cloneInternTable(this.#storage.canonicalInterned)
-      },
-      scopedInterning: cloneScopedInterning(this.#scopedInterning)
+      entries: [...this.#entries],
+      interner: this.#interner.fork()
     });
   }
 
   sharesEntry(origin: ValueArena, id: ValueId): boolean {
-    const entry = this.#storage.entries[id];
+    const entry = this.#entries[id];
 
-    return entry !== undefined && entry === origin.#storage.entries[id];
+    return entry !== undefined && entry === origin.#entries[id];
   }
 
   node(id: ValueId): ValueNode {
@@ -81,7 +61,7 @@ export class ValueArena implements ValueGraph {
   }
 
   size(): number {
-    return this.#storage.entries.length;
+    return this.#entries.length;
   }
 
   children(id: ValueId): readonly ValueId[] {
@@ -135,24 +115,9 @@ export class ValueArena implements ValueGraph {
       return folded;
     }
 
-    switch (definition.identity.kind) {
-      case "occurrence":
-        return this.#append(definition, node, children, width);
-      case "canonical":
-        return internValue(
-          this.#storage.canonicalInterned,
-          definition,
-          definition.identity.key(node),
-          () => this.#append(definition, node, children, width)
-        );
-      case "scoped":
-        return internScopedValue(
-          this.#scopedInterning,
-          definition,
-          definition.identity.key(node),
-          () => this.#append(definition, node, children, width)
-        );
-    }
+    return this.#interner.intern(definition, node, () =>
+      this.#append(definition, node, children, width)
+    );
   }
 
   #append<Args, Node extends ValueNode>(
@@ -161,9 +126,9 @@ export class ValueArena implements ValueGraph {
     children: readonly ValueId[],
     width: IntegerWidth
   ): ValueId {
-    const id = valueId(this.#storage.entries.length);
+    const id = valueId(this.#entries.length);
 
-    this.#storage.entries.push(
+    this.#entries.push(
       createValueEntry(definition, {
         node,
         children,
@@ -174,7 +139,7 @@ export class ValueArena implements ValueGraph {
   }
 
   #entry(id: ValueId): ValueEntry {
-    const entry = this.#storage.entries[id];
+    const entry = this.#entries[id];
 
     assert(entry !== undefined, `unknown value id ${id}`);
     return entry;
