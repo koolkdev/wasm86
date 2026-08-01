@@ -1,25 +1,29 @@
+import type { IntegerWidth } from "#compiler/integer/width.js";
+import type { Integer as IntegerValue } from "./values/integer/types.js";
+import { Integer as integerTypes } from "./values/type.js";
+
 export type {
   AnyInteger,
-  AnyI32Integer,
+  AnyNarrowInteger,
   AnyValueHandle,
   IntegerLiteral,
   IntegerOperand,
   BitValue,
-  Integer,
   ExtensionTargets,
-  I32Handle,
   I32Value,
-  I64Handle,
   I64Value,
   ShiftCount,
   SignedView,
   TruncationTargets,
-  UnsignedView,
-  ValueFor,
-  ValueTuple
+  UnsignedView
 } from "./values/integer/types.js";
 
-export type { CarrierTypeForWidth } from "#compiler/integer/width.js";
+export type { AnyValue, IntegerType, ValueType, ValueTuple } from "./values/type.js";
+
+export const Integer = integerTypes;
+export type Integer<Width extends IntegerWidth> = IntegerValue<Width>;
+export { sameValueType, valueTypeOf } from "./values/type.js";
+
 export type { ValueHandle } from "./values/handle.js";
 
 export { integer, i8, i16, i32, i64, u8, u16 } from "./values/integer/constants.js";

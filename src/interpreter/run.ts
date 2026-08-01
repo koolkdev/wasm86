@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ResourceEffect, ResourceRef } from "#compiler/ir/resource.js";
 import type { ProgramBuilder } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/reference.js";
 import type { ExecutionModel } from "#execution/model.js";

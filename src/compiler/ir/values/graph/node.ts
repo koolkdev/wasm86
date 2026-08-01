@@ -14,7 +14,6 @@ import type { TruncateNode } from "./truncate.js";
 import type { ZeroTestNode } from "./zero-test.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 
 export type ValueNode =
   | BinaryNode
@@ -37,7 +36,6 @@ export interface ValueGraph {
   size(): number;
   children(id: ValueId): readonly ValueId[];
   bitWidth(id: ValueId): IntegerWidth;
-  valueType(id: ValueId): ValueType;
   isUnreachable(id: ValueId): boolean;
   constant(id: ValueId): bigint | undefined;
 }

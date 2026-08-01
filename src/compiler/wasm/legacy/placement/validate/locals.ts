@@ -4,7 +4,7 @@ import { describeNode } from "#compiler/ir/node.js";
 import type { VariableRef } from "#compiler/ir/variable.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
-import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { FunctionGraph } from "#compiler/wasm/legacy/function.js";
 import type { PlacementPlan } from "../model.js";
 import type { PlacementProof } from "./uses.js";
 

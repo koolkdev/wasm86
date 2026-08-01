@@ -1,6 +1,6 @@
+import type { FunctionType } from "#compiler/wasm/legacy/function-type.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { DirectCallTarget } from "#compiler/ir/invocation.js";
-import type { FunctionType } from "#compiler/ir/function.js";
 import type { FunctionRef } from "#compiler/reference.js";
 
 export const programImportModuleName = "wasm86";

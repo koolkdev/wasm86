@@ -4,7 +4,6 @@ import type { ValueOperation } from "../expression.js";
 import { signedInteger } from "./integer.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueHandle } from "../handle.js";
 
 type ComparisonOperands<Value> = Readonly<{
@@ -13,7 +12,7 @@ type ComparisonOperands<Value> = Readonly<{
   b: Value;
 }>;
 
-type ComparisonInput = ComparisonOperands<ValueHandle<ValueType>>;
+type ComparisonInput = ComparisonOperands<ValueHandle>;
 type ComparisonArgs = ComparisonOperands<ValueId>;
 
 export type ComparisonNode = Readonly<ComparisonArgs & { kind: "compare" }>;

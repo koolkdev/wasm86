@@ -8,7 +8,7 @@ import { validateIrFunction } from "#compiler/ir/validate.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { describeNode } from "#compiler/ir/node.js";
 import { compilerTestResourceEffect } from "#test/support/storage-operations.js";
 

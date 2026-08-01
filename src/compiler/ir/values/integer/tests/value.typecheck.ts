@@ -9,7 +9,7 @@ import {
   u8,
   u16,
   type AnyInteger,
-  type AnyI32Integer,
+  type AnyNarrowInteger,
   type BitValue,
   type Integer,
   type ExtensionTargets,
@@ -19,8 +19,8 @@ import {
   type TruncationTargets,
   type UnsignedView
 } from "#compiler/ir/values.js";
-import type { AccessWidth, IntegerWidth } from "#compiler/integer/width.js";
-import type { AnyValueHandle, I32Handle, I64Handle } from "#compiler/ir/values/handle.js";
+import type { IntegerWidth, StorageWidth } from "#compiler/integer/width.js";
+import type { AnyValueHandle, ValueHandle } from "#compiler/ir/values/handle.js";
 
 export function valueTypeContract(
   narrow: I32Value,
@@ -28,7 +28,7 @@ export function valueTypeContract(
   predicate: BitValue,
   byte: Integer<8>,
   word: Integer<16>,
-  dynamic: AnyI32Integer,
+  dynamic: AnyNarrowInteger,
   either: AnyValueHandle
 ): void {
   const sum32: I32Value = narrow.add(1);
@@ -57,9 +57,9 @@ export function valueTypeContract(
   const signedWide: I64Value = byte.signed.extend(64);
   const unsignedWide: I64Value = byte.unsigned.extend(64);
   const wrapped: Integer<32> = wide.truncate(32);
-  const byteHandle: I32Handle = byte;
-  const bitHandle: I32Handle = predicate;
-  const wideHandle: I64Handle = wide;
+  const byteHandle: ValueHandle<8> = byte;
+  const bitHandle: ValueHandle<1> = predicate;
+  const wideHandle: ValueHandle<64> = wide;
   const byteSum: Integer<8> = byte.add(1);
   const predicateSum: BitValue = predicate.add(1);
   const neutralWord: Integer<16> = byte.unsigned.extend(16);
@@ -81,18 +81,7 @@ export function valueTypeContract(
       break;
   }
 
-  switch (either.type) {
-    case "i32": {
-      const handle: I32Handle = either;
-      void handle;
-      break;
-    }
-    case "i64": {
-      const handle: I64Handle = either;
-      void handle;
-      break;
-    }
-  }
+  const dynamicWidth: IntegerWidth = either.width;
 
   // @ts-expect-error arithmetic requires matching widths.
   byte.add(word);
@@ -101,9 +90,9 @@ export function valueTypeContract(
   // @ts-expect-error neutral values do not choose signed division.
   byte.div(2);
   // @ts-expect-error signed views are operation namespaces, not values.
-  const viewAsHandle: I32Handle = byte.signed;
+  const viewAsHandle: ValueHandle<8> = byte.signed;
   // @ts-expect-error value handles can only come from the expression system.
-  const forgedHandle: I32Handle = { type: "i32" };
+  const forgedHandle: ValueHandle<32> = { width: 32 };
   // @ts-expect-error neutral widening must choose signed or unsigned extension.
   byte.extend(16);
   // @ts-expect-error truncation cannot widen.
@@ -114,7 +103,7 @@ export function valueTypeContract(
   const sumAsView: typeof byte.signed = byteSum;
   // @ts-expect-error i32 and i64 values cannot be mixed.
   narrow.xor(wide);
-  // @ts-expect-error shift counts use the i32 carrier family.
+  // @ts-expect-error shift counts must be at most 32 bits wide.
   byte.shl(wide);
   // @ts-expect-error one-bit operands must be zero or one.
   predicate.add(2);
@@ -186,6 +175,7 @@ export function valueTypeContract(
     neutralWord,
     anyInteger,
     narrowed,
+    dynamicWidth,
     viewAsHandle,
     forgedHandle,
     sumAsView
@@ -204,13 +194,13 @@ export function genericExtensionContract<Width extends Exclude<IntegerWidth, 64>
   return value.unsigned.extend(32);
 }
 
-export function genericTruncationContract<Width extends AccessWidth>(
+export function genericTruncationContract<Width extends StorageWidth>(
   value: Integer<Width>
 ): Integer<8> {
   return value.truncate(8);
 }
 
-export function unsafeGenericExtension<Width extends AccessWidth>(value: Integer<Width>): void {
+export function unsafeGenericExtension<Width extends StorageWidth>(value: Integer<Width>): void {
   // @ts-expect-error 64-bit values cannot extend to 32 bits.
   value.unsigned.extend(32);
 }

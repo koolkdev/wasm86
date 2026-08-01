@@ -1,4 +1,4 @@
-import type { IrFunction } from "#compiler/ir/function.js";
+import type { Function as IrFunction } from "#compiler/wasm/legacy/function.js";
 import { describeNode } from "#compiler/ir/node.js";
 import { regionCompletes, type Region, type RegionNode } from "#compiler/ir/region.js";
 import type { ModuleBindings } from "#compiler/wasm/module/bindings.js";

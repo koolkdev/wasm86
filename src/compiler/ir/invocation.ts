@@ -1,8 +1,8 @@
 import { assert } from "#common/assert.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ValueInput } from "#compiler/ir/values/types.js";
-import type { FunctionType } from "#compiler/ir/function.js";
 import type { FunctionRef, TableRef } from "#compiler/reference.js";
+import type { FunctionType } from "#compiler/wasm/legacy/function-type.js";
 
 export type DirectCallTarget = Readonly<{
   kind: "direct";

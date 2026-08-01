@@ -1,8 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { ValueOperation } from "../expression.js";
 import type { ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
-import type { I32Handle, ValueHandle } from "../handle.js";
+import type { ValueHandle } from "../handle.js";
 
 type SelectOperands<Condition, Value> = Readonly<{
   condition: Condition;
@@ -10,7 +9,7 @@ type SelectOperands<Condition, Value> = Readonly<{
   whenFalse: Value;
 }>;
 
-type SelectInput = SelectOperands<I32Handle, ValueHandle<ValueType>>;
+type SelectInput = SelectOperands<ValueHandle<1>, ValueHandle>;
 type SelectArgs = SelectOperands<ValueId, ValueId>;
 
 export type SelectNode = Readonly<SelectArgs & { kind: "select" }>;

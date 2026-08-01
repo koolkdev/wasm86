@@ -3,7 +3,6 @@ import type { ValueDefinition } from "./definition.js";
 import type { ValueOperation } from "../expression.js";
 import { normalizeInteger } from "./integer.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 
 type ConstantArgs = Readonly<{
   width: IntegerWidth;
@@ -27,13 +26,13 @@ export type LoopInputNode = Readonly<LoopInputArgs & { kind: "loopInput" }>;
 
 type ParameterArgs = Readonly<{
   index: number;
-  type: ValueType;
+  width: IntegerWidth;
 }>;
 
 export type ParameterNode = Readonly<{
   kind: "parameter";
   index: number;
-  width: 32 | 64;
+  width: IntegerWidth;
 }>;
 
 export const constantValue: ValueOperation<ConstantArgs, ConstantArgs, ConstantNode> = {
@@ -74,12 +73,12 @@ export const loopInputValue: ValueDefinition<LoopInputArgs, LoopInputNode> = {
 };
 
 export const parameterValue: ValueDefinition<ParameterArgs, ParameterNode> = {
-  create: ({ index, type }) => {
+  create: ({ index, width }) => {
     assert(Number.isInteger(index) && index >= 0, `invalid function parameter index: ${index}`);
     return {
       kind: "parameter",
       index,
-      width: type === "i32" ? 32 : 64
+      width
     };
   },
   identity: {

@@ -15,8 +15,8 @@ import { callOperation } from "#compiler/ir/operations/index.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { type RegionNode, type Region } from "#compiler/ir/region.js";
-import type { FunctionGraph, IrFunction } from "#compiler/ir/function.js";
-import { functionType } from "#compiler/ir/function.js";
+import type { FunctionGraph, Function as IrFunction } from "#compiler/wasm/legacy/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef, tableRef } from "#compiler/reference.js";
 import {

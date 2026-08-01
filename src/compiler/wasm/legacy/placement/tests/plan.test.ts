@@ -11,7 +11,7 @@ import {
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { placeFunction } from "#compiler/wasm/legacy/placement/place.js";
 import type { Region } from "#compiler/ir/region.js";
-import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { FunctionGraph } from "#compiler/wasm/legacy/function.js";
 import { RegionBuilder } from "#compiler/ir/builder/region.js";
 import {
   compilerTestValues,

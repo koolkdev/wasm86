@@ -1,8 +1,8 @@
+import type { FunctionType } from "#compiler/wasm/legacy/function-type.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { FunctionPlacement } from "#compiler/wasm/legacy/placement/place.js";
-import type { IrFunction } from "#compiler/ir/function.js";
-import type { FunctionType } from "#compiler/ir/function.js";
+import type { Function as IrFunction } from "#compiler/wasm/legacy/function.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import type { FunctionImport } from "./imports.js";
 import type { FunctionRef, TableRef } from "#compiler/reference.js";

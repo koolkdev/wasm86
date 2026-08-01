@@ -6,7 +6,7 @@ import {
   type WasmFunctionType,
   type WasmValueType
 } from "#compiler/wasm/encoder/types.js";
-import type { FunctionType } from "#compiler/ir/function.js";
+import type { FunctionType } from "#compiler/wasm/legacy/function-type.js";
 import { createModuleBindings } from "#compiler/wasm/module/bindings.js";
 import type { ModuleLayout } from "#compiler/wasm/module/layout.js";
 import type { Program, ProgramFunction } from "#compiler/program/program.js";

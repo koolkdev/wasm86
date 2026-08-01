@@ -12,7 +12,7 @@ import {
   switchControl
 } from "#compiler/ir/controls/index.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/reference.js";
 import { VariableRef } from "#compiler/ir/variable.js";

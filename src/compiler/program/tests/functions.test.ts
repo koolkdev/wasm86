@@ -1,7 +1,7 @@
 import { notStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { FunctionFamily } from "#compiler/program/functions.js";
 
 const noEffects = { reads: [], writes: [] } as const;

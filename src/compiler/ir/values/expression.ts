@@ -1,13 +1,12 @@
 import type { IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueDefinition } from "./graph/definition.js";
 import type { ValueNode } from "./graph/node.js";
 import type { ValueTable } from "./graph/table.js";
 import type { ValueHandle } from "./handle.js";
 
 export type ValueInputs = Readonly<{
-  value<Type extends ValueType>(value: ValueHandle<Type>): ValueId;
+  value<Width extends IntegerWidth>(value: ValueHandle<Width>): ValueId;
 }>;
 
 export type ValueOperation<Input, Args, Node extends ValueNode> = ValueDefinition<Args, Node> &

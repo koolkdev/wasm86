@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { assert } from "#common/assert.js";
 import { compileProgram } from "#compiler/compile.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { functionRef } from "#compiler/reference.js";
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";

@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { functionRef } from "#compiler/reference.js";
 import { layoutProgram } from "#compiler/wasm/module/layout.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";

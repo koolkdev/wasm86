@@ -1,10 +1,10 @@
 import { assert } from "#common/assert.js";
 import { buildDefinition } from "#build";
+import type { FunctionType } from "#compiler/wasm/legacy/function-type.js";
 import type { StorageEffects } from "#compiler/ir/effects.js";
 import { type BuildFunction, FunctionDefinition } from "#compiler/program/functions.js";
 import { FunctionImport, type FunctionImportDeclaration } from "./imports.js";
 import { buildProgram, DeclarationCollection } from "./closure.js";
-import type { FunctionType } from "#compiler/ir/function.js";
 import type { FunctionDeclaration, Program } from "./program.js";
 import type { FunctionExport } from "./exports.js";
 import type { FunctionRef } from "#compiler/reference.js";

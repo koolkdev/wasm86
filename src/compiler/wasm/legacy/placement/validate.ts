@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { FunctionAnalysis } from "#compiler/wasm/legacy/analysis/model.js";
-import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { FunctionGraph } from "#compiler/wasm/legacy/function.js";
 import type { PlacementPlan } from "./model.js";
 import { validatePlacementGeometry } from "./validate/geometry.js";
 import { validatePlacementLocals } from "./validate/locals.js";

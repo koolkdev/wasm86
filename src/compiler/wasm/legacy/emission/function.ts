@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { IrFunction } from "#compiler/ir/function.js";
+import type { Function as IrFunction } from "#compiler/wasm/legacy/function.js";
 import type { ModuleBindings } from "#compiler/wasm/module/bindings.js";
 import type { FunctionPlacement } from "#compiler/wasm/legacy/placement/place.js";
 import {

@@ -2,7 +2,6 @@ import { assert } from "#common/assert.js";
 import type { ValueOperation } from "../expression.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueHandle } from "../handle.js";
 
 type TruncateOperands<Value> = Readonly<{
@@ -10,7 +9,7 @@ type TruncateOperands<Value> = Readonly<{
   value: Value;
 }>;
 
-type TruncateInput = TruncateOperands<ValueHandle<ValueType>>;
+type TruncateInput = TruncateOperands<ValueHandle>;
 type TruncateArgs = TruncateOperands<ValueId>;
 
 export type TruncateNode = Readonly<TruncateArgs & { kind: "truncate" }>;

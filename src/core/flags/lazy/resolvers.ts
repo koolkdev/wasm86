@@ -1,6 +1,6 @@
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { FunctionFamily } from "#compiler/program/functions.js";
 import type { StateAccess } from "#core/state/access.js";
 import type { FunctionBuilder } from "#compiler/ir/builder/function.js";

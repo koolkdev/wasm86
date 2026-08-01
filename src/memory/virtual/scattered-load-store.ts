@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { FunctionBuilder } from "#compiler/ir/builder/function.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import { FunctionFamily } from "#compiler/program/functions.js";
 import type { PhysicalAddressSpaceDefinition } from "../physical.js";

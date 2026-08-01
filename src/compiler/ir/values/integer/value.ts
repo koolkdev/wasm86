@@ -4,13 +4,8 @@ import type {
   BitCountOperator,
   CompareOperator
 } from "#compiler/integer/operators.js";
-import {
-  carrierTypeForWidth,
-  type CarrierTypeForWidth,
-  type IntegerWidth
-} from "#compiler/integer/width.js";
+import type { IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import { resolveValue, type ValueHandle } from "../handle.js";
 import { binaryValue } from "../graph/binary.js";
 import { bitCountValue } from "../graph/bit-count.js";
@@ -57,7 +52,7 @@ export function boundValue<Width extends IntegerWidth>(
 }
 
 class IntegerValue<Width extends IntegerWidth> implements Integer<Width> {
-  readonly type: CarrierTypeForWidth<Width>;
+  readonly kind = "integer";
   readonly signed: SignedView<Width>;
   readonly unsigned: UnsignedView<Width>;
 
@@ -65,7 +60,6 @@ class IntegerValue<Width extends IntegerWidth> implements Integer<Width> {
     readonly width: Width,
     private readonly expression: ValueExpression
   ) {
-    this.type = carrierTypeForWidth(width);
     this.signed = signednessView(this, "signed");
     this.unsigned = signednessView(this, "unsigned");
   }
@@ -160,7 +154,7 @@ class IntegerValue<Width extends IntegerWidth> implements Integer<Width> {
       }>,
     width: TargetWidth
   ): Integer<TargetWidth>;
-  truncate(this: Integer<Width>, width: IntegerWidth): ValueHandle<ValueType> {
+  truncate(this: Integer<Width>, width: IntegerWidth): ValueHandle {
     return truncateInteger(this, width);
   }
 }

@@ -139,13 +139,12 @@ test("i64 has the same operation surface as i32", () => {
     values.use(expression);
   }
 
-  strictEqual(values.valueType(values.use(expressions[0])), "i64");
-  strictEqual(values.valueType(values.use(expressions[7])), "i32");
+  strictEqual(values.bitWidth(values.use(expressions[0])), 64);
   strictEqual(values.bitWidth(values.use(expressions[7])), 1);
   strictEqual(values.bitWidth(values.use(expressions[8])), 1);
   strictEqual(values.bitWidth(values.use(expressions[9])), 1);
-  strictEqual(values.valueType(values.use(expressions[10])), "i64");
-  strictEqual(values.valueType(values.use(expressions[11])), "i32");
+  strictEqual(values.bitWidth(values.use(expressions[10])), 64);
+  strictEqual(values.bitWidth(values.use(expressions[11])), 8);
 });
 
 test("unreachable values preserve their bit width", () => {
@@ -154,9 +153,9 @@ test("unreachable values preserve their bit width", () => {
   const dword = values.use(unreachable());
   const qword = values.use(unreachable(64));
 
-  strictEqual(values.valueType(byte), "i32");
-  strictEqual(values.valueType(dword), "i32");
-  strictEqual(values.valueType(qword), "i64");
+  strictEqual(values.bitWidth(byte), 8);
+  strictEqual(values.bitWidth(dword), 32);
+  strictEqual(values.bitWidth(qword), 64);
   strictEqual(values.isUnreachable(byte), true);
   strictEqual(values.isUnreachable(dword), true);
   strictEqual(values.isUnreachable(qword), true);

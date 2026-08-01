@@ -10,7 +10,8 @@ import {
   switchControl,
   type SwitchControlArgs
 } from "#compiler/ir/controls/index.js";
-import { functionType, type FunctionGraph, type IrFunction } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
+import type { FunctionGraph, Function as IrFunction } from "#compiler/wasm/legacy/function.js";
 import { Invocation } from "#compiler/ir/invocation.js";
 import { variableRead, variableWrite } from "#compiler/ir/operations/variables.js";
 import type { OperationResult } from "#compiler/ir/operations/definition.js";

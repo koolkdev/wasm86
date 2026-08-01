@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { BinaryOperator } from "#compiler/integer/operators.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId } from "#compiler/ir/value.js";
+import { Integer } from "#compiler/ir/values.js";
 import { binaryValue } from "../binary.js";
 import { bitCountValue } from "../bit-count.js";
 import { comparisonValue } from "../comparison.js";
@@ -12,7 +13,7 @@ import { selectValue } from "../select.js";
 import { ValueTable } from "../table.js";
 import { truncateValue } from "../truncate.js";
 
-test("constants expose normalized semantic bits and signed i32 convenience values", () => {
+test("constants expose normalized logical bits and signed i32 convenience values", () => {
   const values = new ValueTable();
   const byte = constant(values, 8, -1);
   const deadBeef = constant(values, 32, 0xdead_beef);
@@ -25,12 +26,19 @@ test("constants expose normalized semantic bits and signed i32 convenience value
   strictEqual(values.constant(wide), 0xffff_ffff_ffff_ffffn);
   strictEqual(values.constValue(wide), undefined);
   strictEqual(values.bitWidth(byte), 8);
-  strictEqual(values.valueType(byte), "i32");
   strictEqual(values.bitWidth(wide), 64);
-  strictEqual(values.valueType(wide), "i64");
 });
 
-test("constant binary operations fold modulo their semantic width", () => {
+test("function parameters retain their exact logical width", () => {
+  const values = new ValueTable();
+  const byte = values.functionParameter(0, Integer[8]);
+  const wide = values.functionParameter(1, Integer[64]);
+
+  strictEqual(values.bitWidth(byte), 8);
+  strictEqual(values.bitWidth(wide), 64);
+});
+
+test("constant binary operations fold modulo their logical width", () => {
   const values = new ValueTable();
 
   strictEqual(values.constant(binary(values, 8, "add", 250, 10)), 4n);
@@ -40,7 +48,7 @@ test("constant binary operations fold modulo their semantic width", () => {
   strictEqual(values.constant(binary(values, 64, "add", 0xffff_ffff_ffff_ffffn, 1n)), 0n);
 });
 
-test("signedness belongs to semantic operators rather than stored values", () => {
+test("signedness belongs to logical operators rather than stored values", () => {
   const values = new ValueTable();
   const allBits = constant(values, 8, 0xff);
   const one = constant(values, 8, 1);
@@ -61,7 +69,7 @@ test("signedness belongs to semantic operators rather than stored values", () =>
   strictEqual(values.bitWidth(unsigned), 1);
 });
 
-test("truncation and extension fold as semantic width changes", () => {
+test("truncation and extension fold as logical width changes", () => {
   const values = new ValueTable();
   const negativeOne = constant(values, 32, -1);
   const eighty = constant(values, 8, 0x80);
@@ -95,7 +103,7 @@ test("truncation and extension fold as semantic width changes", () => {
 test("computed values derive one exact logical width", () => {
   const values = new ValueTable();
   const condition = constant(values, 1, 1);
-  const count = values.parameter(1, "i32");
+  const count = values.parameter(1, 32);
   const left = values.addNodeOutput(8);
   const right = values.addNodeOutput(8);
   const sum = values.create(binaryValue, {
@@ -125,14 +133,13 @@ test("computed values derive one exact logical width", () => {
 
   for (const value of [sum, shifted, selected, countBits]) {
     strictEqual(values.bitWidth(value), 8);
-    strictEqual(values.valueType(value), "i32");
   }
   strictEqual(values.bitWidth(compared), 1);
 });
 
 test("scoped identities reuse ancestors without crossing sibling scopes", () => {
   const root = new ValueTable();
-  const input = root.parameter(0, "i32");
+  const input = root.parameter(0, 32);
   const one = constant(root, 32, 1);
   const create = (values: ValueTable, operator: BinaryOperator) =>
     values.create(binaryValue, {

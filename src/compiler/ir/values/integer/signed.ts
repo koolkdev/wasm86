@@ -1,6 +1,5 @@
 import type { BinaryOperator, CompareOperator } from "#compiler/integer/operators.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueHandle } from "../handle.js";
 import { extendInteger } from "./width.js";
 import { binary, compare, shift } from "./value.js";
@@ -78,7 +77,7 @@ class ValueSignednessView<
       }>,
     width: TargetWidth
   ): Integer<TargetWidth>;
-  extend(width: IntegerWidth): ValueHandle<ValueType> {
+  extend(width: IntegerWidth): ValueHandle {
     return extendInteger(this.#value, this.signedness, width);
   }
 }

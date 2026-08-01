@@ -11,7 +11,7 @@ import type { ValueId } from "#compiler/ir/values/types.js";
 import { resourceRead } from "#compiler/ir/operations/resource.js";
 import { compileProgram } from "#compiler/compile.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { functionExportRef } from "#compiler/program/exports.js";
 import { functionRef, tableRef } from "#compiler/reference.js";
 import { createProgramResources, type ProgramResources } from "#compiler/program/resources.js";

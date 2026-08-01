@@ -1,7 +1,7 @@
 import { buildDefinition } from "#build";
 import { analyzeFunction } from "#compiler/wasm/legacy/analysis/analyze.js";
 import type { FunctionAnalysis } from "#compiler/wasm/legacy/analysis/model.js";
-import type { IrFunction } from "#compiler/ir/function.js";
+import type { Function as IrFunction } from "#compiler/wasm/legacy/function.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";
 import { indexPlacement, type PlacementIndex } from "./index.js";
 import type { PlacementPlan } from "./model.js";

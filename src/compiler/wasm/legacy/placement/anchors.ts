@@ -1,12 +1,16 @@
 import { assert } from "#common/assert.js";
-import type { FunctionAnalysis, SiteId, ValueDemand } from "#compiler/wasm/legacy/analysis/model.js";
+import type {
+  FunctionAnalysis,
+  SiteId,
+  ValueDemand
+} from "#compiler/wasm/legacy/analysis/model.js";
 import type { StorageAccess } from "#compiler/ir/effects.js";
 import { describeNode } from "#compiler/ir/node.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { mayAlias } from "#compiler/ir/effects.js";
-import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { FunctionGraph } from "#compiler/wasm/legacy/function.js";
 import type { Region } from "#compiler/ir/region.js";
 import { canCaptureAtDeadline } from "./capture-safety.js";
 import { LoopAnchors } from "./loop-anchors.js";

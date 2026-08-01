@@ -1,14 +1,8 @@
-import type {
-  CarrierTypeForWidth,
-  IntegerWidth,
-  WidthsAtLeast,
-  WidthsAtMost
-} from "#compiler/integer/width.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
+import type { IntegerWidth, WidthsAtLeast, WidthsAtMost } from "#compiler/integer/width.js";
 import type { ValueHandle } from "../handle.js";
 
 export type { WidthsAtLeast, WidthsAtMost } from "#compiler/integer/width.js";
-export type { AnyValueHandle, I32Handle, I64Handle } from "../handle.js";
+export type { AnyValueHandle } from "../handle.js";
 
 type IntegerLiteralByWidth = Readonly<{
   1: 0 | 1;
@@ -23,7 +17,7 @@ export type IntegerLiteral<Width extends IntegerWidth> = IntegerLiteralByWidth[W
 export type IntegerOperand<Width extends IntegerWidth> =
   Integer<NoInfer<Width>> | IntegerLiteral<Width>;
 
-export type ShiftCount = AnyI32Integer | number;
+export type ShiftCount = AnyNarrowInteger | number;
 
 export type ExtensionTargets<Source extends IntegerWidth> = WidthsAtLeast<Source>;
 
@@ -59,9 +53,8 @@ interface ExtendOperation<Width extends IntegerWidth, Mode extends Signedness> {
   ): Integer<TargetWidth>;
 }
 
-export interface Integer<Width extends IntegerWidth> extends ValueHandle<
-  CarrierTypeForWidth<Width>
-> {
+export interface Integer<Width extends IntegerWidth> extends ValueHandle<Width> {
+  readonly kind: "integer";
   readonly width: Width;
 
   readonly add: (this: Integer<Width>, other: IntegerOperand<Width>) => Integer<Width>;
@@ -112,17 +105,6 @@ export type BitValue = Integer<1>;
 export type I32Value = Integer<32>;
 export type I64Value = Integer<64>;
 
-export type AnyI32Integer = BitValue | Integer<8> | Integer<16> | Integer<32>;
+export type AnyNarrowInteger = BitValue | Integer<8> | Integer<16> | I32Value;
 
-export type AnyInteger = AnyI32Integer | Integer<64>;
-
-type ValueByType = Readonly<{
-  i32: I32Value;
-  i64: I64Value;
-}>;
-
-export type ValueFor<Type extends ValueType> = ValueByType[Type];
-
-export type ValueTuple<Types extends readonly ValueType[]> = {
-  readonly [Index in keyof Types]: Types[Index] extends ValueType ? ValueFor<Types[Index]> : never;
-};
+export type AnyInteger = AnyNarrowInteger | Integer<64>;

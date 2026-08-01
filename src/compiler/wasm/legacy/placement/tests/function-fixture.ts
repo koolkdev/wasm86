@@ -1,5 +1,6 @@
 import { returnControl } from "#compiler/ir/controls/index.js";
-import { functionType, type FunctionGraph, type IrFunction } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
+import type { FunctionGraph, Function as IrFunction } from "#compiler/wasm/legacy/function.js";
 import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 
 export function completedPlacementFunction(

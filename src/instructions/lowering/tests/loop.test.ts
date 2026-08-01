@@ -7,7 +7,7 @@ import { subFlagSource } from "#core/flags/lazy/sources.js";
 import type { InstructionStateChannel } from "../state/channels.js";
 import { gprChannel } from "#core/state/channels.js";
 import type { LoopControl } from "#compiler/ir/controls/index.js";
-import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { FunctionGraph } from "#compiler/wasm/legacy/function.js";
 import { describeNode } from "#compiler/ir/node.js";
 import type { RegionNode } from "#compiler/ir/region.js";
 import { validateIrFunction } from "#compiler/ir/validate.js";

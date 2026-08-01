@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { FunctionType } from "#compiler/ir/function.js";
+import type { FunctionType } from "#compiler/wasm/legacy/function-type.js";
 import type { FunctionRef, TableRef } from "#compiler/reference.js";
 import type { ResourceRef } from "#compiler/ir/resource.js";
 import type { FunctionExportRef } from "#compiler/program/exports.js";

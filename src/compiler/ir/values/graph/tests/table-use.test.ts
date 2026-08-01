@@ -13,7 +13,7 @@ test("one deferred expression can be resolved by independent graphs", () => {
   strictEqual(second.constValue(second.use(expression)), 7);
 });
 
-test("one expression object keeps one semantic identity across ordinary scopes", () => {
+test("one expression object keeps one logical identity across ordinary scopes", () => {
   const root = new ValueTable();
   const first = root.childScope();
   const second = root.childScope();
@@ -24,9 +24,9 @@ test("one expression object keeps one semantic identity across ordinary scopes",
   strictEqual(root.use(expression), resolved);
 });
 
-test("use resolves a narrow expression directly to its semantic value", () => {
+test("use resolves a narrow expression directly to its logical value", () => {
   const values = new ValueTable();
-  const parameter = values.integer(32, values.parameter(0, "i32"));
+  const parameter = values.integer(32, values.parameter(0, 32));
   const byte = parameter.truncate(8).add(1);
   const resolved = values.use(byte);
   const size = values.size();
@@ -36,7 +36,7 @@ test("use resolves a narrow expression directly to its semantic value", () => {
   strictEqual(values.bitWidth(resolved), 8);
 });
 
-test("sameValue compares semantic identities resolved in its graph", () => {
+test("sameValue compares logical identities resolved in its graph", () => {
   const values = new ValueTable();
   const expression = i32(4).add(3);
 

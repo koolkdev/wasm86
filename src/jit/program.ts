@@ -5,7 +5,7 @@ import type { CallTarget } from "#compiler/ir/invocation.js";
 import type { ResourceEffect, ResourceRef } from "#compiler/ir/resource.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import type { Program } from "#compiler/program/program.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
 import { functionExportRef, type FunctionExportRef } from "#compiler/program/exports.js";

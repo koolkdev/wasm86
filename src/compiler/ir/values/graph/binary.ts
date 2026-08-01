@@ -5,7 +5,6 @@ import type { ValueOperation } from "../expression.js";
 import { normalizeInteger, signedInteger } from "./integer.js";
 import { effectiveShiftAmount, type IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueHandle } from "../handle.js";
 
 type BinaryOperands<Value> = Readonly<{
@@ -14,7 +13,7 @@ type BinaryOperands<Value> = Readonly<{
   b: Value;
 }>;
 
-type BinaryInput = BinaryOperands<ValueHandle<ValueType>>;
+type BinaryInput = BinaryOperands<ValueHandle>;
 type BinaryArgs = BinaryOperands<ValueId>;
 
 export type BinaryNode = Readonly<BinaryArgs & { kind: "binary" }>;
@@ -54,14 +53,11 @@ function foldBinary(node: BinaryNode, context: ValueFoldContext): ValueId | unde
   const right = context.constant(node.b);
 
   if (left !== undefined && right !== undefined) {
-    if (binaryConstantTraps(node.operator, width, left, right)) {
+    if (binaryConstantIsUndefined(node.operator, width, left, right)) {
       return context.unreachable(width);
     }
 
-    return context.constantValue(
-      width,
-      evaluateNonTrappingBinary(node.operator, width, left, right)
-    );
+    return context.constantValue(width, evaluateDefinedBinary(node.operator, width, left, right));
   }
 
   switch (node.operator) {
@@ -132,7 +128,7 @@ function foldBinary(node: BinaryNode, context: ValueFoldContext): ValueId | unde
   }
 }
 
-function evaluateNonTrappingBinary(
+function evaluateDefinedBinary(
   operator: BinaryOperator,
   width: IntegerWidth,
   left: bigint,
@@ -182,7 +178,7 @@ function evaluateNonTrappingBinary(
   }
 }
 
-function binaryConstantTraps(
+function binaryConstantIsUndefined(
   operator: BinaryOperator,
   width: IntegerWidth,
   left: bigint,

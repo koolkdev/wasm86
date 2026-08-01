@@ -2,10 +2,10 @@ import { assert } from "#common/assert.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
 import { resolveValue, type ValueHandle } from "../handle.js";
 import { boundValue } from "../integer/value.js";
-import type { Integer } from "../integer/types.js";
+import type { AnyInteger, Integer } from "../integer/types.js";
+import type { AnyValue, ValueType, ValueTuple } from "../type.js";
 import type { ValueResolutionContext, ValueScopeRequirement } from "../expression.js";
 import type { ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import { ValueArena } from "./arena.js";
 import type { ValueDefinition } from "./definition.js";
 import { loopInputValue, nodeOutputValue, parameterValue } from "./leaves.js";
@@ -16,7 +16,7 @@ const tableState = Symbol("valueTableState");
 type ValueTableState = Readonly<{
   [tableState]: true;
   arena: ValueArena;
-  expressionResolutions: WeakMap<ValueHandle<ValueType>, ValueResolution>;
+  expressionResolutions: WeakMap<ValueHandle, ValueResolution>;
   valueScope: ValueScope;
 }>;
 
@@ -24,7 +24,7 @@ type ValueScope = Readonly<{
   parent?: ValueScope;
 }>;
 
-type ValueIds<Values extends readonly ValueHandle<ValueType>[]> = {
+type ValueIds<Values extends readonly ValueHandle[]> = {
   readonly [Index in keyof Values]: ValueId;
 };
 
@@ -33,15 +33,13 @@ type ValueResolution = Readonly<{
   requirements: readonly ValueScopeRequirement[];
 }>;
 
-function isValueList(
-  value: ValueHandle<ValueType> | readonly ValueHandle<ValueType>[]
-): value is readonly ValueHandle<ValueType>[] {
+function isValueList(value: ValueHandle | readonly ValueHandle[]): value is readonly ValueHandle[] {
   return Array.isArray(value);
 }
 
 export class ValueTable implements ValueGraph {
   readonly #arena: ValueArena;
-  readonly #expressionResolutions: WeakMap<ValueHandle<ValueType>, ValueResolution>;
+  readonly #expressionResolutions: WeakMap<ValueHandle, ValueResolution>;
   readonly #valueScope: ValueScope;
 
   constructor(state?: ValueTableState) {
@@ -77,11 +75,29 @@ export class ValueTable implements ValueGraph {
     return boundValue(width, { origin: this, id });
   }
 
-  use<Type extends ValueType>(value: ValueHandle<Type>): ValueId;
-  use<const Values extends readonly ValueHandle<ValueType>[]>(values: Values): ValueIds<Values>;
-  use(
-    valueOrValues: ValueHandle<ValueType> | readonly ValueHandle<ValueType>[]
-  ): ValueId | readonly ValueId[] {
+  handles<const Types extends readonly ValueType[]>(
+    types: Types,
+    ids: readonly ValueId[]
+  ): ValueTuple<Types>;
+  handles(types: readonly ValueType[], ids: readonly ValueId[]): readonly AnyValue[] {
+    assert(
+      types.length === ids.length,
+      `${ids.length} values do not align with ${types.length} types`
+    );
+    return types.map((type, index): AnyValue => {
+      const id = ids[index];
+
+      assert(id !== undefined, `value ${index} is missing`);
+      switch (type.kind) {
+        case "integer":
+          return integerForWidth(this, type.width, id);
+      }
+    });
+  }
+
+  use<Width extends IntegerWidth>(value: ValueHandle<Width>): ValueId;
+  use<const Values extends readonly ValueHandle[]>(values: Values): ValueIds<Values>;
+  use(valueOrValues: ValueHandle | readonly ValueHandle[]): ValueId | readonly ValueId[] {
     const values = isValueList(valueOrValues) ? valueOrValues : [valueOrValues];
     const resolved = this.#resolveValues(values);
 
@@ -94,7 +110,10 @@ export class ValueTable implements ValueGraph {
     return value;
   }
 
-  sameValue<Width extends IntegerWidth>(a: Integer<Width>, b: Integer<NoInfer<Width>>): boolean {
+  sameValue(a: ValueHandle, b: ValueHandle): boolean {
+    if (a.width !== b.width) {
+      return false;
+    }
     const [left, right] = this.use([a, b]);
 
     return left === right;
@@ -116,10 +135,6 @@ export class ValueTable implements ValueGraph {
     return this.#arena.bitWidth(id);
   }
 
-  valueType(id: ValueId): ValueType {
-    return this.#arena.valueType(id);
-  }
-
   isUnreachable(id: ValueId): boolean {
     return this.#arena.isUnreachable(id);
   }
@@ -132,8 +147,15 @@ export class ValueTable implements ValueGraph {
     return this.#arena.constValue(id);
   }
 
-  parameter(index: number, type: ValueType): ValueId {
-    return this.create(parameterValue, { index, type });
+  parameter(index: number, width: IntegerWidth): ValueId {
+    return this.create(parameterValue, { index, width });
+  }
+
+  functionParameter(index: number, type: ValueType): ValueId {
+    switch (type.kind) {
+      case "integer":
+        return this.parameter(index, type.width);
+    }
   }
 
   addNodeOutput(width: IntegerWidth): ValueId {
@@ -151,9 +173,9 @@ export class ValueTable implements ValueGraph {
     return this.#arena.create(definition, args);
   }
 
-  #resolveValues(values: readonly ValueHandle<ValueType>[]): readonly ValueId[] {
-    const resolutions = new Map<ValueHandle<ValueType>, ValueResolution>();
-    const resolve = (value: ValueHandle<ValueType>): ValueResolution => {
+  #resolveValues(values: readonly ValueHandle[]): readonly ValueId[] {
+    const resolutions = new Map<ValueHandle, ValueResolution>();
+    const resolve = (value: ValueHandle): ValueResolution => {
       const existing = resolutions.get(value) ?? this.#expressionResolutions.get(value);
 
       if (existing !== undefined) {
@@ -180,9 +202,12 @@ export class ValueTable implements ValueGraph {
         bitWidth: (id) => this.bitWidth(id)
       };
       const id = value[resolveValue](context);
-      const actualType = this.valueType(id);
+      const actualWidth = this.bitWidth(id);
 
-      assert(actualType === value.type, `${value.type} expression produced ${actualType} value`);
+      assert(
+        actualWidth === value.width,
+        `${value.width}-bit expression produced a ${actualWidth}-bit value`
+      );
       const resolution: ValueResolution = { id, requirements };
 
       resolutions.set(value, resolution);
@@ -226,5 +251,20 @@ function addRequirement(
     )
   ) {
     requirements.push(requirement);
+  }
+}
+
+function integerForWidth(table: ValueTable, width: IntegerWidth, id: ValueId): AnyInteger {
+  switch (width) {
+    case 1:
+      return table.integer(1, id);
+    case 8:
+      return table.integer(8, id);
+    case 16:
+      return table.integer(16, id);
+    case 32:
+      return table.integer(32, id);
+    case 64:
+      return table.integer(64, id);
   }
 }

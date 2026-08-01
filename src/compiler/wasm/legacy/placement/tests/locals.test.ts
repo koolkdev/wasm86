@@ -9,7 +9,7 @@ import { placeFunction } from "#compiler/wasm/legacy/placement/place.js";
 import { validatePlacement } from "#compiler/wasm/legacy/placement/validate.js";
 import type { Operation } from "#compiler/ir/operations/index.js";
 import type { Region } from "#compiler/ir/region.js";
-import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { FunctionGraph } from "#compiler/wasm/legacy/function.js";
 import {
   compilerTestValues,
   resourceReadNode,

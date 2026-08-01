@@ -7,7 +7,7 @@ import { ValueTable } from "../table.js";
 test("ancestor values retain their identity in descendant scopes", () => {
   const root = new ValueTable();
   const child = root.childScope();
-  const parameterId = root.parameter(0, "i32");
+  const parameterId = root.parameter(0, 32);
   const value = root.integer(32, parameterId);
   const [childId] = child.use([value]);
 
@@ -17,7 +17,7 @@ test("ancestor values retain their identity in descendant scopes", () => {
 
 test("an expression over an ancestor value is reusable in sibling scopes", () => {
   const root = new ValueTable();
-  const parameter = root.integer(32, root.parameter(0, "i32"));
+  const parameter = root.integer(32, root.parameter(0, 32));
   const expression = parameter.add(4).xor(7);
   const thenValues = root.childScope();
   const elseValues = root.childScope();
@@ -41,7 +41,7 @@ test("a derived value retains branch-local requirements after its first use", ()
 
 test("a retained expression resolves to its graph identity in children and forks", () => {
   const root = new ValueTable();
-  const parameter = root.integer(32, root.parameter(0, "i32"));
+  const parameter = root.integer(32, root.parameter(0, 32));
   const expression = parameter.add(4).xor(7);
   const resolved = root.use(expression);
   const thenValues = root.childScope();
@@ -91,7 +91,7 @@ test("forks see only values retained by their source snapshot", () => {
 
 test("forks retain resolved prefixes but isolate later expression resolution", () => {
   const source = new ValueTable();
-  const parameter = source.integer(32, source.parameter(0, "i32"));
+  const parameter = source.integer(32, source.parameter(0, 32));
   const retainedExpression = parameter.add(4).xor(7);
   const retained = source.use(retainedExpression);
   const fork = source.fork();
@@ -139,8 +139,8 @@ test("forks inherit the ancestry of a child scope", () => {
 
 test("sameValue recognizes one graph value across scopes and forks", () => {
   const root = new ValueTable();
-  const firstId = root.parameter(0, "i32");
-  const secondId = root.parameter(1, "i32");
+  const firstId = root.parameter(0, 32);
+  const secondId = root.parameter(1, 32);
   const first = root.integer(32, firstId);
   const second = root.integer(32, secondId);
   const child = root.childScope();

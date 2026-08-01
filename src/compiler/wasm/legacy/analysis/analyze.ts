@@ -6,7 +6,7 @@ import { describeNode } from "#compiler/ir/node.js";
 import { valueId } from "#compiler/ir/values/id.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { Region, RegionNode } from "#compiler/ir/region.js";
-import type { IrFunction } from "#compiler/ir/function.js";
+import type { Function as IrFunction } from "#compiler/wasm/legacy/function.js";
 import type {
   FunctionAnalysis,
   RegionPathStep,

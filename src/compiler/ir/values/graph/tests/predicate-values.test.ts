@@ -7,7 +7,7 @@ import { constantValue, parameterValue } from "../leaves.js";
 import { selectValue } from "../select.js";
 import { zeroTestValue } from "../zero-test.js";
 
-test("predicates occupy one semantic bit", () => {
+test("predicates occupy one logical bit", () => {
   const values = new ValueArena();
   const one = values.create(constantValue, { width: 32, value: 1 });
   const two = values.create(constantValue, { width: 32, value: 2 });
@@ -16,7 +16,7 @@ test("predicates occupy one semantic bit", () => {
     a: one,
     b: two
   });
-  const input = values.create(parameterValue, { index: 0, type: "i32" });
+  const input = values.create(parameterValue, { index: 0, width: 32 });
   const predicate = values.create(zeroTestValue, {
     operator: "nonzero",
     value: input

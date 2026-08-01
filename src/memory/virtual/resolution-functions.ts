@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { FunctionBuilder } from "#compiler/ir/builder/function.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { functionRef } from "#compiler/reference.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { FunctionDefinition, FunctionFamily } from "#compiler/program/functions.js";

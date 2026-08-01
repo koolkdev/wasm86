@@ -1,13 +1,12 @@
 import { assert } from "#common/assert.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import { extendValue } from "../graph/extend.js";
 import { truncateValue } from "../graph/truncate.js";
 import type { ValueHandle } from "../handle.js";
 import { operationValue } from "./value.js";
 import type { Integer, ExtensionTargets, Signedness, TruncationTargets } from "./types.js";
 
-type IntegerHandle = ValueHandle<ValueType> & Readonly<{ width: IntegerWidth }>;
+type IntegerHandle = ValueHandle & Readonly<{ kind: "integer"; width: IntegerWidth }>;
 
 export function extendInteger<
   Width extends IntegerWidth,
@@ -17,12 +16,12 @@ export function extendInteger(
   value: IntegerHandle,
   signedness: Signedness,
   width: IntegerWidth
-): ValueHandle<ValueType>;
+): ValueHandle;
 export function extendInteger(
   value: IntegerHandle,
   signedness: Signedness,
   width: IntegerWidth
-): ValueHandle<ValueType> {
+): ValueHandle {
   assert(width >= value.width, `cannot extend ${value.width} bits to ${width} bits`);
 
   if (width === value.width) {
@@ -59,8 +58,8 @@ export function truncateInteger<
   Width extends IntegerWidth,
   TargetWidth extends TruncationTargets<Width>
 >(value: Integer<Width>, width: TargetWidth): Integer<TargetWidth>;
-export function truncateInteger(value: IntegerHandle, width: IntegerWidth): ValueHandle<ValueType>;
-export function truncateInteger(value: IntegerHandle, width: IntegerWidth): ValueHandle<ValueType> {
+export function truncateInteger(value: IntegerHandle, width: IntegerWidth): ValueHandle;
+export function truncateInteger(value: IntegerHandle, width: IntegerWidth): ValueHandle {
   assert(width <= value.width, `cannot truncate ${value.width} bits to ${width} bits`);
 
   if (width === value.width) {

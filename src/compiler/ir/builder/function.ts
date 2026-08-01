@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
-import type { FunctionType } from "#compiler/ir/function.js";
-import type { IrFunction } from "#compiler/ir/function.js";
+import type { FunctionType } from "#compiler/wasm/legacy/function-type.js";
+import type { Function as IrFunction } from "#compiler/wasm/legacy/function.js";
 import { mapControlBodies } from "#compiler/ir/controls/index.js";
 import type { CallTarget } from "#compiler/ir/invocation.js";
 import type { Region } from "#compiler/ir/region.js";

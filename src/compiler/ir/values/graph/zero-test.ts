@@ -1,5 +1,4 @@
 import type { ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueHandle } from "../handle.js";
 import type { ValueOperation } from "../expression.js";
 
@@ -10,7 +9,7 @@ type ZeroTestOperands<Value> = Readonly<{
   value: Value;
 }>;
 
-type ZeroTestInput = ZeroTestOperands<ValueHandle<ValueType>>;
+type ZeroTestInput = ZeroTestOperands<ValueHandle>;
 type ZeroTestArgs = ZeroTestOperands<ValueId>;
 
 export type ZeroTestNode = Readonly<ZeroTestArgs & { kind: "zeroTest" }>;

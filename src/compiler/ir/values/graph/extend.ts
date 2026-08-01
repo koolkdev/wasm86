@@ -1,18 +1,17 @@
 import { assert } from "#common/assert.js";
 import type { ValueOperation } from "../expression.js";
 import { signedInteger } from "./integer.js";
-import type { IntegerWidth } from "#compiler/integer/width.js";
+import type { StorageWidth } from "#compiler/integer/width.js";
 import type { ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueHandle } from "../handle.js";
 
 type ExtendOperands<Value> = Readonly<{
-  width: IntegerWidth;
+  width: StorageWidth;
   value: Value;
   signed: boolean;
 }>;
 
-type ExtendInput = ExtendOperands<ValueHandle<ValueType>>;
+type ExtendInput = ExtendOperands<ValueHandle>;
 type ExtendArgs = ExtendOperands<ValueId>;
 
 export type ExtendNode = Readonly<ExtendArgs & { kind: "extend" }>;

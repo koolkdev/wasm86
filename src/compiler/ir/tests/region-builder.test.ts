@@ -12,7 +12,7 @@ import { validateIrFunction } from "#compiler/ir/validate.js";
 import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef, tableRef } from "#compiler/reference.js";
 import { compilerTestResourceEffect, resourceWriteNode } from "#test/support/storage-operations.js";

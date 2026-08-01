@@ -8,7 +8,7 @@ import { unboundedWidthBounds } from "#compiler/ir/values/width-bounds.js";
 import type { ValueId, ValueType, WidthBounds } from "#compiler/ir/values/types.js";
 import type { VariableRef } from "#compiler/ir/variable.js";
 import { regionCompletes, type Region, type RegionNode } from "./region.js";
-import type { FunctionGraph, IrFunction } from "./function.js";
+import type { FunctionGraph, Function as IrFunction } from "#compiler/wasm/legacy/function.js";
 import { describeNode, type NestedRegion } from "./node.js";
 import { validateResourceOperation, validateStorageEffectRanges } from "./validate/resource.js";
 

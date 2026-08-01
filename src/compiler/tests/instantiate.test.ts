@@ -12,7 +12,7 @@ import { resourceRead } from "#compiler/ir/operations/resource.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import { compileProgram, type CompiledProgram } from "#compiler/compile.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import { functionExportRef, type FunctionExportRef } from "#compiler/program/exports.js";
 import { functionRef, type FunctionRef } from "#compiler/reference.js";

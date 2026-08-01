@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { FunctionAnalysis, SiteId } from "#compiler/wasm/legacy/analysis/model.js";
 import { describeNode } from "#compiler/ir/node.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { FunctionGraph } from "#compiler/wasm/legacy/function.js";
 
 // A capture at an ordinary site runs on entry. Structured headers first emit
 // their operands, so captured recipes may also replay locals materialized by

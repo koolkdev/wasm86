@@ -13,7 +13,7 @@ import {
   type ResourceRef
 } from "#compiler/ir/resource.js";
 import { VariableRef } from "#compiler/ir/variable.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { ValueTable } from "#compiler/ir/values/table.js";
 import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";

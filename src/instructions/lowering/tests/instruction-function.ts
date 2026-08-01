@@ -1,11 +1,11 @@
 import type { InstructionBuilder } from "#instructions/lowering/builder.js";
 import type { InstructionLowerer } from "#instructions/lowering/lowerer.js";
 import type { InstructionTerminals } from "#instructions/lowering/terminal.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/reference.js";
 import { buildFunction } from "#compiler/ir/builder/function.js";
-import type { IrFunction } from "#compiler/ir/function.js";
+import type { Function as IrFunction } from "#compiler/wasm/legacy/function.js";
 import { testInstructionLowerer } from "#test/support/execution-model.js";
 
 const instructionFunctionType = functionType([], ["i64"]);

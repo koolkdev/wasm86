@@ -1,7 +1,6 @@
 import type { BitCountOperator } from "#compiler/integer/operators.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
 import type { ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueHandle } from "../handle.js";
 import type { ValueOperation } from "../expression.js";
 
@@ -10,7 +9,7 @@ type BitCountOperands<Value> = Readonly<{
   value: Value;
 }>;
 
-type BitCountInput = BitCountOperands<ValueHandle<ValueType>>;
+type BitCountInput = BitCountOperands<ValueHandle>;
 type BitCountArgs = BitCountOperands<ValueId>;
 
 export type BitCountNode = Readonly<BitCountArgs & { kind: "bitCount" }>;

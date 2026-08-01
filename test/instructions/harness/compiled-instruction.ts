@@ -8,7 +8,7 @@ import { buildVariant } from "#compiler/ir/builder/variant.js";
 import { compileProgram } from "#compiler/compile.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/ir/function.js";
+import { functionType } from "#compiler/wasm/legacy/function-type.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
 import { functionExportRef } from "#compiler/program/exports.js";
 import { functionRef } from "#compiler/reference.js";

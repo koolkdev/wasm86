@@ -2,7 +2,7 @@ import { assert } from "#common/assert.js";
 import type { FunctionAnalysis } from "#compiler/wasm/legacy/analysis/model.js";
 import { describeNode } from "#compiler/ir/node.js";
 import { valueId } from "#compiler/ir/values/id.js";
-import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { FunctionGraph } from "#compiler/wasm/legacy/function.js";
 import { planValueAnchors } from "./anchors.js";
 import { planLocals } from "./locals.js";
 import type { PlacementPlan, ValuePlacement } from "./model.js";

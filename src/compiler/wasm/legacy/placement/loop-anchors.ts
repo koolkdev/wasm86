@@ -3,7 +3,7 @@ import { valueDependsOn } from "#compiler/wasm/legacy/analysis/dependencies.js";
 import type { FunctionAnalysis, SiteId } from "#compiler/wasm/legacy/analysis/model.js";
 import { describeNode } from "#compiler/ir/node.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
-import type { FunctionGraph } from "#compiler/ir/function.js";
+import type { FunctionGraph } from "#compiler/wasm/legacy/function.js";
 import type { Region } from "#compiler/ir/region.js";
 
 type LoopBoundary = Readonly<{

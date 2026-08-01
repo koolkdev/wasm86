@@ -2,12 +2,11 @@ import { assert } from "#common/assert.js";
 import type { ValueDefinition, ValueFoldContext, ValueQuery } from "./definition.js";
 import type { ValueGraph, ValueNode } from "./node.js";
 import { valueId, type ValueId } from "#compiler/ir/value.js";
-import type { ValueType } from "#compiler/ir/values/types.js";
 import { constantValue, unreachableValue } from "./leaves.js";
 import { zeroTestValue } from "./zero-test.js";
 import { ValueInterner } from "./interner.js";
 import { createValueEntry, type ValueEntry } from "./entry.js";
-import { carrierTypeForWidth, type IntegerWidth } from "#compiler/integer/width.js";
+import type { IntegerWidth } from "#compiler/integer/width.js";
 
 type ArenaState = Readonly<{
   entries: ValueEntry[];
@@ -71,10 +70,6 @@ export class ValueArena implements ValueGraph {
 
   bitWidth(id: ValueId): IntegerWidth {
     return this.#entry(id).bitWidth;
-  }
-
-  valueType(id: ValueId): ValueType {
-    return carrierTypeForWidth(this.bitWidth(id));
   }
 
   isUnreachable(id: ValueId): boolean {
