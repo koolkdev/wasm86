@@ -1,7 +1,7 @@
 import type { ValueDefinition } from "./definition.js";
 import type { ValueNode } from "./node.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
-import type { ValueId } from "#compiler/value.js";
+import type { ValueId } from "#compiler/ir/value.js";
 
 const noChildren: readonly ValueId[] = [];
 

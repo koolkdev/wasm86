@@ -1,6 +1,6 @@
 import type { BinaryOperator, CompareOperator } from "#compiler/integer/operators.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
-import type { ValueType } from "#compiler/value.js";
+import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueHandle } from "../handle.js";
 import { extendInteger } from "./width.js";
 import { binary, compare, shift } from "./value.js";

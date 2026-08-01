@@ -9,7 +9,8 @@ import {
   type CarrierTypeForWidth,
   type IntegerWidth
 } from "#compiler/integer/width.js";
-import type { ValueId, ValueType } from "#compiler/value.js";
+import type { ValueId } from "#compiler/ir/value.js";
+import type { ValueType } from "#compiler/ir/values/types.js";
 import { resolveValue, type ValueHandle } from "../handle.js";
 import { binaryValue } from "../graph/binary.js";
 import { bitCountValue } from "../graph/bit-count.js";

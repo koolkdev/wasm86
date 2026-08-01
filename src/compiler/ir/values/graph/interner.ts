@@ -1,7 +1,7 @@
 import { InternTable } from "#common/intern-table.js";
 import type { ValueDefinition, ValueKey } from "./definition.js";
 import type { ValueNode } from "./node.js";
-import type { ValueId } from "#compiler/value.js";
+import type { ValueId } from "#compiler/ir/value.js";
 
 type ValueInternTable = InternTable<object, ValueKey, ValueId>;
 

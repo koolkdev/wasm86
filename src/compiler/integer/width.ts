@@ -1,4 +1,4 @@
-import type { ValueType } from "#compiler/value.js";
+import type { ValueType } from "#compiler/ir/values/types.js";
 
 export type AccessWidth = 8 | 16 | 32 | 64;
 export type IntegerWidth = 1 | AccessWidth;

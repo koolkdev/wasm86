@@ -4,7 +4,8 @@ import type { ValueFoldContext } from "./definition.js";
 import type { ValueOperation } from "../expression.js";
 import { normalizeInteger, signedInteger } from "./integer.js";
 import { effectiveShiftAmount, type IntegerWidth } from "#compiler/integer/width.js";
-import type { ValueId, ValueType } from "#compiler/value.js";
+import type { ValueId } from "#compiler/ir/value.js";
+import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueHandle } from "../handle.js";
 
 type BinaryOperands<Value> = Readonly<{

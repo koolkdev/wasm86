@@ -1,7 +1,8 @@
 import { assert } from "#common/assert.js";
 import type { ValueDefinition, ValueFoldContext, ValueQuery } from "./definition.js";
 import type { ValueGraph, ValueNode } from "./node.js";
-import { valueId, type ValueId, type ValueType } from "#compiler/value.js";
+import { valueId, type ValueId } from "#compiler/ir/value.js";
+import type { ValueType } from "#compiler/ir/values/types.js";
 import { constantValue, unreachableValue } from "./leaves.js";
 import { zeroTestValue } from "./zero-test.js";
 import { ValueInterner } from "./interner.js";

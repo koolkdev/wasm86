@@ -4,7 +4,7 @@ import type {
   WidthsAtLeast,
   WidthsAtMost
 } from "#compiler/integer/width.js";
-import type { ValueType } from "#compiler/value.js";
+import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueHandle } from "../handle.js";
 
 export type { WidthsAtLeast, WidthsAtMost } from "#compiler/integer/width.js";

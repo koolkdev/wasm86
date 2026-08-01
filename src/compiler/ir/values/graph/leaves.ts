@@ -3,7 +3,7 @@ import type { ValueDefinition } from "./definition.js";
 import type { ValueOperation } from "../expression.js";
 import { normalizeInteger } from "./integer.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
-import type { ValueType } from "#compiler/value.js";
+import type { ValueType } from "#compiler/ir/values/types.js";
 
 type ConstantArgs = Readonly<{
   width: IntegerWidth;

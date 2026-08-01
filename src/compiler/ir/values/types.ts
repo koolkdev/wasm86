@@ -1,6 +1,6 @@
-declare const valueBrand: unique symbol;
+import type { ValueId } from "#compiler/ir/value.js";
 
-export type ValueId = number & { readonly [valueBrand]: "compiler-value" };
+export type { ValueId } from "#compiler/ir/value.js";
 export type ValueType = "i32" | "i64";
 export type IntegerWidth = 8 | 16 | 32;
 

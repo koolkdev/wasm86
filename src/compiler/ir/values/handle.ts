@@ -1,4 +1,5 @@
-import type { ValueId, ValueType } from "#compiler/value.js";
+import type { ValueId } from "#compiler/ir/value.js";
+import type { ValueType } from "#compiler/ir/values/types.js";
 import type { ValueResolutionContext } from "./expression.js";
 
 export const resolveValue = Symbol("resolveValue");

@@ -2,7 +2,7 @@ import { notStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 import type { BinaryOperator } from "#compiler/integer/operators.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
-import type { ValueId } from "#compiler/value.js";
+import type { ValueId } from "#compiler/ir/value.js";
 import { binaryValue } from "../binary.js";
 import { bitCountValue } from "../bit-count.js";
 import { comparisonValue } from "../comparison.js";

@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { IntegerWidth } from "#compiler/integer/width.js";
-import type { ValueType } from "#compiler/value.js";
+import type { ValueType } from "#compiler/ir/values/types.js";
 import { extendValue } from "../graph/extend.js";
 import { truncateValue } from "../graph/truncate.js";
 import type { ValueHandle } from "../handle.js";

@@ -1,5 +1,5 @@
 import type { IntegerWidth } from "#compiler/integer/width.js";
-import type { ValueId } from "#compiler/value.js";
+import type { ValueId } from "#compiler/ir/value.js";
 
 export type ValueNodeBase = Readonly<{ kind: string }>;
 export type ValueKey = string | number | bigint | boolean;

@@ -1,6 +1,6 @@
 import type { AnyValueHandle } from "#compiler/ir/values/handle.js";
 import type { Integer, I32Value, I64Value } from "#compiler/ir/values.js";
-import type { ValueId } from "#compiler/value.js";
+import type { ValueId } from "#compiler/ir/value.js";
 import type { ValueInputs } from "../../expression.js";
 import type { ValueTable } from "../table.js";
 

@@ -1,4 +1,4 @@
-import type { ValueType } from "#compiler/value.js";
+import type { ValueType } from "#compiler/ir/values/types.js";
 
 const functionTypeBrand = Symbol("functionType");
 
