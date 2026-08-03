@@ -1,6 +1,18 @@
-import { reg32, type OperandWidth, type RegisterAlias, type Reg32, type RegName } from "./types.js";
+import {
+  reg32,
+  type OperandWidth,
+  type RegisterAlias,
+  type RegisterAliasFor,
+  type RegisterNameForWidth,
+  type Reg32,
+  type RegName
+} from "./types.js";
 
-export const registerAliasesByWidth = {
+type RegisterAliasesByWidth = {
+  readonly [Width in OperandWidth]: readonly RegisterAliasFor<RegisterNameForWidth<Width>>[];
+};
+
+export const registerAliasesByWidth: RegisterAliasesByWidth = {
   8: [
     { name: "al", base: "eax", bitOffset: 0, width: 8 },
     { name: "cl", base: "ecx", bitOffset: 0, width: 8 },
@@ -31,7 +43,7 @@ export const registerAliasesByWidth = {
     { name: "esi", base: "esi", bitOffset: 0, width: 32 },
     { name: "edi", base: "edi", bitOffset: 0, width: 32 }
   ]
-} as const satisfies Readonly<Record<OperandWidth, readonly RegisterAlias[]>>;
+};
 
 const registerAliasesByName = new Map<RegName, RegisterAlias>(
   Object.values(registerAliasesByWidth).flatMap((aliases) =>
@@ -39,17 +51,20 @@ const registerAliasesByName = new Map<RegName, RegisterAlias>(
   )
 );
 
-export function registerAlias(name: RegName): RegisterAlias {
+export function registerAlias<Name extends RegName>(name: Name): RegisterAliasFor<Name> {
   const alias = registerAliasesByName.get(name);
 
   if (alias === undefined) {
     throw new Error(`unknown register alias: ${name}`);
   }
 
-  return alias;
+  return alias as RegisterAliasFor<Name>;
 }
 
-export function registerAliasByIndex(width: OperandWidth, index: number): RegisterAlias {
+export function registerAliasByIndex<Width extends OperandWidth>(
+  width: Width,
+  index: number
+): RegisterAliasFor<RegisterNameForWidth<Width>> {
   const alias = registerAliasesByWidth[width][index & 0b111];
 
   if (alias === undefined) {
