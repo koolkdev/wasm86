@@ -1,5 +1,5 @@
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticsBuilder, SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { SemanticsBuilder, InstructionSemantics } from "#instructions/semantics/builder.js";
 import type { Value } from "#instructions/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
 import { writeShiftFlags } from "./flag-writes.js";
@@ -13,7 +13,7 @@ export function shiftSemantic(
   op: ShiftOp,
   width: OperandWidth,
   countSource: ShiftCountSource
-): SemanticTemplate {
+): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const destination = s.update(dst, { width });
@@ -32,7 +32,7 @@ export function doubleShiftSemantic(
   op: DoubleShiftOp,
   width: Extract<OperandWidth, 16 | 32>,
   countSource: DoubleShiftCountSource
-): SemanticTemplate {
+): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);

@@ -1,9 +1,9 @@
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 import type { OperandWidth } from "#core/types.js";
 
 export function accumulatorSignExtendSemantic(
   width: Extract<OperandWidth, 8 | 16>
-): SemanticTemplate {
+): InstructionSemantics {
   return (s) => {
     switch (width) {
       case 8:
@@ -18,7 +18,7 @@ export function accumulatorSignExtendSemantic(
 
 export function highAccumulatorSignExtendSemantic(
   width: Extract<OperandWidth, 16 | 32>
-): SemanticTemplate {
+): InstructionSemantics {
   return (s, v) => {
     switch (width) {
       case 16:

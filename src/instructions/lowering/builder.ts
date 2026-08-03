@@ -10,7 +10,7 @@ import type {
   IfBody,
   LoopBody,
   SemanticBranchHint,
-  SemanticTemplate
+  InstructionSemantics
 } from "#instructions/semantics/builder.js";
 import type { TargetInput, Value, ValueInput } from "#instructions/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
@@ -20,7 +20,7 @@ import type { OperandBinding, SegmentOperandBinding } from "./bindings.js";
 import { ControlEmitter, type IfOutcome } from "./control.js";
 import { LoopBuilder } from "./loop.js";
 import { SemanticScopeStack, type SemanticRegionScope } from "./scope.js";
-import { InstructionSemantics, type InstructionSemanticsSession } from "./semantics.js";
+import { ScopedSemanticsBuilder, type InstructionSemanticsSession } from "./semantics.js";
 import { emitSegmentLoad } from "./segments.js";
 import { InstructionStorage, type ScopedInstructionStorage } from "./storage.js";
 import { type InstructionStateChannel } from "./state/channels.js";
@@ -32,9 +32,9 @@ export type InstructionLocation =
 
 type InstructionLocationValues = Readonly<{ eip(): ValueId; nextEip(): ValueId }>;
 
-export type InstructionBuilder = Readonly<{
+export type InstructionSequenceBuilder = Readonly<{
   add(
-    template: SemanticTemplate,
+    semantics: InstructionSemantics,
     bindings: readonly OperandBinding[],
     location: InstructionLocation
   ): boolean;
@@ -52,9 +52,9 @@ export type InstructionBuildOptions = Readonly<{
 export function buildInstructionSequence(
   region: RegionBuilder,
   options: InstructionBuildOptions,
-  addInstructions: (builder: InstructionBuilder) => void
+  addInstructions: (builder: InstructionSequenceBuilder) => void
 ): ValueId | undefined {
-  return new InstructionBuilderImpl(region, options).build(addInstructions);
+  return new InstructionSequenceBuilderImpl(region, options).build(addInstructions);
 }
 
 export function staticInstructionLocation(eip: number, nextEip: number): InstructionLocation {
@@ -65,10 +65,10 @@ export function valueInstructionLocation(eip: ValueId, nextEip: ValueId): Instru
   return { kind: "value", eip, nextEip };
 }
 
-// Coordinates one instruction-sequence transaction. Semantic callbacks
-// receive InstructionSemantics instances fixed to their lexical scope; this
+// Coordinates one instruction-sequence transaction. Instruction-semantics
+// callbacks receive builder facades fixed to their lexical scope; this
 // session owns lifecycle, joins, completion, and the shared pending state.
-class InstructionBuilderImpl implements InstructionSemanticsSession {
+class InstructionSequenceBuilderImpl implements InstructionSemanticsSession {
   readonly #values: ValueTable;
   readonly #region: RegionBuilder;
   readonly #scopes: SemanticScopeStack;
@@ -77,7 +77,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   readonly #control: ControlEmitter;
   readonly #terminator: InstructionTerminator;
   readonly #scopeStorage = new WeakMap<SemanticRegionScope, ScopedInstructionStorage>();
-  readonly #scopeSemantics = new WeakMap<SemanticRegionScope, InstructionSemantics>();
+  readonly #scopeSemanticsBuilders = new WeakMap<SemanticRegionScope, ScopedSemanticsBuilder>();
   #instructionLocation: InstructionLocationValues | undefined;
   #closed = false;
   // "terminated" means the root region already holds its terminator.
@@ -101,7 +101,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
       writeObserver: stateWriteLog
     });
     this.#control = new ControlEmitter(this.#storage.state, stateWriteLog, this.#scopes, (scope) =>
-      this.#semantics(scope)
+      this.#semanticsBuilder(scope)
     );
     this.#terminator = new InstructionTerminator(
       this.#storage.state,
@@ -110,9 +110,9 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     );
   }
 
-  build(addInstructions: (builder: InstructionBuilder) => void): ValueId | undefined {
-    const facade: InstructionBuilder = {
-      add: (template, bindings, location) => this.add(template, bindings, location)
+  build(addInstructions: (builder: InstructionSequenceBuilder) => void): ValueId | undefined {
+    const facade: InstructionSequenceBuilder = {
+      add: (semantics, bindings, location) => this.add(semantics, bindings, location)
     };
 
     try {
@@ -124,7 +124,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
   }
 
   add(
-    template: SemanticTemplate,
+    semantics: InstructionSemantics,
     bindings: readonly OperandBinding[],
     location: InstructionLocation
   ): boolean {
@@ -139,13 +139,13 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     this.#instructionLocation = this.#locationValues(location);
     this.#storage.beginInstruction(bindings, this.#location().eip());
 
-    this.#scopes.root.run(() => template(this.#semantics(this.#scopes.root), this.#values));
+    this.#scopes.root.run(() => semantics(this.#semanticsBuilder(this.#scopes.root), this.#values));
 
     if (!this.#scopes.root.isTerminated()) {
       this.#completeRootFallthrough();
     }
 
-    // Cleared only on success: a template that throws leaves the instruction
+    // Cleared only on success: a callback that throws leaves the instruction
     // in place with its partial pendings, poisoning further use.
     this.#instructionLocation = undefined;
     this.#storage.endInstruction();
@@ -233,7 +233,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
 
   // Opens a loop: body-written channels become loop-carried values held in
   // locals while the body runs. The loop itself falls through; instruction
-  // completion remains with the surrounding semantic template.
+  // completion remains with the surrounding instruction semantics.
   loop(scope: SemanticRegionScope, body: LoopBody): void {
     this.assertActive(scope);
     const bodyWrites = this.#deriveLoopWrites(body);
@@ -269,8 +269,8 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     scope.complete();
   }
 
-  #semantics(scope: SemanticRegionScope): InstructionSemantics {
-    const existing = this.#scopeSemantics.get(scope);
+  #semanticsBuilder(scope: SemanticRegionScope): ScopedSemanticsBuilder {
+    const existing = this.#scopeSemanticsBuilders.get(scope);
 
     if (existing !== undefined) {
       return existing;
@@ -281,7 +281,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
       writeSegmentSelector: (binding, value, width) =>
         this.#writeSegmentSelector(scope, binding, value, width)
     });
-    const semantics = new InstructionSemantics({
+    const builder = new ScopedSemanticsBuilder({
       session: this,
       scope,
       storage,
@@ -290,12 +290,12 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     });
 
     this.#scopeStorage.set(scope, storage);
-    this.#scopeSemantics.set(scope, semantics);
-    return semantics;
+    this.#scopeSemanticsBuilders.set(scope, builder);
+    return builder;
   }
 
   #storageFor(scope: SemanticRegionScope): ScopedInstructionStorage {
-    this.#semantics(scope);
+    this.#semanticsBuilder(scope);
     const storage = this.#scopeStorage.get(scope);
 
     assert(storage !== undefined, "semantic scope has no lexical storage binding");
@@ -329,7 +329,7 @@ class InstructionBuilderImpl implements InstructionSemanticsSession {
     // depend on build-time side effects because construction invokes it twice.
     const writeLog = new StateWriteLog();
     const scratchValues = this.#scopes.current.region.values.fork();
-    const scratch = new InstructionBuilderImpl(
+    const scratch = new InstructionSequenceBuilderImpl(
       new RegionBuilder(scratchValues),
       this.#options,
       writeLog,

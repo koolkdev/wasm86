@@ -2,7 +2,7 @@ import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import type {
   SemanticsBuilder,
   SemanticUpdate,
-  SemanticTemplate
+  InstructionSemantics
 } from "#instructions/semantics/builder.js";
 import { bitAt, lowBit, signBit } from "#core/flags/values.js";
 import type { Value } from "#instructions/semantics/refs.js";
@@ -20,7 +20,7 @@ export function rotateSemantic(
   op: RotateOp,
   width: OperandWidth,
   countSource: ShiftCountSource
-): SemanticTemplate {
+): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const destination = s.update(dst, { width });

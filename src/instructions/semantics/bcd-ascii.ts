@@ -1,11 +1,11 @@
 import { zspValues } from "#core/flags/values.js";
 import { divideError } from "#core/exceptions.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticTemplate, SemanticsBuilder } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics, SemanticsBuilder } from "#instructions/semantics/builder.js";
 import type { Value, ValueInput } from "#instructions/semantics/refs.js";
 import { writeAddFlags, writeStatusFlagValues } from "./flag-writes.js";
 
-export function daaSemantic(): SemanticTemplate {
+export function daaSemantic(): InstructionSemantics {
   return (s, v) => {
     const oldAl = s.read(s.reg("al"), { width: 8 });
     const lowAdjust = decimalLowAdjust(s, v, oldAl);
@@ -18,7 +18,7 @@ export function daaSemantic(): SemanticTemplate {
   };
 }
 
-export function dasSemantic(): SemanticTemplate {
+export function dasSemantic(): InstructionSemantics {
   return (s, v) => {
     const oldAl = s.read(s.reg("al"), { width: 8 });
     const lowAdjust = decimalLowAdjust(s, v, oldAl);
@@ -33,19 +33,19 @@ export function dasSemantic(): SemanticTemplate {
   };
 }
 
-export function aaaSemantic(): SemanticTemplate {
+export function aaaSemantic(): InstructionSemantics {
   return (s, v) => {
     asciiAdjust(s, v, "add");
   };
 }
 
-export function aasSemantic(): SemanticTemplate {
+export function aasSemantic(): InstructionSemantics {
   return (s, v) => {
     asciiAdjust(s, v, "sub");
   };
 }
 
-export function aamSemantic(): SemanticTemplate {
+export function aamSemantic(): InstructionSemantics {
   return (s, v) => {
     const base = s.read(s.operand(0), { width: 8 });
     const oldAl = s.read(s.reg("al"), { width: 8 });
@@ -65,7 +65,7 @@ export function aamSemantic(): SemanticTemplate {
   };
 }
 
-export function aadSemantic(): SemanticTemplate {
+export function aadSemantic(): InstructionSemantics {
   return (s, v) => {
     const base = s.read(s.operand(0), { width: 8 });
     const oldAl = s.read(s.reg("al"), { width: 8 });

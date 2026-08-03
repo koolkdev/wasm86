@@ -31,18 +31,18 @@ export class ControlEmitter {
   readonly #state: InstructionState;
   readonly #writeLog: StateWriteLog;
   readonly #scopes: SemanticScopeStack;
-  readonly #bindScope: (scope: SemanticRegionScope) => SemanticsBuilder;
+  readonly #semanticsBuilderForScope: (scope: SemanticRegionScope) => SemanticsBuilder;
 
   constructor(
     state: InstructionState,
     writeLog: StateWriteLog,
     scopes: SemanticScopeStack,
-    bindScope: (scope: SemanticRegionScope) => SemanticsBuilder
+    semanticsBuilderForScope: (scope: SemanticRegionScope) => SemanticsBuilder
   ) {
     this.#state = state;
     this.#writeLog = writeLog;
     this.#scopes = scopes;
-    this.#bindScope = bindScope;
+    this.#semanticsBuilderForScope = semanticsBuilderForScope;
   }
 
   if(
@@ -56,7 +56,7 @@ export class ControlEmitter {
 
     if (conditionValue !== undefined) {
       if (conditionValue !== 0) {
-        emitThen(this.#bindScope(parentScope), parent.values);
+        emitThen(this.#semanticsBuilderForScope(parentScope), parent.values);
       }
       return "continues";
     }
@@ -78,7 +78,10 @@ export class ControlEmitter {
     const conditionValue = parent.values.constValue(condition);
 
     if (conditionValue !== undefined) {
-      (conditionValue !== 0 ? emitThen : emitElse)(this.#bindScope(parentScope), parent.values);
+      (conditionValue !== 0 ? emitThen : emitElse)(
+        this.#semanticsBuilderForScope(parentScope),
+        parent.values
+      );
       return "continues";
     }
 
@@ -95,7 +98,7 @@ export class ControlEmitter {
     finish: (condition: ValueId) => T
   ): T {
     return this.#scopes.enter(parentScope, "loop", region, (scope) => {
-      const outcome = scope.run(() => body(this.#bindScope(scope), region.values));
+      const outcome = scope.run(() => body(this.#semanticsBuilderForScope(scope), region.values));
 
       assert(outcome.kind === "fallthrough", "a loop body must not terminate the instruction");
       scope.commitMemoryWrites();
@@ -170,7 +173,7 @@ export class ControlEmitter {
       const child = parentScope.region.child();
 
       return this.#scopes.enter(parentScope, "arm", child, (scope) => {
-        scope.run(() => emitBody(this.#bindScope(scope), child.values));
+        scope.run(() => emitBody(this.#semanticsBuilderForScope(scope), child.values));
         const completes = regionCompletes(child.build());
 
         if (completes) {

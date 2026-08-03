@@ -1,20 +1,20 @@
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticTemplate, SemanticsBuilder } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics, SemanticsBuilder } from "#instructions/semantics/builder.js";
 import type { StorageInput, Value } from "#instructions/semantics/refs.js";
 import type { OperandWidth, RegName } from "#core/types.js";
 
 type MultiplyKind = "signed" | "unsigned";
 type MultiplyProduct = Readonly<{ full: Value; low: Value; high: Value; overflow: Value }>;
 
-export function mulImplicitSemantic(width: OperandWidth): SemanticTemplate {
+export function mulImplicitSemantic(width: OperandWidth): InstructionSemantics {
   return implicitMultiplySemantic("unsigned", width);
 }
 
-export function imulImplicitSemantic(width: OperandWidth): SemanticTemplate {
+export function imulImplicitSemantic(width: OperandWidth): InstructionSemantics {
   return implicitMultiplySemantic("signed", width);
 }
 
-function implicitMultiplySemantic(kind: MultiplyKind, width: OperandWidth): SemanticTemplate {
+function implicitMultiplySemantic(kind: MultiplyKind, width: OperandWidth): InstructionSemantics {
   return (s, v) => {
     const src = s.operand(0);
     const right = s.read(src, { width });
@@ -26,7 +26,7 @@ function implicitMultiplySemantic(kind: MultiplyKind, width: OperandWidth): Sema
   };
 }
 
-export function imulRegRmSemantic(width: OperandWidth): SemanticTemplate {
+export function imulRegRmSemantic(width: OperandWidth): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
@@ -37,7 +37,7 @@ export function imulRegRmSemantic(width: OperandWidth): SemanticTemplate {
   };
 }
 
-export function imulRegRmImmSemantic(width: OperandWidth): SemanticTemplate {
+export function imulRegRmImmSemantic(width: OperandWidth): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);

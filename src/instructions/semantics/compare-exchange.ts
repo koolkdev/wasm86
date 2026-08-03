@@ -1,10 +1,10 @@
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 import type { Value, ValueInput } from "#instructions/semantics/refs.js";
 import type { OperandWidth, RegName } from "#core/types.js";
 import { addFlagSource, subFlagSource } from "#core/flags/lazy/sources.js";
 
-export function cmpxchgSemantic(width: OperandWidth): SemanticTemplate {
+export function cmpxchgSemantic(width: OperandWidth): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
@@ -26,7 +26,7 @@ export function cmpxchgSemantic(width: OperandWidth): SemanticTemplate {
   };
 }
 
-export function xaddSemantic(width: OperandWidth): SemanticTemplate {
+export function xaddSemantic(width: OperandWidth): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
@@ -43,7 +43,7 @@ export function xaddSemantic(width: OperandWidth): SemanticTemplate {
   };
 }
 
-export function cmpxchg8bSemantic(): SemanticTemplate {
+export function cmpxchg8bSemantic(): InstructionSemantics {
   return (s, v) => {
     const access = s.memory.guard({
       reference: s.memory.operand(s.operand(0)),

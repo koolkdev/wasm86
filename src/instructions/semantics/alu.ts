@@ -1,5 +1,5 @@
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 import type { Value } from "#instructions/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#core/types.js";
 import { addFlagSource, logicFlagSource, subFlagSource } from "#core/flags/lazy/sources.js";
@@ -14,7 +14,7 @@ import {
 export type AluOp = "add" | "adc" | "sub" | "sbb" | "xor" | "and" | "or";
 export type UnaryAluOp = "inc" | "dec" | "not" | "neg";
 
-export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
+export function aluSemantic(op: AluOp, width: OperandWidth): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
@@ -66,7 +66,7 @@ export function aluSemantic(op: AluOp, width: OperandWidth): SemanticTemplate {
   };
 }
 
-export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): SemanticTemplate {
+export function unaryAluSemantic(op: UnaryAluOp, width: OperandWidth): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const destination = s.update(dst, { width });

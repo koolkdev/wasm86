@@ -139,7 +139,7 @@ export interface LoopSemanticsBuilder extends SemanticOps {
 
 export type LoopBody = (builder: LoopSemanticsBuilder, values: ValueBuilder) => ValueInput;
 
-export type SemanticTemplate = (builder: SemanticsBuilder, values: ValueBuilder) => void;
+export type InstructionSemantics = (builder: SemanticsBuilder, values: ValueBuilder) => void;
 
 export interface SemanticsBuilder extends SemanticOps {
   currentEip(): Value;

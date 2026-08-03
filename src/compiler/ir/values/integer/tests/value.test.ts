@@ -68,7 +68,7 @@ test("narrow values use logical-width operations", () => {
   }
 });
 
-test("narrow operations ignore carrier bits above their logical width", () => {
+test("narrow operations ignore representation bits above their logical width", () => {
   const values = new ValueTable();
   const zero = i32(0x100).truncate(8);
   const negative = i32(0x180).truncate(8);

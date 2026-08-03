@@ -1,34 +1,34 @@
 import { type X86Flag } from "#core/flags/definitions.js";
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 import { buildFlagImage, writeFlagsFromImage } from "./flag-image.js";
 
 const lahfFlags = ["CF", "PF", "AF", "ZF", "SF"] as const satisfies readonly X86Flag[];
 
-export function writeFlagSemantic(flag: X86Flag, value: 0 | 1): SemanticTemplate {
+export function writeFlagSemantic(flag: X86Flag, value: 0 | 1): InstructionSemantics {
   return (s, v) => {
     s.writeFlag(flag, v.const(value));
   };
 }
 
-export function cmcSemantic(): SemanticTemplate {
+export function cmcSemantic(): InstructionSemantics {
   return (s, v) => {
     s.writeFlag("CF", v.binary("xor", s.readFlag("CF"), v.const(1)));
   };
 }
 
-export function lahfSemantic(): SemanticTemplate {
+export function lahfSemantic(): InstructionSemantics {
   return (s, v) => {
     s.write(s.reg("ah"), buildFlagImage(s, v, lahfFlags, 0x02), { width: 8 });
   };
 }
 
-export function sahfSemantic(): SemanticTemplate {
+export function sahfSemantic(): InstructionSemantics {
   return (s, v) => {
     writeFlagsFromImage(s, v, lahfFlags, s.read(s.reg("ah"), { width: 8 }));
   };
 }
 
-export function xlatSemantic(): SemanticTemplate {
+export function xlatSemantic(): InstructionSemantics {
   return (s) => {
     const reference = s.memory.operand(s.operand(0), s.read(s.reg("al"), { width: 8 }));
 

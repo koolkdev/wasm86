@@ -2,11 +2,11 @@ import type { ValueBuilder } from "#compiler/ir/values/builder.js";
 import { invalidOpcode } from "#core/exceptions.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
 import { segmentRegisterIndex } from "#core/segments.js";
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 import type { SegmentRef, Value } from "#instructions/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
 
-export function movSemantic(width: OperandWidth = 32): SemanticTemplate {
+export function movSemantic(width: OperandWidth = 32): InstructionSemantics {
   return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
@@ -16,7 +16,9 @@ export function movSemantic(width: OperandWidth = 32): SemanticTemplate {
   };
 }
 
-export function movSregSemantic(registerWidth: Extract<OperandWidth, 16 | 32>): SemanticTemplate {
+export function movSregSemantic(
+  registerWidth: Extract<OperandWidth, 16 | 32>
+): InstructionSemantics {
   return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
@@ -26,7 +28,7 @@ export function movSregSemantic(registerWidth: Extract<OperandWidth, 16 | 32>): 
   };
 }
 
-export function movToSregSemantic(): SemanticTemplate {
+export function movToSregSemantic(): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);
@@ -49,7 +51,10 @@ function segmentTargetIsCs(v: ValueBuilder, segment: SegmentRef): Value | undefi
   }
 }
 
-export function movzxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {
+export function movzxSemantic(
+  sourceWidth: 8 | 16,
+  destinationWidth: 16 | 32
+): InstructionSemantics {
   return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
@@ -59,7 +64,10 @@ export function movzxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): S
   };
 }
 
-export function movsxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {
+export function movsxSemantic(
+  sourceWidth: 8 | 16,
+  destinationWidth: 16 | 32
+): InstructionSemantics {
   return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
@@ -69,7 +77,7 @@ export function movsxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): S
   };
 }
 
-export function cmovSemantic(cc: ConditionCode, width: OperandWidth = 32): SemanticTemplate {
+export function cmovSemantic(cc: ConditionCode, width: OperandWidth = 32): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);

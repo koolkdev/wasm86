@@ -18,5 +18,5 @@ type WrongWidth = FunctionType<
 // @ts-expect-error logical byte and dword parameters are distinct types.
 export const wrongWidth: WrongWidth = exactType;
 
-// @ts-expect-error Wasm carrier spellings are not logical IR types.
+// @ts-expect-error Wasm representation spellings are not logical IR types.
 functionType(["i32"], []);

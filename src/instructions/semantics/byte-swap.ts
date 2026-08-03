@@ -1,6 +1,6 @@
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 
-export function bswapSemantic(): SemanticTemplate {
+export function bswapSemantic(): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const value = s.read(dst, { width: 32 });

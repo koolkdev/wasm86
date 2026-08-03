@@ -1,4 +1,4 @@
-import type { InstructionBuilder } from "#instructions/lowering/builder.js";
+import type { InstructionSequenceBuilder } from "#instructions/lowering/builder.js";
 import type { InstructionLowerer } from "#instructions/lowering/lowerer.js";
 import type { InstructionTerminals } from "#instructions/lowering/terminal.js";
 import { functionType } from "#compiler/wasm/legacy/function-type.js";
@@ -21,7 +21,7 @@ export const testInstructionDispatch = new FunctionDefinition({
 });
 
 export function buildInstructionFunction(
-  build: (instructions: InstructionBuilder) => void,
+  build: (instructions: InstructionSequenceBuilder) => void,
   lowerer: InstructionLowerer = testInstructionLowerer
 ): IrFunction {
   return buildFunction(instructionFunctionType, (fn) => {

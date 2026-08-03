@@ -1,5 +1,5 @@
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticsBuilder, SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { SemanticsBuilder, InstructionSemantics } from "#instructions/semantics/builder.js";
 import type { Value, ValueInput } from "#instructions/semantics/refs.js";
 import { x86EflagsBitOffset, x86Flags, type X86Flag } from "#core/flags/definitions.js";
 import type { OperandWidth, Reg16, Reg32 } from "#core/types.js";
@@ -71,7 +71,7 @@ export function popStack(s: SemanticsBuilder, v: ValueBuilder, width: StackOpera
   return value;
 }
 
-export function pushSemantic(width: StackOperandWidth = 32): SemanticTemplate {
+export function pushSemantic(width: StackOperandWidth = 32): InstructionSemantics {
   return (s, v) => {
     const src = s.operand(0);
 
@@ -79,49 +79,49 @@ export function pushSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   };
 }
 
-export function pushfdSemantic(): SemanticTemplate {
+export function pushfdSemantic(): InstructionSemantics {
   return (s, v) => {
     pushFlags(s, v, 32, x86Flags);
   };
 }
 
-export function pushfSemantic(): SemanticTemplate {
+export function pushfSemantic(): InstructionSemantics {
   return (s, v) => {
     pushFlags(s, v, 16, x86Low16Flags);
   };
 }
 
-export function popfdSemantic(): SemanticTemplate {
+export function popfdSemantic(): InstructionSemantics {
   return (s, v) => {
     popFlags(s, v, 32, x86Flags);
   };
 }
 
-export function popfSemantic(): SemanticTemplate {
+export function popfSemantic(): InstructionSemantics {
   return (s, v) => {
     popFlags(s, v, 16, x86Low16Flags);
   };
 }
 
-export function pushadSemantic(): SemanticTemplate {
+export function pushadSemantic(): InstructionSemantics {
   return (s, v) => {
     pushAll(s, v, 32);
   };
 }
 
-export function pushaSemantic(): SemanticTemplate {
+export function pushaSemantic(): InstructionSemantics {
   return (s, v) => {
     pushAll(s, v, 16);
   };
 }
 
-export function popadSemantic(): SemanticTemplate {
+export function popadSemantic(): InstructionSemantics {
   return (s, v) => {
     popAll(s, v, 32);
   };
 }
 
-export function popaSemantic(): SemanticTemplate {
+export function popaSemantic(): InstructionSemantics {
   return (s, v) => {
     popAll(s, v, 16);
   };
@@ -198,7 +198,7 @@ function popFlags(
   writeFlagsFromImage(s, v, flags, image);
 }
 
-export function popSemantic(width: StackOperandWidth = 32): SemanticTemplate {
+export function popSemantic(width: StackOperandWidth = 32): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     // SDM order: esp is incremented before the destination EA is computed,
@@ -209,7 +209,7 @@ export function popSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   };
 }
 
-export function popSegmentSemantic(width: StackOperandWidth = 32): SemanticTemplate {
+export function popSegmentSemantic(width: StackOperandWidth = 32): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const value = popStack(s, v, width);
@@ -218,7 +218,7 @@ export function popSegmentSemantic(width: StackOperandWidth = 32): SemanticTempl
   };
 }
 
-export function leaveSemantic(): SemanticTemplate {
+export function leaveSemantic(): InstructionSemantics {
   return (s, v) => {
     const frame = s.read(s.reg("ebp"), { width: 32 });
     const savedFrame = s.memory.read(s.memory.reference("ss", frame), { width: 32 });

@@ -1,10 +1,10 @@
 import type { ConditionCode } from "#core/flags/conditions.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticsBuilder, SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { SemanticsBuilder, InstructionSemantics } from "#instructions/semantics/builder.js";
 import type { Value } from "#instructions/semantics/refs.js";
 import { popStack, pushStack, type StackOperandWidth } from "./stack.js";
 
-export function jmpSemantic(width: StackOperandWidth = 32): SemanticTemplate {
+export function jmpSemantic(width: StackOperandWidth = 32): InstructionSemantics {
   return (s, v) => {
     const target = s.operand(0);
     const value = s.read(target, { width });
@@ -13,7 +13,7 @@ export function jmpSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   };
 }
 
-export function callSemantic(width: StackOperandWidth = 32): SemanticTemplate {
+export function callSemantic(width: StackOperandWidth = 32): InstructionSemantics {
   return (s, v) => {
     const targetOperand = s.operand(0);
     const target = s.read(targetOperand, { width });
@@ -23,7 +23,7 @@ export function callSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   };
 }
 
-export function retSemantic(width: StackOperandWidth = 32): SemanticTemplate {
+export function retSemantic(width: StackOperandWidth = 32): InstructionSemantics {
   return (s, v) => {
     const target = popStack(s, v, width);
 
@@ -31,7 +31,7 @@ export function retSemantic(width: StackOperandWidth = 32): SemanticTemplate {
   };
 }
 
-export function retImmSemantic(width: StackOperandWidth = 32): SemanticTemplate {
+export function retImmSemantic(width: StackOperandWidth = 32): InstructionSemantics {
   return (s, v) => {
     const target = popStack(s, v, width);
     const bytes = s.read(s.operand(0), { width: 32 });
@@ -43,7 +43,7 @@ export function retImmSemantic(width: StackOperandWidth = 32): SemanticTemplate 
   };
 }
 
-export function enterSemantic(): SemanticTemplate {
+export function enterSemantic(): InstructionSemantics {
   return (s, v) => {
     const size = s.read(s.operand(0), { width: 32 });
     const level = v.binary("and", s.read(s.operand(1), { width: 32 }), v.const(31));
@@ -129,7 +129,7 @@ export function enterSemantic(): SemanticTemplate {
   };
 }
 
-export function jccSemantic(cc: ConditionCode): SemanticTemplate {
+export function jccSemantic(cc: ConditionCode): InstructionSemantics {
   return (s) => {
     const branch = s.condition(cc);
     const target = s.read(s.operand(0), { width: 32 });
@@ -138,7 +138,7 @@ export function jccSemantic(cc: ConditionCode): SemanticTemplate {
   };
 }
 
-export function jecxzSemantic(): SemanticTemplate {
+export function jecxzSemantic(): InstructionSemantics {
   return (s, v) => {
     const ecx = s.read(s.reg("ecx"), { width: 32 });
     const branch = v.compare(32, "eq", ecx, v.const(0));
@@ -150,7 +150,7 @@ export function jecxzSemantic(): SemanticTemplate {
 
 export type LoopCondition = "none" | "E" | "NE";
 
-export function loopSemantic(condition: LoopCondition): SemanticTemplate {
+export function loopSemantic(condition: LoopCondition): InstructionSemantics {
   return (s, v) => {
     const decremented = v.binary("sub", s.read(s.reg("ecx"), { width: 32 }), v.const(1));
     const nonzero = v.compare(32, "ne", decremented, v.const(0));

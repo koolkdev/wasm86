@@ -57,7 +57,7 @@ export interface InstructionSemanticsSession {
 
 // The x86 semantic language projected onto one lexical region. These objects
 // are cheap facades over the session's shared transaction state.
-export class InstructionSemantics implements SemanticsBuilder {
+export class ScopedSemanticsBuilder implements SemanticsBuilder {
   readonly #session: InstructionSemanticsSession;
   readonly #scope: SemanticRegionScope;
   readonly #storage: ScopedInstructionStorage;

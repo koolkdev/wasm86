@@ -1,8 +1,8 @@
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 import type { OperandWidth } from "#core/types.js";
 import { subFlagSource } from "#core/flags/lazy/sources.js";
 
-export function cmpSemantic(width: OperandWidth = 32): SemanticTemplate {
+export function cmpSemantic(width: OperandWidth = 32): InstructionSemantics {
   return (s, v) => {
     const leftOperand = s.operand(0);
     const rightOperand = s.operand(1);

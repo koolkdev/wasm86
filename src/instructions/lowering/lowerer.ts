@@ -4,14 +4,14 @@ import type { FieldRef } from "#compiler/layout/handles.js";
 import { createStatusFlagResolvers } from "#core/flags/lazy/resolvers.js";
 import type { StateAccess } from "#core/state/access.js";
 import type { MemoryAccess } from "#memory/types.js";
-import { buildInstructionSequence, type InstructionBuilder } from "./builder.js";
+import { buildInstructionSequence, type InstructionSequenceBuilder } from "./builder.js";
 import type { BuildExit, InstructionTerminals } from "./terminal.js";
 
 export type InstructionLowerer = Readonly<{
   lower(
     region: RegionBuilder,
     terminals: InstructionTerminals,
-    addInstructions: (builder: InstructionBuilder) => void
+    addInstructions: (builder: InstructionSequenceBuilder) => void
   ): ValueId | undefined;
 }>;
 

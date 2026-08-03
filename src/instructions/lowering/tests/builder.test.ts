@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { staticInstructionLocation as loc } from "#instructions/lowering/builder.js";
 import { immBinding, regBinding } from "#instructions/lowering/bindings.js";
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 import { jmpSemantic } from "#instructions/semantics/control.js";
 import { movSemantic } from "#instructions/semantics/mov.js";
 import { RegionBuilder } from "#compiler/ir/builder/region.js";
@@ -40,7 +40,7 @@ test("lower returns its fallthrough without dispatching", () => {
 });
 
 test("a terminating dynamic arm preserves the fallthrough path", () => {
-  const conditionalJump: SemanticTemplate = (s, v) => {
+  const conditionalJump: InstructionSemantics = (s, v) => {
     s.if(s.read(s.reg("eax"), { width: 32 }), (then) => then.jump(v.const(0x2000)));
   };
   let continues: boolean | undefined;
@@ -53,7 +53,7 @@ test("a terminating dynamic arm preserves the fallthrough path", () => {
 });
 
 test("two terminating dynamic arms complete the instruction path", () => {
-  const trapEitherWay: SemanticTemplate = (s, v) => {
+  const trapEitherWay: InstructionSemantics = (s, v) => {
     s.ifElse(
       s.read(s.reg("eax"), { width: 32 }),
       (then) => then.hostTrap(v.const(1)),
@@ -81,7 +81,7 @@ test("a root jump completes the instruction path", () => {
 });
 
 test("a possible fault cannot be introduced after a memory write", () => {
-  const storeThenGuard: SemanticTemplate = (s, v) => {
+  const storeThenGuard: InstructionSemantics = (s, v) => {
     const first = s.memory.guard({
       reference: s.memory.reference("ds", v.const(0x2000)),
       byteLength: v.const(4),
@@ -110,7 +110,7 @@ test("a possible fault cannot be introduced after a memory write", () => {
 
 test("constant branches build only the selected semantic arms", () => {
   let selectedArms = 0;
-  const folded: SemanticTemplate = (s, v) => {
+  const folded: InstructionSemantics = (s, v) => {
     s.if(v.const(0), () => {
       throw new Error("constant-false arm was built");
     });

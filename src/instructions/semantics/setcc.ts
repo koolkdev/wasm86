@@ -1,7 +1,7 @@
 import type { ConditionCode } from "#core/flags/conditions.js";
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 
-export function setccSemantic(cc: ConditionCode): SemanticTemplate {
+export function setccSemantic(cc: ConditionCode): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const condition = s.condition(cc);

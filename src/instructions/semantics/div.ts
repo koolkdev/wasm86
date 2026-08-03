@@ -1,6 +1,6 @@
 import { divideError } from "#core/exceptions.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticTemplate, SemanticsBuilder } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics, SemanticsBuilder } from "#instructions/semantics/builder.js";
 import type { Value } from "#instructions/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
 
@@ -8,15 +8,15 @@ type DivideKind = "signed" | "unsigned";
 type DivideResult = Readonly<{ quotient: Value; remainder: Value }>;
 type UnsignedDividend = Readonly<{ high: Value; full: Value }>;
 
-export function divImplicitSemantic(width: OperandWidth): SemanticTemplate {
+export function divImplicitSemantic(width: OperandWidth): InstructionSemantics {
   return implicitDivideSemantic("unsigned", width);
 }
 
-export function idivImplicitSemantic(width: OperandWidth): SemanticTemplate {
+export function idivImplicitSemantic(width: OperandWidth): InstructionSemantics {
   return implicitDivideSemantic("signed", width);
 }
 
-function implicitDivideSemantic(kind: DivideKind, width: OperandWidth): SemanticTemplate {
+function implicitDivideSemantic(kind: DivideKind, width: OperandWidth): InstructionSemantics {
   return (s, v) => {
     const src = s.operand(0);
     const divisor = s.read(src, { width, signed: kind === "signed" });

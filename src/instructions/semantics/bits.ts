@@ -3,7 +3,7 @@ import type {
   SemanticsBuilder,
   SemanticOperandMemoryOptions,
   SemanticUpdate,
-  SemanticTemplate
+  InstructionSemantics
 } from "#instructions/semantics/builder.js";
 import type { Value, ValueInput } from "#instructions/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#core/types.js";
@@ -18,7 +18,7 @@ export function bitTestSemantic(
   op: BitTestOp,
   width: BitFieldWidth,
   offsetSource: BitOffsetSource
-): SemanticTemplate {
+): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const offset = readBitOffset(s, width, offsetSource);
@@ -42,7 +42,7 @@ export function bitTestSemantic(
   };
 }
 
-export function bitScanSemantic(op: BitScanOp, width: BitFieldWidth): SemanticTemplate {
+export function bitScanSemantic(op: BitScanOp, width: BitFieldWidth): InstructionSemantics {
   return (s, v) => {
     const dst = s.operand(0);
     const src = s.operand(1);

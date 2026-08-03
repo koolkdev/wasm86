@@ -1,56 +1,56 @@
 import { subFlagSource } from "#core/flags/lazy/sources.js";
 import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticOps, SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { SemanticOps, InstructionSemantics } from "#instructions/semantics/builder.js";
 import type { Value } from "#instructions/semantics/refs.js";
 import type { OperandWidth, RegName } from "#core/types.js";
 
 type StringUnit = (builder: SemanticOps, values: ValueBuilder) => void;
 
-export function movsSemantic(width: OperandWidth): SemanticTemplate {
+export function movsSemantic(width: OperandWidth): InstructionSemantics {
   return movsUnit(width);
 }
 
-export function repMovsSemantic(width: OperandWidth): SemanticTemplate {
+export function repMovsSemantic(width: OperandWidth): InstructionSemantics {
   return repSemantic(movsUnit(width));
 }
 
-export function cmpsSemantic(width: OperandWidth): SemanticTemplate {
+export function cmpsSemantic(width: OperandWidth): InstructionSemantics {
   return cmpsUnit(width);
 }
 
-export function repeCmpsSemantic(width: OperandWidth): SemanticTemplate {
+export function repeCmpsSemantic(width: OperandWidth): InstructionSemantics {
   return repSemantic(cmpsUnit(width), "E");
 }
 
-export function repneCmpsSemantic(width: OperandWidth): SemanticTemplate {
+export function repneCmpsSemantic(width: OperandWidth): InstructionSemantics {
   return repSemantic(cmpsUnit(width), "NE");
 }
 
-export function stosSemantic(width: OperandWidth): SemanticTemplate {
+export function stosSemantic(width: OperandWidth): InstructionSemantics {
   return stosUnit(width);
 }
 
-export function repStosSemantic(width: OperandWidth): SemanticTemplate {
+export function repStosSemantic(width: OperandWidth): InstructionSemantics {
   return repSemantic(stosUnit(width));
 }
 
-export function lodsSemantic(width: OperandWidth): SemanticTemplate {
+export function lodsSemantic(width: OperandWidth): InstructionSemantics {
   return lodsUnit(width);
 }
 
-export function repLodsSemantic(width: OperandWidth): SemanticTemplate {
+export function repLodsSemantic(width: OperandWidth): InstructionSemantics {
   return repSemantic(lodsUnit(width));
 }
 
-export function scasSemantic(width: OperandWidth): SemanticTemplate {
+export function scasSemantic(width: OperandWidth): InstructionSemantics {
   return scasUnit(width);
 }
 
-export function repeScasSemantic(width: OperandWidth): SemanticTemplate {
+export function repeScasSemantic(width: OperandWidth): InstructionSemantics {
   return repSemantic(scasUnit(width), "E");
 }
 
-export function repneScasSemantic(width: OperandWidth): SemanticTemplate {
+export function repneScasSemantic(width: OperandWidth): InstructionSemantics {
   return repSemantic(scasUnit(width), "NE");
 }
 
@@ -121,7 +121,7 @@ function scasUnit(width: OperandWidth): StringUnit {
     stepRegister(s, v, "edi", delta);
   };
 }
-function repSemantic(unit: StringUnit, condition?: "E" | "NE"): SemanticTemplate {
+function repSemantic(unit: StringUnit, condition?: "E" | "NE"): InstructionSemantics {
   return (s, v) => {
     const ecx = s.read(s.reg("ecx"), { width: 32 });
     const enter = v.compare(32, "ne", ecx, v.const(0));
