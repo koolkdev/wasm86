@@ -11,11 +11,17 @@ export type SegmentRegister = (typeof segmentRegisters)[number];
 export type OperandWidth = 8 | 16 | 32;
 export type MemoryOperandWidth = OperandWidth | 64;
 
-export type RegisterAlias = Readonly<{
-  name: RegName;
+export type RegisterWidth<Name extends RegName> = Name extends Reg8
+  ? 8
+  : Name extends Reg16
+    ? 16
+    : 32;
+
+export type RegisterAlias<Name extends RegName = RegName> = Readonly<{
+  name: Name;
   base: Reg32;
   bitOffset: 0 | 8;
-  width: OperandWidth;
+  width: RegisterWidth<Name>;
 }>;
 
 export type EffectiveAddress = Readonly<{

@@ -1,6 +1,20 @@
-import { reg32, type OperandWidth, type RegisterAlias, type Reg32, type RegName } from "./types.js";
+import { assert } from "#common/assert.js";
+import {
+  reg32,
+  type OperandWidth,
+  type RegisterAlias,
+  type Reg8,
+  type Reg16,
+  type Reg32,
+  type RegName
+} from "./types.js";
 
-export const registerAliasesByWidth = {
+// Rows follow the three-bit register code used by ModR/M and opcode fields.
+const aliases: Readonly<{
+  8: readonly RegisterAlias<Reg8>[];
+  16: readonly RegisterAlias<Reg16>[];
+  32: readonly RegisterAlias<Reg32>[];
+}> = {
   8: [
     { name: "al", base: "eax", bitOffset: 0, width: 8 },
     { name: "cl", base: "ecx", bitOffset: 0, width: 8 },
@@ -31,40 +45,29 @@ export const registerAliasesByWidth = {
     { name: "esi", base: "esi", bitOffset: 0, width: 32 },
     { name: "edi", base: "edi", bitOffset: 0, width: 32 }
   ]
-} as const satisfies Readonly<Record<OperandWidth, readonly RegisterAlias[]>>;
+};
 
-const registerAliasesByName = new Map<RegName, RegisterAlias>(
-  Object.values(registerAliasesByWidth).flatMap((aliases) =>
-    aliases.map((alias) => [alias.name, alias])
-  )
+const aliasesByName = new Map<RegName, RegisterAlias>(
+  Object.values(aliases).flatMap((row) => row.map((alias) => [alias.name, alias]))
 );
 
-export function registerAlias(name: RegName): RegisterAlias {
-  const alias = registerAliasesByName.get(name);
+export function registerAlias<Name extends RegName>(name: Name): RegisterAlias<Name> {
+  const alias = aliasesByName.get(name);
+  assert(alias !== undefined, `register alias is missing: ${name}`);
 
-  if (alias === undefined) {
-    throw new Error(`unknown register alias: ${name}`);
-  }
-
-  return alias;
+  return alias as RegisterAlias<Name>;
 }
 
-export function registerAliasByIndex(width: OperandWidth, index: number): RegisterAlias {
-  const alias = registerAliasesByWidth[width][index & 0b111];
-
-  if (alias === undefined) {
-    throw new Error(`register alias index out of range: ${index}`);
-  }
+export function registerAliasByCode(width: OperandWidth, code: number): RegisterAlias {
+  const alias = aliases[width][code & 0b111];
+  assert(alias !== undefined, `register alias code is missing: ${width}:${code & 0b111}`);
 
   return alias;
 }
 
 export function reg32Index(reg: Reg32): number {
   const index = reg32.indexOf(reg);
-
-  if (index === -1) {
-    throw new Error(`unknown r32 register: ${reg}`);
-  }
+  assert(index !== -1, `r32 register is missing: ${reg}`);
 
   return index;
 }

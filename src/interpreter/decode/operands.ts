@@ -19,7 +19,7 @@ import {
   type OperandBinding,
   type SegmentBindingSelection
 } from "#instructions/lowering/bindings.js";
-import { registerAliasByIndex } from "#core/registers.js";
+import { registerAliasByCode } from "#core/registers.js";
 import { segmentRegisterIndex } from "#core/segments.js";
 import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { DecodedMemoryAddress } from "./address.js";
@@ -99,7 +99,7 @@ export class OperandDecoder {
       case "modrm.rm":
         return this.#rmBinding(region, rm);
       case "opcode.reg":
-        return regBinding(registerAliasByIndex(operand.width, form.opcodeLowBits!).name);
+        return regBinding(registerAliasByCode(operand.width, form.opcodeLowBits!).name);
       case "implicit.reg":
         return regBinding(operand.alias.name);
       case "implicit.sreg":
