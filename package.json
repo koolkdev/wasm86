@@ -39,6 +39,10 @@
       "types": "./src/common/*",
       "default": "./dist/src/common/*"
     },
+    "#wasm/*": {
+      "types": "./src/wasm/*",
+      "default": "./dist/src/wasm/*"
+    },
     "#execution/*": {
       "types": "./src/execution/*",
       "default": "./dist/src/execution/*"

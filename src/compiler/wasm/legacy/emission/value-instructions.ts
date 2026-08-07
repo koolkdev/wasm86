@@ -1,5 +1,5 @@
-import { wasmInstruction } from "#compiler/wasm/encoder/instructions.js";
-import type { WasmInstructionWriter } from "#compiler/wasm/encoder/instruction-writer.js";
+import { wasmInstruction } from "#wasm/encoder/instructions.js";
+import type { WasmInstructionWriter } from "#wasm/encoder/instruction-writer.js";
 import type { IntegerWidth, ValueType } from "#compiler/ir/values/types.js";
 import type { ValueNode } from "#compiler/ir/values/table.js";
 

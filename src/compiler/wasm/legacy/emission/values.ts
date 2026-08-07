@@ -7,10 +7,10 @@ import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
 import type { PlacementIndex } from "#compiler/wasm/legacy/placement/index.js";
 import type { PlacementPlan } from "#compiler/wasm/legacy/placement/model.js";
 import type { ModuleBindings } from "#compiler/wasm/module/bindings.js";
-import type { WasmLocalResolver } from "#compiler/wasm/encoder/function-body.js";
-import { wasmInstruction } from "#compiler/wasm/encoder/instructions.js";
-import type { WasmInstructionWriter } from "#compiler/wasm/encoder/instruction-writer.js";
-import { wasmValueType, type WasmValueType } from "#compiler/wasm/encoder/types.js";
+import type { WasmLocalResolver } from "#wasm/encoder/function-body.js";
+import { wasmInstruction } from "#wasm/encoder/instructions.js";
+import type { WasmInstructionWriter } from "#wasm/encoder/instruction-writer.js";
+import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
 import { emitOperation } from "./operations.js";
 import { emitValueNode } from "./value-instructions.js";
 

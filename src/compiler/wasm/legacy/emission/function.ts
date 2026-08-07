@@ -5,7 +5,7 @@ import type { FunctionPlacement } from "#compiler/wasm/legacy/placement/place.js
 import {
   encodeWasmFunctionBody,
   type EncodedWasmFunctionBody
-} from "#compiler/wasm/encoder/function-body.js";
+} from "#wasm/encoder/function-body.js";
 import { emitFunctionRegions } from "./region.js";
 import { wasmTypeForValue } from "./values.js";
 

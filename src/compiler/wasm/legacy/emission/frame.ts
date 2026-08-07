@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
-import { wasmInstruction } from "#compiler/wasm/encoder/instructions.js";
-import type { WasmInstructionWriter } from "#compiler/wasm/encoder/instruction-writer.js";
+import { wasmInstruction } from "#wasm/encoder/instructions.js";
+import type { WasmInstructionWriter } from "#wasm/encoder/instruction-writer.js";
 
 // Tracks structured labels while one symbolic function is emitted.
 

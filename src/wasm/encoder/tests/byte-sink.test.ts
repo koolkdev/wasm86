@@ -1,7 +1,7 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { ByteSink } from "#compiler/wasm/encoder/byte-sink.js";
+import { ByteSink } from "#wasm/encoder/byte-sink.js";
 
 test("ByteSink prefixes section content and UTF-8 names", () => {
   const sink = new ByteSink();

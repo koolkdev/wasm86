@@ -1,11 +1,7 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import {
-  encodeI32Leb128,
-  encodeI64Leb128,
-  encodeU32Leb128
-} from "#compiler/wasm/encoder/leb128.js";
+import { encodeI32Leb128, encodeI64Leb128, encodeU32Leb128 } from "#wasm/encoder/leb128.js";
 
 test("u32 LEB128 uses the canonical boundary encodings", () => {
   for (const [value, expected] of [

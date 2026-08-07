@@ -1,6 +1,6 @@
-import { wasmInstruction } from "#compiler/wasm/encoder/instructions.js";
-import type { WasmInstructionWriter } from "#compiler/wasm/encoder/instruction-writer.js";
-import type { WasmMemoryImmediate } from "#compiler/wasm/encoder/memory.js";
+import { wasmInstruction } from "#wasm/encoder/instructions.js";
+import type { WasmInstructionWriter } from "#wasm/encoder/instruction-writer.js";
+import type { WasmMemoryImmediate } from "#wasm/encoder/memory.js";
 import type { CallTarget } from "#compiler/ir/invocation.js";
 import { describeNode } from "#compiler/ir/node.js";
 import type {
