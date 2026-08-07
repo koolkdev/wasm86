@@ -1,9 +1,9 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { encodeWasmFunctionBody } from "#compiler/wasm/encoder/function-body.js";
-import { wasmInstruction } from "#compiler/wasm/encoder/instructions.js";
-import { wasmValueType } from "#compiler/wasm/encoder/types.js";
+import { encodeWasmFunctionBody } from "#wasm/encoder/function-body.js";
+import { wasmInstruction } from "#wasm/encoder/instructions.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
 
 test("declared locals follow parameters in the Wasm local index space", () => {
   const body = encodeWasmFunctionBody(

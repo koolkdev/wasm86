@@ -1,7 +1,7 @@
 import { deepStrictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { encodeMemoryImmediate } from "#compiler/wasm/encoder/memory.js";
+import { encodeMemoryImmediate } from "#wasm/encoder/memory.js";
 
 test("memory immediates encode default and indexed memories literally", () => {
   deepStrictEqual(encodeMemoryImmediate({ align: 2, memoryIndex: 0, offset: 7 }), [0x02, 0x07]);

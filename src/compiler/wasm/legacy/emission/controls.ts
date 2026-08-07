@@ -13,8 +13,8 @@ import { regionCompletes, type Region } from "#compiler/ir/region.js";
 import type { ValueId } from "#compiler/ir/values/types.js";
 import type { ModuleBindings } from "#compiler/wasm/module/bindings.js";
 import type { PlacementPlan } from "#compiler/wasm/legacy/placement/model.js";
-import { wasmInstruction } from "#compiler/wasm/encoder/instructions.js";
-import type { WasmInstructionWriter } from "#compiler/wasm/encoder/instruction-writer.js";
+import { wasmInstruction } from "#wasm/encoder/instructions.js";
+import type { WasmInstructionWriter } from "#wasm/encoder/instruction-writer.js";
 import { createFunctionFrame } from "./frame.js";
 import type { ValueEmitter } from "./values.js";
 

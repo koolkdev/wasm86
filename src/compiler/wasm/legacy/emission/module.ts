@@ -1,11 +1,7 @@
 import { assert } from "#common/assert.js";
-import type { EncodedWasmFunctionBody } from "#compiler/wasm/encoder/function-body.js";
-import { encodeWasmModule, type WasmModuleDescription } from "#compiler/wasm/encoder/module.js";
-import {
-  wasmValueType,
-  type WasmFunctionType,
-  type WasmValueType
-} from "#compiler/wasm/encoder/types.js";
+import type { EncodedWasmFunctionBody } from "#wasm/encoder/function-body.js";
+import { encodeWasmModule, type WasmModuleDescription } from "#wasm/encoder/module.js";
+import { wasmValueType, type WasmFunctionType, type WasmValueType } from "#wasm/encoder/types.js";
 import type { FunctionType } from "#compiler/wasm/legacy/function-type.js";
 import { createModuleBindings } from "#compiler/wasm/module/bindings.js";
 import type { ModuleLayout } from "#compiler/wasm/module/layout.js";

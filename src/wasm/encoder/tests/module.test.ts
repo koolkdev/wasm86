@@ -1,11 +1,11 @@
 import { strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { encodeWasmFunctionBody } from "#compiler/wasm/encoder/function-body.js";
-import { wasmInstruction } from "#compiler/wasm/encoder/instructions.js";
-import { encodeWasmModule } from "#compiler/wasm/encoder/module.js";
-import { createTestModuleDescription } from "#compiler/wasm/encoder/tests/module-fixture.js";
-import { wasmValueType } from "#compiler/wasm/encoder/types.js";
+import { encodeWasmFunctionBody } from "#wasm/encoder/function-body.js";
+import { wasmInstruction } from "#wasm/encoder/instructions.js";
+import { encodeWasmModule } from "#wasm/encoder/module.js";
+import { createTestModuleDescription } from "#wasm/encoder/tests/module-fixture.js";
+import { wasmValueType } from "#wasm/encoder/types.js";
 
 test("ordered module description uses declared numeric positions", async () => {
   const bytes = encodeWasmModule(

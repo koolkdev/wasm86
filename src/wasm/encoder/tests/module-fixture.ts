@@ -1,4 +1,4 @@
-import { encodeWasmModule, type WasmModuleDescription } from "#compiler/wasm/encoder/module.js";
+import { encodeWasmModule, type WasmModuleDescription } from "#wasm/encoder/module.js";
 
 export function createTestModuleDescription(
   overrides: Partial<WasmModuleDescription>
