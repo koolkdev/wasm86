@@ -9,10 +9,15 @@ type Ref<Kind extends string> = Readonly<{
 }>;
 
 export type FunctionRef = Ref<"function">;
+export type ResourceRef = Ref<"resource">;
 export type TableRef = Ref<"table">;
 
 export function functionRef(id: string): FunctionRef {
   return createReference("function", id);
+}
+
+export function resourceRef(id: string): ResourceRef {
+  return createReference("resource", id);
 }
 
 export function tableRef(id: string): TableRef {
