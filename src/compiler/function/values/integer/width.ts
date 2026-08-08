@@ -19,3 +19,7 @@ export type WidthsAtMost<Width extends IntegerWidth> = 1 extends Width
       : 32 extends Width
         ? 1 | 8 | 16 | 32
         : IntegerWidth;
+
+export function normalizeInteger(width: IntegerWidth, value: number | bigint): bigint {
+  return BigInt.asUintN(width, BigInt(value));
+}

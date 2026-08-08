@@ -1,4 +1,18 @@
-import type { BitValue, I32Value, I64Value, Integer, ValueRef } from "#compiler/function/values.js";
+import {
+  i32,
+  i64,
+  integer,
+  nonzero,
+  select,
+  u8,
+  u16,
+  unreachable,
+  type BitValue,
+  type I32Value,
+  type I64Value,
+  type Integer,
+  type ValueRef
+} from "#compiler/function/values.js";
 import type { IntegerWidth } from "../width.js";
 import type { ExtensionTargets, SignedView, TruncationTargets, UnsignedView } from "../types.js";
 
@@ -84,4 +98,29 @@ export function unionConversionContract(value: Integer<8 | 64>): void {
   value.unsigned.extend(32);
   // @ts-expect-error the source may be narrower than the truncation target.
   value.truncate(32);
+}
+
+export function integerConstructionContract(condition: BitValue): void {
+  const bit: BitValue = integer(1, 1);
+  const byte: Integer<8> = u8(0xff);
+  const word: Integer<16> = u16(0xffff);
+  const value32: I32Value = i32(-1);
+  const value64: I64Value = i64(-1n);
+  const predicate: BitValue = nonzero(byte);
+  const selected: Integer<8> = select(condition, byte, u8(0));
+  const dead32: I32Value = unreachable();
+  const dead64: I64Value = unreachable(64);
+
+  // @ts-expect-error one-bit literals must be zero or one.
+  integer(1, 2);
+  // @ts-expect-error i32 constants use JavaScript numbers.
+  i32(1n);
+  // @ts-expect-error i64 constants use JavaScript bigints.
+  i64(1);
+  // @ts-expect-error conditions must be one-bit values.
+  select(value32, byte, u8(0));
+  // @ts-expect-error select alternatives must have one width.
+  select(condition, byte, word);
+
+  void [bit, value32, value64, predicate, selected, dead32, dead64];
 }
