@@ -1,17 +1,24 @@
 import { functionType, type FunctionType } from "#compiler/function/type.js";
 import {
+  Float,
   Integer,
+  type Float as FloatValue,
+  type FloatType,
   type Integer as IntegerValue,
   type IntegerType,
   type ValueTuple
 } from "#compiler/function/values.js";
 
 const exactType = functionType([Integer[8], Integer[64]], [Integer[1]]);
+const exactFloatType = functionType([Float[32]], [Float[64]]);
 
 export const typedFunction: FunctionType<
   readonly [IntegerType<8>, IntegerType<64>],
   readonly [IntegerType<1>]
 > = exactType;
+
+export const typedFloatFunction: FunctionType<readonly [FloatType<32>], readonly [FloatType<64>]> =
+  exactFloatType;
 
 type Equal<Left, Right> =
   (<Type>() => Type extends Left ? 1 : 2) extends <Type>() => Type extends Right ? 1 : 2
@@ -21,6 +28,10 @@ type Expect<Type extends true> = Type;
 
 export type ParameterValuesContract = Expect<
   Equal<ValueTuple<typeof exactType.parameters>, readonly [IntegerValue<8>, IntegerValue<64>]>
+>;
+
+export type FloatValuesContract = Expect<
+  Equal<ValueTuple<typeof exactFloatType.parameters>, readonly [FloatValue<32>]>
 >;
 
 type WrongWidth = FunctionType<

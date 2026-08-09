@@ -1,4 +1,9 @@
 import type {
+  FloatBinaryOperator,
+  FloatCompareOperator,
+  FloatWidth
+} from "#compiler/function/values/float/types.js";
+import type {
   BinaryOperator,
   BitCountOperator,
   CompareOperator,
@@ -16,7 +21,9 @@ interface TypedValueRef<Kind extends string, Width extends number> {
 
 export type IntegerRef<Width extends IntegerWidth = IntegerWidth> = TypedValueRef<"integer", Width>;
 
-export type ValueRef = IntegerRef;
+export type FloatRef<Width extends FloatWidth = FloatWidth> = TypedValueRef<"float", Width>;
+
+export type ValueRef = IntegerRef | FloatRef;
 
 export type ValueKind = ValueRef["kind"];
 
@@ -72,4 +79,30 @@ export type IntegerExpression =
       { a: IntegerRef<1>; b: IntegerRef; c: IntegerRef }
     >;
 
-export type ValueExpression = IntegerExpression;
+type FloatConstantExpression =
+  | ExpressionShape<"float", 32, "float.constant", { attr: number }>
+  | ExpressionShape<"float", 64, "float.constant", { attr: bigint }>;
+
+// Expression families follow their operators; a float comparison produces an integer bit.
+export type FloatExpression =
+  | FloatConstantExpression
+  | ExpressionShape<
+      "integer",
+      1,
+      "float.compare",
+      { attr: FloatCompareOperator; a: FloatRef; b: FloatRef }
+    >
+  | ExpressionShape<
+      "float",
+      FloatWidth,
+      "float.binary",
+      { attr: FloatBinaryOperator; a: FloatRef; b: FloatRef }
+    >
+  | ExpressionShape<
+      "float",
+      FloatWidth,
+      "float.select",
+      { a: IntegerRef<1>; b: FloatRef; c: FloatRef }
+    >;
+
+export type ValueExpression = IntegerExpression | FloatExpression;

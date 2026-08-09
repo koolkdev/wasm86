@@ -1,7 +1,8 @@
 import {
   valueExpression,
-  type IntegerExpression,
-  type IntegerRef
+  type IntegerRef,
+  type ValueExpression,
+  type ValueRef
 } from "#compiler/function/values/expression.js";
 import type {
   BinaryOperator,
@@ -29,6 +30,21 @@ import type {
   TruncationTargets,
   UnsignedView
 } from "./types.js";
+
+type IntegerResultExpression = Extract<ValueExpression, { kind: "integer" }>;
+type ComparisonExpression = Extract<ValueExpression, { op: `${string}.compare` }>;
+
+// Map each comparison variant separately so its operation, operator, and
+// operand types remain correlated.
+type ComparisonArgumentsOf<Expression> = Expression extends ComparisonExpression
+  ? readonly [
+      operation: Expression["op"],
+      operator: Expression["attr"],
+      left: Expression["a"],
+      right: Expression["b"]
+    ]
+  : never;
+type ComparisonArguments = ComparisonArgumentsOf<ComparisonExpression>;
 
 export function integerConstant<Width extends IntegerWidth>(
   width: Width,
@@ -60,6 +76,12 @@ export function unreachable(width: IntegerWidth = 32): AnyInteger {
 
 export function integerZeroTest(operator: ZeroTestOperator, value: IntegerRef): BitValue {
   return new IntegerValue(1, "integer.zeroTest", operator, value);
+}
+
+export function comparisonBit(
+  ...[operation, operator, left, right]: ComparisonArguments
+): BitValue {
+  return new IntegerValue(1, operation, operator, left, right);
 }
 
 export function nonzero(value: AnyInteger): BitValue {
@@ -97,11 +119,11 @@ class IntegerValue<Width extends IntegerWidth> implements Integer<Width> {
 
   constructor(
     readonly width: Width,
-    readonly op: IntegerExpression["op"],
-    readonly attr: IntegerExpression["attr"],
-    readonly a: IntegerRef | undefined = undefined,
-    readonly b: IntegerRef | undefined = undefined,
-    readonly c: IntegerRef | undefined = undefined,
+    readonly op: IntegerResultExpression["op"],
+    readonly attr: IntegerResultExpression["attr"],
+    readonly a: ValueRef | undefined = undefined,
+    readonly b: ValueRef | undefined = undefined,
+    readonly c: ValueRef | undefined = undefined,
     readonly bound: undefined = undefined
   ) {}
 
@@ -113,8 +135,8 @@ class IntegerValue<Width extends IntegerWidth> implements Integer<Width> {
     return (this.#unsigned ??= new IntegerSignednessView(this, "unsigned"));
   }
 
-  [valueExpression](): IntegerExpression {
-    return this as unknown as IntegerExpression;
+  [valueExpression](): IntegerResultExpression {
+    return this as unknown as IntegerResultExpression;
   }
 
   add(this: Integer<Width>, other: IntegerOperand<Width>): Integer<Width> {
@@ -297,7 +319,7 @@ function compare<Width extends IntegerWidth>(
   operator: CompareOperator,
   right: IntegerOperand<Width>
 ): BitValue {
-  return new IntegerValue(1, "integer.compare", operator, left, operandValue(left, right));
+  return comparisonBit("integer.compare", operator, left, operandValue(left, right));
 }
 
 function bitCount<Width extends IntegerWidth>(
