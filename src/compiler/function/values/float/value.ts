@@ -1,7 +1,8 @@
 import {
   valueExpression,
-  type FloatExpression,
   type FloatRef,
+  type ValueExpression,
+  type ValueSource,
   type ValueRef
 } from "#compiler/function/values/expression.js";
 import type { BitValue } from "#compiler/function/values/integer/types.js";
@@ -10,7 +11,7 @@ import { floatBits } from "./bits.js";
 import type { FloatBinaryOperator, FloatCompareOperator, FloatWidth } from "./types.js";
 
 type FloatLiteral = number;
-type FloatResultExpression = Extract<FloatExpression, { kind: "float" }>;
+type FloatResultExpression = Extract<ValueExpression, { kind: "float" }>;
 
 export type FloatOperand<Width extends FloatWidth> = Float<NoInfer<Width>> | FloatLiteral;
 
@@ -50,6 +51,13 @@ export function floatConstantBits(width: FloatWidth, bits: number | bigint): Any
     : new FloatValue(64, "float.constant", bits as bigint);
 }
 
+export function floatFromSource<Width extends FloatWidth>(
+  width: Width,
+  source: ValueSource
+): Float<Width> {
+  return new FloatValue(width, "value.source", source);
+}
+
 export function floatSelect<Width extends FloatWidth>(
   width: Width,
   condition: BitValue,
@@ -68,8 +76,7 @@ class FloatValue<Width extends FloatWidth> implements Float<Width> {
     readonly attr: FloatResultExpression["attr"],
     readonly a: ValueRef | undefined = undefined,
     readonly b: ValueRef | undefined = undefined,
-    readonly c: ValueRef | undefined = undefined,
-    readonly bound: undefined = undefined
+    readonly c: ValueRef | undefined = undefined
   ) {}
 
   [valueExpression](): FloatResultExpression {

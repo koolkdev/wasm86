@@ -1,6 +1,7 @@
 import {
   valueExpression,
   type IntegerRef,
+  type ValueSource,
   type ValueExpression,
   type ValueRef
 } from "#compiler/function/values/expression.js";
@@ -55,6 +56,13 @@ export function integerConstant<Width extends IntegerWidth>(
 
 export function integerUnreachable<Width extends IntegerWidth>(width: Width): Integer<Width> {
   return new IntegerValue(width, "integer.unreachable", undefined);
+}
+
+export function integerFromSource<Width extends IntegerWidth>(
+  width: Width,
+  source: ValueSource
+): Integer<Width> {
+  return new IntegerValue(width, "value.source", source);
 }
 
 export function unreachable(): I32Value;
@@ -123,8 +131,7 @@ class IntegerValue<Width extends IntegerWidth> implements Integer<Width> {
     readonly attr: IntegerResultExpression["attr"],
     readonly a: ValueRef | undefined = undefined,
     readonly b: ValueRef | undefined = undefined,
-    readonly c: ValueRef | undefined = undefined,
-    readonly bound: undefined = undefined
+    readonly c: ValueRef | undefined = undefined
   ) {}
 
   get signed(): SignedView<Width> {

@@ -27,7 +27,10 @@ export type ValueRef = IntegerRef | FloatRef;
 
 export type ValueKind = ValueRef["kind"];
 
-type ExpressionFieldName = "attr" | "a" | "b" | "c" | "bound";
+export type ValueSource =
+  Readonly<{ kind: "parameter"; index: number }> | Readonly<{ kind: "producer" }>;
+
+type ExpressionFieldName = "attr" | "a" | "b" | "c";
 
 type ExpressionField<Fields, Name extends ExpressionFieldName> =
   Fields extends Readonly<Record<Name, infer Value>> ? Value : undefined;
@@ -45,8 +48,11 @@ type ExpressionShape<
   a: ExpressionField<Fields, "a">;
   b: ExpressionField<Fields, "b">;
   c: ExpressionField<Fields, "c">;
-  bound: ExpressionField<Fields, "bound">;
 }>;
+
+type SourceExpression =
+  | ExpressionShape<"integer", IntegerWidth, "value.source", { attr: ValueSource }>
+  | ExpressionShape<"float", FloatWidth, "value.source", { attr: ValueSource }>;
 
 export type IntegerExpression =
   | ExpressionShape<"integer", IntegerWidth, "integer.constant", { attr: bigint }>
@@ -105,4 +111,4 @@ export type FloatExpression =
       { a: IntegerRef<1>; b: FloatRef; c: FloatRef }
     >;
 
-export type ValueExpression = IntegerExpression | FloatExpression;
+export type ValueExpression = SourceExpression | IntegerExpression | FloatExpression;
