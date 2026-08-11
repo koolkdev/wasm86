@@ -5,7 +5,9 @@ import {
   type ValueRef,
   type ValueSource
 } from "./expression.js";
+import { simplifyFloat } from "./float/simplify.js";
 import { floatFromSource } from "./float/value.js";
+import { simplifyInteger } from "./integer/simplify.js";
 import { integerFromSource } from "./integer/value.js";
 import type { AnyValue, ValueForType, ValueTuple, ValueType } from "./type.js";
 
@@ -74,7 +76,9 @@ export class ValueResolver {
         const a = this.#operand(expression.a);
         const b = this.#operand(expression.b);
         const c = this.#operand(expression.c);
-        const resolution = this.#intern(expression, a, b, c);
+        const simplified = simplifyExpression(expression, a, b, c);
+        const resolution =
+          simplified === undefined ? this.#intern(expression, a, b, c) : this.resolve(simplified);
 
         this.#resolvedRefs.set(value, resolution);
         return resolution;
@@ -130,6 +134,55 @@ export class ValueResolver {
     this.#nextIdentity += 1;
     return resolution;
   }
+}
+
+function simplifyExpression(
+  expression: ValueExpression,
+  a: ValueResolution | undefined,
+  b: ValueResolution | undefined,
+  c: ValueResolution | undefined
+): ValueRef | undefined {
+  switch (expression.op) {
+    case "integer.binary":
+    case "integer.compare":
+    case "integer.zeroTest":
+    case "integer.bitCount":
+    case "integer.extend":
+    case "integer.truncate":
+      return simplifyInteger(expression, a, b);
+    case "float.binary":
+    case "float.compare":
+      return simplifyFloat(expression, a, b);
+    case "integer.select":
+    case "float.select":
+      return simplifySelect(expression, a, b, c);
+    case "value.source":
+    case "integer.constant":
+    case "integer.unreachable":
+    case "float.constant":
+      return undefined;
+  }
+}
+
+function simplifySelect(
+  expression: Extract<ValueExpression, { op: `${string}.select` }>,
+  condition: ValueResolution | undefined,
+  whenTrue: ValueResolution | undefined,
+  whenFalse: ValueResolution | undefined
+): ValueRef | undefined {
+  if (
+    whenTrue !== undefined &&
+    whenFalse !== undefined &&
+    whenTrue.identity === whenFalse.identity
+  ) {
+    return expression.b;
+  }
+  const conditionExpression = condition?.expression;
+
+  if (conditionExpression?.op !== "integer.constant") {
+    return undefined;
+  }
+  return conditionExpression.attr === 0n ? expression.c : expression.b;
 }
 
 function expressionKey(

@@ -1,7 +1,7 @@
 import { doesNotThrow, strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { i32 } from "#compiler/function/values.js";
+import { f32, i32, integer, select, type ValueRef } from "#compiler/function/values.js";
 import { ValueResolver } from "../resolver.js";
 import { Float, Integer } from "../type.js";
 
@@ -32,6 +32,34 @@ test("equivalent expressions resolve to one function value", () => {
   strictEqual(values.sameValue(integer.add(1), otherInteger.add(1)), false);
   strictEqual(values.sameValue(float.add(1), float.add(1)), true);
   strictEqual(values.sameValue(float.add(1), float.sub(1)), false);
+  strictEqual(values.sameValue(f32(0), f32(-0)), false);
+});
+
+test("select forwards resolved arms", () => {
+  const values = new ValueResolver();
+  const condition = values.producer(Integer[1]);
+  const firstInteger = values.producer(Integer[32]);
+  const secondInteger = values.producer(Integer[32]);
+  const firstFloat = values.producer(Float[32]);
+  const secondFloat = values.producer(Float[32]);
+  const equivalentIntegerA = firstInteger.add(1);
+  const equivalentIntegerB = firstInteger.add(1);
+  const equivalentFloatA = firstFloat.add(1);
+  const equivalentFloatB = firstFloat.add(1);
+  const cases: readonly (readonly [string, ValueRef, ValueRef])[] = [
+    [
+      "integer same arms",
+      select(condition, equivalentIntegerA, equivalentIntegerB),
+      equivalentIntegerA
+    ],
+    ["float same arms", select(condition, equivalentFloatA, equivalentFloatB), equivalentFloatA],
+    ["false condition", select(integer(1, 0), firstInteger, secondInteger), secondInteger],
+    ["true condition", select(integer(1, 1), firstFloat, secondFloat), firstFloat]
+  ];
+
+  for (const [name, actual, expected] of cases) {
+    strictEqual(values.sameValue(actual, expected), true, name);
+  }
 });
 
 test("function sources cannot cross resolvers", () => {
@@ -44,4 +72,5 @@ test("function sources cannot cross resolvers", () => {
   doesNotThrow(() => second.resolve(pure));
   throws(() => second.resolve(owned), /value source belongs to another resolver/);
   throws(() => second.resolve(owned.add(1)), /value source belongs to another resolver/);
+  throws(() => second.resolve(owned.mul(0)), /value source belongs to another resolver/);
 });

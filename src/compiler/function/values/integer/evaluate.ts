@@ -55,9 +55,9 @@ export function evaluateBinary(
     case "shr_u":
       return normalizeInteger(width, left >> BigInt(effectiveShiftAmount(width, right)));
     case "rotl":
-      return rotateLeft(width, left, rotateAmount(width, right));
+      return rotateLeft(width, left, effectiveRotateAmount(width, right));
     case "rotr":
-      return rotateRight(width, left, rotateAmount(width, right));
+      return rotateRight(width, left, effectiveRotateAmount(width, right));
   }
 }
 
@@ -131,6 +131,14 @@ export function evaluateTruncation(width: IntegerWidth, value: bigint): bigint {
   return normalizeInteger(width, value);
 }
 
+export function effectiveShiftAmount(width: IntegerWidth, value: bigint): number {
+  return Number(value & (width === 64 ? 63n : 31n));
+}
+
+export function effectiveRotateAmount(width: IntegerWidth, value: bigint): number {
+  return Number(value % BigInt(width));
+}
+
 function trailingZeroes(value: bigint): bigint {
   let remaining = value;
   let count = 0n;
@@ -146,16 +154,8 @@ function signedInteger(width: IntegerWidth, value: bigint): bigint {
   return BigInt.asIntN(width, value);
 }
 
-function effectiveShiftAmount(width: IntegerWidth, value: bigint): number {
-  return Number(value & (width === 64 ? 63n : 31n));
-}
-
 function bitLength(value: bigint): number {
   return value === 0n ? 0 : value.toString(2).length;
-}
-
-function rotateAmount(width: IntegerWidth, value: bigint): number {
-  return Number(value % BigInt(width));
 }
 
 function rotateLeft(width: IntegerWidth, value: bigint, count: number): bigint {
