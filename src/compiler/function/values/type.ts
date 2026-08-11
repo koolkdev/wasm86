@@ -2,7 +2,7 @@ import type { FloatWidth } from "#compiler/function/values/float/types.js";
 import type { Float as FloatValue } from "#compiler/function/values/float/value.js";
 import type { IntegerWidth } from "#compiler/function/values/integer/width.js";
 import type { Integer as IntegerValue } from "./integer/types.js";
-import type { ValueRef } from "./expression.js";
+import type { FloatRef, IntegerRef, ValueRef } from "./expression.js";
 
 const valueTypeBrand = Symbol("valueType");
 
@@ -33,6 +33,13 @@ export const Float = {
 
 export type ValueType = IntegerType | FloatType;
 
+export type ValueTypeOf<Value extends ValueRef> =
+  Value extends IntegerRef<infer Width>
+    ? IntegerType<Width>
+    : Value extends FloatRef<infer Width>
+      ? FloatType<Width>
+      : never;
+
 export function sameValueType(a: ValueType, b: ValueType): boolean {
   return a.kind === b.kind && a.width === b.width;
 }
@@ -56,6 +63,7 @@ export type ValueTuple<Types extends readonly ValueType[]> = {
 
 export type AnyValue = ValueForType<ValueType>;
 
+export function valueTypeOf<Value extends ValueRef>(value: Value): ValueTypeOf<Value>;
 export function valueTypeOf(value: ValueRef): ValueType {
   switch (value.kind) {
     case "integer":

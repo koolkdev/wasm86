@@ -25,6 +25,7 @@ export type {
   FloatType,
   IntegerType,
   ValueForType,
+  ValueTypeOf,
   ValueTuple,
   ValueType
 } from "./values/type.js";
