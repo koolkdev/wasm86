@@ -104,3 +104,120 @@ test("calls and returns retain their typed value linkage", () => {
   deepStrictEqual(tailReturn.source.invocation.arguments, [argument]);
   deepStrictEqual(tailReturn.source.invocation.target.effects, effects);
 });
+
+test("if branches retain isolated bodies and one typed result", () => {
+  const values = new ValueResolver();
+  const builder = new RegionBuilder(values);
+  const condition = values.parameter(0, Integer[1]);
+  const whenTrue = values.parameter(1, Float[32]);
+  const whenFalse = values.parameter(2, Float[32]);
+  const variable = builder.variable(whenTrue);
+  let thenResult!: Float<32>;
+  let elseResult!: Float<32>;
+  const joined = builder.ifValue(
+    condition,
+    (thenBody) => {
+      thenBody.write(variable, whenTrue);
+      thenResult = thenBody.read(variable);
+      return thenResult;
+    },
+    (elseBody) => {
+      elseBody.write(variable, whenFalse);
+      elseResult = elseBody.read(variable);
+      return elseResult;
+    },
+    { hint: "likely" }
+  );
+
+  builder.if(condition, (thenBody) => thenBody.write(variable, whenTrue), {
+    hint: "unlikely",
+    elseBuild: (elseBody) => elseBody.write(variable, whenFalse)
+  });
+
+  const region = builder.build();
+  const valueBranch = region.nodes[1];
+  const controlBranch = region.nodes[2];
+
+  ok(valueBranch?.kind === "if");
+  strictEqual(valueBranch.output, joined);
+  strictEqual(valueBranch.hint, "likely");
+  deepStrictEqual(
+    valueBranch.thenBody.nodes.map((node) => node.kind),
+    ["variable.write", "variable.read"]
+  );
+  deepStrictEqual(
+    valueBranch.elseBody.nodes.map((node) => node.kind),
+    ["variable.write", "variable.read"]
+  );
+  strictEqual(valueBranch.thenBody.result, thenResult);
+  strictEqual(valueBranch.elseBody.result, elseResult);
+  strictEqual(joined.kind, "float");
+  strictEqual(joined.width, 32);
+
+  ok(controlBranch?.kind === "if");
+  strictEqual(controlBranch.output, undefined);
+  strictEqual(controlBranch.hint, "unlikely");
+  strictEqual(controlBranch.thenBody.nodes[0]?.kind, "variable.write");
+  strictEqual(controlBranch.elseBody?.nodes[0]?.kind, "variable.write");
+});
+
+test("switch variants retain their cases, bodies, and typed result", () => {
+  const values = new ValueResolver();
+  const builder = new RegionBuilder(values);
+  const selector = values.parameter(0, Integer[16]);
+  const first = values.parameter(1, Float[64]);
+  const second = values.parameter(2, Float[64]);
+  const fallback = values.parameter(3, Float[64]);
+  const variable = builder.variable(fallback);
+  let firstResult!: Float<64>;
+  const joined = builder.switch(
+    selector,
+    [
+      {
+        match: 3,
+        build: (body) => {
+          body.write(variable, first);
+          firstResult = body.read(variable);
+          return firstResult;
+        }
+      },
+      { match: 7, build: () => second }
+    ],
+    () => fallback
+  );
+
+  builder.switchControl(
+    selector,
+    [
+      {
+        matches: [4, 8],
+        build: (body) => body.write(variable, first)
+      }
+    ],
+    (body) => body.write(variable, fallback)
+  );
+
+  const region = builder.build();
+  const valueSwitch = region.nodes[1];
+  const controlSwitch = region.nodes[2];
+
+  ok(valueSwitch?.kind === "switch");
+  strictEqual(valueSwitch.output, joined);
+  deepStrictEqual(
+    valueSwitch.cases.map((entry) => entry.matches),
+    [[3], [7]]
+  );
+  strictEqual(valueSwitch.cases[0]?.body.nodes[0]?.kind, "variable.write");
+  strictEqual(valueSwitch.cases[0]?.body.nodes[1]?.kind, "variable.read");
+  strictEqual(valueSwitch.cases[0]?.body.result, firstResult);
+  strictEqual(valueSwitch.cases[1]?.body.result, second);
+  strictEqual(valueSwitch.defaultBody.result, fallback);
+  strictEqual(joined.kind, "float");
+  strictEqual(joined.width, 64);
+
+  ok(controlSwitch?.kind === "switch");
+  strictEqual(controlSwitch.output, undefined);
+  deepStrictEqual(controlSwitch.cases[0]?.matches, [4, 8]);
+  strictEqual(controlSwitch.cases[0]?.body.nodes[0]?.kind, "variable.write");
+  strictEqual(controlSwitch.defaultBody.nodes[0]?.kind, "variable.write");
+});
