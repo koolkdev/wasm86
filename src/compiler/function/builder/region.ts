@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import { Control, type BranchHint } from "#compiler/function/control.js";
 import { Invocation, type CallTarget } from "#compiler/function/invocation.js";
 import { Operation } from "#compiler/function/operation.js";
@@ -7,6 +8,7 @@ import { VariableRef } from "#compiler/function/storage.js";
 import type { FunctionType } from "#compiler/function/type.js";
 import {
   Integer,
+  sameValueType,
   valueTypeOf,
   type AnyInteger,
   type AnyNarrowInteger,
@@ -56,11 +58,23 @@ export type SwitchControlArm<FunctionResults extends readonly ValueType[] = read
     build: BuildBody<FunctionResults>;
   }>;
 
+type LoopInputs<Seeds extends readonly AnyValue[]> = {
+  readonly [Index in keyof Seeds]: Seeds[Index] extends AnyValue
+    ? ValueForType<ValueTypeOf<Seeds[Index]>>
+    : never;
+};
+
+type BuildLoopBody<
+  FunctionResults extends readonly ValueType[],
+  Seeds extends readonly AnyValue[]
+> = (body: RegionBuilder<FunctionResults>, inputs: LoopInputs<Seeds>) => void;
+
 type ResultRegion<Value extends AnyValue> = Region & Readonly<{ result: Value }>;
 
 export class RegionBuilder<FunctionResults extends readonly ValueType[] = readonly ValueType[]> {
   readonly #nodes: RegionNode[] = [];
   readonly #values: ValueResolver;
+  #loopContinueTypes: readonly ValueType[] | undefined;
 
   constructor(values: ValueResolver) {
     this.#values = values;
@@ -202,6 +216,49 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     this.#nodes.push(Control.switch({ selector, cases, defaultBody }));
   }
 
+  loop<const Seeds extends readonly AnyValue[]>(
+    seeds: Seeds,
+    build: BuildLoopBody<FunctionResults, NoInfer<Seeds>>
+  ): void {
+    for (const seed of seeds) {
+      this.#values.resolve(seed);
+    }
+    const body = this.#child(seeds.map((seed) => valueTypeOf(seed)));
+    const inputs = createLoopInputs(this.#values, seeds);
+
+    build(body, inputs);
+    this.#nodes.push(
+      Control.loop({
+        carried: seeds.map((seed, index) => {
+          const loopInput = inputs[index];
+
+          assert(loopInput !== undefined, `loop seed ${index} has no input`);
+          return { seed, loopInput };
+        }),
+        body: body.build()
+      })
+    );
+  }
+
+  loopContinue(updates: readonly AnyValue[]): void {
+    const expectedTypes = this.#loopContinueTypes;
+
+    assert(expectedTypes !== undefined, "loopContinue requires an enclosing loop");
+    assert(updates.length === expectedTypes.length, "loop updates do not align with their loop");
+    for (const [index, update] of updates.entries()) {
+      const expected = expectedTypes[index];
+
+      assert(
+        expected !== undefined && sameValueType(valueTypeOf(update), expected),
+        `loop update ${index} has the wrong value type`
+      );
+    }
+    for (const update of updates) {
+      this.#values.resolve(update);
+    }
+    this.#nodes.push(Control.loopContinue({ updates }));
+  }
+
   return(results: ValueTuple<NoInfer<FunctionResults>>): void {
     for (const value of results) {
       this.#values.resolve(value);
@@ -222,8 +279,17 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     return { nodes: [...this.#nodes] };
   }
 
-  #childBody(build: BuildBody<FunctionResults>): Region {
+  #child(
+    loopContinueTypes: readonly ValueType[] | undefined = this.#loopContinueTypes
+  ): RegionBuilder<FunctionResults> {
     const child = new RegionBuilder<FunctionResults>(this.#values);
+
+    child.#loopContinueTypes = loopContinueTypes;
+    return child;
+  }
+
+  #childBody(build: BuildBody<FunctionResults>): Region {
+    const child = this.#child();
 
     build(child);
     return child.build();
@@ -232,7 +298,7 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
   #childResultBody<Value extends AnyValue>(
     build: BuildResult<FunctionResults, Value>
   ): ResultRegion<Value> {
-    const child = new RegionBuilder<FunctionResults>(this.#values);
+    const child = this.#child();
     const result = build(child);
 
     this.#values.resolve(result);
@@ -253,6 +319,14 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
 function produceResult<Value extends AnyValue>(values: ValueResolver, result: Value): Value;
 function produceResult(values: ValueResolver, result: AnyValue): AnyValue {
   return values.producer(valueTypeOf(result));
+}
+
+function createLoopInputs<const Seeds extends readonly AnyValue[]>(
+  values: ValueResolver,
+  seeds: Seeds
+): LoopInputs<Seeds>;
+function createLoopInputs(values: ValueResolver, seeds: readonly AnyValue[]): readonly AnyValue[] {
+  return seeds.map((seed) => values.producer(valueTypeOf(seed)));
 }
 
 function produceInteger<Width extends IntegerWidth>(

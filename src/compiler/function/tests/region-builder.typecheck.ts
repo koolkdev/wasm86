@@ -136,3 +136,33 @@ export function regionBuilderBranchTypeContract(
 
   void [joinedFloat, joinedByte, switchedFloat, switchedDword];
 }
+
+export function regionBuilderLoopTypeContract(
+  values: ValueResolver,
+  byte: Integer<8>,
+  word: Integer<16>,
+  single: Float<32>
+): void {
+  const builder = new RegionBuilder(values);
+
+  builder.loop([byte, single], (body, inputs) => {
+    const byteInput: Integer<8> = inputs[0];
+    const floatInput: Float<32> = inputs[1];
+
+    // @ts-expect-error loop inputs retain their tuple length.
+    inputs[2];
+    body.if(byteInput.ne(0), (repeat) => repeat.loopContinue([byteInput, floatInput]));
+    body.switchControl(
+      byteInput,
+      [{ matches: [1], build: (arm) => arm.loopContinue([byteInput, floatInput]) }],
+      (fallback) => fallback.loopContinue([byteInput, floatInput])
+    );
+    body.loop([word], (inner, [wordInput]) => {
+      inner.loopContinue([wordInput]);
+    });
+    body.loopContinue([byteInput, floatInput]);
+  });
+  builder.loop([], (body, inputs) => {
+    body.loopContinue(inputs);
+  });
+}

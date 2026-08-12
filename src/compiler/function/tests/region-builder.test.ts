@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
 import { RegionBuilder } from "#compiler/function/builder/region.js";
@@ -220,4 +220,64 @@ test("switch variants retain their cases, bodies, and typed result", () => {
   deepStrictEqual(controlSwitch.cases[0]?.matches, [4, 8]);
   strictEqual(controlSwitch.cases[0]?.body.nodes[0]?.kind, "variable.write");
   strictEqual(controlSwitch.defaultBody.nodes[0]?.kind, "variable.write");
+});
+
+test("loops retain typed inputs and nested back edges", () => {
+  const values = new ValueResolver();
+  const builder = new RegionBuilder(values);
+  const byteSeed = values.parameter(0, Integer[8]);
+  const floatSeed = values.parameter(1, Float[64]);
+  let byteInput!: Integer<8>;
+  let floatInput!: Float<64>;
+
+  builder.loop([byteSeed, floatSeed], (body, inputs) => {
+    [byteInput, floatInput] = inputs;
+    body.loop([byteInput], (inner, [innerInput]) => inner.loopContinue([innerInput]));
+    body.if(byteInput.ne(0), (repeat) => repeat.loopContinue([byteInput, floatInput]));
+    body.loopContinue([byteInput, floatInput]);
+  });
+  builder.loop([], (body) => body.loopContinue([]));
+
+  const region = builder.build();
+  const loop = region.nodes[0];
+  const emptyLoop = region.nodes[1];
+
+  ok(loop?.kind === "loop");
+  strictEqual(loop.carried[0]?.seed, byteSeed);
+  strictEqual(loop.carried[0]?.loopInput, byteInput);
+  strictEqual(loop.carried[1]?.seed, floatSeed);
+  strictEqual(loop.carried[1]?.loopInput, floatInput);
+  notStrictEqual(byteInput, byteSeed);
+  notStrictEqual(floatInput, floatSeed);
+  strictEqual(byteInput.width, 8);
+  strictEqual(floatInput.kind, "float");
+  strictEqual(floatInput.width, 64);
+
+  const innerLoop = loop.body.nodes[0];
+
+  ok(innerLoop?.kind === "loop");
+  const innerContinuation = innerLoop.body.nodes[0];
+
+  ok(innerContinuation?.kind === "loopContinue");
+  deepStrictEqual(innerContinuation.updates, [innerLoop.carried[0]?.loopInput]);
+
+  const branch = loop.body.nodes[1];
+
+  ok(branch?.kind === "if");
+  const continuation = branch.thenBody.nodes[0];
+
+  ok(continuation?.kind === "loopContinue");
+  deepStrictEqual(continuation.updates, [byteInput, floatInput]);
+
+  const outerContinuation = loop.body.nodes[2];
+
+  ok(outerContinuation?.kind === "loopContinue");
+  deepStrictEqual(outerContinuation.updates, [byteInput, floatInput]);
+
+  ok(emptyLoop?.kind === "loop");
+  deepStrictEqual(emptyLoop.carried, []);
+  const emptyContinuation = emptyLoop.body.nodes[0];
+
+  ok(emptyContinuation?.kind === "loopContinue");
+  deepStrictEqual(emptyContinuation.updates, []);
 });
