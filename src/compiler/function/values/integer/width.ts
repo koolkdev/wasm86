@@ -23,3 +23,8 @@ export type WidthsAtMost<Width extends IntegerWidth> = 1 extends Width
 export function normalizeInteger(width: IntegerWidth, value: number | bigint): bigint {
   return BigInt.asUintN(width, BigInt(value));
 }
+
+// Number of bits occupied by a non-negative magnitude; zero occupies none.
+export function bitLength(value: bigint): number {
+  return value === 0n ? 0 : value.toString(2).length;
+}

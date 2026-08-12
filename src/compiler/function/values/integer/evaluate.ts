@@ -4,7 +4,11 @@ import type {
   CompareOperator,
   ZeroTestOperator
 } from "#compiler/function/values/integer/operators.js";
-import { normalizeInteger, type IntegerWidth } from "#compiler/function/values/integer/width.js";
+import {
+  bitLength,
+  normalizeInteger,
+  type IntegerWidth
+} from "#compiler/function/values/integer/width.js";
 
 export function evaluateBinary(
   operator: BinaryOperator,
@@ -152,10 +156,6 @@ function trailingZeroes(value: bigint): bigint {
 
 function signedInteger(width: IntegerWidth, value: bigint): bigint {
   return BigInt.asIntN(width, value);
-}
-
-function bitLength(value: bigint): number {
-  return value === 0n ? 0 : value.toString(2).length;
 }
 
 function rotateLeft(width: IntegerWidth, value: bigint, count: number): bigint {
