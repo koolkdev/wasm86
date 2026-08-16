@@ -73,6 +73,7 @@ type ResultRegion<Value extends AnyValue> = Region & Readonly<{ result: Value }>
 
 export class RegionBuilder<FunctionResults extends readonly ValueType[] = readonly ValueType[]> {
   readonly #nodes: RegionNode[] = [];
+  readonly #writtenVariables = new Set<VariableRef>();
   readonly #values: ValueResolver;
   #loopContinueTypes: readonly ValueType[] | undefined;
 
@@ -85,14 +86,14 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     const variable = new VariableRef(valueTypeOf(seed));
 
     this.#values.resolve(seed);
-    this.#nodes.push(Operation.variableWrite(variable, seed, "seed"));
+    this.#append(Operation.variableWrite(variable, seed, "seed"));
     return variable;
   }
 
   read<Type extends ValueType>(variable: VariableRef<Type>): ValueForType<Type> {
     const output = this.#values.producer(variable.type);
 
-    this.#nodes.push(Operation.variableRead(variable, output));
+    this.#append(Operation.variableRead(variable, output));
     return output;
   }
 
@@ -101,7 +102,7 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     value: NoInfer<ValueForType<Type>>
   ): void {
     this.#values.resolve(value);
-    this.#nodes.push(Operation.variableWrite(variable, value, "update"));
+    this.#append(Operation.variableWrite(variable, value, "update"));
   }
 
   readResource<Access extends AnyResourceAccess>(source: Access): Integer<Access["valueWidth"]> {
@@ -109,7 +110,7 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     this.#values.resolve(source.address.base);
     const output = produceInteger(this.#values, source.valueWidth);
 
-    this.#nodes.push(Operation.resourceRead(source, output));
+    this.#append(Operation.resourceRead(source, output));
     return output;
   }
 
@@ -119,7 +120,7 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
   ): void {
     this.#values.resolve(destination.address.base);
     this.#values.resolve(value);
-    this.#nodes.push(Operation.resourceWrite(destination, value));
+    this.#append(Operation.resourceWrite(destination, value));
   }
 
   call<Type extends CallableFunction>(
@@ -131,12 +132,12 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     const resultType = target.type.results[0];
 
     if (resultType === undefined) {
-      this.#nodes.push(Operation.call(invocation as Invocation<ResultlessFunction>));
+      this.#append(Operation.call(invocation as Invocation<ResultlessFunction>));
       return [];
     }
     const output = this.#values.producer(resultType);
 
-    this.#nodes.push(Operation.call(invocation as Invocation<SingleResultFunction>, output));
+    this.#append(Operation.call(invocation as Invocation<SingleResultFunction>, output));
     return [output];
   }
 
@@ -150,7 +151,7 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     const elseBody =
       options.elseBuild === undefined ? undefined : this.#childBody(options.elseBuild);
 
-    this.#nodes.push(
+    this.#append(
       Control.if({
         condition,
         ...(options.hint === undefined ? {} : { hint: options.hint }),
@@ -171,7 +172,7 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     const elseBody = this.#childResultBody(elseBuild);
     const output = produceResult(this.#values, thenBody.result);
 
-    this.#nodes.push(
+    this.#append(
       Control.if({
         condition,
         ...(options.hint === undefined ? {} : { hint: options.hint }),
@@ -197,7 +198,7 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     }));
     const output = produceResult(this.#values, defaultBody.result);
 
-    this.#nodes.push(Control.switch({ selector, output, cases, defaultBody }));
+    this.#append(Control.switch({ selector, output, cases, defaultBody }));
     return output;
   }
 
@@ -213,7 +214,7 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     }));
     const defaultBody = this.#childBody(defaultBuild);
 
-    this.#nodes.push(Control.switch({ selector, cases, defaultBody }));
+    this.#append(Control.switch({ selector, cases, defaultBody }));
   }
 
   loop<const Seeds extends readonly AnyValue[]>(
@@ -227,7 +228,7 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     const inputs = createLoopInputs(this.#values, seeds);
 
     build(body, inputs);
-    this.#nodes.push(
+    this.#append(
       Control.loop({
         carried: seeds.map((seed, index) => {
           const loopInput = inputs[index];
@@ -256,14 +257,14 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
     for (const update of updates) {
       this.#values.resolve(update);
     }
-    this.#nodes.push(Control.loopContinue({ updates }));
+    this.#append(Control.loopContinue({ updates }));
   }
 
   return(results: ValueTuple<NoInfer<FunctionResults>>): void {
     for (const value of results) {
       this.#values.resolve(value);
     }
-    this.#nodes.push(Control.return({ source: { kind: "values", values: results } }));
+    this.#append(Control.return({ source: { kind: "values", values: results } }));
   }
 
   returnCall<Type extends FunctionType<readonly ValueType[], FunctionResults>>(
@@ -272,11 +273,33 @@ export class RegionBuilder<FunctionResults extends readonly ValueType[] = readon
   ): void {
     const invocation = this.#invocation(target, args);
 
-    this.#nodes.push(Control.return({ source: { kind: "invocation", invocation } }));
+    this.#append(Control.return({ source: { kind: "invocation", invocation } }));
   }
 
   build(): Region {
-    return { nodes: [...this.#nodes] };
+    const last = this.#nodes[this.#nodes.length - 1];
+
+    return {
+      nodes: [...this.#nodes],
+      writtenVariables: new Set(this.#writtenVariables),
+      fallsThrough:
+        last === undefined || last.category === "operation" || Control.describe(last).fallsThrough
+    };
+  }
+
+  #append(node: RegionNode): void {
+    this.#nodes.push(node);
+    if (node.category === "operation") {
+      if (node.kind === "variable.write") {
+        this.#writtenVariables.add(node.variable);
+      }
+      return;
+    }
+    for (const { body } of Control.describe(node).regions) {
+      for (const variable of body.writtenVariables) {
+        this.#writtenVariables.add(variable);
+      }
+    }
   }
 
   #child(

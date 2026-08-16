@@ -80,6 +80,7 @@ export type ControlDescription = Readonly<{
   output: ValueRef | undefined;
   regions: readonly ControlRegion[];
   effects: StorageEffects;
+  fallsThrough: boolean;
 }>;
 
 function ifControl(args: IfControlArgs): IfControl {
@@ -150,7 +151,11 @@ function describe(control: Control): ControlDescription {
                 }
               ])
         ],
-        effects: noStorageEffects
+        effects: noStorageEffects,
+        fallsThrough:
+          control.elseBody === undefined ||
+          control.thenBody.fallsThrough ||
+          control.elseBody.fallsThrough
       };
     case "switch":
       return {
@@ -164,7 +169,9 @@ function describe(control: Control): ControlDescription {
             body: control.defaultBody
           }
         ],
-        effects: noStorageEffects
+        effects: noStorageEffects,
+        fallsThrough:
+          control.cases.some((entry) => entry.body.fallsThrough) || control.defaultBody.fallsThrough
       };
     case "loop":
       return {
@@ -176,14 +183,16 @@ function describe(control: Control): ControlDescription {
             loopInputs: control.carried.map((value) => value.loopInput)
           }
         ],
-        effects: noStorageEffects
+        effects: noStorageEffects,
+        fallsThrough: true
       };
     case "loopContinue":
       return {
         operands: control.updates,
         output: undefined,
         regions: [],
-        effects: noStorageEffects
+        effects: noStorageEffects,
+        fallsThrough: false
       };
     case "return":
       return {
@@ -196,7 +205,8 @@ function describe(control: Control): ControlDescription {
         effects:
           control.source.kind === "invocation"
             ? control.source.invocation.target.effects
-            : noStorageEffects
+            : noStorageEffects,
+        fallsThrough: false
       };
   }
 }

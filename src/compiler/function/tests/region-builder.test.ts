@@ -281,3 +281,43 @@ test("loops retain typed inputs and nested back edges", () => {
   ok(emptyContinuation?.kind === "loopContinue");
   deepStrictEqual(emptyContinuation.updates, []);
 });
+
+test("build snapshots direct variable writes and ordinary fallthrough", () => {
+  const values = new ValueResolver();
+  const builder = new RegionBuilder(values);
+  const empty = builder.build();
+  const seed = values.parameter(0, Integer[32]);
+  const variable = builder.variable(seed);
+  const written = builder.build();
+
+  builder.return([]);
+  const returned = builder.build();
+
+  strictEqual(empty.fallsThrough, true);
+  strictEqual(empty.writtenVariables.size, 0);
+  strictEqual(written.fallsThrough, true);
+  strictEqual(written.writtenVariables.has(variable), true);
+  strictEqual(returned.fallsThrough, false);
+  strictEqual(returned.writtenVariables.has(variable), true);
+});
+
+test("regions include nested writes while loops conservatively fall through", () => {
+  const values = new ValueResolver();
+  const builder = new RegionBuilder(values);
+  const seed = values.parameter(0, Integer[32]);
+  const replacement = values.parameter(1, Integer[32]);
+  const variable = builder.variable(seed);
+
+  builder.loop([], (body) => {
+    body.if(seed.eqz(), (arm) => arm.write(variable, replacement));
+    body.loopContinue([]);
+  });
+  const region = builder.build();
+  const loop = region.nodes.at(-1);
+
+  ok(loop?.kind === "loop");
+  strictEqual(loop.body.writtenVariables.has(variable), true);
+  strictEqual(loop.body.fallsThrough, false);
+  strictEqual(region.writtenVariables.has(variable), true);
+  strictEqual(region.fallsThrough, true);
+});

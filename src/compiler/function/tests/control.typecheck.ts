@@ -2,7 +2,11 @@ import { Control } from "#compiler/function/control.js";
 import type { Region } from "#compiler/function/region.js";
 import type { Float, Integer } from "#compiler/function/values.js";
 
-const body: Region = { nodes: [] };
+const body: Region = {
+  nodes: [],
+  writtenVariables: new Set(),
+  fallsThrough: true
+};
 
 export function controlTypeContract(
   bit: Integer<1>,

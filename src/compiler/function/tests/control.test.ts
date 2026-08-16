@@ -17,8 +17,18 @@ test("if and switch controls describe their selected regions", () => {
   const thenResult = values.parameter(2, Float[32]);
   const elseResult = values.parameter(3, Float[32]);
   const output = values.producer(Float[32]);
-  const thenBody: Region = { nodes: [], result: thenResult };
-  const elseBody: Region = { nodes: [], result: elseResult };
+  const thenBody: Region = {
+    nodes: [],
+    result: thenResult,
+    writtenVariables: new Set(),
+    fallsThrough: true
+  };
+  const elseBody: Region = {
+    nodes: [],
+    result: elseResult,
+    writtenVariables: new Set(),
+    fallsThrough: true
+  };
   const ifDescription = Control.describe(Control.if({ condition, output, thenBody, elseBody }));
   const switchDescription = Control.describe(
     Control.switch({
@@ -33,6 +43,7 @@ test("if and switch controls describe their selected regions", () => {
   strictEqual(ifDescription.output, output);
   deepStrictEqual(ifDescription.regions, [{ body: thenBody }, { body: elseBody }]);
   deepStrictEqual(ifDescription.effects, { reads: [], writes: [] });
+  strictEqual(ifDescription.fallsThrough, true);
   deepStrictEqual(switchDescription.operands, [selector]);
   strictEqual(switchDescription.output, output);
   deepStrictEqual(switchDescription.regions, [{ body: thenBody }, { body: elseBody }]);
@@ -45,7 +56,9 @@ test("loops describe their carried values and scoped body", () => {
   const update = values.parameter(1, Integer[16]);
   const continuation = Control.loopContinue({ updates: [update] });
   const body: Region = {
-    nodes: [continuation]
+    nodes: [continuation],
+    writtenVariables: new Set(),
+    fallsThrough: false
   };
   const loopDescription = Control.describe(Control.loop({ carried: [{ seed, loopInput }], body }));
   const continueDescription = Control.describe(continuation);
@@ -60,6 +73,8 @@ test("loops describe their carried values and scoped body", () => {
   deepStrictEqual(continueDescription.operands, [update]);
   strictEqual(continueDescription.output, undefined);
   deepStrictEqual(continueDescription.regions, []);
+  strictEqual(loopDescription.fallsThrough, true);
+  strictEqual(continueDescription.fallsThrough, false);
 });
 
 test("returned invocations expose their arguments and direct effects", () => {
@@ -82,4 +97,49 @@ test("returned invocations expose their arguments and direct effects", () => {
   deepStrictEqual(description.effects, effects);
   strictEqual(description.output, undefined);
   deepStrictEqual(description.regions, []);
+  strictEqual(description.fallsThrough, false);
+});
+
+test("branching controls fall through when any selected body does", () => {
+  const values = new ValueResolver();
+  const condition = values.parameter(0, Integer[1]);
+  const selector = values.parameter(1, Integer[8]);
+  const returned = Control.return({ source: { kind: "values", values: [] } });
+  const terminal: Region = {
+    nodes: [returned],
+    writtenVariables: new Set(),
+    fallsThrough: false
+  };
+  const ordinary: Region = {
+    nodes: [],
+    writtenVariables: new Set(),
+    fallsThrough: true
+  };
+
+  strictEqual(Control.describe(Control.if({ condition, thenBody: terminal })).fallsThrough, true);
+  strictEqual(
+    Control.describe(Control.if({ condition, thenBody: terminal, elseBody: terminal }))
+      .fallsThrough,
+    false
+  );
+  strictEqual(
+    Control.describe(
+      Control.switch({
+        selector,
+        cases: [{ matches: [1], body: terminal }],
+        defaultBody: terminal
+      })
+    ).fallsThrough,
+    false
+  );
+  strictEqual(
+    Control.describe(
+      Control.switch({
+        selector,
+        cases: [{ matches: [1], body: ordinary }],
+        defaultBody: terminal
+      })
+    ).fallsThrough,
+    true
+  );
 });
