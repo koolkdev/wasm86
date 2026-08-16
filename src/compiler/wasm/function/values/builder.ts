@@ -19,6 +19,7 @@ import {
   zeroExtendedRequiredBits,
   type RequiredBits
 } from "./integer/required-bits.js";
+import { canSpeculateIntegerBinary } from "./integer/speculation.js";
 import {
   isWasmIntegerType,
   wasmIntegerTypeWidth,
@@ -51,10 +52,11 @@ type KeyedNode = CanonicalNode | OperationNode;
 export class WasmValuesBuilder {
   readonly #nodes: WasmValueNode[] = [];
   readonly #requiredBits: (RequiredBits | undefined)[] = [];
+  readonly #cannotSpeculate = new Set<WasmValueId>();
   readonly #interned = new Map<string, WasmValueId>();
 
   finish(): WasmValueGraph {
-    return new WasmValueGraph(this.#nodes);
+    return new WasmValueGraph(this.#nodes, this.#cannotSpeculate);
   }
 
   node(id: WasmValueId): WasmValueNode {
@@ -319,7 +321,25 @@ export class WasmValuesBuilder {
     if (requiredBits !== undefined) {
       this.#setRequiredBits(id, requiredBits);
     }
+    if (!this.#canSpeculateInstruction(node)) {
+      this.#cannotSpeculate.add(id);
+    }
     return id;
+  }
+
+  #canSpeculateInstruction(node: WasmValueNode): boolean {
+    if (node.kind === "unreachable") {
+      return false;
+    }
+    if (node.kind !== "binary" || (node.type !== "i32" && node.type !== "i64")) {
+      return true;
+    }
+    return canSpeculateIntegerBinary(
+      node,
+      this.requiredBits(node.inputs[0]),
+      this.#integerConstant(node.inputs[0]),
+      this.#integerConstant(node.inputs[1])
+    );
   }
 
   #deriveRequiredBits(node: WasmValueNode): RequiredBits | undefined {
