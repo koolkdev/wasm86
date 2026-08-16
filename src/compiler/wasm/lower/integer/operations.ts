@@ -1,3 +1,4 @@
+import { assert } from "#common/assert.js";
 import type { IntegerExpression, IntegerRef } from "#compiler/function/values/expression.js";
 import { compareIsSigned } from "#compiler/function/values/integer/operators.js";
 import type {
@@ -9,6 +10,7 @@ import type { IntegerWidth } from "#compiler/function/values/integer/width.js";
 import type { WasmValuesBuilder } from "#compiler/wasm/function/values/builder.js";
 import type { WasmValueId } from "#compiler/wasm/function/values/nodes.js";
 import { wasmIntegerType } from "#compiler/wasm/type-mapping.js";
+import { isWasmIntegerType, type WasmIntegerType } from "#wasm/types.js";
 import type { LowBits } from "./low-bits.js";
 
 export type IntegerView = "unsigned" | "signed";
@@ -38,6 +40,25 @@ export type IntegerLowering = Readonly<{
   lower(value: IntegerRef): WasmValueId;
   normalize(value: IntegerRef, view: IntegerView): WasmValueId;
 }>;
+
+export function convertIntegerRepresentation(
+  wasm: WasmValuesBuilder,
+  value: WasmValueId,
+  targetType: WasmIntegerType
+): WasmValueId {
+  const sourceType = wasm.node(value).type;
+
+  assert(isWasmIntegerType(sourceType), "integer representation conversion requires an integer");
+  if (sourceType === targetType) {
+    return value;
+  }
+  switch (targetType) {
+    case "i32":
+      return wasm.convert("wrap_i64", value);
+    case "i64":
+      return wasm.convert("extend_i32_u", value);
+  }
+}
 
 export function lowerIntegerOperation(
   expression: IntegerOperation,
