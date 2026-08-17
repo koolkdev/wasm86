@@ -109,6 +109,22 @@ const i64ConstInstruction = instruction<readonly [value: bigint]>(0x42, (body, v
   body.writeBytes(encodeI64Leb128(value));
 });
 
+// Float immediates are raw little-endian IEEE bit patterns, never LEB128.
+const f32ConstInstruction = instruction<readonly [bits: number]>(0x43, (body, bits) => {
+  body.writeByte(bits & 0xff);
+  body.writeByte((bits >>> 8) & 0xff);
+  body.writeByte((bits >>> 16) & 0xff);
+  body.writeByte(bits >>> 24);
+});
+
+const f64ConstInstruction = instruction<readonly [bits: bigint]>(0x44, (body, bits) => {
+  const value = BigInt.asUintN(64, bits);
+
+  for (let offset = 0n; offset < 64n; offset += 8n) {
+    body.writeByte(Number((value >> offset) & 0xffn));
+  }
+});
+
 export const wasmInstruction = {
   control: {
     block: blockInstruction,
@@ -220,7 +236,35 @@ export const wasmInstruction = {
     shr_u: plainInstruction(0x88),
     rotl: plainInstruction(0x89),
     rotr: plainInstruction(0x8a),
+    load: memoryInstruction(0x29),
+    store: memoryInstruction(0x37),
     extendI32S: plainInstruction(0xac),
     extendI32U: plainInstruction(0xad)
+  },
+  f32: {
+    const: f32ConstInstruction,
+    eq: plainInstruction(0x5b),
+    ne: plainInstruction(0x5c),
+    lt: plainInstruction(0x5d),
+    gt: plainInstruction(0x5e),
+    le: plainInstruction(0x5f),
+    ge: plainInstruction(0x60),
+    add: plainInstruction(0x92),
+    sub: plainInstruction(0x93),
+    mul: plainInstruction(0x94),
+    div: plainInstruction(0x95)
+  },
+  f64: {
+    const: f64ConstInstruction,
+    eq: plainInstruction(0x61),
+    ne: plainInstruction(0x62),
+    lt: plainInstruction(0x63),
+    gt: plainInstruction(0x64),
+    le: plainInstruction(0x65),
+    ge: plainInstruction(0x66),
+    add: plainInstruction(0xa0),
+    sub: plainInstruction(0xa1),
+    mul: plainInstruction(0xa2),
+    div: plainInstruction(0xa3)
   }
 } as const;
