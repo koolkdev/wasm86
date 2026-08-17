@@ -3,13 +3,12 @@ import { test } from "node:test";
 
 import { encodeWasmFunctionBody } from "#wasm/encoder/function-body.js";
 import { wasmInstruction } from "#wasm/encoder/instructions.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
 
 test("declared locals follow parameters in the Wasm local index space", () => {
   const body = encodeWasmFunctionBody(
     {
       parameterCount: 2,
-      localTypes: [wasmValueType.i32, wasmValueType.i64]
+      localTypes: ["i32", "i64"]
     },
     (writer, resolveLocal) => {
       writer.write(wasmInstruction.i32.const, 7);
@@ -29,6 +28,30 @@ test("declared locals follow parameters in the Wasm local index space", () => {
     0x20, 0x02, 0x1a,
     0x0b
   ]);
+});
+
+test("all canonical Wasm value types encode in local and control signatures", () => {
+  const body = encodeWasmFunctionBody(
+    {
+      parameterCount: 0,
+      localTypes: ["i32", "i64", "f32", "f64"]
+    },
+    (writer) => {
+      writer.write(wasmInstruction.control.block, "f32");
+      writer.write(wasmInstruction.control.end);
+      writer.write(wasmInstruction.i32.const, 1);
+      writer.write(wasmInstruction.control.if, { result: "f64" });
+      writer.write(wasmInstruction.control.end);
+    }
+  );
+
+  deepStrictEqual(
+    [...body.bytes],
+    [
+      0x04, 0x01, 0x7f, 0x01, 0x7e, 0x01, 0x7d, 0x01, 0x7c, 0x02, 0x7d, 0x0b, 0x41, 0x01, 0x04,
+      0x7c, 0x0b, 0x0b
+    ]
+  );
 });
 
 test("br_table encodes its label vector and default depth", () => {
@@ -78,7 +101,7 @@ test("narrow memory and sign-extension instructions use their Wasm encodings", (
   const body = encodeWasmFunctionBody(
     {
       parameterCount: 2,
-      localTypes: [wasmValueType.i32]
+      localTypes: ["i32"]
     },
     (writer, resolveLocal) => {
       const valueLocal = resolveLocal(0);

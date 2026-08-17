@@ -1,17 +1,18 @@
+import type { WasmFunctionType } from "#wasm/types.js";
 import { ByteSink } from "./byte-sink.js";
+import {
+  encodeWasmValueType,
+  wasmExternalKind,
+  wasmFunctionReferenceTypeCode,
+  wasmFunctionTypePrefix,
+  wasmMagic,
+  wasmSectionId,
+  wasmVersion
+} from "./format.js";
 import type { EncodedWasmFunctionBody } from "./function-body.js";
 import { wasmInstruction } from "./instructions.js";
 import { createWasmInstructionWriter } from "./instruction-writer.js";
 import type { WasmMemoryLimits } from "./memory.js";
-import {
-  wasmExternalKind,
-  wasmFunctionTypePrefix,
-  wasmMagic,
-  wasmSectionId,
-  wasmValueType,
-  wasmVersion,
-  type WasmFunctionType
-} from "./types.js";
 
 export type WasmFunctionImport = Readonly<{
   moduleName: string;
@@ -37,8 +38,8 @@ export type WasmTableImport = Readonly<{
 }>;
 
 export type WasmGlobalDefinition =
-  | Readonly<{ type: typeof wasmValueType.i32; mutable: boolean; initialValue: number }>
-  | Readonly<{ type: typeof wasmValueType.i64; mutable: boolean; initialValue: bigint }>;
+  | Readonly<{ type: "i32"; mutable: boolean; initialValue: number }>
+  | Readonly<{ type: "i64"; mutable: boolean; initialValue: bigint }>;
 
 export type WasmDefinedFunction = Readonly<{
   typeIndex: number;
@@ -141,10 +142,14 @@ function writeTypeSection(section: ByteSink, functionTypes: readonly WasmFunctio
 
   for (const type of functionTypes) {
     section.writeByte(wasmFunctionTypePrefix);
-    section.writeVecLength(type.params.length);
-    section.writeBytes(type.params);
+    section.writeVecLength(type.parameters.length);
+    for (const parameter of type.parameters) {
+      section.writeByte(encodeWasmValueType(parameter));
+    }
     section.writeVecLength(type.results.length);
-    section.writeBytes(type.results);
+    for (const result of type.results) {
+      section.writeByte(encodeWasmValueType(result));
+    }
   }
 }
 
@@ -160,7 +165,7 @@ function writeGlobalSection(section: ByteSink, globals: readonly WasmGlobalDefin
   section.writeVecLength(globals.length);
 
   for (const global of globals) {
-    section.writeByte(global.type);
+    section.writeByte(encodeWasmValueType(global.type));
     section.writeByte(global.mutable ? 0x01 : 0x00);
     writeGlobalInit(section, global);
   }
@@ -216,7 +221,7 @@ function writeMemoryType(section: ByteSink, limits: WasmMemoryLimits): void {
 }
 
 function writeTableType(section: ByteSink, limits: WasmTableLimits): void {
-  section.writeByte(wasmValueType.funcref);
+  section.writeByte(wasmFunctionReferenceTypeCode);
   writeResizableLimits(section, limits.minElements, limits.maxElements);
 }
 
@@ -240,10 +245,10 @@ function writeGlobalInit(section: ByteSink, global: WasmGlobalDefinition): void 
   const { writer } = createWasmInstructionWriter(section);
 
   switch (global.type) {
-    case wasmValueType.i32:
+    case "i32":
       writer.write(wasmInstruction.i32.const, global.initialValue);
       break;
-    case wasmValueType.i64:
+    case "i64":
       writer.write(wasmInstruction.i64.const, global.initialValue);
       break;
   }

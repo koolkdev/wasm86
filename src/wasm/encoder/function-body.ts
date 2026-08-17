@@ -1,8 +1,9 @@
 import { assert } from "#common/assert.js";
+import type { WasmValueType } from "#wasm/types.js";
 import { ByteSink } from "./byte-sink.js";
+import { encodeWasmValueType } from "./format.js";
 import { wasmInstruction } from "./instructions.js";
 import { createWasmInstructionWriter, type WasmInstructionWriter } from "./instruction-writer.js";
-import type { WasmValueType } from "./types.js";
 
 const maximumWasmIndex = 0xffff_ffff;
 const wasmIndexSpaceSize = 0x1_0000_0000;
@@ -70,7 +71,7 @@ function writeLocalDeclarations(body: ByteSink, locals: readonly WasmValueType[]
 
   for (const group of groups) {
     body.writeU32(group.count);
-    body.writeByte(group.type);
+    body.writeByte(encodeWasmValueType(group.type));
   }
 }
 

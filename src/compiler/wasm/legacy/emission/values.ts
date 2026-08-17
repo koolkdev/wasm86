@@ -3,14 +3,13 @@ import type { FunctionAnalysis, RegionSite, SiteId } from "#compiler/wasm/legacy
 import { describeNode } from "#compiler/ir/node.js";
 import type { VariableRef } from "#compiler/ir/variable.js";
 import type { ValueTable } from "#compiler/ir/values/table.js";
-import type { ValueId, ValueType } from "#compiler/ir/values/types.js";
+import type { ValueId } from "#compiler/ir/values/types.js";
 import type { PlacementIndex } from "#compiler/wasm/legacy/placement/index.js";
 import type { PlacementPlan } from "#compiler/wasm/legacy/placement/model.js";
 import type { ModuleBindings } from "#compiler/wasm/module/bindings.js";
 import type { WasmLocalResolver } from "#wasm/encoder/function-body.js";
 import { wasmInstruction } from "#wasm/encoder/instructions.js";
 import type { WasmInstructionWriter } from "#wasm/encoder/instruction-writer.js";
-import { wasmValueType, type WasmValueType } from "#wasm/encoder/types.js";
 import { emitOperation } from "./operations.js";
 import { emitValueNode } from "./value-instructions.js";
 
@@ -219,10 +218,6 @@ export class ValueEmitter {
     assert(site !== undefined, "value realization occurred outside a placement site");
     return site;
   }
-}
-
-export function wasmTypeForValue(type: ValueType): WasmValueType {
-  return type === "i32" ? wasmValueType.i32 : wasmValueType.i64;
 }
 
 function capturesAfterOperands(site: RegionSite): boolean {

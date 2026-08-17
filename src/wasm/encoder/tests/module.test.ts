@@ -5,14 +5,13 @@ import { encodeWasmFunctionBody } from "#wasm/encoder/function-body.js";
 import { wasmInstruction } from "#wasm/encoder/instructions.js";
 import { encodeWasmModule } from "#wasm/encoder/module.js";
 import { createTestModuleDescription } from "#wasm/encoder/tests/module-fixture.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
 
 test("ordered module description uses declared numeric positions", async () => {
   const bytes = encodeWasmModule(
     createTestModuleDescription({
       functionTypes: [
-        { params: [], results: [] },
-        { params: [], results: [wasmValueType.i32] }
+        { parameters: [], results: [] },
+        { parameters: [], results: ["i32"] }
       ],
       functions: [
         {

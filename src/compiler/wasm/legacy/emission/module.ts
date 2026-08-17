@@ -1,7 +1,6 @@
 import { assert } from "#common/assert.js";
 import type { EncodedWasmFunctionBody } from "#wasm/encoder/function-body.js";
 import { encodeWasmModule, type WasmModuleDescription } from "#wasm/encoder/module.js";
-import { wasmValueType, type WasmFunctionType, type WasmValueType } from "#wasm/encoder/types.js";
 import type { FunctionType } from "#compiler/wasm/legacy/function-type.js";
 import { createModuleBindings } from "#compiler/wasm/module/bindings.js";
 import type { ModuleLayout } from "#compiler/wasm/module/layout.js";
@@ -16,7 +15,7 @@ export function emitModule(program: Program, layout: ModuleLayout): Uint8Array<A
 
 function moduleDescription(program: Program, layout: ModuleLayout): WasmModuleDescription {
   return {
-    functionTypes: layout.types.map(encodeFunctionType),
+    functionTypes: layout.types,
     functionImports: program.functionImports.map((imported) => ({
       moduleName: imported.moduleName,
       name: imported.name,
@@ -54,22 +53,6 @@ function emitProgramFunction(layout: ModuleLayout, fn: ProgramFunction): Encoded
     }),
     placement: fn.placement
   });
-}
-
-function encodeFunctionType(type: FunctionType): WasmFunctionType {
-  return {
-    params: type.parameters.map(encodeValueType),
-    results: type.results.map(encodeValueType)
-  };
-}
-
-function encodeValueType(type: FunctionType["parameters"][number]): WasmValueType {
-  switch (type) {
-    case "i32":
-      return wasmValueType.i32;
-    case "i64":
-      return wasmValueType.i64;
-  }
 }
 
 function requireTypeIndex(layout: ModuleLayout, type: FunctionType): number {

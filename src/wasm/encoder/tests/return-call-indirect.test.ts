@@ -7,7 +7,6 @@ import {
 } from "#wasm/encoder/function-body.js";
 import { wasmInstruction } from "#wasm/encoder/instructions.js";
 import { encodeTestModule } from "#wasm/encoder/tests/module-fixture.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
 
 const importNamespace = "wasm86";
 const tableImportName = "links";
@@ -66,8 +65,8 @@ function encodeIndirectCallModule(
   return encodeTestModule({
     functionTypes: [
       {
-        params: [wasmValueType.i32],
-        results: [wasmValueType.i64]
+        parameters: ["i32"],
+        results: ["i64"]
       }
     ],
     tableImports: [

@@ -7,7 +7,6 @@ import {
   type EncodedWasmFunctionBody
 } from "#wasm/encoder/function-body.js";
 import { emitFunctionRegions } from "./region.js";
-import { wasmTypeForValue } from "./values.js";
 
 export type FunctionEmitContext = Readonly<{
   bindings: ModuleBindings;
@@ -20,12 +19,10 @@ export function emitFunction(
 ): EncodedWasmFunctionBody {
   assert(context.placement.function === fn, "placement belongs to another IR function");
 
-  const localTypes = context.placement.plan.localTypes.map((type) => wasmTypeForValue(type));
-
   return encodeWasmFunctionBody(
     {
       parameterCount: fn.parameters.length,
-      localTypes
+      localTypes: context.placement.plan.localTypes
     },
     (body, resolveLocal) => {
       emitFunctionRegions(fn, {

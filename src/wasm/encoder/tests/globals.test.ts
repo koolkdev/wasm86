@@ -4,13 +4,12 @@ import { test } from "node:test";
 import { encodeWasmFunctionBody } from "#wasm/encoder/function-body.js";
 import { wasmInstruction } from "#wasm/encoder/instructions.js";
 import { encodeTestModule } from "#wasm/encoder/tests/module-fixture.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
 
 test("a mutable i32 global initializes and round-trips through set/get", async () => {
   const bytes = encodeTestModule({
     functionTypes: [
-      { params: [], results: [wasmValueType.i32] },
-      { params: [wasmValueType.i32], results: [] }
+      { parameters: [], results: ["i32"] },
+      { parameters: ["i32"], results: [] }
     ],
     functions: [
       {
@@ -39,7 +38,7 @@ test("a mutable i32 global initializes and round-trips through set/get", async (
         )
       }
     ],
-    globals: [{ type: wasmValueType.i32, mutable: true, initialValue: 7 }],
+    globals: [{ type: "i32", mutable: true, initialValue: 7 }],
     functionExports: [
       { name: "get", functionIndex: 0 },
       { name: "set", functionIndex: 1 }
@@ -57,7 +56,7 @@ test("a mutable i32 global initializes and round-trips through set/get", async (
 test("an i64 global keeps its full-width initial value", async () => {
   const expected = 0x0006_0000_1234_5678n;
   const bytes = encodeTestModule({
-    functionTypes: [{ params: [], results: [wasmValueType.i64] }],
+    functionTypes: [{ parameters: [], results: ["i64"] }],
     functions: [
       {
         typeIndex: 0,
@@ -72,7 +71,7 @@ test("an i64 global keeps its full-width initial value", async () => {
         )
       }
     ],
-    globals: [{ type: wasmValueType.i64, mutable: false, initialValue: expected }],
+    globals: [{ type: "i64", mutable: false, initialValue: expected }],
     functionExports: [{ name: "get", functionIndex: 0 }]
   });
   const instance = await WebAssembly.instantiate(await WebAssembly.compile(bytes));

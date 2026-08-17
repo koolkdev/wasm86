@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { encodeWasmFunctionBody } from "#wasm/encoder/function-body.js";
 import { wasmInstruction } from "#wasm/encoder/instructions.js";
 import { encodeTestModule } from "#wasm/encoder/tests/module-fixture.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
 
 const importNamespace = "wasm86";
 const cpuStateImportName = "cpuState";
@@ -55,9 +54,9 @@ async function instantiateImportedMemoryTestModule(
 function encodeImportedMemoryTestModule(): Uint8Array<ArrayBuffer> {
   return encodeTestModule({
     functionTypes: [
-      { params: [wasmValueType.i32], results: [] },
-      { params: [wasmValueType.i32, wasmValueType.i32], results: [] },
-      { params: [wasmValueType.i32], results: [wasmValueType.i32] }
+      { parameters: ["i32"], results: [] },
+      { parameters: ["i32", "i32"], results: [] },
+      { parameters: ["i32"], results: ["i32"] }
     ],
     memoryImports: [
       {

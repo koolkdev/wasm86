@@ -1,7 +1,8 @@
+import type { WasmValueType } from "#wasm/types.js";
 import type { ByteSink } from "./byte-sink.js";
+import { encodeWasmValueType } from "./format.js";
 import { encodeI32Leb128, encodeI64Leb128 } from "./leb128.js";
 import { encodeMemoryImmediate, type WasmMemoryImmediate } from "./memory.js";
-import type { WasmValueType } from "./types.js";
 
 const emptyBlockType = 0x40;
 
@@ -47,7 +48,7 @@ function memoryInstruction(
 }
 
 const blockInstruction = instruction<readonly [result?: WasmValueType]>(0x02, (body, result) => {
-  body.writeByte(result ?? emptyBlockType);
+  body.writeByte(result === undefined ? emptyBlockType : encodeWasmValueType(result));
 });
 
 const loopInstruction = instruction(0x03, (body) => {
@@ -57,7 +58,9 @@ const loopInstruction = instruction(0x03, (body) => {
 const ifInstruction = instruction<readonly [options?: WasmIfInstructionOptions]>(
   0x04,
   (body, options = {}) => {
-    body.writeByte(options.result ?? emptyBlockType);
+    body.writeByte(
+      options.result === undefined ? emptyBlockType : encodeWasmValueType(options.result)
+    );
   },
   (options = {}) => options.hint
 );

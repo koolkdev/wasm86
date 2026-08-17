@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { encodeWasmFunctionBody } from "#wasm/encoder/function-body.js";
 import { wasmInstruction } from "#wasm/encoder/instructions.js";
 import { encodeTestModule } from "#wasm/encoder/tests/module-fixture.js";
-import { wasmValueType } from "#wasm/encoder/types.js";
 
 const importModuleName = "host";
 const importFunctionName = "increment";
@@ -13,8 +12,8 @@ test("function imports prefix defined indexes and direct calls", async () => {
   const bytes = encodeTestModule({
     functionTypes: [
       {
-        params: [wasmValueType.i32],
-        results: [wasmValueType.i32]
+        parameters: ["i32"],
+        results: ["i32"]
       }
     ],
     functionImports: [
@@ -83,7 +82,7 @@ test("function imports prefix defined indexes and direct calls", async () => {
 
 test("branch hints use imported-function-prefixed indexes", () => {
   const bytes = encodeTestModule({
-    functionTypes: [{ params: [], results: [] }],
+    functionTypes: [{ parameters: [], results: [] }],
     functionImports: [
       {
         moduleName: importModuleName,
