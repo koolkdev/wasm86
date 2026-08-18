@@ -85,8 +85,7 @@ export type ComparisonNode = {
     Readonly<{ inputType: Type; operator: CompareOperatorFor[Type] }>;
 }[WasmValueType];
 
-// Required-bit analysis needs only integer constants and binary operations.
-export type IntegerConstantNode = Extract<ConstantNode, { type: WasmIntegerType }>;
+// Required-bit analysis narrows binary operations to their integer forms.
 export type IntegerBinaryNode = Extract<BinaryNode, { type: WasmIntegerType }>;
 
 export type EqzNode = WasmNode<"eqz", "i32", readonly [value: WasmValueId]> &

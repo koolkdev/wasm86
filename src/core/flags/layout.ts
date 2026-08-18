@@ -1,20 +1,20 @@
-import { FieldRef } from "#compiler/layout/handles.js";
+import { bitField, FieldRef, type AnyFieldRef } from "#compiler/layout/handles.js";
 import { layoutStructure } from "#compiler/layout/structure.js";
 import { x86Flags, type X86Flag } from "./definitions.js";
 
 const concreteFlagFields = {
-  CF: new FieldRef("core.flags.CF", "u8"),
-  PF: new FieldRef("core.flags.PF", "u8"),
-  AF: new FieldRef("core.flags.AF", "u8"),
-  ZF: new FieldRef("core.flags.ZF", "u8"),
-  SF: new FieldRef("core.flags.SF", "u8"),
-  OF: new FieldRef("core.flags.OF", "u8"),
-  DF: new FieldRef("core.flags.DF", "u8"),
-  TF: new FieldRef("core.flags.TF", "u8"),
-  NT: new FieldRef("core.flags.NT", "u8"),
-  AC: new FieldRef("core.flags.AC", "u8"),
-  ID: new FieldRef("core.flags.ID", "u8")
-} as const satisfies Readonly<Record<X86Flag, FieldRef<"u8">>>;
+  CF: bitField("core.flags.CF"),
+  PF: bitField("core.flags.PF"),
+  AF: bitField("core.flags.AF"),
+  ZF: bitField("core.flags.ZF"),
+  SF: bitField("core.flags.SF"),
+  OF: bitField("core.flags.OF"),
+  DF: bitField("core.flags.DF"),
+  TF: bitField("core.flags.TF"),
+  NT: bitField("core.flags.NT"),
+  AC: bitField("core.flags.AC"),
+  ID: bitField("core.flags.ID")
+} as const satisfies Readonly<Record<X86Flag, FieldRef<"u8", 1>>>;
 
 export const flagStateFields = {
   lazyKind: new FieldRef("core.flags.lazy-flag.kind", "u8"),
@@ -30,20 +30,20 @@ export type LazyFlagStateField =
 
 export type FlagStateField = ConcreteFlagStateField | LazyFlagStateField;
 
-const concreteFlagStateFields: ReadonlySet<FieldRef> = new Set(
+const concreteFlagStateFields: ReadonlySet<AnyFieldRef> = new Set(
   x86Flags.map((flag) => flagStateFields.concrete[flag])
 );
-const lazyFlagStateFields: ReadonlySet<FieldRef> = new Set([
+const lazyFlagStateFields: ReadonlySet<AnyFieldRef> = new Set([
   flagStateFields.lazyKind,
   flagStateFields.lazyA,
   flagStateFields.lazyB
 ]);
 
-export function isConcreteFlagStateField(field: FieldRef): field is ConcreteFlagStateField {
+export function isConcreteFlagStateField(field: AnyFieldRef): field is ConcreteFlagStateField {
   return concreteFlagStateFields.has(field);
 }
 
-export function isLazyFlagStateField(field: FieldRef): field is LazyFlagStateField {
+export function isLazyFlagStateField(field: AnyFieldRef): field is LazyFlagStateField {
   return lazyFlagStateFields.has(field);
 }
 

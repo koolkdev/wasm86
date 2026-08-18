@@ -203,7 +203,7 @@ export const CMOVCC = CONDITION_CODE_DESCRIPTORS.map((descriptor) =>
       opcode: [0x0f, 0x40 + descriptor.opcodeLow],
       operands: [modrmReg("r32"), modrmRm("rm32")],
       syntax: `cmov${descriptor.suffix} {0}, {1}`,
-      semantics: cmovSemantic(descriptor.cc)
+      semantics: cmovSemantic(descriptor.cc, 32)
     })
   ])
 );

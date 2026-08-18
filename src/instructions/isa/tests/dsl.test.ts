@@ -19,9 +19,9 @@ import {
   instructionReadsModRm,
   type InstructionSpec
 } from "#instructions/isa/spec.js";
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 
-const semantics: SemanticTemplate = () => {};
+const semantics: InstructionSemantics = () => {};
 
 test("opcode path exact bytes expand directly", () => {
   deepStrictEqual(expandOpcodePath([0x8b]), [{ bytes: [0x8b] }]);

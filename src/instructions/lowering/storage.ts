@@ -1,6 +1,7 @@
 import { assert } from "#common/assert.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
 import { isX86StatusFlag, type X86Flag } from "#core/flags/definitions.js";
 import type { StatusFlagResolverFamily } from "#core/flags/lazy/resolvers.js";
 import type { SimpleFlagSource } from "#core/flags/lazy/sources.js";
@@ -9,21 +10,19 @@ import type {
   AccessFault,
   SemanticReadOptions,
   SemanticUpdate,
-  SemanticVar,
   SemanticWriteOptions
 } from "#instructions/semantics/builder.js";
 import { operand, reg } from "#instructions/semantics/refs.js";
 import type {
-  OperandInput,
   OperandRef,
   RegRef,
+  RegRefForWidth,
+  SemanticVar,
   SegmentRef,
-  StorageInput,
-  Value,
-  ValueInput
+  StorageRef
 } from "#instructions/semantics/refs.js";
 import type { OperandWidth, RegName } from "#core/types.js";
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
+import { i32, type Integer, type BitValue, type I32Value } from "#compiler/function/values.js";
 import type { MemoryAccess } from "#memory/types.js";
 import type { OperandBinding, SegmentOperandBinding } from "./bindings.js";
 import { InstructionMemory } from "./memory.js";
@@ -34,7 +33,7 @@ import type { StateWriteObserver } from "./state/write-log.js";
 
 type WriteSegmentSelector = (
   binding: SegmentOperandBinding,
-  value: ValueInput,
+  value: I32Value,
   width: OperandWidth
 ) => void;
 
@@ -73,13 +72,13 @@ export class InstructionStorage {
     this.operands = new OperandResolver(this.state);
   }
 
-  bind(
+  forScope(
     scope: SemanticRegionScope,
     options: ScopedInstructionStorageOptions
   ): ScopedInstructionStorage {
     const region = scope.region;
-    const access = this.#stateAccess.bind(region);
-    const operands = this.operands.bind(scope.operands, access);
+    const access = this.#stateAccess.forRegion(region);
+    const operands = this.operands.forScope(scope.operands, access);
 
     return new ScopedInstructionStorage(
       region,
@@ -94,9 +93,13 @@ export class InstructionStorage {
     );
   }
 
-  beginInstruction(bindings: readonly OperandBinding[], eip: ValueInput): void {
+  beginInstruction(
+    region: RegionBuilder,
+    bindings: readonly OperandBinding[],
+    eip: I32Value
+  ): void {
     this.operands.beginInstruction(bindings);
-    this.state.beginInstruction(eip);
+    this.state.beginInstruction(this.#stateAccess.forRegion(region), eip);
   }
 
   endInstruction(): void {
@@ -149,145 +152,223 @@ export class ScopedInstructionStorage {
     return operand(index);
   }
 
-  reg(name: RegName): RegRef {
+  reg<Name extends RegName>(name: Name): RegRef<Name> {
     return reg(name);
   }
 
-  segment(operandRef: OperandInput): SegmentRef {
+  segment(operandRef: OperandRef): SegmentRef {
     return this.#operands.segment(operandRef.index);
   }
 
-  variable(seed: ValueInput): SemanticVar {
-    assert(this.#region.values.valueType(seed) === "i32", "semantic var seed must be i32");
-    return this.#region.variable(seed) as SemanticVar;
+  variable(seed: I32Value): SemanticVar {
+    return this.#region.variable(seed);
   }
 
-  address(operandRef: OperandRef): Value {
+  address(operandRef: OperandRef): I32Value {
     return this.#operands.address(operandRef.index);
   }
 
-  read(source: StorageInput, options: SemanticReadOptions): Value {
-    const signed = options.signed ?? false;
+  read(source: SemanticVar): I32Value;
+  read<Width extends OperandWidth>(source: RegRefForWidth<Width>): Integer<Width>;
+  read<Width extends OperandWidth>(source: SemanticUpdate<Width>): Integer<Width>;
+  read<Width extends OperandWidth>(
+    source: OperandRef,
+    width: Width,
+    options?: SemanticReadOptions
+  ): Integer<Width>;
+  read<Width extends OperandWidth>(
+    source: SemanticVar | RegRefForWidth<Width> | SemanticUpdate<Width> | OperandRef,
+    width?: Width,
+    options?: SemanticReadOptions
+  ): Integer<Width> | I32Value {
+    switch (source.kind) {
+      case "update":
+        switch (source.destination.kind) {
+          case "memory":
+            return this.memory.load(source.destination.access, source.width);
+          case "storage":
+            return this.#readStorage(source.destination.reference, source.width);
+        }
+      case "operand": {
+        assert(width !== undefined, "operand reads require a width");
 
-    if (source.kind === "operand" && this.#operands.isMemory(source.index)) {
-      const width = options.memory?.width ?? options.width;
-      const reference = this.memory.operand(source, options.memory?.addressOffset?.());
-      return this.memory.read(reference, { width, signed });
+        if (this.#operands.isMemory(source.index)) {
+          const reference = this.memory.operand(source, options?.addressOffset);
+          return this.memory.read(reference, width);
+        }
+
+        return this.#readStorage(source, width);
+      }
+      case "variable":
+        return this.#region.read(source);
+      case "reg":
+        return this.#readStorage(source, source.width);
     }
-
-    return this.#readStorage(source, options.width, signed);
   }
 
-  write(target: StorageInput, value: ValueInput, options: SemanticWriteOptions): void {
-    if (target.kind === "operand" && this.#operands.isMemory(target.index)) {
-      const width = options.memory?.width ?? options.width;
-      const reference = this.memory.operand(target, options.memory?.addressOffset?.());
-      this.memory.write(reference, { width, value });
-      return;
-    }
+  write(target: SemanticVar, value: I32Value): void;
+  write<Width extends OperandWidth>(
+    target: RegRefForWidth<Width>,
+    value: Integer<NoInfer<Width>>
+  ): void;
+  write<Width extends OperandWidth>(
+    target: SemanticUpdate<Width>,
+    value: Integer<NoInfer<Width>>
+  ): void;
+  write<Width extends OperandWidth>(
+    target: OperandRef,
+    value: Integer<Width>,
+    options?: SemanticWriteOptions<NoInfer<Width>>
+  ): void;
+  write<Width extends OperandWidth>(
+    target: SemanticVar | RegRefForWidth<Width> | SemanticUpdate<Width> | OperandRef,
+    value: Integer<Width>,
+    options?: SemanticWriteOptions<NoInfer<Width>>
+  ): void {
+    switch (target.kind) {
+      case "update":
+        switch (target.destination.kind) {
+          case "memory":
+            this.memory.store(target.destination.access, value);
+            return;
+          case "storage":
+            this.#writeStorage(target.destination.reference, value);
+            return;
+        }
+      case "operand": {
+        if (!this.#operands.isMemory(target.index)) {
+          this.#writeStorage(target, value);
+          return;
+        }
+        const reference = this.memory.operand(target, options?.addressOffset);
+        const memoryWidth = options?.memoryWidth;
 
-    this.#writeStorage(target, value, options.width);
+        if (memoryWidth === undefined) {
+          this.memory.write(reference, value);
+        } else {
+          this.memory.write(reference, value.truncate(memoryWidth));
+        }
+        return;
+      }
+      case "variable":
+      case "reg":
+        this.#writeStorage(target, value);
+        return;
+    }
   }
 
-  update(target: StorageInput, options: SemanticWriteOptions): SemanticUpdate {
-    if (target.kind === "operand") {
-      const binding = this.#operands.binding(target.index);
+  update(target: SemanticVar): SemanticUpdate<32>;
+  update<Width extends OperandWidth>(target: RegRefForWidth<Width>): SemanticUpdate<Width>;
+  update<Width extends OperandWidth>(
+    target: OperandRef,
+    width: Width,
+    options?: SemanticReadOptions
+  ): SemanticUpdate<Width>;
+  update<Width extends OperandWidth>(
+    target: SemanticVar | RegRefForWidth<Width> | OperandRef,
+    width?: Width,
+    options?: SemanticReadOptions
+  ): SemanticUpdate<Width> | SemanticUpdate<32> {
+    switch (target.kind) {
+      case "operand": {
+        const binding = this.#operands.binding(target.index);
 
-      assert(binding.kind !== "imm", "an immediate operand is not writable");
+        assert(binding.kind !== "imm", "an immediate operand is not writable");
+        assert(width !== undefined, "operand updates require a width");
+
+        if (this.#operands.isMemory(target.index)) {
+          const reference = this.memory.operand(target, options?.addressOffset);
+          const access = this.memory.guard({
+            reference,
+            byteLength: i32(width / 8),
+            intent: "write"
+          });
+
+          return {
+            kind: "update",
+            width,
+            destination: { kind: "memory", access }
+          };
+        }
+
+        return {
+          kind: "update",
+          width,
+          destination: { kind: "storage", reference: target }
+        };
+      }
+      case "variable":
+        return {
+          kind: "update",
+          width: 32,
+          destination: { kind: "storage", reference: target }
+        };
+      case "reg":
+        return {
+          kind: "update",
+          width: target.width,
+          destination: { kind: "storage", reference: target }
+        };
     }
-
-    if (target.kind === "operand" && this.#operands.isMemory(target.index)) {
-      const width = options.memory?.width ?? options.width;
-      const reference = this.memory.operand(target, options.memory?.addressOffset?.());
-      const access = this.memory.guard({
-        reference,
-        byteLength: this.#region.values.const(width / 8),
-        intent: "write"
-      });
-
-      return {
-        read: (region) => region.memory.load(access, { width }),
-        write: (region, value) => region.memory.store(access, { width, value })
-      };
-    }
-
-    return {
-      read: (region) =>
-        region.read(target, {
-          width: options.width
-        }),
-      write: (region, value) =>
-        region.write(target, value, {
-          width: options.width
-        })
-    };
   }
 
-  readFlag(flag: X86Flag): Value {
+  readFlag(flag: X86Flag): BitValue {
     return isX86StatusFlag(flag)
       ? this.#state.statusFlags.read({ region: this.#region, access: this.#access }, flag)
       : this.#state.flags.read(this.#access, flag);
   }
 
-  writeFlag(flag: X86Flag, value: ValueInput): void {
+  writeFlag(flag: X86Flag, value: BitValue): void {
     if (isX86StatusFlag(flag)) {
       this.#state.statusFlags.write({ region: this.#region, access: this.#access }, flag, value);
       return;
     }
 
-    this.#state.flags.write(flag, value);
+    this.#state.flags.write(this.#access, flag, value);
   }
 
-  writeStatusFlagsSource(source: SimpleFlagSource): void {
+  writeStatusFlagsSource<Width extends OperandWidth>(source: SimpleFlagSource<Width>): void {
     this.#state.statusFlags.writeSource({ region: this.#region, access: this.#access }, source);
   }
 
-  condition(cc: ConditionCode): Value {
+  condition(cc: ConditionCode): BitValue {
     return this.#state.statusFlags.condition({ region: this.#region, access: this.#access }, cc);
   }
 
-  addInstructionCount(amount: ValueInput): void {
+  addInstructionCount(amount: I32Value): void {
     this.#state.instructionCount.add(this.#access, amount);
   }
 
-  #readStorage(storage: StorageInput, width: OperandWidth, signed: boolean): Value {
-    const options = signed ? ({ signed: true } as const) : {};
-
+  #readStorage<Width extends OperandWidth>(storage: StorageRef, width: Width): Integer<Width> {
     switch (storage.kind) {
       case "variable":
-        return this.#region.read(storage);
+        return this.#region.read(storage).truncate(width);
       case "reg":
-        return this.#state.gpr.read(this.#access, storage.reg, width, options);
+        return this.#state.gpr.read(this.#access, storage.reg, width);
       case "operand": {
         const binding = this.#operands.binding(storage.index);
 
         switch (binding.kind) {
           case "imm": {
             const value =
-              binding.source.kind === "static"
-                ? this.#region.values.const(binding.source.value)
-                : binding.source.value;
+              binding.source.kind === "static" ? i32(binding.source.value) : binding.source.value;
 
-            return this.#region.values.widthAdjusted(width, value, signed);
+            return value.truncate(width);
           }
           case "reg":
             return binding.selection.kind === "static"
-              ? this.#state.gpr.read(this.#access, binding.selection.reg, width, options)
-              : this.#state.gpr.readDynamic(this.#access, binding.selection.index, width, options);
+              ? this.#state.gpr.read(this.#access, binding.selection.reg, width)
+              : this.#state.gpr.readDynamic(this.#access, binding.selection.index, width);
           case "segment":
-            return binding.selection.kind === "static"
-              ? this.#state.segments.readSelector(
-                  this.#access,
-                  binding.selection.reg,
-                  width,
-                  options
-                )
-              : this.#state.segments.readDynamicSelector(
-                  this.#access,
-                  binding.selection.index,
-                  width,
-                  options
-                );
+            return (
+              binding.selection.kind === "static"
+                ? this.#state.segments.readSelector(this.#access, binding.selection.reg, width)
+                : this.#state.segments.readDynamicSelector(
+                    this.#access,
+                    binding.selection.index,
+                    width
+                  )
+            ).truncate(width);
           case "mem":
             assert(false, "memory operand reached non-memory read");
         }
@@ -295,10 +376,12 @@ export class ScopedInstructionStorage {
     }
   }
 
-  #writeStorage(storage: StorageInput, value: ValueInput, width: OperandWidth): void {
+  #writeStorage<Width extends OperandWidth>(storage: StorageRef, value: Integer<Width>): void {
+    const width = value.width;
+
     switch (storage.kind) {
       case "variable":
-        this.#region.write(storage, value);
+        this.#region.write(storage, value.unsigned.extend(32));
         return;
       case "reg":
         this.#state.gpr.write(this.#access, storage.reg, value, width);
@@ -315,7 +398,7 @@ export class ScopedInstructionStorage {
             this.#state.gpr.writeDynamic(this.#access, binding.selection.index, width, value);
             return;
           case "segment":
-            this.#writeSegmentSelector(binding, value, width);
+            this.#writeSegmentSelector(binding, value.unsigned.extend(32), width);
             return;
           case "imm":
             assert(false, "an immediate operand is not writable");

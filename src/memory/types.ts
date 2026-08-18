@@ -1,16 +1,17 @@
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
+import type { Integer, BitValue, I32Value } from "#compiler/function/values.js";
 import type { PageFault } from "#core/exceptions.js";
 import type { PhysicalAccess } from "./physical.js";
 
 export type LinearRange = Readonly<{
-  start: ValueId;
-  byteLength: ValueId;
+  start: I32Value;
+  byteLength: I32Value;
 }>;
 
 export type MemoryDataAccessIntent = "read" | "write";
 export type MemoryAccessIntent = MemoryDataAccessIntent | "instructionFetch";
 export type MemoryReadIntent = Exclude<MemoryAccessIntent, "write">;
+export type MemoryTransferWidth = 8 | 16 | 32;
 
 export type GuestMemoryByteRead =
   | Readonly<{ kind: "value"; value: number }>
@@ -24,8 +25,8 @@ export type GuestMemoryReader = Readonly<{
 }>;
 
 export type MemoryFault = Readonly<{
-  condition: ValueId;
-  exception: PageFault<ValueId>;
+  condition: BitValue;
+  exception: PageFault<I32Value>;
 }>;
 
 export type DirectMemoryAccess<TIntent extends MemoryAccessIntent = MemoryAccessIntent> = Readonly<{
@@ -35,7 +36,7 @@ export type DirectMemoryAccess<TIntent extends MemoryAccessIntent = MemoryAccess
 
 export type DirectMemoryResolution<TIntent extends MemoryAccessIntent = MemoryAccessIntent> =
   Readonly<{
-    unavailable: ValueId;
+    unavailable: BitValue;
     access: DirectMemoryAccess<TIntent>;
   }>;
 
@@ -43,17 +44,13 @@ export type ResolvedMemoryAccess<TIntent extends MemoryAccessIntent = MemoryAcce
   Readonly<{
     range: LinearRange;
     intent: TIntent;
-    scattered: ValueId;
+    scattered: BitValue;
     physicalAccess: PhysicalAccess;
   }>;
 
 export type MemoryResolution<TIntent extends MemoryAccessIntent = MemoryAccessIntent> = Readonly<{
   access: ResolvedMemoryAccess<TIntent>;
   fault: MemoryFault;
-}>;
-
-export type MemoryLoadOptions = Readonly<{
-  signed?: boolean;
 }>;
 
 export type BoundMemoryAccess = Readonly<{
@@ -68,34 +65,30 @@ export type BoundMemoryAccess = Readonly<{
     range: LinearRange,
     intent: TIntent
   ): DirectMemoryResolution<TIntent>;
-  load(
+  load<Width extends MemoryTransferWidth>(
     access: ResolvedMemoryAccess,
-    byteOffset: ValueId,
-    width: IntegerWidth,
-    options?: MemoryLoadOptions
-  ): ValueId;
-  loadDirect(
+    byteOffset: I32Value,
+    width: Width
+  ): Integer<Width>;
+  loadDirect<Width extends MemoryTransferWidth>(
     access: DirectMemoryAccess,
-    byteOffset: ValueId,
-    width: IntegerWidth,
-    options?: MemoryLoadOptions
-  ): ValueId;
-  store(
+    byteOffset: I32Value,
+    width: Width
+  ): Integer<Width>;
+  store<Width extends MemoryTransferWidth>(
     access: ResolvedMemoryAccess<"write">,
-    byteOffset: ValueId,
-    value: ValueId,
-    width: IntegerWidth
+    byteOffset: I32Value,
+    value: Integer<Width>
   ): void;
-  storeDirect(
+  storeDirect<Width extends MemoryTransferWidth>(
     access: DirectMemoryAccess<"write">,
-    byteOffset: ValueId,
-    value: ValueId,
-    width: IntegerWidth
+    byteOffset: I32Value,
+    value: Integer<Width>
   ): void;
 }>;
 
 export type MemoryAccess = Readonly<{
-  bind(region: RegionBuilder): BoundMemoryAccess;
+  forRegion(region: RegionBuilder): BoundMemoryAccess;
   // The root must dominate every use of the returned access. Cached values
   // live for one invocation of that generated function.
   withCache(root: RegionBuilder): MemoryAccess;

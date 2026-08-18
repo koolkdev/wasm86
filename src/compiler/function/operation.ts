@@ -1,6 +1,11 @@
 import { assert } from "#common/assert.js";
 import type { Invocation } from "#compiler/function/invocation.js";
-import type { AnyResourceAccess } from "#compiler/function/resource.js";
+import type {
+  AnyResourceAccess,
+  ResourceAccess,
+  StorageWidth,
+  ValueWidthForStorage
+} from "#compiler/function/resource.js";
 import type { StorageEffects, VariableRef } from "#compiler/function/storage.js";
 import type { IntegerRef } from "#compiler/function/values/expression.js";
 import type { ValueRef } from "#compiler/function/values.js";
@@ -29,8 +34,6 @@ export type ResourceWriteOperation = OperationNode<"resource.write"> &
     destination: AnyResourceAccess;
     value: IntegerRef;
   }>;
-
-export type ResourceOperation = ResourceReadOperation | ResourceWriteOperation;
 
 export type VariableReadOperation = OperationNode<"variable.read"> &
   Readonly<{ variable: VariableRef; output: ValueRef }>;
@@ -93,28 +96,34 @@ function call(invocation: Invocation, output?: ValueRef): CallOperation {
   };
 }
 
-function resourceRead<Access extends AnyResourceAccess>(
-  source: Access,
-  output: NoInfer<IntegerRef<Access["valueWidth"]>>
+function resourceRead<
+  StoredWidth extends StorageWidth,
+  ValueWidth extends ValueWidthForStorage<StoredWidth>
+>(
+  source: ResourceAccess<StoredWidth, ValueWidth>,
+  output: NoInfer<IntegerRef<ValueWidth>>
 ): ResourceReadOperation {
   return {
     category: "operation",
     kind: "resource.read",
     source,
     output
-  };
+  } as ResourceReadOperation;
 }
 
-function resourceWrite<Access extends AnyResourceAccess>(
-  destination: Access,
-  value: NoInfer<IntegerRef<Access["valueWidth"]>>
+function resourceWrite<
+  StoredWidth extends StorageWidth,
+  ValueWidth extends ValueWidthForStorage<StoredWidth>
+>(
+  destination: ResourceAccess<StoredWidth, ValueWidth>,
+  value: NoInfer<IntegerRef<ValueWidth>>
 ): ResourceWriteOperation {
   return {
     category: "operation",
     kind: "resource.write",
     destination,
     value
-  };
+  } as ResourceWriteOperation;
 }
 
 function variableRead<Type extends ValueType>(

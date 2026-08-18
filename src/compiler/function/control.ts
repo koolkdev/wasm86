@@ -58,6 +58,9 @@ export type SwitchCase = Readonly<{
   body: Region;
 }>;
 
+// Matches lower to a dense br_table, so they stay byte-sized.
+export const maxSwitchMatch = 255;
+
 export type SwitchControlArgs = Readonly<{
   selector: AnyNarrowInteger;
   output?: ValueRef;
@@ -121,6 +124,10 @@ function switchControl(args: SwitchControlArgs): SwitchControl {
   for (const [caseIndex, entry] of args.cases.entries()) {
     assert(entry.matches.length > 0, `switch case ${caseIndex} has no matches`);
     for (const match of entry.matches) {
+      assert(
+        Number.isInteger(match) && match >= 0 && match <= maxSwitchMatch,
+        `switch case match ${match} is not an integer in [0, ${maxSwitchMatch}]`
+      );
       assert(!matches.has(match), `switch has duplicate case match ${match}`);
       matches.add(match);
     }

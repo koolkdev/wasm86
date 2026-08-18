@@ -1,12 +1,19 @@
-import type { ValueId } from "#compiler/ir/values/types.js";
-import { VariableRef } from "#compiler/ir/variable.js";
+import {
+  Integer,
+  i32,
+  select,
+  u8,
+  type BitValue,
+  type I32Value
+} from "#compiler/function/values.js";
+import { VariableRef } from "#compiler/function/storage.js";
 import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";
 import type { AddressBase, Displacement } from "#instructions/decoder/model/types.js";
 import { reg32Index } from "#core/registers.js";
 import { segmentRegisterIndex } from "#core/segments.js";
 import type { StateAccess } from "#core/state/access.js";
 import type { SegmentRegister } from "#core/types.js";
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
 import type { SegmentOverrideState } from "./prefixes.js";
 import { InstructionByteStream } from "./stream.js";
 
@@ -19,16 +26,16 @@ const invalidAddressKind = -1;
 export type DecodedMemoryAddress =
   | Readonly<{
       kind: "baseLess";
-      offset: ValueId;
-      segmentIndex: ValueId;
+      offset: I32Value;
+      segmentIndex: Integer<8>;
     }>
   | Readonly<{
       kind: "dynamicBase";
       // Kept as an index so the instruction reads the base after any earlier
       // architectural update, such as POP incrementing ESP.
-      baseRegisterIndex: ValueId;
-      offset: ValueId;
-      segmentIndex: ValueId;
+      baseRegisterIndex: Integer<8>;
+      offset: I32Value;
+      segmentIndex: Integer<8>;
     }>;
 
 type ModRmAddressDecoderOptions = Readonly<{
@@ -43,26 +50,27 @@ export class ModRmAddressDecoder {
   readonly #stateAccess: StateAccess;
   readonly #segmentOverride: SegmentOverrideState;
   readonly #unreachable: (region: RegionBuilder) => void;
-  readonly #addressKind: VariableRef;
-  readonly #baseRegisterIndex: VariableRef;
-  readonly #offset: VariableRef;
-  readonly #segmentIndex: VariableRef;
+  readonly #addressKind: VariableRef<(typeof Integer)[32]>;
+  readonly #baseRegisterIndex: VariableRef<(typeof Integer)[8]>;
+  readonly #offset: VariableRef<(typeof Integer)[32]>;
+  readonly #segmentIndex: VariableRef<(typeof Integer)[8]>;
 
   constructor(region: RegionBuilder, options: ModRmAddressDecoderOptions) {
-    const invalid = region.values.const(-1);
+    const invalid = i32(-1);
+    const invalidIndex = u8(0xff);
 
     this.#stream = options.stream;
     this.#stateAccess = options.stateAccess;
     this.#segmentOverride = options.segmentOverride;
     this.#unreachable = options.unreachable;
-    this.#addressKind = region.variable(region.values.const(invalidAddressKind));
-    this.#baseRegisterIndex = region.variable(invalid);
+    this.#addressKind = region.variable(i32(invalidAddressKind));
+    this.#baseRegisterIndex = region.variable(invalidIndex);
     this.#offset = region.variable(invalid);
-    this.#segmentIndex = region.variable(invalid);
+    this.#segmentIndex = region.variable(invalidIndex);
   }
 
-  decode(region: RegionBuilder, modRmByte: ValueId): void {
-    const mode = region.values.binary("shr_u", modRmByte, region.values.const(6));
+  decode(region: RegionBuilder, modRmByte: Integer<8>): void {
+    const mode = modRmByte.unsigned.shr(6);
 
     region.switchControl(
       mode,
@@ -73,11 +81,7 @@ export class ModRmAddressDecoder {
               {
                 matches: [match],
                 build: (modeArm: RegionBuilder) => {
-                  const encodedRm = modeArm.values.binary(
-                    "and",
-                    modRmByte,
-                    modeArm.values.const(0b111)
-                  );
+                  const encodedRm = modRmByte.and(0b111);
 
                   modeArm.switchControl(
                     encodedRm,
@@ -85,7 +89,7 @@ export class ModRmAddressDecoder {
                       matches: [rm],
                       build: (rmArm) => {
                         if (address.kind === "base") {
-                          this.#writeAddress(rmArm, address.address, rmArm.values.const(0));
+                          this.#writeAddress(rmArm, address.address, i32(0));
                           return;
                         }
                         this.#decodeSib(rmArm, address.bases);
@@ -134,19 +138,15 @@ export class ModRmAddressDecoder {
 
   #decodeSib(region: RegionBuilder, bases: readonly AddressBase[]): void {
     const sib = this.#stream.readByte(region);
-    const scaleShift = region.values.binary("shr_u", sib, region.values.const(6));
-    const indexField = region.values.binary(
-      "and",
-      region.values.binary("shr_u", sib, region.values.const(3)),
-      region.values.const(0b111)
-    );
-    const baseField = region.values.binary("and", sib, region.values.const(0b111));
-    const state = this.#stateAccess.bind(region);
+    const scaleShift = sib.unsigned.shr(6);
+    const indexField = sib.unsigned.shr(3).and(0b111);
+    const baseField = sib.and(0b111);
+    const state = this.#stateAccess.forRegion(region);
     const indexValue = state.read(state.dynamicGpr(indexField, 32));
-    const scaledIndex = region.values.select(
-      region.values.compare(32, "eq", indexField, region.values.const(sibNoIndexEncoding)),
-      region.values.const(0),
-      region.values.binary("shl", indexValue, scaleShift)
+    const scaledIndex = select(
+      indexField.eq(sibNoIndexEncoding),
+      i32(0),
+      indexValue.shl(scaleShift)
     );
     const baseLessEncodings = bases.flatMap((base, encoding) =>
       base.base === undefined ? [encoding] : []
@@ -160,7 +160,7 @@ export class ModRmAddressDecoder {
     const baseLess = bases[baseLessEncoding]!;
 
     region.if(
-      region.values.compare(32, "eq", baseField, region.values.const(baseLessEncoding)),
+      baseField.eq(baseLessEncoding),
       (withoutBase) => this.#writeAddress(withoutBase, baseLess, scaledIndex),
       {
         elseBuild: (withBase) =>
@@ -173,76 +173,65 @@ export class ModRmAddressDecoder {
     region: RegionBuilder,
     bases: readonly AddressBase[],
     excludedEncoding: number | undefined,
-    baseField: ValueId,
-    scaledIndex: ValueId
+    baseField: Integer<8>,
+    scaledIndex: I32Value
   ): void {
     const plan = prepareDynamicSibPlan(bases, excludedEncoding);
-    const defaultSegmentIndex = region.values.select(
-      this.#matchesAnyEncoding(region, baseField, plan.matchedEncodings),
-      region.values.const(segmentRegisterIndex(plan.matchedSegment)),
-      region.values.const(segmentRegisterIndex(plan.fallbackSegment))
+    const defaultSegmentIndex = select(
+      this.#matchesAnyEncoding(baseField, plan.matchedEncodings),
+      u8(segmentRegisterIndex(plan.matchedSegment)),
+      u8(segmentRegisterIndex(plan.fallbackSegment))
     );
     const displacement =
       plan.displacement.byteLength === 0
-        ? region.values.const(0)
+        ? i32(0)
         : this.#stream.readEncoded(region, {
             byteLength: plan.displacement.byteLength,
             signed: plan.displacement.signed
           });
 
     region.write(this.#baseRegisterIndex, baseField);
-    region.write(this.#offset, region.values.binary("add", scaledIndex, displacement));
+    region.write(this.#offset, scaledIndex.add(displacement));
     region.write(this.#segmentIndex, this.#selectSegmentIndex(region, defaultSegmentIndex));
-    region.write(this.#addressKind, region.values.const(dynamicBaseAddressKind));
+    region.write(this.#addressKind, i32(dynamicBaseAddressKind));
   }
 
-  #writeAddress(region: RegionBuilder, address: AddressBase, scaledIndex: ValueId): void {
+  #writeAddress(region: RegionBuilder, address: AddressBase, scaledIndex: I32Value): void {
     const displacement =
       address.displacement.byteLength === 0
-        ? region.values.const(0)
+        ? i32(0)
         : this.#stream.readEncoded(region, {
             byteLength: address.displacement.byteLength,
             signed: address.displacement.signed
           });
 
-    region.write(this.#offset, region.values.binary("add", scaledIndex, displacement));
+    region.write(this.#offset, scaledIndex.add(displacement));
     region.write(
       this.#segmentIndex,
-      this.#selectSegmentIndex(
-        region,
-        region.values.const(segmentRegisterIndex(address.defaultSegment))
-      )
+      this.#selectSegmentIndex(region, u8(segmentRegisterIndex(address.defaultSegment)))
     );
     if (address.base === undefined) {
-      region.write(this.#addressKind, region.values.const(baseLessAddressKind));
+      region.write(this.#addressKind, i32(baseLessAddressKind));
       return;
     }
-    region.write(this.#baseRegisterIndex, region.values.const(reg32Index(address.base)));
-    region.write(this.#addressKind, region.values.const(dynamicBaseAddressKind));
+    region.write(this.#baseRegisterIndex, u8(reg32Index(address.base)));
+    region.write(this.#addressKind, i32(dynamicBaseAddressKind));
   }
 
-  #selectSegmentIndex(region: RegionBuilder, defaultSegmentIndex: ValueId): ValueId {
-    return region.values.select(
+  #selectSegmentIndex(region: RegionBuilder, defaultSegmentIndex: Integer<8>): Integer<8> {
+    return select(
       region.read(this.#segmentOverride.present),
       region.read(this.#segmentOverride.registerIndex),
       defaultSegmentIndex
     );
   }
 
-  #matchesAnyEncoding(
-    region: RegionBuilder,
-    value: ValueId,
-    encodings: readonly number[]
-  ): ValueId {
+  #matchesAnyEncoding(value: Integer<8>, encodings: readonly number[]): BitValue {
     const first = encodings[0]!;
-    let matches = region.values.compare(32, "eq", value, region.values.const(first));
+    let matches = value.eq(first);
 
     for (const encoding of encodings.slice(1)) {
-      matches = region.values.binary(
-        "or",
-        matches,
-        region.values.compare(32, "eq", value, region.values.const(encoding))
-      );
+      matches = matches.or(value.eq(encoding));
     }
     return matches;
   }

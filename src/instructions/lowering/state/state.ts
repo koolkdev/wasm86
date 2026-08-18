@@ -1,10 +1,9 @@
 import { assert } from "#common/assert.js";
-import type { ResourceWriteArgs } from "#compiler/ir/operations/resource.js";
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import type { ResourceEffect } from "#compiler/ir/resource.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
+import type { ResourceEffect } from "#compiler/function/resource.js";
+import type { I32Value } from "#compiler/function/values.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
 import { type BoundStateAccess, type StateAccess } from "#core/state/access.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
 import { StatusFlagTracker } from "#core/flags/lazy/tracker.js";
 import type { StatusFlagResolverFamily } from "#core/flags/lazy/resolvers.js";
 import { StateFieldTracker } from "./field-tracker.js";
@@ -12,11 +11,12 @@ import type { InstructionStateChannel } from "./channels.js";
 import type { StatePathKind } from "./pending-buffer.js";
 import { EipState } from "./eip.js";
 import { InstructionFlagState } from "./flags.js";
-import { GprState } from "./gpr.js";
+import { gprValueAsI32, GprState } from "./gpr.js";
 import { InstructionCountState } from "./instruction-count.js";
 import { SegmentState } from "./segments.js";
 import type { StateWriteObserver, StateWriteObserverCheckpoint } from "./write-log.js";
-import { covers, mayAlias } from "#compiler/ir/effects.js";
+import { covers, mayAlias } from "#compiler/function/storage.js";
+import type { StateWriteback } from "./writeback.js";
 
 type InstructionStateSnapshot = Readonly<{
   gpr: ReturnType<GprState["snapshot"]>;
@@ -60,7 +60,6 @@ export class InstructionState {
         this.#fields.publishForReads(context.access, target.effects.reads);
         const [resolved] = context.region.call(target, []);
 
-        assert(resolved !== undefined, `status-flag resolver for ${flag} has no result`);
         return resolved;
       },
       () => writeObserver?.recordStatusFlagSourceWrite()
@@ -70,13 +69,13 @@ export class InstructionState {
     this.instructionCount = new InstructionCountState(this.#fields, instructionCountField);
   }
 
-  bind(region: RegionBuilder): BoundStateAccess {
-    return this.#stateAccess.bind(region);
+  forRegion(region: RegionBuilder): BoundStateAccess {
+    return this.#stateAccess.forRegion(region);
   }
 
-  beginInstruction(eip: ValueId): void {
+  beginInstruction(access: BoundStateAccess, eip: I32Value): void {
     this.segments.beginInstruction();
-    this.eip.write(eip);
+    this.eip.write(access, eip);
     this.beginInstructionBoundary();
   }
 
@@ -85,7 +84,7 @@ export class InstructionState {
     this.#fields.beginInstruction();
   }
 
-  flushesForPath(access: BoundStateAccess, path: StatePathKind): readonly ResourceWriteArgs[] {
+  flushesForPath(access: BoundStateAccess, path: StatePathKind): readonly StateWriteback[] {
     return [...this.gpr.flushesForPath(access, path), ...this.#fields.flushesForPath(access, path)];
   }
 
@@ -112,9 +111,9 @@ export class InstructionState {
     this.#fields.invalidate(channel);
   }
 
-  readChannel(access: BoundStateAccess, channel: InstructionStateChannel): ValueId {
+  readChannel(access: BoundStateAccess, channel: InstructionStateChannel): I32Value {
     return channel.kind === "gpr"
-      ? this.gpr.readChannel(access, channel)
+      ? gprValueAsI32(this.gpr.readChannel(access, channel))
       : this.#fields.read(access, channel);
   }
 
@@ -124,7 +123,7 @@ export class InstructionState {
       : this.#fields.isDirty(channel);
   }
 
-  writeChannel(access: BoundStateAccess, channel: InstructionStateChannel, value: ValueId): void {
+  writeChannel(access: BoundStateAccess, channel: InstructionStateChannel, value: I32Value): void {
     switch (channel.kind) {
       case "gpr":
         this.gpr.writeChannel(access, channel, value);
@@ -136,7 +135,7 @@ export class InstructionState {
           channel !== this.#instructionCountField,
           "the instruction count changes only through InstructionCountState"
         );
-        this.#fields.write(channel, value);
+        this.#fields.write(access, channel, value);
         return;
     }
   }
@@ -144,8 +143,8 @@ export class InstructionState {
   writeback(
     access: BoundStateAccess,
     channel: InstructionStateChannel,
-    value: ValueId
-  ): ResourceWriteArgs {
+    value: I32Value
+  ): StateWriteback {
     return channel.kind === "gpr"
       ? this.gpr.writeback(access, channel, value)
       : this.#fields.writeback(access, channel, value);

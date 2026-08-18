@@ -1,8 +1,7 @@
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
-import type { OperandWidth } from "#core/types.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 
-export function leaSemantic(width: OperandWidth = 32): SemanticTemplate {
+export function leaSemantic(width: 16 | 32): InstructionSemantics {
   return (s) => {
-    s.write(s.operand(0), s.address(s.operand(1)), { width });
+    s.write(s.operand(0), s.address(s.operand(1)).truncate(width));
   };
 }

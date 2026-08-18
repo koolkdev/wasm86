@@ -2,23 +2,23 @@ import { assert } from "#common/assert.js";
 import type { MemRef, SegmentRef } from "#instructions/semantics/refs.js";
 import type { SegmentRegister } from "#core/types.js";
 import type { EffectiveAddressComponents, MemAddressSource, OperandBinding } from "./bindings.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
+import { i32, type I32Value } from "#compiler/function/values.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 import type { InstructionState } from "./state/state.js";
 
 export class OperandScope {
   readonly #parent: OperandScope | undefined;
-  readonly #addresses = new Map<number, ValueId>();
+  readonly #addresses = new Map<number, I32Value>();
 
   constructor(parent?: OperandScope) {
     this.#parent = parent;
   }
 
-  address(index: number): ValueId | undefined {
+  address(index: number): I32Value | undefined {
     return this.#addresses.get(index) ?? this.#parent?.address(index);
   }
 
-  setAddress(index: number, address: ValueId): void {
+  setAddress(index: number, address: I32Value): void {
     this.#addresses.set(index, address);
   }
 
@@ -35,7 +35,7 @@ export class OperandResolver {
     this.#state = state;
   }
 
-  bind(scope: OperandScope, access: BoundStateAccess): ScopedOperandResolver {
+  forScope(scope: OperandScope, access: BoundStateAccess): ScopedOperandResolver {
     return new ScopedOperandResolver(this, this.#state, scope, access);
   }
 
@@ -80,7 +80,7 @@ export class OperandResolver {
   }
 }
 
-// Address realization is lexical: the fixed scope owns its cache, and every
+// Address construction is lexical: the fixed scope owns its cache, and every
 // architectural read uses the state access bound to the same region.
 export class ScopedOperandResolver {
   readonly #owner: OperandResolver;
@@ -112,7 +112,7 @@ export class ScopedOperandResolver {
     return this.#owner.segment(index);
   }
 
-  address(index: number): ValueId {
+  address(index: number): I32Value {
     const scope = this.#scope;
     const cached = scope.address(index);
 
@@ -132,7 +132,7 @@ export class ScopedOperandResolver {
     return this.#bindingMemoryReference(index, binding);
   }
 
-  resolveAddress(memory: MemRef): ValueId {
+  resolveAddress(memory: MemRef): I32Value {
     return this.#segmentLinearAddress(memory.segment, memory.offset);
   }
 
@@ -140,7 +140,7 @@ export class ScopedOperandResolver {
     return this.#owner.operandUsesDynamicGpr(index);
   }
 
-  #bindingAddress(binding: OperandBinding): ValueId {
+  #bindingAddress(binding: OperandBinding): I32Value {
     assert(binding.kind === "mem", `address of a ${binding.kind} operand binding`);
 
     switch (binding.address.kind) {
@@ -159,18 +159,18 @@ export class ScopedOperandResolver {
     };
   }
 
-  #dynamicAddress(address: Extract<MemAddressSource, { kind: "dynamic" }>): ValueId {
+  #dynamicAddress(address: Extract<MemAddressSource, { kind: "dynamic" }>): I32Value {
     if (address.baseRegisterIndex === undefined) {
       return address.addend;
     }
 
     const base = this.#state.gpr.readDynamic(this.#access, address.baseRegisterIndex, 32);
 
-    return this.#access.values.binary("add", base, address.addend);
+    return base.add(address.addend);
   }
 
-  #effectiveAddress(components: EffectiveAddressComponents): ValueId {
-    let address: ValueId | undefined;
+  #effectiveAddress(components: EffectiveAddressComponents): I32Value {
+    let address: I32Value | undefined;
 
     if (components.base !== undefined) {
       address = this.#state.gpr.read(this.#access, components.base);
@@ -178,50 +178,33 @@ export class ScopedOperandResolver {
 
     if (components.index !== undefined) {
       const index = this.#state.gpr.read(this.#access, components.index);
-      const scaled =
-        components.scale === 1
-          ? index
-          : this.#access.values.binary(
-              "shl",
-              index,
-              this.#access.values.const(scaleShift[components.scale])
-            );
+      const scaled = components.scale === 1 ? index : index.shl(scaleShift[components.scale]);
 
-      address = address === undefined ? scaled : this.#access.values.binary("add", address, scaled);
+      address = address === undefined ? scaled : address.add(scaled);
     }
 
     if (address === undefined) {
-      return this.#access.values.const(components.disp);
+      return i32(components.disp);
     }
 
-    return components.disp === 0
-      ? address
-      : this.#access.values.binary("add", address, this.#access.values.const(components.disp));
+    return components.disp === 0 ? address : address.add(components.disp);
   }
 
-  #linearAddress(segment: SegmentRegister, offset: ValueId): ValueId {
+  #linearAddress(segment: SegmentRegister, offset: I32Value): I32Value {
     // Flat-memory assumption: CS/DS/ES/SS bases are zero; FS/GS may be non-zero.
     if (segment !== "fs" && segment !== "gs") {
       return offset;
     }
 
-    return this.#access.values.binary(
-      "add",
-      this.#state.segments.readBase(this.#access, segment),
-      offset
-    );
+    return this.#state.segments.readBase(this.#access, segment).add(offset);
   }
 
-  #segmentLinearAddress(segment: SegmentRef, offset: ValueId): ValueId {
+  #segmentLinearAddress(segment: SegmentRef, offset: I32Value): I32Value {
     switch (segment.kind) {
       case "static":
         return this.#linearAddress(segment.reg, offset);
       case "dynamic":
-        return this.#access.values.binary(
-          "add",
-          this.#state.segments.readDynamicBase(this.#access, segment.index),
-          offset
-        );
+        return this.#state.segments.readDynamicBase(this.#access, segment.index).add(offset);
     }
   }
 }

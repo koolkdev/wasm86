@@ -1,38 +1,40 @@
 import {
   type ResourceReadOperation,
   type ResourceWriteOperation
-} from "#compiler/ir/operations/resource.js";
-import type { ResourceByteOperand, ResourceEffect } from "#compiler/ir/resource.js";
-import type { ValueTable } from "#compiler/ir/values/table.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
-import { BoundStateAccess, StateAccess } from "#core/state/access.js";
+} from "#compiler/function/operation.js";
+import type { ResourceEffect } from "#compiler/function/resource.js";
+import type { ValueRef } from "#compiler/function/values.js";
 import type { InstructionStateChannel } from "../state/channels.js";
-import { cpuState } from "#test/support/execution-model.js";
-import type { RegionNode } from "#compiler/ir/region.js";
-import { RegionBuilder } from "#compiler/ir/builder/region.js";
-import { covers } from "#compiler/ir/effects.js";
+import { cpuState, cpuStateAccess } from "#test/support/execution-model.js";
+import type { RegionNode } from "#compiler/function/region.js";
+import { covers } from "#compiler/function/storage.js";
 
 export type StateReadOperation = ResourceReadOperation;
 export type StateWriteOperation = ResourceWriteOperation;
 
-export function stateEffect(values: ValueTable, channel: InstructionStateChannel): ResourceEffect {
-  return channelOperand(accessFor(values), channel).effect;
+export function stateEffect(channel: InstructionStateChannel): ResourceEffect {
+  switch (channel.kind) {
+    case "field":
+      return cpuStateAccess.fieldEffect(channel);
+    case "gpr":
+      return cpuStateAccess.gprEffect(channel);
+    case "segment":
+      return cpuStateAccess.segmentEffect(channel.reg, channel.field);
+  }
 }
 
 export function readsStateChannel(
-  values: ValueTable,
   node: RegionNode,
   channel: InstructionStateChannel
 ): node is StateReadOperation {
-  return isStateRead(node) && effectsEqual(node.source.effect, stateEffect(values, channel));
+  return isStateRead(node) && effectsEqual(node.source.effect, stateEffect(channel));
 }
 
 export function writesStateChannel(
-  values: ValueTable,
   node: RegionNode,
   channel: InstructionStateChannel
 ): node is StateWriteOperation {
-  return isStateWrite(node) && effectsEqual(node.destination.effect, stateEffect(values, channel));
+  return isStateWrite(node) && effectsEqual(node.destination.effect, stateEffect(channel));
 }
 
 export function isStateRead(node: RegionNode): node is StateReadOperation {
@@ -43,26 +45,8 @@ export function isStateWrite(node: RegionNode): node is StateWriteOperation {
   return node.kind === "resource.write" && node.destination.effect.resource === cpuState.resource;
 }
 
-export function stateWriteValue(operation: StateWriteOperation): ValueId {
+export function stateWriteValue(operation: StateWriteOperation): ValueRef {
   return operation.value;
-}
-
-function accessFor(values: ValueTable): BoundStateAccess {
-  return new StateAccess(cpuState).bind(new RegionBuilder(values));
-}
-
-function channelOperand(
-  access: BoundStateAccess,
-  channel: InstructionStateChannel
-): ResourceByteOperand {
-  switch (channel.kind) {
-    case "field":
-      return access.field(channel);
-    case "gpr":
-      return access.gprChannel(channel);
-    case "segment":
-      return access.segment(channel.reg, channel.field);
-  }
 }
 
 function effectsEqual(left: ResourceEffect, right: ResourceEffect): boolean {

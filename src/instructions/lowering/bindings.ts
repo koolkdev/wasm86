@@ -1,4 +1,4 @@
-import type { ValueId } from "#compiler/ir/values/types.js";
+import type { Integer, I32Value } from "#compiler/function/values.js";
 import type { EffectiveAddress, RegName, SegmentRegister } from "#core/types.js";
 
 export type EffectiveAddressComponents = Omit<EffectiveAddress, "segment">;
@@ -10,7 +10,7 @@ export type RegBindingSelection =
     }>
   | Readonly<{
       kind: "dynamic";
-      index: ValueId;
+      index: Integer<8>;
     }>;
 
 export type RegOperandBinding = Readonly<{
@@ -25,7 +25,7 @@ export type SegmentBindingSelection =
     }>
   | Readonly<{
       kind: "dynamic";
-      index: ValueId;
+      index: Integer<8>;
     }>;
 
 export type SegmentOperandBinding = Readonly<{
@@ -40,7 +40,7 @@ export type ImmBindingSource =
     }>
   | Readonly<{
       kind: "dynamic";
-      value: ValueId;
+      value: I32Value;
     }>;
 
 export type ImmOperandBinding = Readonly<{
@@ -59,9 +59,9 @@ export type MemAddressSource =
       kind: "dynamic";
       // When present, the selected base is deliberately read by the
       // instruction.
-      baseRegisterIndex: ValueId | undefined;
+      baseRegisterIndex: Integer<8> | undefined;
       // Without a base this is the complete offset; otherwise it is index + disp.
-      addend: ValueId;
+      addend: I32Value;
     }>;
 
 export type MemOperandBinding = Readonly<{
@@ -80,7 +80,7 @@ export function regBinding(reg: RegName): RegOperandBinding {
   };
 }
 
-export function regDynamicBinding(index: ValueId): RegOperandBinding {
+export function regDynamicBinding(index: Integer<8>): RegOperandBinding {
   return {
     kind: "reg",
     selection: { kind: "dynamic", index }
@@ -94,7 +94,7 @@ export function segmentBinding(reg: SegmentRegister): SegmentOperandBinding {
   };
 }
 
-export function segmentDynamicBinding(index: ValueId): SegmentOperandBinding {
+export function segmentDynamicBinding(index: Integer<8>): SegmentOperandBinding {
   return {
     kind: "segment",
     selection: { kind: "dynamic", index }
@@ -108,7 +108,7 @@ export function immBinding(value: number): ImmOperandBinding {
   };
 }
 
-export function immDynamicBinding(value: ValueId): ImmOperandBinding {
+export function immDynamicBinding(value: I32Value): ImmOperandBinding {
   return {
     kind: "imm",
     source: { kind: "dynamic", value }
@@ -127,7 +127,7 @@ export function memBinding(
 }
 
 export function memOffsetBinding(
-  offset: ValueId,
+  offset: I32Value,
   segment: SegmentBindingSelection
 ): MemOperandBinding {
   return {
@@ -142,8 +142,8 @@ export function memOffsetBinding(
 }
 
 export function memDynamicBaseBinding(
-  baseRegisterIndex: ValueId,
-  addend: ValueId,
+  baseRegisterIndex: Integer<8>,
+  addend: I32Value,
   segment: SegmentBindingSelection
 ): MemOperandBinding {
   return {
@@ -161,6 +161,6 @@ export function staticMemSegment(reg: SegmentRegister): SegmentBindingSelection 
   return { kind: "static", reg };
 }
 
-export function dynamicMemSegment(index: ValueId): SegmentBindingSelection {
+export function dynamicMemSegment(index: Integer<8>): SegmentBindingSelection {
   return { kind: "dynamic", index };
 }

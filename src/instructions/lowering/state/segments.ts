@@ -1,96 +1,81 @@
 import { assert } from "#common/assert.js";
+import type { Integer, I32Value } from "#compiler/function/values.js";
 import type { OperandWidth, SegmentRegister } from "#core/types.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 import { segmentBaseChannel, segmentSelectorChannel } from "#core/state/channels.js";
-import { type ValueId } from "#compiler/ir/values/types.js";
 import type { StateFieldTracker } from "./field-tracker.js";
 
-export type SegmentReadOptions = Readonly<{
-  signed?: boolean;
+type SegmentStateSnapshot = Readonly<{
+  dynamicBases: readonly DynamicSegmentBase[];
 }>;
 
-type SegmentStateSnapshot = Readonly<{
-  dynamicBases: ReadonlyMap<number, ValueId>;
+type DynamicSegmentBase = Readonly<{
+  index: Integer<8>;
+  value: I32Value;
 }>;
 
 // Selector and base state only. The terminal owns selector-write policy.
 export class SegmentState {
   readonly #state: StateFieldTracker;
-  readonly #dynamicBases = new Map<number, ValueId>();
+  readonly #dynamicBases: DynamicSegmentBase[] = [];
 
   constructor(state: StateFieldTracker) {
     this.#state = state;
   }
 
   beginInstruction(): void {
-    this.#dynamicBases.clear();
+    this.#dynamicBases.length = 0;
   }
 
   snapshot(): SegmentStateSnapshot {
-    return { dynamicBases: new Map(this.#dynamicBases) };
+    return { dynamicBases: [...this.#dynamicBases] };
   }
 
   restore(snapshot: SegmentStateSnapshot): void {
-    this.#dynamicBases.clear();
+    this.#dynamicBases.length = 0;
 
-    for (const [index, value] of snapshot.dynamicBases) {
-      this.#dynamicBases.set(index, value);
-    }
+    this.#dynamicBases.push(...snapshot.dynamicBases);
   }
 
   readSelector(
     access: BoundStateAccess,
     reg: SegmentRegister,
-    accessWidth: OperandWidth,
-    options: SegmentReadOptions
-  ): ValueId {
-    return this.#widthAdjusted(
-      access,
-      this.#state.read(access, segmentSelectorChannel(reg)),
-      accessWidth,
-      options
-    );
+    accessWidth: OperandWidth
+  ): I32Value {
+    return this.#widthAdjusted(this.#state.read(access, segmentSelectorChannel(reg)), accessWidth);
   }
 
   readDynamicSelector(
     access: BoundStateAccess,
-    index: ValueId,
-    accessWidth: OperandWidth,
-    options: SegmentReadOptions
-  ): ValueId {
+    index: Integer<8>,
+    accessWidth: OperandWidth
+  ): I32Value {
     return this.#widthAdjusted(
-      access,
-      access.read(access.dynamicSegment(index, "selector")),
-      accessWidth,
-      options
+      access.read(access.dynamicSegment(index, "selector")).unsigned.extend(32),
+      accessWidth
     );
   }
 
-  readBase(access: BoundStateAccess, reg: SegmentRegister): ValueId {
+  readBase(access: BoundStateAccess, reg: SegmentRegister): I32Value {
     return this.#state.read(access, segmentBaseChannel(reg));
   }
 
-  readDynamicBase(access: BoundStateAccess, index: ValueId): ValueId {
-    let base = this.#dynamicBases.get(index);
+  readDynamicBase(access: BoundStateAccess, index: Integer<8>): I32Value {
+    const cached = this.#dynamicBases.find((entry) => access.sameValue(entry.index, index));
 
-    if (base === undefined) {
-      base = access.read(access.dynamicSegment(index, "base"));
-      this.#dynamicBases.set(index, base);
+    if (cached !== undefined) {
+      return cached.value;
     }
 
+    const base = access.read(access.dynamicSegment(index, "base"));
+
+    this.#dynamicBases.push({ index, value: base });
     return base;
   }
 
-  #widthAdjusted(
-    access: BoundStateAccess,
-    value: ValueId,
-    accessWidth: OperandWidth,
-    options: SegmentReadOptions
-  ): ValueId {
+  #widthAdjusted(value: I32Value, accessWidth: OperandWidth): I32Value {
     assert(accessWidth === 16 || accessWidth === 32, `${accessWidth}-bit segment selector read`);
 
-    return options.signed === true
-      ? access.values.extend(accessWidth, value, true)
-      : access.values.truncate(accessWidth, value);
+    return value.truncate(accessWidth).unsigned.extend(32);
   }
 }

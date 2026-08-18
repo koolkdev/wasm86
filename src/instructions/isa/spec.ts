@@ -1,4 +1,4 @@
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 import type { RepeatPrefix } from "#instructions/isa/prefixes.js";
 import type { OperandWidth, Reg32, RegName, SegmentRegister } from "#core/types.js";
 
@@ -64,7 +64,7 @@ export type InstructionSpec = Readonly<{
   }>;
   operands?: readonly OperandSpec[];
   syntax: string;
-  semantics: SemanticTemplate;
+  semantics: InstructionSemantics;
 }>;
 
 export type InstructionFormSpec = Omit<InstructionSpec, "id" | "mnemonic">;

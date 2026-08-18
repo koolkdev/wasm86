@@ -1,4 +1,4 @@
-import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { ResourceRef } from "#compiler/reference.js";
 import type { GuestMemoryReader } from "#memory/types.js";
 import { testExecutionModel } from "#test/support/execution-model.js";
 

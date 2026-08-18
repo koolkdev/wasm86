@@ -54,7 +54,7 @@ export function integerConstant<Width extends IntegerWidth>(
   return new IntegerValue(width, "integer.constant", normalizeInteger(width, value));
 }
 
-export function integerUnreachable<Width extends IntegerWidth>(width: Width): Integer<Width> {
+function integerUnreachable<Width extends IntegerWidth>(width: Width): Integer<Width> {
   return new IntegerValue(width, "integer.unreachable", undefined);
 }
 

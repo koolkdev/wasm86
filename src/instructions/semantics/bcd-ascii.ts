@@ -1,143 +1,112 @@
+import {
+  integer,
+  select,
+  u8,
+  u16,
+  type Integer,
+  type BitValue
+} from "#compiler/function/values.js";
 import { zspValues } from "#core/flags/values.js";
 import { divideError } from "#core/exceptions.js";
-import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticTemplate, SemanticsBuilder } from "#instructions/semantics/builder.js";
-import type { Value, ValueInput } from "#instructions/semantics/refs.js";
+import type { InstructionSemantics, SemanticsBuilder } from "#instructions/semantics/builder.js";
 import { writeAddFlags, writeStatusFlagValues } from "./flag-writes.js";
 
-export function daaSemantic(): SemanticTemplate {
-  return (s, v) => {
-    const oldAl = s.read(s.reg("al"), { width: 8 });
-    const lowAdjust = decimalLowAdjust(s, v, oldAl);
-    const highAdjust = v.binary("or", v.compare(8, "gt_u", oldAl, v.const(0x99)), s.readFlag("CF"));
-    const afterLowAdjust = addSelectedByte(v, oldAl, lowAdjust, 0x06);
-    const result = addSelectedByte(v, afterLowAdjust, highAdjust, 0x60);
+export function daaSemantic(): InstructionSemantics {
+  return (s) => {
+    const oldAl = s.read(s.reg("al"));
+    const lowAdjust = decimalLowAdjust(s, oldAl);
+    const highAdjust = oldAl.unsigned.gt(0x99).or(s.readFlag("CF"));
+    const afterLowAdjust = oldAl.add(select(lowAdjust, u8(0x06), u8(0)));
+    const result = afterLowAdjust.add(select(highAdjust, u8(0x60), u8(0)));
 
-    s.write(s.reg("al"), result, { width: 8 });
-    writeAdjustFlags(s, v, result, { highAdjust, lowAdjust });
+    s.write(s.reg("al"), result);
+    writeAdjustFlags(s, result, { highAdjust, lowAdjust });
   };
 }
 
-export function dasSemantic(): SemanticTemplate {
-  return (s, v) => {
-    const oldAl = s.read(s.reg("al"), { width: 8 });
-    const lowAdjust = decimalLowAdjust(s, v, oldAl);
-    const highAdjust = v.binary("or", v.compare(8, "gt_u", oldAl, v.const(0x99)), s.readFlag("CF"));
-    const lowBorrow = v.binary("and", lowAdjust, v.compare(8, "lt_u", oldAl, v.const(0x06)));
-    const carryAdjust = v.binary("or", highAdjust, lowBorrow);
-    const afterLowAdjust = subSelectedByte(v, oldAl, lowAdjust, 0x06);
-    const result = subSelectedByte(v, afterLowAdjust, highAdjust, 0x60);
+export function dasSemantic(): InstructionSemantics {
+  return (s) => {
+    const oldAl = s.read(s.reg("al"));
+    const lowAdjust = decimalLowAdjust(s, oldAl);
+    const highAdjust = oldAl.unsigned.gt(0x99).or(s.readFlag("CF"));
+    const lowBorrow = lowAdjust.and(oldAl.unsigned.lt(0x06));
+    const carryAdjust = highAdjust.or(lowBorrow);
+    const afterLowAdjust = oldAl.sub(select(lowAdjust, u8(0x06), u8(0)));
+    const result = afterLowAdjust.sub(select(highAdjust, u8(0x60), u8(0)));
 
-    s.write(s.reg("al"), result, { width: 8 });
-    writeAdjustFlags(s, v, result, { highAdjust: carryAdjust, lowAdjust });
+    s.write(s.reg("al"), result);
+    writeAdjustFlags(s, result, { highAdjust: carryAdjust, lowAdjust });
   };
 }
 
-export function aaaSemantic(): SemanticTemplate {
-  return (s, v) => {
-    asciiAdjust(s, v, "add");
+export function aaaSemantic(): InstructionSemantics {
+  return (s) => asciiAdjust(s, "add");
+}
+
+export function aasSemantic(): InstructionSemantics {
+  return (s) => asciiAdjust(s, "sub");
+}
+
+export function aamSemantic(): InstructionSemantics {
+  return (s) => {
+    const base = s.read(s.operand(0), 8);
+    const oldAl = s.read(s.reg("al"));
+
+    s.if(base.eq(0), (then) => then.cpuException(divideError()), "unlikely");
+
+    const quotient = oldAl.unsigned.div(base);
+    const remainder = oldAl.unsigned.rem(base);
+
+    s.write(s.reg("ah"), quotient);
+    s.write(s.reg("al"), remainder);
+    writeAdjustFlags(s, remainder);
   };
 }
 
-export function aasSemantic(): SemanticTemplate {
-  return (s, v) => {
-    asciiAdjust(s, v, "sub");
+export function aadSemantic(): InstructionSemantics {
+  return (s) => {
+    const base = s.read(s.operand(0), 8);
+    const oldAl = s.read(s.reg("al"));
+    const oldAh = s.read(s.reg("ah"));
+    const addend = oldAh.mul(base);
+    const result = oldAl.add(addend);
+
+    s.write(s.reg("al"), result);
+    s.write(s.reg("ah"), u8(0));
+    writeAddFlags(s, { left: oldAl, right: addend, result });
   };
 }
 
-export function aamSemantic(): SemanticTemplate {
-  return (s, v) => {
-    const base = s.read(s.operand(0), { width: 8 });
-    const oldAl = s.read(s.reg("al"), { width: 8 });
+function asciiAdjust(s: SemanticsBuilder, op: "add" | "sub"): void {
+  const oldAx = s.read(s.reg("ax"));
+  const oldAl = s.read(s.reg("al"));
+  const adjust = decimalLowAdjust(s, oldAl);
+  const adjustedAx = oldAx[op](select(adjust, u16(0x0106), u16(0)));
+  const resultAl = adjustedAx.and(0x0f).truncate(8);
+  const resultAx = adjustedAx.and(0xff0f);
 
-    s.if(
-      v.compare(8, "eq", base, v.const(0)),
-      (then) => then.cpuException(divideError()),
-      "unlikely"
-    );
-
-    const quotient = v.binary("div_u", oldAl, base);
-    const remainder = v.binary("rem_u", oldAl, base);
-
-    s.write(s.reg("ah"), quotient, { width: 8 });
-    s.write(s.reg("al"), remainder, { width: 8 });
-    writeAdjustFlags(s, v, remainder);
-  };
+  s.write(s.reg("ax"), resultAx);
+  writeAdjustFlags(s, resultAl, { lowAdjust: adjust });
 }
 
-export function aadSemantic(): SemanticTemplate {
-  return (s, v) => {
-    const base = s.read(s.operand(0), { width: 8 });
-    const oldAl = s.read(s.reg("al"), { width: 8 });
-    const oldAh = s.read(s.reg("ah"), { width: 8 });
-    const addend = v.binary("mul", oldAh, base);
-    const result = v.truncate(8, v.binary("add", oldAl, addend));
-
-    s.write(s.reg("al"), result, { width: 8 });
-    s.write(s.reg("ah"), v.const(0), { width: 8 });
-    writeAddFlags(s, v, { width: 8, left: oldAl, right: addend, result });
-  };
-}
-
-function asciiAdjust(s: SemanticsBuilder, v: ValueBuilder, op: "add" | "sub"): void {
-  const oldAx = s.read(s.reg("ax"), { width: 16 });
-  const oldAl = s.read(s.reg("al"), { width: 8 });
-  const adjust = decimalLowAdjust(s, v, oldAl);
-  const adjustedAx = v.truncate(
-    16,
-    op === "add"
-      ? v.binary("add", oldAx, v.select(adjust, v.const(0x0106), v.const(0)))
-      : v.binary("sub", oldAx, v.select(adjust, v.const(0x0106), v.const(0)))
-  );
-  const resultAl = v.binary("and", adjustedAx, v.const(0x0f));
-  const resultAx = v.binary("and", adjustedAx, v.const(0xff0f));
-
-  s.write(s.reg("ax"), resultAx, { width: 16 });
-  writeAdjustFlags(s, v, resultAl, { lowAdjust: adjust });
-}
-
-function decimalLowAdjust(s: SemanticsBuilder, v: ValueBuilder, oldAl: ValueInput): Value {
-  return v.binary(
-    "or",
-    v.compare(8, "gt_u", v.binary("and", oldAl, v.const(0x0f)), v.const(9)),
-    s.readFlag("AF")
-  );
-}
-
-function addSelectedByte(
-  v: ValueBuilder,
-  value: ValueInput,
-  condition: ValueInput,
-  amount: number
-): Value {
-  return v.truncate(8, v.binary("add", value, v.select(condition, v.const(amount), v.const(0))));
-}
-
-function subSelectedByte(
-  v: ValueBuilder,
-  value: ValueInput,
-  condition: ValueInput,
-  amount: number
-): Value {
-  return v.truncate(8, v.binary("sub", value, v.select(condition, v.const(amount), v.const(0))));
+function decimalLowAdjust(s: SemanticsBuilder, oldAl: Integer<8>): BitValue {
+  return oldAl.and(0x0f).unsigned.gt(9).or(s.readFlag("AF"));
 }
 
 function writeAdjustFlags(
   s: SemanticsBuilder,
-  v: ValueBuilder,
-  result: ValueInput,
-  adjust?: Readonly<{ highAdjust?: ValueInput; lowAdjust?: ValueInput }>
+  result: Integer<8>,
+  adjust?: Readonly<{ highAdjust?: BitValue; lowAdjust?: BitValue }>
 ): void {
-  const zero = v.const(0);
   // Missing adjust values mean CF/AF are architecturally undefined; choose zero as observed.
-  const lowAdjust = adjust?.lowAdjust ?? zero;
+  const lowAdjust = adjust?.lowAdjust ?? integer(1, 0);
   const highAdjust = adjust?.highAdjust ?? lowAdjust;
 
   writeStatusFlagValues(s, {
-    ...zspValues(v, { width: 8, result }),
+    ...zspValues(result),
     CF: highAdjust,
     AF: lowAdjust,
     // OF is architecturally undefined; choose zero as observed.
-    OF: zero
+    OF: integer(1, 0)
   });
 }

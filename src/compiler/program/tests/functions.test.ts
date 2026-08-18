@@ -1,14 +1,15 @@
 import { notStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { functionType } from "#compiler/wasm/legacy/function-type.js";
+import { functionType } from "#compiler/function/type.js";
 import { FunctionFamily } from "#compiler/program/functions.js";
 
 const noEffects = { reads: [], writes: [] } as const;
+const voidType = functionType([], []);
 
 test("function families provide one stable definition for each key", () => {
-  const family = new FunctionFamily<number>({
-    type: functionType([], []),
+  const family = new FunctionFamily<number, typeof voidType>({
+    type: voidType,
     effects: () => noEffects,
     id: (key) => `test.family.${key}`,
     build: (_key, fn) => fn.return([])

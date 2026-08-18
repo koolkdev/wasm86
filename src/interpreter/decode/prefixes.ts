@@ -1,15 +1,15 @@
 import { assert } from "#common/assert.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
-import { VariableRef } from "#compiler/ir/variable.js";
+import { Integer, integer, i32, u8, type I32Value } from "#compiler/function/values.js";
+import { VariableRef } from "#compiler/function/storage.js";
 import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";
 import type { PrefixEffect } from "#instructions/decoder/model/types.js";
 import { segmentRegisterIndex } from "#core/segments.js";
-import type { RegionBuilder, SwitchControlArm } from "#compiler/ir/builder/region.js";
+import type { RegionBuilder, SwitchControlArm } from "#compiler/function/builder/region.js";
 import { InstructionByteStream } from "./stream.js";
 
 export type SegmentOverrideState = Readonly<{
-  present: VariableRef;
-  registerIndex: VariableRef;
+  present: VariableRef<(typeof Integer)[1]>;
+  registerIndex: VariableRef<(typeof Integer)[8]>;
 }>;
 
 export type ExactInstructionFallback = (region: RegionBuilder) => void;
@@ -32,20 +32,21 @@ assert(
 export class PrefixDecoder {
   readonly segmentOverride: SegmentOverrideState;
   readonly #stream: InstructionByteStream;
-  readonly #flags: VariableRef;
-  readonly #firstOpcodeByte: VariableRef;
+  readonly #flags: VariableRef<(typeof Integer)[32]>;
+  readonly #firstOpcodeByte: VariableRef<(typeof Integer)[8]>;
   readonly #mode: PrefixDecodeMode;
 
   constructor(region: RegionBuilder, stream: InstructionByteStream, mode: PrefixDecodeMode) {
-    const zero = region.values.const(0);
+    const zero = i32(0);
+    const absent = integer(1, 0);
 
     this.#stream = stream;
     this.#mode = mode;
     this.#flags = region.variable(zero);
-    this.#firstOpcodeByte = region.variable(zero);
+    this.#firstOpcodeByte = region.variable(u8(0));
     this.segmentOverride = {
-      present: region.variable(zero),
-      registerIndex: region.variable(zero)
+      present: region.variable(absent),
+      registerIndex: region.variable(u8(0))
     };
   }
 
@@ -74,60 +75,40 @@ export class PrefixDecoder {
     });
   }
 
-  flags(region: RegionBuilder): ValueId {
+  flags(region: RegionBuilder): I32Value {
     return region.read(this.#flags);
   }
 
-  firstOpcodeByte(region: RegionBuilder): ValueId {
+  firstOpcodeByte(region: RegionBuilder): Integer<8> {
     return region.read(this.#firstOpcodeByte);
   }
 
   #guardDirectPrefixLimit(region: RegionBuilder, fallback: ExactInstructionFallback): void {
-    const values = region.values;
-
-    region.if(
-      values.compare(
-        32,
-        "gt_u",
-        this.#stream.offset(region),
-        values.const(maximumDirectPrefixCount)
-      ),
-      fallback,
-      { hint: "unlikely" }
-    );
+    region.if(this.#stream.offset(region).unsigned.gt(maximumDirectPrefixCount), fallback, {
+      hint: "unlikely"
+    });
   }
 
   #apply(region: RegionBuilder, effect: PrefixEffect): void {
-    const values = region.values;
-    const bits = X86_32_DECODE_MODEL.prefixes.flagBits;
+    const flagBits = X86_32_DECODE_MODEL.prefixes.flagBits;
 
     switch (effect.kind) {
       case "operandSize":
-        region.write(
-          this.#flags,
-          values.binary("or", region.read(this.#flags), values.const(bits.operandSizeOverride))
-        );
+        region.write(this.#flags, region.read(this.#flags).or(flagBits.operandSizeOverride));
         return;
       case "repeat": {
-        const repeatMask = bits.rep | bits.repne;
-        const cleared = values.binary(
-          "and",
-          region.read(this.#flags),
-          values.const(~repeatMask >>> 0)
-        );
+        const repeatMask = flagBits.rep | flagBits.repne;
+        const cleared = region.read(this.#flags).and(~repeatMask >>> 0);
 
         region.write(
           this.#flags,
-          values.binary("or", cleared, values.const(effect.value === "rep" ? bits.rep : bits.repne))
+          cleared.or(effect.value === "rep" ? flagBits.rep : flagBits.repne)
         );
         return;
       }
       case "segment":
-        region.write(this.segmentOverride.present, values.const(1));
-        region.write(
-          this.segmentOverride.registerIndex,
-          values.const(segmentRegisterIndex(effect.value))
-        );
+        region.write(this.segmentOverride.present, integer(1, 1));
+        region.write(this.segmentOverride.registerIndex, u8(segmentRegisterIndex(effect.value)));
         return;
     }
   }

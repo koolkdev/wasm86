@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import { resourceRef } from "#compiler/ir/resource.js";
 import { createProgramResources, type MemoryImport } from "#compiler/program/resources.js";
+import { resourceRef } from "#compiler/reference.js";
 
 test("program resources retain owner-provided memory imports", () => {
   const state = memoryImport("test.state", "state");

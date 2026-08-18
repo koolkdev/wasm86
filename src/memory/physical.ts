@@ -1,16 +1,14 @@
 import { assert } from "#common/assert.js";
-import type { StorageEffects } from "#compiler/ir/effects.js";
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import { resourceRead, resourceWrite } from "#compiler/ir/operations/resource.js";
+import type { StorageEffects } from "#compiler/function/storage.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
 import {
-  DynamicByteOriginRef,
-  resourceRef,
   type ByteRange,
-  type ResourceByteOperand,
-  type ResourceEffect,
-  type ResourceRef
-} from "#compiler/ir/resource.js";
-import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
+  type DynamicByteOrigin,
+  type ResourceAccess,
+  type ResourceEffect
+} from "#compiler/function/resource.js";
+import { resourceRef, type ResourceRef } from "#compiler/reference.js";
+import type { Integer, I32Value } from "#compiler/function/values.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
 import { wasmPageByteLength } from "#compiler/program/limits.js";
 import type { MemoryImport } from "#compiler/program/resources.js";
@@ -18,32 +16,33 @@ import { readBackingByte } from "./bytes.js";
 import { physicalRamResourceDefinition } from "./resource.js";
 
 export type PhysicalRange = Readonly<{
-  start: ValueId;
-  byteLength: ValueId;
+  start: I32Value;
+  byteLength: I32Value;
 }>;
 
 export type PhysicalAccess = Readonly<{
   range: PhysicalRange;
-  origin: DynamicByteOriginRef;
+  origin: DynamicByteOrigin;
 }>;
 
-export type PhysicalLoadOptions = Readonly<{
-  signed?: boolean;
-}>;
+export type PhysicalTransferWidth = 8 | 16 | 32;
 
 export type PhysicalAccessOperations = Readonly<{
   issue(range: PhysicalRange): PhysicalAccess;
-  load(
+  load<Width extends PhysicalTransferWidth>(
     access: PhysicalAccess,
-    byteOffset: ValueId,
-    width: IntegerWidth,
-    options?: PhysicalLoadOptions
-  ): ValueId;
-  store(access: PhysicalAccess, byteOffset: ValueId, value: ValueId, width: IntegerWidth): void;
+    byteOffset: I32Value,
+    width: Width
+  ): Integer<Width>;
+  store<Width extends PhysicalTransferWidth>(
+    access: PhysicalAccess,
+    byteOffset: I32Value,
+    value: Integer<Width>
+  ): void;
 }>;
 
 export type PhysicalAccessConstruction = Readonly<{
-  bind(region: RegionBuilder): PhysicalAccessOperations;
+  forRegion(region: RegionBuilder): PhysicalAccessOperations;
 }>;
 
 export type PhysicalByteReader = Readonly<{
@@ -84,7 +83,7 @@ export function createPhysicalAddressSpaceDefinition(): PhysicalAddressSpaceDefi
     ramImport,
     resources: [ramImport],
     access: {
-      bind: (region) => new DirectRamAccessBuilder(ramResource, region)
+      forRegion: (region) => new DirectRamAccessBuilder(ramResource, region)
     },
     effects: {
       reads: [ramEffect],
@@ -125,49 +124,49 @@ class DirectRamAccessBuilder implements PhysicalAccessOperations {
   issue(range: PhysicalRange): PhysicalAccess {
     return {
       range,
-      origin: new DynamicByteOriginRef()
+      origin: Symbol("physical RAM access")
     };
   }
 
-  load(
+  load<Width extends PhysicalTransferWidth>(
     access: PhysicalAccess,
-    byteOffset: ValueId,
-    width: IntegerWidth,
-    options: PhysicalLoadOptions = {}
-  ): ValueId {
+    byteOffset: I32Value,
+    width: Width
+  ): Integer<Width> {
     const region = this.#region;
-    const source = physicalRamOperand(this.#ramResource, region, access, byteOffset, width);
-    const signed = options.signed === true && width !== 32;
+    const source = physicalRamAccess(this.#ramResource, region, access, byteOffset, width);
 
-    return region.operation(
-      resourceRead,
-      signed ? { source, mode: { kind: "signed" } } : { source }
-    );
+    return region.readResource(source);
   }
 
-  store(access: PhysicalAccess, byteOffset: ValueId, value: ValueId, width: IntegerWidth): void {
+  store<Width extends PhysicalTransferWidth>(
+    access: PhysicalAccess,
+    byteOffset: I32Value,
+    value: Integer<Width>
+  ): void {
     const region = this.#region;
-    const destination = physicalRamOperand(this.#ramResource, region, access, byteOffset, width);
+    const destination = physicalRamAccess(
+      this.#ramResource,
+      region,
+      access,
+      byteOffset,
+      value.width
+    );
 
-    region.operation(resourceWrite, { destination, value });
+    region.writeResource(destination, value);
   }
 }
 
-function physicalRamOperand(
+function physicalRamAccess<Width extends PhysicalTransferWidth>(
   ramResource: ResourceRef,
   region: RegionBuilder,
   access: PhysicalAccess,
-  byteOffset: ValueId,
-  width: IntegerWidth
-): ResourceByteOperand {
-  assert(
-    width === 8 || width === 16 || width === 32,
-    `physical RAM operation width must be 8, 16, or 32, got ${String(width)}`
-  );
+  byteOffset: I32Value,
+  width: Width
+): ResourceAccess<Width> {
   const byteLength = width / 8;
-  const values = region.values;
-  const staticAccessByteLength = values.constValue(access.range.byteLength);
-  const staticByteOffset = values.constValue(byteOffset);
+  const staticAccessByteLength = region.constValue(access.range.byteLength);
+  const staticByteOffset = region.constValue(byteOffset);
 
   assert(
     staticByteOffset === undefined || staticByteOffset >= 0,
@@ -181,17 +180,16 @@ function physicalRamOperand(
   );
   const range = physicalRamRange(region, access, staticByteOffset, byteLength);
   const base =
-    staticByteOffset === undefined
-      ? values.binary("add", access.range.start, byteOffset)
-      : access.range.start;
+    staticByteOffset === undefined ? access.range.start.add(byteOffset) : access.range.start;
 
   return {
-    effect: { space: "resource", resource: ramResource, range },
+    effect: { kind: "resource", resource: ramResource, range },
     address: {
       base,
       displacement: staticByteOffset ?? 0
     },
-    width
+    storageWidth: width,
+    valueWidth: width
   };
 }
 
@@ -203,31 +201,35 @@ function physicalRamRange(
   byteLength: number
 ): ByteRange {
   if (staticByteOffset === undefined) {
-    return { basis: { kind: "dynamic", origin: access.origin } };
+    return { kind: "whole", origin: access.origin };
   }
-  const staticStart = region.values.constValue(access.range.start);
+  const staticStart = region.constValue(access.range.start);
 
   if (staticStart !== undefined) {
     const absoluteStart = (staticStart >>> 0) + staticByteOffset;
 
     if (absoluteStart + byteLength <= physicalAddressSpaceByteLength) {
       return {
-        basis: { kind: "resource" },
-        slice: { byteOffset: absoluteStart, byteLength }
+        kind: "slice",
+        origin: "resource",
+        byteOffset: absoluteStart,
+        byteLength
       };
     }
   }
 
   return {
-    basis: { kind: "dynamic", origin: access.origin },
-    slice: { byteOffset: staticByteOffset, byteLength }
+    kind: "slice",
+    origin: access.origin,
+    byteOffset: staticByteOffset,
+    byteLength
   };
 }
 
 function wholeResourceEffect(resource: ResourceRef): ResourceEffect {
   return {
-    space: "resource",
+    kind: "resource",
     resource,
-    range: { basis: { kind: "resource" } }
+    range: { kind: "whole", origin: "resource" }
   };
 }

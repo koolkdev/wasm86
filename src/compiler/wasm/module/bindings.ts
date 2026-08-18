@@ -1,48 +1,32 @@
 import { assert } from "#common/assert.js";
-import type { FunctionType } from "#compiler/wasm/legacy/function-type.js";
-import type { FunctionRef, TableRef } from "#compiler/reference.js";
-import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { WasmFunctionBindings } from "#compiler/wasm/emit/bindings.js";
+import type { WasmFunctionType } from "#wasm/types.js";
+import type { ModuleIndices } from "./indices.js";
 
-// The numeric module identities visible while realizing one function. The
-// maps supplied to createModuleBindings are intentionally dependency-scoped.
-export interface ModuleBindings {
-  readonly functionIndex: (ref: FunctionRef) => number;
-  readonly typeIndex: (type: FunctionType) => number;
-  readonly tableIndex: (ref: TableRef) => number;
-  readonly resourceIndex: (ref: ResourceRef) => number;
+// Shared by every function body in one module. Symbols stay unresolved until
+// an emitted instruction or module entry needs its numeric identity.
+export interface ModuleBindings extends WasmFunctionBindings {
+  readonly functionTypeIndex: (type: WasmFunctionType) => number;
 }
 
-export type ModuleBindingIndices = Readonly<{
-  functions: ReadonlyMap<FunctionRef, number>;
-  types: ReadonlyMap<FunctionType, number>;
-  tables: ReadonlyMap<TableRef, number>;
-  resources: ReadonlyMap<ResourceRef, number>;
-}>;
-
-export function createModuleBindings(indices: ModuleBindingIndices): ModuleBindings {
+export function createModuleBindings(indices: ModuleIndices): ModuleBindings {
   return {
     functionIndex(ref) {
-      const index = indices.functions.get(ref);
+      const index = indices.functionIndices.get(ref);
 
       assert(index !== undefined, `missing resolved function ${ref.id}`);
       return index;
     },
-    typeIndex(type) {
-      const index = indices.types.get(type);
+    functionTypeIndex(type) {
+      const index = indices.functionTypeIndices.get(type);
 
-      assert(index !== undefined, "missing resolved indirect call type");
+      assert(index !== undefined, "missing resolved function type");
       return index;
     },
-    tableIndex(ref) {
-      const index = indices.tables.get(ref);
+    memoryIndex(ref) {
+      const index = indices.memoryIndices.get(ref);
 
-      assert(index !== undefined, `missing resolved table ${ref.id}`);
-      return index;
-    },
-    resourceIndex(ref) {
-      const index = indices.resources.get(ref);
-
-      assert(index !== undefined, `missing resolved resource ${ref.id}`);
+      assert(index !== undefined, `missing resolved memory resource ${ref.id}`);
       return index;
     }
   };

@@ -48,24 +48,8 @@ export class InternTable<Namespace, Part, Value extends NonNullable<unknown>> {
     position.value = value;
     return value;
   }
-
-  clone(): InternTable<Namespace, Part, Value> {
-    const clone = new InternTable<Namespace, Part, Value>();
-
-    for (const [namespace, root] of this.#roots) {
-      clone.#roots.set(namespace, cloneInternNode(root));
-    }
-    return clone;
-  }
 }
 
 function internNode<Part, Value>(): InternNode<Part, Value> {
   return { children: new Map(), value: undefined };
-}
-
-function cloneInternNode<Part, Value>(source: InternNode<Part, Value>): InternNode<Part, Value> {
-  return {
-    children: new Map([...source.children].map(([part, child]) => [part, cloneInternNode(child)])),
-    value: source.value
-  };
 }

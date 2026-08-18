@@ -1,30 +1,33 @@
-import { assert } from "#common/assert.js";
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import type { FunctionBuilder } from "#compiler/ir/builder/function.js";
-import { functionType } from "#compiler/wasm/legacy/function-type.js";
-import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
+import type { FunctionBuilder } from "#compiler/function/builder/function.js";
+import { functionType } from "#compiler/function/type.js";
+import { Integer, i32, type I32Value } from "#compiler/function/values.js";
 import { FunctionFamily } from "#compiler/program/functions.js";
 import type { PhysicalAddressSpaceDefinition } from "../physical.js";
-import type { MemoryLoadOptions } from "../types.js";
+import type { MemoryTransferWidth } from "../types.js";
 import { pageTableEntryFrameMask, virtualPageOffsetMask, virtualPageShift } from "./layout.js";
 import type { PageTableAccess } from "./page-table.js";
 
-const scatteredReadType = functionType(["i32"], ["i32"]);
-const scatteredStoreType = functionType(["i32", "i32"], []);
+const scatteredReadType = functionType([Integer[32]], [Integer[32]]);
+const scatteredStoreType = functionType([Integer[32], Integer[32]], []);
+type ScatteredInteger = Integer<8> | Integer<16> | Integer<32>;
 
 type ScatteredLoadStoreFunctions = Readonly<{
-  reads: FunctionFamily<IntegerWidth>;
-  stores: FunctionFamily<IntegerWidth>;
+  reads: FunctionFamily<MemoryTransferWidth, typeof scatteredReadType>;
+  stores: FunctionFamily<MemoryTransferWidth, typeof scatteredStoreType>;
 }>;
 
 export type ScatteredLoadStore = Readonly<{
-  load(
+  load<Width extends MemoryTransferWidth>(
     region: RegionBuilder,
-    linearStart: ValueId,
-    width: IntegerWidth,
-    options?: MemoryLoadOptions
-  ): ValueId;
-  store(region: RegionBuilder, linearStart: ValueId, value: ValueId, width: IntegerWidth): void;
+    linearStart: I32Value,
+    width: Width
+  ): Integer<Width>;
+  store<Width extends MemoryTransferWidth>(
+    region: RegionBuilder,
+    linearStart: I32Value,
+    value: Integer<Width>
+  ): void;
 }>;
 
 export function createScatteredLoadStore(
@@ -34,18 +37,65 @@ export function createScatteredLoadStore(
   const functions = createScatteredLoadStoreFunctions(physical, pageTable);
 
   return {
-    load: (region, linearStart, width, options: MemoryLoadOptions = {}) => {
-      const raw = region.call(functions.reads.get(width), [linearStart])[0];
-
-      assert(raw !== undefined, "scattered read result is missing");
-      // Helpers return assembled i32 bits; signedness belongs to the requested
-      // narrow load and is applied after the bytewise operation.
-      return region.values.widthAdjusted(width, raw, options.signed === true);
-    },
-    store: (region, linearStart, value, width) => {
-      region.call(functions.stores.get(width), [linearStart, value]);
-    }
+    load: (region, linearStart, width) => loadScattered(region, linearStart, width, functions),
+    store: (region, linearStart, value) => storeScattered(region, linearStart, value, functions)
   };
+}
+
+function loadScattered<Width extends MemoryTransferWidth>(
+  region: RegionBuilder,
+  linearStart: I32Value,
+  width: Width,
+  functions: ScatteredLoadStoreFunctions
+): Integer<Width>;
+function loadScattered(
+  region: RegionBuilder,
+  linearStart: I32Value,
+  width: MemoryTransferWidth,
+  functions: ScatteredLoadStoreFunctions
+): ScatteredInteger {
+  switch (width) {
+    case 8: {
+      const [value] = region.call(functions.reads.get(width), [linearStart]);
+
+      return value.truncate(width);
+    }
+    case 16: {
+      const [value] = region.call(functions.reads.get(width), [linearStart]);
+
+      return value.truncate(width);
+    }
+    case 32: {
+      const [value] = region.call(functions.reads.get(width), [linearStart]);
+
+      return value;
+    }
+  }
+}
+
+function storeScattered<Width extends MemoryTransferWidth>(
+  region: RegionBuilder,
+  linearStart: I32Value,
+  value: Integer<Width>,
+  functions: ScatteredLoadStoreFunctions
+): void;
+function storeScattered(
+  region: RegionBuilder,
+  linearStart: I32Value,
+  value: ScatteredInteger,
+  functions: ScatteredLoadStoreFunctions
+): void {
+  switch (value.width) {
+    case 8:
+      region.call(functions.stores.get(value.width), [linearStart, value.unsigned.extend(32)]);
+      return;
+    case 16:
+      region.call(functions.stores.get(value.width), [linearStart, value.unsigned.extend(32)]);
+      return;
+    case 32:
+      region.call(functions.stores.get(value.width), [linearStart, value]);
+      return;
+  }
 }
 
 function createScatteredLoadStoreFunctions(
@@ -53,18 +103,18 @@ function createScatteredLoadStoreFunctions(
   pageTable: PageTableAccess
 ): ScatteredLoadStoreFunctions {
   return {
-    reads: new FunctionFamily<IntegerWidth>({
+    reads: new FunctionFamily({
       type: scatteredReadType,
-      effects: () => ({
+      effects: (_width: MemoryTransferWidth) => ({
         reads: [pageTable.effect, ...physical.effects.reads],
         writes: []
       }),
       id: (width) => `memory.virtual.scattered-read.${width}`,
       build: (width, fn) => buildScatteredRead(fn, width, physical, pageTable)
     }),
-    stores: new FunctionFamily<IntegerWidth>({
+    stores: new FunctionFamily({
       type: scatteredStoreType,
-      effects: () => ({
+      effects: (_width: MemoryTransferWidth) => ({
         reads: [pageTable.effect],
         writes: physical.effects.writes
       }),
@@ -75,30 +125,24 @@ function createScatteredLoadStoreFunctions(
 }
 
 function buildScatteredRead(
-  fn: FunctionBuilder,
-  width: IntegerWidth,
+  fn: FunctionBuilder<typeof scatteredReadType>,
+  width: MemoryTransferWidth,
   physical: PhysicalAddressSpaceDefinition,
   pageTable: PageTableAccess
 ): void {
-  const linearStart = fn.parameters[0];
-
-  assert(linearStart !== undefined, "scattered read start is missing");
+  const [linearStart] = fn.parameters;
   const byteLength = width / 8;
 
   fn.return([readBytes(fn.region, physical, pageTable, linearStart, byteLength)]);
 }
 
 function buildScatteredStore(
-  fn: FunctionBuilder,
-  width: IntegerWidth,
+  fn: FunctionBuilder<typeof scatteredStoreType>,
+  width: MemoryTransferWidth,
   physical: PhysicalAddressSpaceDefinition,
   pageTable: PageTableAccess
 ): void {
-  const linearStart = fn.parameters[0];
-  const value = fn.parameters[1];
-
-  assert(linearStart !== undefined, "scattered store start is missing");
-  assert(value !== undefined, "scattered store value is missing");
+  const [linearStart, value] = fn.parameters;
   const byteLength = width / 8;
 
   storeBytes(fn.region, physical, pageTable, linearStart, value, byteLength);
@@ -112,18 +156,18 @@ function readBytes(
   region: RegionBuilder,
   physical: PhysicalAddressSpaceDefinition,
   pageTable: PageTableAccess,
-  linearStart: ValueId,
+  linearStart: I32Value,
   byteLength: number
-): ValueId {
-  let result = region.values.const(0);
+): I32Value {
+  let result = i32(0);
 
   for (let index = 0; index < byteLength; index += 1) {
-    const linearAddress = addByteOffset(region, linearStart, index);
+    const linearAddress = addByteOffset(linearStart, index);
     const byte = readTranslatedByte(region, physical, pageTable, linearAddress);
-    const part =
-      index === 0 ? byte : region.values.binary("shl", byte, region.values.const(index * 8));
+    const extended = byte.unsigned.extend(32);
+    const part = index === 0 ? extended : extended.shl(index * 8);
 
-    result = region.values.binary("or", result, part);
+    result = result.or(part);
   }
 
   return result;
@@ -133,14 +177,13 @@ function storeBytes(
   region: RegionBuilder,
   physical: PhysicalAddressSpaceDefinition,
   pageTable: PageTableAccess,
-  linearStart: ValueId,
-  value: ValueId,
+  linearStart: I32Value,
+  value: I32Value,
   byteLength: number
 ): void {
   for (let index = 0; index < byteLength; index += 1) {
-    const linearAddress = addByteOffset(region, linearStart, index);
-    const byte =
-      index === 0 ? value : region.values.binary("shr_u", value, region.values.const(index * 8));
+    const linearAddress = addByteOffset(linearStart, index);
+    const byte = (index === 0 ? value : value.unsigned.shr(index * 8)).truncate(8);
 
     storeTranslatedByte(region, physical, pageTable, linearAddress, byte);
   }
@@ -150,8 +193,8 @@ function readTranslatedByte(
   region: RegionBuilder,
   physical: PhysicalAddressSpaceDefinition,
   pageTable: PageTableAccess,
-  linearAddress: ValueId
-): ValueId {
+  linearAddress: I32Value
+): Integer<8> {
   return readPhysicalByte(region, physical, translateAddress(region, linearAddress, pageTable));
 }
 
@@ -159,8 +202,8 @@ function storeTranslatedByte(
   region: RegionBuilder,
   physical: PhysicalAddressSpaceDefinition,
   pageTable: PageTableAccess,
-  linearAddress: ValueId,
-  value: ValueId
+  linearAddress: I32Value,
+  value: Integer<8>
 ): void {
   storePhysicalByte(region, physical, translateAddress(region, linearAddress, pageTable), value);
 }
@@ -168,16 +211,16 @@ function storeTranslatedByte(
 function readPhysicalByte(
   region: RegionBuilder,
   physical: PhysicalAddressSpaceDefinition,
-  physicalStart: ValueId
-): ValueId {
-  const access = physical.access.bind(region);
+  physicalStart: I32Value
+): Integer<8> {
+  const access = physical.access.forRegion(region);
 
   return access.load(
     access.issue({
       start: physicalStart,
-      byteLength: region.values.const(1)
+      byteLength: i32(1)
     }),
-    region.values.const(0),
+    i32(0),
     8
   );
 }
@@ -185,47 +228,40 @@ function readPhysicalByte(
 function storePhysicalByte(
   region: RegionBuilder,
   physical: PhysicalAddressSpaceDefinition,
-  physicalStart: ValueId,
-  value: ValueId
+  physicalStart: I32Value,
+  value: Integer<8>
 ): void {
-  const access = physical.access.bind(region);
+  const access = physical.access.forRegion(region);
 
   access.store(
     access.issue({
       start: physicalStart,
-      byteLength: region.values.const(1)
+      byteLength: i32(1)
     }),
-    region.values.const(0),
-    value,
-    8
+    i32(0),
+    value
   );
 }
 
-function pageIndex(region: RegionBuilder, address: ValueId): ValueId {
-  return region.values.binary("shr_u", address, region.values.const(virtualPageShift));
+function pageIndex(address: I32Value): Integer<32> {
+  return address.unsigned.shr(virtualPageShift);
 }
 
 function translateAddress(
   region: RegionBuilder,
-  linearAddress: ValueId,
+  linearAddress: I32Value,
   pageTable: PageTableAccess
-): ValueId {
-  return translate(region, linearAddress, pageTable.read(region, pageIndex(region, linearAddress)));
+): I32Value {
+  return translate(linearAddress, pageTable.read(region, pageIndex(linearAddress)));
 }
 
-function translate(region: RegionBuilder, linearAddress: ValueId, entry: ValueId): ValueId {
-  const frame = region.values.binary("and", entry, region.values.const(pageTableEntryFrameMask));
-  const offset = region.values.binary(
-    "and",
-    linearAddress,
-    region.values.const(virtualPageOffsetMask)
-  );
+function translate(linearAddress: I32Value, entry: I32Value): I32Value {
+  const frame = entry.and(pageTableEntryFrameMask);
+  const offset = linearAddress.and(virtualPageOffsetMask);
 
-  return region.values.binary("or", frame, offset);
+  return frame.or(offset);
 }
 
-function addByteOffset(region: RegionBuilder, address: ValueId, byteOffset: number): ValueId {
-  return byteOffset === 0
-    ? address
-    : region.values.binary("add", address, region.values.const(byteOffset));
+function addByteOffset(address: I32Value, byteOffset: number): I32Value {
+  return byteOffset === 0 ? address : address.add(byteOffset);
 }

@@ -1,10 +1,10 @@
-import type { ValueId } from "#compiler/ir/values/types.js";
+import type { I32Value } from "#compiler/function/values.js";
 import type { FieldRef } from "#compiler/layout/handles.js";
 import type { StateFieldTracker } from "./field-tracker.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 
 type InstructionCountStateSnapshot = Readonly<{
-  base: ValueId | undefined;
+  base: I32Value | undefined;
   completed: number;
 }>;
 
@@ -14,7 +14,7 @@ type InstructionCountStateSnapshot = Readonly<{
 export class InstructionCountState {
   readonly #state: StateFieldTracker;
   readonly #field: FieldRef<"u32">;
-  #base: ValueId | undefined;
+  #base: I32Value | undefined;
   #completed = 0;
 
   constructor(state: StateFieldTracker, field: FieldRef<"u32">) {
@@ -22,17 +22,17 @@ export class InstructionCountState {
     this.#field = field;
   }
 
-  read(access: BoundStateAccess): ValueId {
+  read(access: BoundStateAccess): I32Value {
     return this.#state.read(access, this.#field);
   }
 
   increment(access: BoundStateAccess): void {
     this.#completed += 1;
-    this.#state.write(this.#field, this.#advancedValue(access));
+    this.#state.write(access, this.#field, this.#advancedValue(access));
   }
 
-  add(access: BoundStateAccess, value: ValueId): void {
-    this.#state.write(this.#field, access.values.binary("add", this.read(access), value));
+  add(access: BoundStateAccess, value: I32Value): void {
+    this.#state.write(access, this.#field, this.read(access).add(value));
     this.#rebase();
   }
 
@@ -58,9 +58,9 @@ export class InstructionCountState {
     this.#completed = 0;
   }
 
-  #advancedValue(access: BoundStateAccess): ValueId {
+  #advancedValue(access: BoundStateAccess): I32Value {
     this.#base ??= this.#state.read(access, this.#field);
 
-    return access.values.binary("add", this.#base, access.values.const(this.#completed));
+    return this.#base.add(this.#completed);
   }
 }

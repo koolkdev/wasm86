@@ -1,26 +1,50 @@
 import { assert } from "#common/assert.js";
-import { resourceRead, resourceWrite } from "#compiler/ir/operations/resource.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
 import type {
-  ResourceByteOperand,
+  ResourceAccess,
   ResourceEffect,
-  ResourceReadMode,
-  ResourceRef
-} from "#compiler/ir/resource.js";
-import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
+  StorageWidth,
+  ValueWidthForStorage
+} from "#compiler/function/resource.js";
 import {
+  i32,
+  type AnyNarrowInteger,
+  type I32Value,
+  type Integer
+} from "#compiler/function/values.js";
+import {
+  layoutBitWidth,
   widthByteLength,
+  type AnyFieldRef,
   type FieldRef,
+  type LayoutBitWidth,
   type LayoutByteLength,
   type LayoutWidth,
   type NamedArrayRef
 } from "#compiler/layout/handles.js";
 import type { Layout, LayoutNamedArray } from "#compiler/layout/layout.js";
+import type { ResourceRef } from "#compiler/reference.js";
 import { registerAlias } from "#core/registers.js";
-import { coreStateFields } from "#core/state/layout.js";
 import type { GprChannel, SegmentStateField } from "#core/state/channels.js";
-import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import type { ValueBuilder } from "#compiler/ir/values/builder.js";
+import { coreStateFields } from "#core/state/layout.js";
+import type { OperandWidth, RegisterWidth, RegName, SegmentRegister } from "#core/types.js";
+
+const segmentArrayByField = {
+  selector: coreStateFields.segmentSelectors,
+  base: coreStateFields.segmentBases,
+  limit: coreStateFields.segmentLimits,
+  access: coreStateFields.segmentAccess
+} as const;
+
+const segmentBitWidthByField = {
+  selector: 16,
+  base: 32,
+  limit: 32,
+  access: 32
+} as const;
+
+type SegmentBitWidth<Field extends SegmentStateField> = (typeof segmentBitWidthByField)[Field];
+type StateStorageWidth = LayoutBitWidth<LayoutWidth>;
 
 export type StateResource = Readonly<{
   resource: ResourceRef;
@@ -34,11 +58,11 @@ export class StateAccess {
     this.#state = state;
   }
 
-  bind(region: RegionBuilder): BoundStateAccess {
+  forRegion(region: RegionBuilder): BoundStateAccess {
     return new BoundStateAccess(this.#state, region);
   }
 
-  fieldEffect(field: FieldRef): ResourceEffect {
+  fieldEffect(field: AnyFieldRef): ResourceEffect {
     const placed = this.#state.layout.field(field);
 
     return resourceEffect(this.#state, placed.offset, placed.byteLength);
@@ -51,7 +75,7 @@ export class StateAccess {
       coreStateFields.gprs,
       coreStateFields.gprs.elementIndex(alias.base),
       alias.bitOffset / 8,
-      widthByteLength(layoutWidth(alias.width))
+      bitWidthByteLength(alias.width)
     );
 
     return resourceEffect(this.#state, slice.byteOffset, slice.byteLength);
@@ -84,130 +108,129 @@ export class BoundStateAccess {
     this.#region = region;
   }
 
-  // Derives the same state owner for an explicitly supplied structured child;
-  // the binding never follows mutable builder state.
   forRegion(region: RegionBuilder): BoundStateAccess {
     return new BoundStateAccess(this.#state, region);
   }
 
-  get values(): ValueBuilder {
-    return this.#region.values;
+  sameValue(a: AnyNarrowInteger, b: AnyNarrowInteger): boolean {
+    return this.#region.sameValue(a, b);
   }
 
-  gpr(reg: RegName): ResourceByteOperand {
+  gpr<Name extends RegName>(reg: Name): ResourceAccess<RegisterWidth<Name>> {
     const alias = registerAlias(reg);
 
     return this.#namedArrayElement(
       coreStateFields.gprs,
       coreStateFields.gprs.elementIndex(alias.base),
       alias.bitOffset / 8,
-      widthByteLength(layoutWidth(alias.width))
+      alias.width
     );
   }
 
-  gprChannel(channel: GprChannel): ResourceByteOperand {
-    return this.gpr(channel.reg);
+  gprChannel<Name extends RegName>(channel: GprChannel<Name>): ResourceAccess<RegisterWidth<Name>>;
+  gprChannel<Width extends OperandWidth>(channel: GprChannel, width: Width): ResourceAccess<Width>;
+  gprChannel(channel: GprChannel, width?: OperandWidth): ResourceAccess<OperandWidth> {
+    const operand = this.gpr(channel.reg);
+
+    if (width !== undefined) {
+      assert(operand.storageWidth === width, `${channel.reg} is not a ${width}-bit GPR channel`);
+    }
+
+    return operand;
   }
 
   owns(effect: ResourceEffect): boolean {
     return effect.resource === this.#state.resource;
   }
 
-  dynamicGpr(index: ValueId, width: OperandWidth): ResourceByteOperand {
-    const values = this.#region.values;
-    const byteLength = widthByteLength(layoutWidth(width));
+  dynamicGpr<Width extends OperandWidth>(index: Integer<8>, width: Width): ResourceAccess<Width> {
     const array = this.#state.layout.namedArray(coreStateFields.gprs);
     const strideShift = powerOfTwoShift(array.stride);
     const relativeOffset =
       width === 8
-        ? values.binary(
-            "add",
-            values.binary(
-              "shl",
-              values.binary("and", index, values.const(3)),
-              values.const(strideShift)
-            ),
-            values.binary("and", values.binary("shr_u", index, values.const(2)), values.const(1))
-          )
-        : values.binary(
-            "shl",
-            values.binary("and", index, values.const(7)),
-            values.const(strideShift)
-          );
+        ? index.and(3).shl(strideShift).add(index.unsigned.shr(2).and(1)).unsigned.extend(32)
+        : index.and(7).shl(strideShift).unsigned.extend(32);
 
-    return this.#dynamicNamedArray(coreStateFields.gprs, array, relativeOffset, byteLength);
+    return this.#dynamicNamedArray(coreStateFields.gprs, array, relativeOffset, width);
   }
 
-  segment(reg: SegmentRegister, field: SegmentStateField): ResourceByteOperand {
+  segment<Field extends SegmentStateField>(
+    reg: SegmentRegister,
+    field: Field
+  ): ResourceAccess<SegmentBitWidth<Field>> {
     const array = segmentNamedArray(field);
 
     return this.#namedArrayElement(
       array,
       array.elementIndex(reg),
       0,
-      widthByteLength(array.elementWidth)
+      segmentBitWidthByField[field]
     );
   }
 
-  dynamicSegment(index: ValueId, field: SegmentStateField): ResourceByteOperand {
-    const values = this.#region.values;
+  dynamicSegment<Field extends SegmentStateField>(
+    index: Integer<8>,
+    field: Field
+  ): ResourceAccess<SegmentBitWidth<Field>> {
     const arrayRef = segmentNamedArray(field);
     const array = this.#state.layout.namedArray(arrayRef);
-    const relativeOffset = values.binary("shl", index, values.const(powerOfTwoShift(array.stride)));
+    const relativeOffset = index.shl(powerOfTwoShift(array.stride)).unsigned.extend(32);
 
-    return this.#dynamicNamedArray(arrayRef, array, relativeOffset, array.elementByteLength);
+    return this.#dynamicNamedArray(arrayRef, array, relativeOffset, segmentBitWidthByField[field]);
   }
 
-  field<TWidth extends LayoutWidth>(field: FieldRef<TWidth>): ResourceByteOperand {
+  field<
+    TWidth extends LayoutWidth,
+    TValueWidth extends ValueWidthForStorage<LayoutBitWidth<TWidth>>
+  >(field: FieldRef<TWidth, TValueWidth>): ResourceAccess<LayoutBitWidth<TWidth>, TValueWidth> {
     const placed = this.#state.layout.field(field);
 
-    return this.#staticOperand(placed.offset, placed.byteLength, integerWidth(field.width));
+    return this.#staticOperand(placed.offset, layoutBitWidth(field.width), field.valueWidth);
   }
 
-  read(operand: ResourceByteOperand, mode?: ResourceReadMode): ValueId {
+  read<StoredWidth extends StorageWidth, ValueWidth extends ValueWidthForStorage<StoredWidth>>(
+    operand: ResourceAccess<StoredWidth, ValueWidth>
+  ): Integer<ValueWidth> {
     assert(this.owns(operand.effect), "operand belongs to another resource");
-    assert(
-      mode?.kind !== "signed" || operand.width !== 32,
-      "a 32-bit state read has no signed extension"
-    );
 
-    return this.#region.operation(
-      resourceRead,
-      mode === undefined ? { source: operand } : { source: operand, mode }
-    );
+    return this.#region.readResource(operand);
   }
 
-  readField<TWidth extends LayoutWidth>(field: FieldRef<TWidth>, mode?: ResourceReadMode): ValueId {
-    return this.read(this.field(field), mode);
+  readField<
+    TWidth extends LayoutWidth,
+    TValueWidth extends ValueWidthForStorage<LayoutBitWidth<TWidth>>
+  >(field: FieldRef<TWidth, TValueWidth>): Integer<TValueWidth> {
+    return this.read(this.field(field));
   }
 
-  write(operand: ResourceByteOperand, value: ValueId): void {
+  write<StoredWidth extends StorageWidth, ValueWidth extends ValueWidthForStorage<StoredWidth>>(
+    operand: ResourceAccess<StoredWidth, ValueWidth>,
+    value: Integer<NoInfer<ValueWidth>>
+  ): void {
     assert(this.owns(operand.effect), "operand belongs to another resource");
-    this.#region.operation(resourceWrite, { destination: operand, value });
+    this.#region.writeResource(operand, value);
   }
 
-  #namedArrayElement<TWidth extends LayoutWidth>(
+  #namedArrayElement<TWidth extends LayoutWidth, Width extends StateStorageWidth>(
     arrayRef: NamedArrayRef<TWidth>,
     index: number,
     byteOffset: number,
-    byteLength: LayoutByteLength
-  ): ResourceByteOperand {
+    width: Width
+  ): ResourceAccess<Width> {
+    const byteLength = bitWidthByteLength(width);
     const slice = namedArrayElementSlice(this.#state, arrayRef, index, byteOffset, byteLength);
 
-    return this.#staticOperand(
-      slice.byteOffset,
-      slice.byteLength,
-      byteLengthWidth(slice.byteLength)
-    );
+    return this.#staticOperand(slice.byteOffset, width);
   }
 
-  #dynamicNamedArray<TWidth extends LayoutWidth>(
+  #dynamicNamedArray<TWidth extends LayoutWidth, Width extends StateStorageWidth>(
     arrayRef: NamedArrayRef<TWidth>,
     array: LayoutNamedArray<TWidth>,
-    relativeOffset: ValueId,
-    byteLength: LayoutByteLength
-  ): ResourceByteOperand {
-    const staticRelativeOffset = this.#region.values.constValue(relativeOffset);
+    relativeOffset: I32Value,
+    width: Width
+  ): ResourceAccess<Width> {
+    const byteLength = bitWidthByteLength(width);
+    const staticRelativeOffset = this.#region.constValue(relativeOffset);
 
     if (staticRelativeOffset !== undefined) {
       assert(
@@ -217,11 +240,7 @@ export class BoundStateAccess {
         `access exceeds named layout array ${arrayRef.id}`
       );
 
-      return this.#staticOperand(
-        array.offset + staticRelativeOffset,
-        byteLength,
-        byteLengthWidth(byteLength)
-      );
+      return this.#staticOperand(array.offset + staticRelativeOffset, width);
     }
 
     return {
@@ -230,24 +249,33 @@ export class BoundStateAccess {
         base: relativeOffset,
         displacement: array.offset
       },
-      width: byteLengthWidth(byteLength)
+      storageWidth: width,
+      valueWidth: width
     };
   }
 
+  #staticOperand<Width extends StateStorageWidth>(
+    byteOffset: number,
+    width: Width
+  ): ResourceAccess<Width>;
+  #staticOperand<Width extends StateStorageWidth, ValueWidth extends ValueWidthForStorage<Width>>(
+    byteOffset: number,
+    width: Width,
+    valueWidth: ValueWidth
+  ): ResourceAccess<Width, ValueWidth>;
   #staticOperand(
     byteOffset: number,
-    byteLength: LayoutByteLength,
-    width: IntegerWidth
-  ): ResourceByteOperand {
-    const values = this.#region.values;
-
+    storageWidth: StateStorageWidth,
+    valueWidth: ValueWidthForStorage<StateStorageWidth> = storageWidth
+  ): ResourceAccess<StateStorageWidth, ValueWidthForStorage<StateStorageWidth>> {
     return {
-      effect: this.#effect(byteOffset, byteLength),
+      effect: this.#effect(byteOffset, bitWidthByteLength(storageWidth)),
       address: {
-        base: values.const(0),
+        base: i32(0),
         displacement: byteOffset
       },
-      width
+      storageWidth,
+      valueWidth
     };
   }
 
@@ -288,60 +316,31 @@ function resourceEffect(
   byteLength: number
 ): ResourceEffect {
   return {
-    space: "resource",
+    kind: "resource",
     resource: state.resource,
     range: {
-      basis: { kind: "resource" },
-      slice: { byteOffset, byteLength }
+      kind: "slice",
+      origin: "resource",
+      byteOffset,
+      byteLength
     }
   };
 }
 
-function segmentNamedArray(
-  field: SegmentStateField
-): NamedArrayRef<"u16" | "u32", SegmentRegister> {
-  switch (field) {
-    case "selector":
-      return coreStateFields.segmentSelectors;
-    case "base":
-      return coreStateFields.segmentBases;
-    case "limit":
-      return coreStateFields.segmentLimits;
-    case "access":
-      return coreStateFields.segmentAccess;
-  }
+function segmentNamedArray<Field extends SegmentStateField>(
+  field: Field
+): (typeof segmentArrayByField)[Field] {
+  return segmentArrayByField[field];
 }
 
-function layoutWidth(width: OperandWidth): LayoutWidth {
+function bitWidthByteLength(width: StateStorageWidth): LayoutByteLength {
   switch (width) {
     case 8:
-      return "u8";
+      return 1;
     case 16:
-      return "u16";
+      return 2;
     case 32:
-      return "u32";
-  }
-}
-
-function integerWidth(width: LayoutWidth): IntegerWidth {
-  switch (width) {
-    case "u8":
-      return 8;
-    case "u16":
-      return 16;
-    case "u32":
-      return 32;
-  }
-}
-
-function byteLengthWidth(byteLength: LayoutByteLength): IntegerWidth {
-  switch (byteLength) {
-    case 1:
-      return 8;
-    case 2:
-      return 16;
-    case 4:
-      return 32;
+      return 4;
   }
 }
 

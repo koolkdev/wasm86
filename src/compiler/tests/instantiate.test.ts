@@ -2,21 +2,17 @@ import { strictEqual } from "node:assert";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 
-import {
-  resourceRef,
-  type ResourceByteOperand,
-  type ResourceEffect,
-  type ResourceRef
-} from "#compiler/ir/resource.js";
-import { resourceRead } from "#compiler/ir/operations/resource.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
+import { type ResourceAccess } from "#compiler/function/resource.js";
+import type { ResourceEffect } from "#compiler/function/resource.js";
+import { resourceRef, type ResourceRef } from "#compiler/reference.js";
 import { compileProgram, type CompiledProgram } from "#compiler/compile.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/wasm/legacy/function-type.js";
+import { functionType } from "#compiler/function/type.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import { functionExportRef, type FunctionExportRef } from "#compiler/program/exports.js";
 import { functionRef, type FunctionRef } from "#compiler/reference.js";
 import { createProgramResources } from "#compiler/program/resources.js";
+import { Integer, i32, type I32Value } from "#compiler/function/values.js";
 
 const fixture = createInstanceFixture();
 
@@ -69,7 +65,7 @@ function createInstanceFixture(): InstanceFixture {
   const access = memoryRead(resource);
   const imported = program.importFunction({
     ref: functionRef("test.instance.function"),
-    type: functionType(["i32"], ["i32"]),
+    type: functionType([Integer[32]], [Integer[32]]),
     effects: { reads: [], writes: [] },
     moduleName: "external runtime/2026",
     name: "function.with punctuation"
@@ -77,13 +73,11 @@ function createInstanceFixture(): InstanceFixture {
   const entry = program.defineFunction(
     {
       ref: functionRef("test.instance.entry"),
-      type: functionType([], ["i32"]),
+      type: functionType([], [Integer[32]]),
       effects: { reads: [access], writes: [] }
     },
     (fn) => {
-      const value = fn.region.operation(resourceRead, {
-        source: memoryOperand(resource, access, fn.values.const(0))
-      });
+      const value = fn.region.readResource(memoryOperand(resource, access, i32(0)));
       const result = fn.region.call(imported, [value])[0];
 
       if (result === undefined) {
@@ -109,23 +103,21 @@ function createInstanceFixture(): InstanceFixture {
 
 function memoryRead(resource: ResourceRef): ResourceEffect {
   return {
-    space: "resource",
+    kind: "resource",
     resource,
-    range: {
-      basis: { kind: "resource" },
-      slice: { byteOffset: 0, byteLength: 4 }
-    }
+    range: { kind: "slice", origin: "resource", byteOffset: 0, byteLength: 4 }
   };
 }
 
 function memoryOperand(
   resource: ResourceRef,
   effect: ResourceEffect,
-  base: ValueId
-): ResourceByteOperand {
+  base: I32Value
+): ResourceAccess<32> {
   return {
     effect: { ...effect, resource },
     address: { base, displacement: 0 },
-    width: 32
+    storageWidth: 32,
+    valueWidth: 32
   };
 }

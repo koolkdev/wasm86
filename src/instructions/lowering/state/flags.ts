@@ -1,6 +1,6 @@
 import type { X86Flag } from "#core/flags/definitions.js";
 import { flagStateFields } from "#core/flags/layout.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
+import { nonzero, type BitValue } from "#compiler/function/values.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 import type { StateFieldTracker } from "./field-tracker.js";
 
@@ -11,11 +11,11 @@ export class InstructionFlagState {
     this.#state = state;
   }
 
-  read(access: BoundStateAccess, flag: X86Flag): ValueId {
-    return this.#state.read(access, flagStateFields.concrete[flag]);
+  read(access: BoundStateAccess, flag: X86Flag): BitValue {
+    return nonzero(this.#state.read(access, flagStateFields.concrete[flag]));
   }
 
-  write(flag: X86Flag, value: ValueId): void {
-    this.#state.write(flagStateFields.concrete[flag], value);
+  write(access: BoundStateAccess, flag: X86Flag, value: BitValue): void {
+    this.#state.write(access, flagStateFields.concrete[flag], value.unsigned.extend(32));
   }
 }

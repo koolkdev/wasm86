@@ -1,5 +1,12 @@
-import type { ValueId } from "#compiler/ir/values/types.js";
-import { VariableRef } from "#compiler/ir/variable.js";
+import {
+  Integer,
+  i32,
+  u8,
+  unreachable,
+  type BitValue,
+  type I32Value
+} from "#compiler/function/values.js";
+import { VariableRef } from "#compiler/function/storage.js";
 import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";
 import type {
   DecodeCandidate,
@@ -15,7 +22,7 @@ import type { InstructionSpec } from "#instructions/isa/spec.js";
 import type { OperandBinding } from "#instructions/lowering/bindings.js";
 import type { BuildExit } from "#instructions/lowering/terminal.js";
 import type { StateAccess } from "#core/state/access.js";
-import type { RegionBuilder, SwitchControlArm } from "#compiler/ir/builder/region.js";
+import type { RegionBuilder, SwitchControlArm } from "#compiler/function/builder/region.js";
 import type { DirectMemoryAccess, MemoryAccess } from "#memory/types.js";
 import { ModRmAddressDecoder } from "./decode/address.js";
 import { memoryFormDispatch, exactModRmCases, modRmRegCases } from "./decode/forms.js";
@@ -27,8 +34,8 @@ type SelectedDecodeCandidate = Exclude<DecodeCandidate, Readonly<{ kind: "empty"
 
 export type DecodedInstruction = Readonly<{
   instruction: InstructionSpec;
-  instructionStart: ValueId;
-  nextEip: ValueId;
+  instructionStart: I32Value;
+  nextEip: I32Value;
   bindings: readonly OperandBinding[];
 }>;
 
@@ -53,11 +60,11 @@ export type InterpreterDecodeOptions = Readonly<{
   mode: InterpreterDecodeMode;
 }>;
 
-// Emits decode and instruction-dispatch IR into the enclosing function;
-// decode/* classes organize author-time construction, not generated calls.
+// Builds decode and instruction-dispatch logic in the enclosing function;
+// Classes under decode/ organize build-time construction, not generated calls.
 export function buildDecodeAndDispatch(
   region: RegionBuilder,
-  instructionStart: ValueId,
+  instructionStart: I32Value,
   options: InterpreterDecodeOptions
 ): void {
   new InterpreterDecoder(region, instructionStart, options).build();
@@ -65,17 +72,21 @@ export function buildDecodeAndDispatch(
 
 class InterpreterDecoder {
   readonly #root: RegionBuilder;
-  readonly #instructionStart: ValueId;
+  readonly #instructionStart: I32Value;
   readonly #options: InterpreterDecodeOptions;
   readonly #stream: InstructionByteStream;
   readonly #prefixes: PrefixDecoder;
-  readonly #memoryFormOrdinal: VariableRef;
-  readonly #modRmByte: VariableRef;
+  readonly #memoryFormOrdinal: VariableRef<(typeof Integer)[32]>;
+  readonly #modRmByte: VariableRef<(typeof Integer)[8]>;
   readonly #address: ModRmAddressDecoder;
   readonly #operands: OperandDecoder;
 
-  constructor(region: RegionBuilder, instructionStart: ValueId, options: InterpreterDecodeOptions) {
-    const invalidFormOrdinal = region.values.const(-1);
+  constructor(
+    region: RegionBuilder,
+    instructionStart: I32Value,
+    options: InterpreterDecodeOptions
+  ) {
+    const invalidFormOrdinal = i32(-1);
 
     this.#root = region;
     this.#instructionStart = instructionStart;
@@ -89,7 +100,7 @@ class InterpreterDecoder {
     );
     this.#prefixes = new PrefixDecoder(region, this.#stream, options.mode);
     this.#memoryFormOrdinal = region.variable(invalidFormOrdinal);
-    this.#modRmByte = region.variable(region.values.const(0x100));
+    this.#modRmByte = region.variable(u8(0));
     this.#operands = new OperandDecoder({
       instructionStart,
       stream: this.#stream,
@@ -120,7 +131,7 @@ class InterpreterDecoder {
     this.#dispatchSelectedMemoryForm(root);
   }
 
-  #dispatchOpcode(region: RegionBuilder, node: OpcodeNode, byte: ValueId): void {
+  #dispatchOpcode(region: RegionBuilder, node: OpcodeNode, byte: Integer<8>): void {
     const arms: SwitchControlArm[] = [];
 
     node.next.forEach((next, match) => {
@@ -142,11 +153,7 @@ class InterpreterDecoder {
   }
 
   #dispatchOpcodeLeaf(region: RegionBuilder, leaf: OpcodeLeaf): void {
-    const flags = region.values.binary(
-      "and",
-      this.#prefixes.flags(region),
-      region.values.const(X86_32_DECODE_MODEL.prefixes.flagMask)
-    );
+    const flags = this.#prefixes.flags(region).and(X86_32_DECODE_MODEL.prefixes.flagMask);
     const arms: SwitchControlArm[] = [];
 
     leaf.byPrefix.forEach((candidate, match) => {
@@ -191,7 +198,7 @@ class InterpreterDecoder {
 
   #dispatchExactModRm(
     region: RegionBuilder,
-    byte: ValueId,
+    byte: Integer<8>,
     byByte: readonly (InstructionForm | undefined)[]
   ): void {
     // The exact byte selects both the form and its register or memory path.
@@ -208,7 +215,7 @@ class InterpreterDecoder {
     );
   }
 
-  #dispatchModRmFields(region: RegionBuilder, byte: ValueId, fields: ModRmFieldSelection): void {
+  #dispatchModRmFields(region: RegionBuilder, byte: Integer<8>, fields: ModRmFieldSelection): void {
     switch (fields.kind) {
       case "mode":
         this.#dispatchModRmMode(region, byte, fields.forms);
@@ -219,20 +226,21 @@ class InterpreterDecoder {
     }
   }
 
-  #dispatchModRmMode(region: RegionBuilder, byte: ValueId, forms: ModRmModeForms): void {
+  #dispatchModRmMode(region: RegionBuilder, byte: Integer<8>, forms: ModRmModeForms): void {
     // The forms are already selected; only register versus memory remains.
-    this.#dispatchModRmForms(region, byte, this.#registerMode(region, byte), forms);
+    this.#dispatchModRmForms(region, byte, this.#registerMode(byte), forms);
   }
 
-  #dispatchModRmReg(region: RegionBuilder, byte: ValueId, byReg: readonly ModRmModeForms[]): void {
+  #dispatchModRmReg(
+    region: RegionBuilder,
+    byte: Integer<8>,
+    byReg: readonly ModRmModeForms[]
+  ): void {
     // Select the opcode-group forms by ModRM.reg, then branch between their
     // register and memory forms inside the selected arm.
-    const formSelector = region.values.binary(
-      "and",
-      region.values.binary("shr_u", byte, region.values.const(3)),
-      region.values.const(0b111)
-    );
-    const registerMode = this.#registerMode(region, byte);
+    const formSelector = byte.unsigned.shr(3).and(0b111);
+    // This selector is shared by every opcode-group arm.
+    const registerMode = this.#registerMode(byte);
 
     region.switchControl(
       formSelector,
@@ -244,14 +252,14 @@ class InterpreterDecoder {
     );
   }
 
-  #registerMode(region: RegionBuilder, byte: ValueId): ValueId {
-    return region.values.compare(32, "ge_u", byte, region.values.const(0xc0));
+  #registerMode(byte: Integer<8>): BitValue {
+    return byte.unsigned.ge(0xc0);
   }
 
   #dispatchModRmForms(
     region: RegionBuilder,
-    byte: ValueId,
-    registerMode: ValueId,
+    byte: Integer<8>,
+    registerMode: BitValue,
     forms: ModRmModeForms
   ): void {
     region.write(this.#modRmByte, byte);
@@ -266,7 +274,7 @@ class InterpreterDecoder {
 
   #buildModRmForm(
     region: RegionBuilder,
-    byte: ValueId,
+    byte: Integer<8>,
     form: InstructionForm | undefined,
     mode: "register" | "memory"
   ): void {
@@ -279,7 +287,7 @@ class InterpreterDecoder {
         // Register arms have all required decode information and finish here.
         this.#buildInstruction(region, form, {
           kind: "register",
-          registerIndex: region.values.binary("and", byte, region.values.const(0b111))
+          registerIndex: byte.and(0b111)
         });
         return;
       case "memory":
@@ -293,7 +301,7 @@ class InterpreterDecoder {
   #recordMemoryForm(region: RegionBuilder, form: InstructionForm): void {
     const ordinal = memoryFormDispatch.ordinalByForm.get(form)!;
 
-    region.write(this.#memoryFormOrdinal, region.values.const(ordinal));
+    region.write(this.#memoryFormOrdinal, i32(ordinal));
   }
 
   #dispatchSelectedMemoryForm(region: RegionBuilder): void {
@@ -307,7 +315,7 @@ class InterpreterDecoder {
 
   #dispatchMemoryFormGroups(
     region: RegionBuilder,
-    ordinal: ValueId,
+    ordinal: I32Value,
     groups: readonly (readonly InstructionForm[])[]
   ): void {
     const forms = groups[0]!;
@@ -322,11 +330,7 @@ class InterpreterDecoder {
       remainingGroups.length === 0
         ? (unreachable) => this.#unreachable(unreachable)
         : (nextGroup) => {
-            const nextOrdinal = nextGroup.values.binary(
-              "sub",
-              ordinal,
-              nextGroup.values.const(memoryFormDispatch.groupSize)
-            );
+            const nextOrdinal = ordinal.sub(memoryFormDispatch.groupSize);
 
             this.#dispatchMemoryFormGroups(nextGroup, nextOrdinal, remainingGroups);
           }
@@ -341,11 +345,7 @@ class InterpreterDecoder {
 
   #buildInstruction(region: RegionBuilder, form: InstructionForm, rm: DecodedRm): void {
     const bindings = this.#operands.buildBindings(region, form, rm);
-    const nextEip = region.values.binary(
-      "add",
-      this.#instructionStart,
-      this.#stream.offset(region)
-    );
+    const nextEip = this.#instructionStart.add(this.#stream.offset(region));
 
     this.#options.buildInstruction(region, {
       instruction: form.instruction,
@@ -356,10 +356,10 @@ class InterpreterDecoder {
   }
 
   #invalidOpcode(region: RegionBuilder): void {
-    region.return([this.#options.buildExit(region.values, exceptionExit(invalidOpcode()))]);
+    region.return([this.#options.buildExit(exceptionExit(invalidOpcode()))]);
   }
 
   #unreachable(region: RegionBuilder): void {
-    region.return([region.values.unreachable("i64")]);
+    region.return([unreachable(64)]);
   }
 }

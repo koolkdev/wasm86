@@ -35,6 +35,15 @@ test("equivalent expressions resolve to one function value", () => {
   strictEqual(values.sameValue(f32(0), f32(-0)), false);
 });
 
+test("constant inspection observes resolved narrow integer expressions", () => {
+  const values = new ValueResolver();
+  const parameter = values.parameter(0, Integer[32]);
+
+  strictEqual(values.constValue(i32(4).add(3)), 7);
+  strictEqual(values.constValue(i32(-1)), -1);
+  strictEqual(values.constValue(parameter), undefined);
+});
+
 test("select forwards resolved arms", () => {
   const values = new ValueResolver();
   const condition = values.producer(Integer[1]);

@@ -5,9 +5,66 @@ import { RegionBuilder } from "#compiler/function/builder/region.js";
 import type { ResourceAccess, ResourceEffect } from "#compiler/function/resource.js";
 import { VariableRef } from "#compiler/function/storage.js";
 import { functionType } from "#compiler/function/type.js";
-import { Float, Integer } from "#compiler/function/values.js";
+import { Float, Integer, i32 } from "#compiler/function/values.js";
 import { ValueResolver } from "#compiler/function/values/resolver.js";
 import { functionRef, resourceRef } from "#compiler/reference.js";
+
+const builderTestResource = resourceRef("test.region-builder.resource");
+
+function resourceAccess(base: Integer<32>, byteOffset: number): ResourceAccess<32> {
+  return {
+    effect: {
+      kind: "resource",
+      resource: builderTestResource,
+      range: {
+        kind: "slice",
+        origin: "resource",
+        byteOffset,
+        byteLength: 4
+      }
+    },
+    address: { base, displacement: byteOffset },
+    storageWidth: 32,
+    valueWidth: 32
+  };
+}
+
+test("region builders expose resolved constant knowledge", () => {
+  const values = new ValueResolver();
+  const builder = new RegionBuilder(values);
+  const parameter = values.parameter(0, Integer[32]);
+
+  strictEqual(builder.constValue(i32(10).sub(4)), 6);
+  strictEqual(builder.constValue(parameter), undefined);
+  strictEqual(builder.sameValue(i32(10).sub(4), i32(6)), true);
+});
+
+test("child and scratch builders isolate nodes while raw if control adopts a child", () => {
+  const values = new ValueResolver();
+  const builder = new RegionBuilder(values);
+  const condition = values.parameter(0, Integer[1]);
+  const base = values.parameter(1, Integer[32]);
+  const value = values.parameter(2, Integer[32]);
+  const child = builder.child();
+  const scratch = builder.scratch();
+
+  child.writeResource(resourceAccess(base, 0), value);
+  scratch.writeResource(resourceAccess(base, 4), value);
+  builder.ifControl(condition, {
+    hint: "likely",
+    thenBody: child.build()
+  });
+
+  const region = builder.build();
+  const branch = region.nodes[0];
+
+  strictEqual(region.nodes.length, 1);
+  ok(branch?.kind === "if");
+  strictEqual(branch.hint, "likely");
+  strictEqual(branch.thenBody.nodes[0]?.kind, "resource.write");
+  strictEqual(branch.elseBody, undefined);
+  strictEqual(scratch.build().nodes[0]?.kind, "resource.write");
+});
 
 test("straight-line storage operations retain their authored order and outputs", () => {
   const values = new ValueResolver();
@@ -280,6 +337,37 @@ test("loops retain typed inputs and nested back edges", () => {
 
   ok(emptyContinuation?.kind === "loopContinue");
   deepStrictEqual(emptyContinuation.updates, []);
+});
+
+test("loop read placement routes selected reads to the loop entry", () => {
+  const values = new ValueResolver();
+  const builder = new RegionBuilder(values);
+  const base = values.parameter(0, Integer[32]);
+
+  builder.loop(
+    [],
+    (body) => {
+      const entryRead = body.readResource(resourceAccess(base, 0));
+      const bodyRead = body.readResource(resourceAccess(base, 4));
+
+      body.writeResource(resourceAccess(base, 8), entryRead.add(bodyRead));
+    },
+    {
+      resourceReadPlacement: (effect) =>
+        effect.range.kind === "slice" && effect.range.byteOffset === 0 ? "entry" : "body"
+    }
+  );
+
+  const region = builder.build();
+  const entryRead = region.nodes[0];
+  const loop = region.nodes[1];
+
+  ok(entryRead?.kind === "resource.read");
+  ok(loop?.kind === "loop");
+  deepStrictEqual(
+    loop.body.nodes.map((node) => node.kind),
+    ["resource.read", "resource.write"]
+  );
 });
 
 test("build snapshots direct variable writes and ordinary fallthrough", () => {

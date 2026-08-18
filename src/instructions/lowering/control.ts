@@ -1,12 +1,11 @@
 import { assert } from "#common/assert.js";
 import { isLazyFlagStateField } from "#core/flags/layout.js";
 import type { IfBody, LoopBody, SemanticsBuilder } from "#instructions/semantics/builder.js";
-import { ifControl, type BranchHint } from "#compiler/ir/controls/index.js";
-import { resourceWrite } from "#compiler/ir/operations/resource.js";
-import { regionCompletes, type Region } from "#compiler/ir/region.js";
-import { RegionBuilder } from "#compiler/ir/builder/region.js";
+import type { BranchHint } from "#compiler/function/control.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
+import type { Region } from "#compiler/function/region.js";
 import { type InstructionStateChannel } from "./state/channels.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
+import type { BitValue } from "#compiler/function/values.js";
 import type { SemanticRegionScope, SemanticScopeStack } from "./scope.js";
 import type { InstructionState } from "./state/state.js";
 import type { StateWriteLog } from "./state/write-log.js";
@@ -31,32 +30,32 @@ export class ControlEmitter {
   readonly #state: InstructionState;
   readonly #writeLog: StateWriteLog;
   readonly #scopes: SemanticScopeStack;
-  readonly #bindScope: (scope: SemanticRegionScope) => SemanticsBuilder;
+  readonly #semanticsBuilderForScope: (scope: SemanticRegionScope) => SemanticsBuilder;
 
   constructor(
     state: InstructionState,
     writeLog: StateWriteLog,
     scopes: SemanticScopeStack,
-    bindScope: (scope: SemanticRegionScope) => SemanticsBuilder
+    semanticsBuilderForScope: (scope: SemanticRegionScope) => SemanticsBuilder
   ) {
     this.#state = state;
     this.#writeLog = writeLog;
     this.#scopes = scopes;
-    this.#bindScope = bindScope;
+    this.#semanticsBuilderForScope = semanticsBuilderForScope;
   }
 
   if(
     parentScope: SemanticRegionScope,
-    condition: ValueId,
+    condition: BitValue,
     emitThen: IfBody,
     hint?: BranchHint
   ): IfOutcome {
     const parent = parentScope.region;
-    const conditionValue = parent.values.constValue(condition);
+    const conditionValue = parent.constValue(condition);
 
     if (conditionValue !== undefined) {
       if (conditionValue !== 0) {
-        emitThen(this.#bindScope(parentScope), parent.values);
+        emitThen(this.#semanticsBuilderForScope(parentScope));
       }
       return "continues";
     }
@@ -69,16 +68,16 @@ export class ControlEmitter {
 
   ifElse(
     parentScope: SemanticRegionScope,
-    condition: ValueId,
+    condition: BitValue,
     emitThen: IfBody,
     emitElse: IfBody,
     hint?: BranchHint
   ): IfOutcome {
     const parent = parentScope.region;
-    const conditionValue = parent.values.constValue(condition);
+    const conditionValue = parent.constValue(condition);
 
     if (conditionValue !== undefined) {
-      (conditionValue !== 0 ? emitThen : emitElse)(this.#bindScope(parentScope), parent.values);
+      (conditionValue !== 0 ? emitThen : emitElse)(this.#semanticsBuilderForScope(parentScope));
       return "continues";
     }
 
@@ -92,10 +91,10 @@ export class ControlEmitter {
     parentScope: SemanticRegionScope,
     region: RegionBuilder,
     body: LoopBody,
-    finish: (condition: ValueId) => T
+    finish: (condition: BitValue) => T
   ): T {
     return this.#scopes.enter(parentScope, "loop", region, (scope) => {
-      const outcome = scope.run(() => body(this.#bindScope(scope), region.values));
+      const outcome = scope.run(() => body(this.#semanticsBuilderForScope(scope)));
 
       assert(outcome.kind === "fallthrough", "a loop body must not terminate the instruction");
       scope.commitMemoryWrites();
@@ -105,7 +104,7 @@ export class ControlEmitter {
 
   #emitOneArmedIf(
     parentScope: SemanticRegionScope,
-    condition: ValueId,
+    condition: BitValue,
     thenArm: BuiltArm,
     hint?: BranchHint
   ): void {
@@ -115,14 +114,11 @@ export class ControlEmitter {
         ? undefined
         : this.#buildImplicitElse(parentScope, thenArm.writtenChannels);
 
-    parent.push(
-      ifControl.create({
-        condition,
-        ...(hint !== undefined ? { hint } : {}),
-        thenBody: thenArm.region.build(),
-        ...(implicitElse !== undefined ? { elseBody: implicitElse } : {})
-      })
-    );
+    parent.ifControl(condition, {
+      ...(hint !== undefined ? { hint } : {}),
+      thenBody: thenArm.region.build(),
+      ...(implicitElse !== undefined ? { elseBody: implicitElse } : {})
+    });
 
     if (thenArm.outcome === "continues") {
       this.#applyJoinEffects(parentScope, [thenArm], thenArm.writtenChannels);
@@ -131,7 +127,7 @@ export class ControlEmitter {
 
   #emitTwoArmedIf(
     parentScope: SemanticRegionScope,
-    condition: ValueId,
+    condition: BitValue,
     thenArm: BuiltArm,
     elseArm: BuiltArm,
     hint?: BranchHint
@@ -146,14 +142,11 @@ export class ControlEmitter {
       this.#commitMissingJoinChannels(arm, joinedChannels);
     }
 
-    parent.push(
-      ifControl.create({
-        condition,
-        ...(hint !== undefined ? { hint } : {}),
-        thenBody: thenArm.region.build(),
-        elseBody: elseArm.region.build()
-      })
-    );
+    parent.ifControl(condition, {
+      ...(hint !== undefined ? { hint } : {}),
+      thenBody: thenArm.region.build(),
+      elseBody: elseArm.region.build()
+    });
 
     if (continuingArms.length === 0) {
       return "completes";
@@ -170,8 +163,8 @@ export class ControlEmitter {
       const child = parentScope.region.child();
 
       return this.#scopes.enter(parentScope, "arm", child, (scope) => {
-        scope.run(() => emitBody(this.#bindScope(scope), child.values));
-        const completes = regionCompletes(child.build());
+        scope.run(() => emitBody(this.#semanticsBuilderForScope(scope)));
+        const completes = !child.build().fallsThrough;
 
         if (completes) {
           return { region: child, outcome: "completes" };
@@ -221,14 +214,14 @@ export class ControlEmitter {
     channels: readonly InstructionStateChannel[]
   ): boolean {
     let emitted = false;
-    const access = this.#state.bind(region);
+    const access = this.#state.forRegion(region);
 
     for (const channel of channels) {
       if (this.#state.isChannelDirty(channel)) {
-        region.operation(
-          resourceWrite,
-          this.#state.writeback(access, channel, this.#state.readChannel(access, channel))
-        );
+        const value = this.#state.readChannel(access, channel);
+        const writeback = this.#state.writeback(access, channel, value);
+
+        writeback.emit(region);
         emitted = true;
       }
     }

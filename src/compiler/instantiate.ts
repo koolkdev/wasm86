@@ -1,5 +1,5 @@
 import { assert } from "#common/assert.js";
-import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { ResourceRef } from "#compiler/reference.js";
 import { wasmPageByteLength } from "#compiler/program/limits.js";
 import type { CompiledProgram } from "#compiler/compile.js";
 import type { FunctionRef } from "#compiler/reference.js";

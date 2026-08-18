@@ -1,8 +1,8 @@
 import { segmentRegisterIndex } from "#core/segments.js";
 import type { SegmentOperandBinding } from "#instructions/lowering/bindings.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
+import { i32, type I32Value } from "#compiler/function/values.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
 import type { InstructionTerminator } from "./terminal.js";
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 
 // A selector write's consequence is mode policy, not state: it may end the
@@ -16,17 +16,17 @@ export function emitSegmentLoad(
   region: RegionBuilder,
   access: BoundStateAccess,
   binding: SegmentOperandBinding,
-  selector: ValueId
+  selector: I32Value
 ): SegmentWriteOutcome {
-  terminator.segmentLoad(region, access, segmentIndex(region, binding), selector);
+  terminator.segmentLoad(region, access, segmentIndex(binding), selector);
   return "terminated";
 }
 
-function segmentIndex(region: RegionBuilder, binding: SegmentOperandBinding): ValueId {
+function segmentIndex(binding: SegmentOperandBinding): I32Value {
   switch (binding.selection.kind) {
     case "static":
-      return region.values.const(segmentRegisterIndex(binding.selection.reg));
+      return i32(segmentRegisterIndex(binding.selection.reg));
     case "dynamic":
-      return binding.selection.index;
+      return binding.selection.index.unsigned.extend(32);
   }
 }

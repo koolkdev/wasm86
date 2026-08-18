@@ -1,6 +1,6 @@
 import { generalProtection, invalidOpcode, type CpuException } from "#core/exceptions.js";
 import { u32 } from "#common/numeric.js";
-import { registerAliasByCode } from "#core/registers.js";
+import { registerAliasByIndex } from "#core/registers.js";
 import type { EffectiveAddress, MemOperand, SegmentRegister } from "#core/types.js";
 import { selectModRmForm } from "./model/candidates.js";
 import { X86_32_DECODE_MODEL } from "./model/index.js";
@@ -276,7 +276,7 @@ class NumericDecodeEvaluator {
 
         return {
           kind: "reg",
-          alias: registerAliasByCode(operand.width, (byte >>> 3) & 0b111)
+          alias: registerAliasByIndex(operand.width, (byte >>> 3) & 0b111)
         };
       }
       case "modrm.sreg": {
@@ -293,7 +293,7 @@ class NumericDecodeEvaluator {
 
           return {
             kind: "reg",
-            alias: registerAliasByCode(registerOperand.registerWidth, rm.index)
+            alias: registerAliasByIndex(registerOperand.registerWidth, rm.index)
           };
         }
 
@@ -307,7 +307,7 @@ class NumericDecodeEvaluator {
       case "opcode.reg":
         return {
           kind: "reg",
-          alias: registerAliasByCode(operand.width, form.opcodeLowBits!)
+          alias: registerAliasByIndex(operand.width, form.opcodeLowBits!)
         };
       case "implicit.reg":
         return { kind: "reg", alias: operand.alias };

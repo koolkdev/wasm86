@@ -1,4 +1,4 @@
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
+import { i32, type Integer, type I32Value } from "#compiler/function/values.js";
 import type {
   BoundMemoryAccess,
   LinearRange,
@@ -10,14 +10,11 @@ import type {
   AccessFault,
   AccessResolution,
   SemanticMemoryAccessOptions,
-  SemanticMemoryLoadOptions,
-  SemanticMemoryOps,
-  SemanticMemoryReadOptions,
-  SemanticMemoryStoreOptions,
-  SemanticMemoryWriteOptions
+  SemanticMemoryOps
 } from "#instructions/semantics/builder.js";
-import type { MemRef, OperandInput, Value, ValueInput } from "#instructions/semantics/refs.js";
-import type { SegmentRegister } from "#core/types.js";
+import type { MemRef, OperandRef } from "#instructions/semantics/refs.js";
+import type { OperandWidth, SegmentRegister } from "#core/types.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
 import type { ScopedOperandResolver } from "./operand-resolver.js";
 
 type InstructionMemoryOptions = Readonly<{
@@ -28,7 +25,6 @@ type InstructionMemoryOptions = Readonly<{
 // Adapts segmented x86 references to Memory's linear access descriptions.
 // Guarding stays here because Core owns CPU-exception control and restart state.
 export class InstructionMemory implements SemanticMemoryOps {
-  readonly #region: RegionBuilder;
   readonly #operands: ScopedOperandResolver;
   readonly #memory: BoundMemoryAccess;
   readonly #options: InstructionMemoryOptions;
@@ -39,27 +35,26 @@ export class InstructionMemory implements SemanticMemoryOps {
     operands: ScopedOperandResolver,
     options: InstructionMemoryOptions
   ) {
-    this.#region = region;
     this.#operands = operands;
-    this.#memory = memory.bind(region);
+    this.#memory = memory.forRegion(region);
     this.#options = options;
   }
 
-  reference(segment: SegmentRegister, offset: ValueInput): MemRef {
+  reference(segment: SegmentRegister, offset: I32Value): MemRef {
     return {
       segment: { kind: "static", reg: segment },
       offset
     };
   }
 
-  operand(operand: OperandInput, addressOffset?: ValueInput): MemRef {
+  operand(operand: OperandRef, addressOffset?: I32Value): MemRef {
     const reference = this.#operands.memoryReference(operand.index);
 
     return addressOffset === undefined
       ? reference
       : {
           segment: reference.segment,
-          offset: this.#region.values.binary("add", reference.offset, addressOffset)
+          offset: reference.offset.add(addressOffset)
         };
   }
 
@@ -81,48 +76,44 @@ export class InstructionMemory implements SemanticMemoryOps {
     return resolution.access;
   }
 
-  read(reference: MemRef, options: SemanticMemoryReadOptions): Value {
+  read<const Width extends OperandWidth>(reference: MemRef, width: Width): Integer<Width> {
     const access = this.guard({
       reference,
-      byteLength: this.#region.values.const(options.width / 8),
+      byteLength: i32(width / 8),
       intent: "read"
     });
 
-    return this.load(access, options);
+    return this.load(access, width);
   }
 
-  write(reference: MemRef, options: SemanticMemoryWriteOptions): void {
+  write<const Width extends OperandWidth>(reference: MemRef, value: Integer<Width>): void {
     const access = this.guard({
       reference,
-      byteLength: this.#region.values.const(options.width / 8),
+      byteLength: i32(value.width / 8),
       intent: "write"
     });
 
-    this.store(access, { width: options.width, value: options.value });
+    this.store(access, value);
   }
 
-  load(access: ResolvedMemoryAccess, options: SemanticMemoryLoadOptions): Value {
-    const { signed = false } = options;
-
-    return this.#memory.load(
-      access,
-      options.byteOffset ?? this.#region.values.const(0),
-      options.width,
-      { signed }
-    );
+  load<const Width extends OperandWidth>(
+    access: ResolvedMemoryAccess,
+    width: Width,
+    byteOffset?: I32Value
+  ): Integer<Width> {
+    return this.#memory.load(access, byteOffset ?? i32(0), width);
   }
 
-  store(access: ResolvedMemoryAccess<"write">, options: SemanticMemoryStoreOptions): void {
+  store<const Width extends OperandWidth>(
+    access: ResolvedMemoryAccess<"write">,
+    value: Integer<Width>,
+    byteOffset?: I32Value
+  ): void {
     this.#options.recordWrite();
-    this.#memory.store(
-      access,
-      options.byteOffset ?? this.#region.values.const(0),
-      options.value,
-      options.width
-    );
+    this.#memory.store(access, byteOffset ?? i32(0), value);
   }
 
-  #range(reference: MemRef, byteLength: ValueInput): LinearRange {
+  #range(reference: MemRef, byteLength: I32Value): LinearRange {
     return {
       start: this.#operands.resolveAddress(reference),
       byteLength

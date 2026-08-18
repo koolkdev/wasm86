@@ -1,10 +1,13 @@
 import { assert } from "#common/assert.js";
+import type { ValueWidthForStorage } from "#compiler/function/resource.js";
 import {
   widthByteLength,
+  type AnyFieldRef,
   type ArrayRef,
   type ByteLengthOf,
   type FieldRef,
   type LayoutByteLength,
+  type LayoutBitWidth,
   type LayoutMember,
   type LayoutWidth,
   type NamedArrayRef
@@ -78,15 +81,20 @@ export type LayoutRecord = Readonly<{
 
 // A layout describes one storage space: execution state today, machine
 // memory (descriptors, page tables) when its first consumer lands. The space
-// is stable identity, not binding — import names and memory indexes stay
-// with module binding.
+// is stable identity, not module layout — import names and memory indexes
+// stay with Wasm module indexing.
 export interface Layout {
   readonly space: string;
   readonly byteLength: number;
   readonly alignment: number;
   readonly record: LayoutRecord;
 
-  field<TWidth extends LayoutWidth>(ref: FieldRef<TWidth>): LayoutField<TWidth>;
+  field<
+    TWidth extends LayoutWidth,
+    TValueWidth extends ValueWidthForStorage<LayoutBitWidth<TWidth>>
+  >(
+    ref: FieldRef<TWidth, TValueWidth>
+  ): LayoutField<TWidth>;
   namedArray<TWidth extends LayoutWidth, TElementId extends string>(
     ref: NamedArrayRef<TWidth, TElementId>
   ): LayoutNamedArray<TWidth, TElementId>;
@@ -94,13 +102,13 @@ export interface Layout {
 }
 
 class LayoutImpl implements Layout {
-  readonly #fields: ReadonlyMap<FieldRef, LayoutField>;
+  readonly #fields: ReadonlyMap<AnyFieldRef, LayoutField>;
   readonly #namedArrays: ReadonlyMap<NamedArrayRef, LayoutNamedArray>;
   readonly #arrays: ReadonlyMap<ArrayRef, LayoutArray>;
 
   constructor(
     readonly record: LayoutRecord,
-    fields: ReadonlyMap<FieldRef, LayoutField>,
+    fields: ReadonlyMap<AnyFieldRef, LayoutField>,
     namedArrays: ReadonlyMap<NamedArrayRef, LayoutNamedArray>,
     arrays: ReadonlyMap<ArrayRef, LayoutArray>
   ) {
@@ -121,8 +129,11 @@ class LayoutImpl implements Layout {
     return this.record.alignment;
   }
 
-  field<TWidth extends LayoutWidth>(ref: FieldRef<TWidth>): LayoutField<TWidth> {
-    const field = this.#fields.get(ref);
+  field<
+    TWidth extends LayoutWidth,
+    TValueWidth extends ValueWidthForStorage<LayoutBitWidth<TWidth>>
+  >(ref: FieldRef<TWidth, TValueWidth>): LayoutField<TWidth> {
+    const field = this.#fields.get(ref as AnyFieldRef);
 
     assert(field !== undefined, `field ${ref.id} does not belong to the ${this.space} layout`);
     return field as LayoutField<TWidth>;
@@ -168,7 +179,7 @@ export function createLayout(space: string, structures: readonly LayoutStructure
   }
 
   const orderedStructures = [...structures].sort((left, right) => compareIds(left.id, right.id));
-  const fields = new Map<FieldRef, LayoutField>();
+  const fields = new Map<AnyFieldRef, LayoutField>();
   const namedArrays = new Map<NamedArrayRef, LayoutNamedArray>();
   const arrays = new Map<ArrayRef, LayoutArray>();
   let offset = 0;
@@ -248,7 +259,7 @@ export function createLayout(space: string, structures: readonly LayoutStructure
 
 function memberRecord(
   member: LayoutMember,
-  fields: ReadonlyMap<FieldRef, LayoutField>,
+  fields: ReadonlyMap<AnyFieldRef, LayoutField>,
   namedArrays: ReadonlyMap<NamedArrayRef, LayoutNamedArray>,
   arrays: ReadonlyMap<ArrayRef, LayoutArray>
 ): LayoutRecordMember {

@@ -1,5 +1,5 @@
 import { createLayout, type Layout } from "#compiler/layout/layout.js";
-import { resourceRef, type ResourceRef } from "#compiler/ir/resource.js";
+import { resourceRef, type ResourceRef } from "#compiler/reference.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
 import { wasmPagesForByteLength } from "#compiler/program/limits.js";
 import type { MemoryImport } from "#compiler/program/resources.js";

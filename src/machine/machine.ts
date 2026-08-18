@@ -1,5 +1,5 @@
 import { wasmPagesForByteLength } from "#compiler/program/limits.js";
-import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { ResourceRef } from "#compiler/reference.js";
 import { createCpu, type Cpu } from "#cpu/cpu.js";
 import { createExecutionModel, type ExecutionModel } from "#execution/model.js";
 import { compileInterpreterProgram, type CompiledInterpreter } from "#interpreter/program.js";

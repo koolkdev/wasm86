@@ -1,15 +1,15 @@
-import type { ValueId } from "#compiler/ir/values/types.js";
+import type { I32Value } from "#compiler/function/values.js";
 import { valueInstructionLocation } from "#instructions/lowering/builder.js";
 import type { InstructionLowerer } from "#instructions/lowering/lowerer.js";
 import type { InstructionTerminals } from "#instructions/lowering/terminal.js";
 import type { StateAccess } from "#core/state/access.js";
 import { buildExit } from "#cpu/exit.js";
 import { instructionCountField, instructionLimitField } from "#cpu/instruction-count.js";
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
 import { instructionLimitExit } from "./exits.js";
 import type { DecodedInstruction } from "./decode.js";
 
-export type BuildInterpreterContinuation = (region: RegionBuilder, targetEip: ValueId) => void;
+export type BuildInterpreterContinuation = (region: RegionBuilder, targetEip: I32Value) => void;
 
 export function buildInterpreterInstruction(
   region: RegionBuilder,
@@ -18,7 +18,7 @@ export function buildInterpreterInstruction(
   instructionLowerer: InstructionLowerer,
   buildContinuation: BuildInterpreterContinuation
 ): void {
-  const entryState = stateAccess.bind(region);
+  const entryState = stateAccess.forRegion(region);
   const entryCount = entryState.readField(instructionCountField);
   const instructionLimit = entryState.readField(instructionLimitField);
   const nextEip = instructionLowerer.lower(
@@ -58,17 +58,16 @@ function interpreterTerminals(
 
 function continueInterpreter(
   region: RegionBuilder,
-  nextEip: ValueId,
+  nextEip: I32Value,
   stateAccess: StateAccess,
-  entryCount: ValueId,
-  instructionLimit: ValueId,
+  entryCount: I32Value,
+  instructionLimit: I32Value,
   buildContinuation: BuildInterpreterContinuation
 ): void {
-  const values = region.values;
-  const completedCount = stateAccess.bind(region).readField(instructionCountField);
-  const completedDistance = values.binary("sub", completedCount, entryCount);
-  const deadlineDistance = values.binary("sub", instructionLimit, entryCount);
-  const crossedDeadline = values.compare(32, "ge_u", completedDistance, deadlineDistance);
+  const completedCount = stateAccess.forRegion(region).readField(instructionCountField);
+  const completedDistance = completedCount.sub(entryCount);
+  const deadlineDistance = instructionLimit.sub(entryCount);
+  const crossedDeadline = completedDistance.unsigned.ge(deadlineDistance);
 
   // REP remains fused and may cross the deadline by more than the signed
   // modular half-range. Comparing progress from the starting instruction count
@@ -76,7 +75,7 @@ function continueInterpreter(
   region.if(
     crossedDeadline,
     (expired) => {
-      expired.return([buildExit(expired.values, instructionLimitExit())]);
+      expired.return([buildExit(instructionLimitExit())]);
     },
     { hint: "unlikely" }
   );

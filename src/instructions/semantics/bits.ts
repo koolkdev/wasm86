@@ -1,11 +1,15 @@
-import type { ValueBuilder } from "#compiler/ir/values/builder.js";
+import {
+  integer,
+  select,
+  type Integer,
+  type BitValue,
+  type I32Value
+} from "#compiler/function/values.js";
 import type {
   SemanticsBuilder,
-  SemanticOperandMemoryOptions,
-  SemanticUpdate,
-  SemanticTemplate
+  SemanticReadOptions,
+  InstructionSemantics
 } from "#instructions/semantics/builder.js";
-import type { Value, ValueInput } from "#instructions/semantics/refs.js";
 import { widthMask, type OperandWidth } from "#core/types.js";
 import { writeStatusFlagValues } from "./flag-writes.js";
 
@@ -14,101 +18,85 @@ export type BitOffsetSource = "reg" | "imm8";
 export type BitScanOp = "bsf" | "bsr";
 export type BitFieldWidth = Extract<OperandWidth, 16 | 32>;
 
-export function bitTestSemantic(
+export function bitTestSemantic<Width extends BitFieldWidth>(
   op: BitTestOp,
-  width: BitFieldWidth,
+  width: Width,
   offsetSource: BitOffsetSource
-): SemanticTemplate {
-  return (s, v) => {
+): InstructionSemantics {
+  return (s) => {
     const dst = s.operand(0);
     const offset = readBitOffset(s, width, offsetSource);
-    const bitIndex = v.binary("and", offset, v.const(width - 1));
-    const memory = bitStringMemoryOptions(v, width, offsetSource, offset);
+    const bitIndex = offset.and(width - 1);
+    const options = bitStringReadOptions(width, offsetSource, offset);
 
     if (op === "bt") {
-      const value = v.truncate(
-        width,
-        s.read(dst, memory === undefined ? { width } : { width, memory })
-      );
+      const value = s.read(dst, width, options);
 
-      writeBitTestFlag(s, v, value, bitIndex);
+      writeBitTestFlag(s, value, bitIndex);
       return;
     }
 
-    const target = s.update(dst, memory === undefined ? { width } : { width, memory });
-    const value = v.truncate(width, target.read(s));
+    const target = s.update(dst, width, options);
+    const value = s.read(target);
 
-    writeBitTestResult(s, v, op, width, target, value, bitIndex);
+    writeBitTestFlag(s, value, bitIndex);
+    s.write(target, bitTestWriteResult(op, value, bitIndex));
   };
 }
 
-export function bitScanSemantic(op: BitScanOp, width: BitFieldWidth): SemanticTemplate {
-  return (s, v) => {
+export function bitScanSemantic<Width extends BitFieldWidth>(
+  op: BitScanOp,
+  width: Width
+): InstructionSemantics {
+  return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
 
-    const source = v.truncate(width, s.read(src, { width }));
-    const oldDestination = s.read(dst, { width });
-    const sourceIsZero = v.compare(width, "eq", source, v.const(0));
-    const scan = bitScanIndex(v, op, source);
-    const scanOrZero = v.select(sourceIsZero, v.const(0), scan);
-    const result = v.select(sourceIsZero, oldDestination, scan);
+    const source = s.read(src, width);
+    const oldDestination = s.read(dst, width);
+    const sourceIsZero = source.eq(0);
+    const scan = bitScanIndex(op, source);
+    const scanOrZero = select(sourceIsZero, integer(source.width, 0), scan);
+    const result = select(sourceIsZero, oldDestination, scan);
 
-    writeBitScanFlags(s, v, sourceIsZero, scanOrZero);
-    s.write(dst, result, { width });
+    writeBitScanFlags(s, sourceIsZero, scanOrZero);
+    s.write(dst, result);
   };
 }
 
-function readBitOffset(
+function readBitOffset<Width extends BitFieldWidth>(
   s: SemanticsBuilder,
-  width: BitFieldWidth,
+  width: Width,
   offsetSource: BitOffsetSource
-): Value {
+): I32Value {
   return offsetSource === "reg"
-    ? s.read(s.operand(1), { width, signed: true })
-    : s.read(s.operand(1), { width: 8 });
+    ? s.read(s.operand(1), width).signed.extend(32)
+    : s.read(s.operand(1), 8).unsigned.extend(32);
 }
 
-function bitStringMemoryOptions(
-  v: ValueBuilder,
+function bitStringReadOptions(
   width: BitFieldWidth,
   offsetSource: BitOffsetSource,
-  offset: Value
-): SemanticOperandMemoryOptions | undefined {
+  offset: I32Value
+): SemanticReadOptions | undefined {
   if (offsetSource !== "reg") {
     return undefined;
   }
 
-  return {
-    addressOffset: () => {
-      const element = v.binary("shr_s", offset, v.const(elementShift(width)));
+  const indexShift = Math.log2(width);
+  const byteShift = Math.log2(width / 8);
 
-      return v.binary("shl", element, v.const(byteShift(width)));
-    }
+  return {
+    addressOffset: offset.signed.shr(indexShift).shl(byteShift)
   };
 }
 
-function writeBitTestResult(
+function writeBitTestFlag<Width extends BitFieldWidth>(
   s: SemanticsBuilder,
-  v: ValueBuilder,
-  op: Exclude<BitTestOp, "bt">,
-  width: BitFieldWidth,
-  target: SemanticUpdate,
-  value: Value,
-  bitIndex: Value
+  value: Integer<Width>,
+  bitIndex: I32Value
 ): void {
-  writeBitTestFlag(s, v, value, bitIndex);
-
-  target.write(s, bitTestWriteResult(v, op, width, value, bitIndex));
-}
-
-function writeBitTestFlag(
-  s: SemanticsBuilder,
-  v: ValueBuilder,
-  value: Value,
-  bitIndex: Value
-): void {
-  const bit = lowBit(v, v.binary("shr_u", value, bitIndex));
+  const bit = value.bit(bitIndex);
 
   // BT/BTS/BTR/BTC define CF only. PF/AF/ZF/SF/OF are architecturally
   // undefined; the local hardware probe preserves them, so leave them
@@ -116,84 +104,58 @@ function writeBitTestFlag(
   s.writeFlag("CF", bit);
 }
 
-function bitTestWriteResult(
-  v: ValueBuilder,
+function bitTestWriteResult<Width extends BitFieldWidth>(
   op: Exclude<BitTestOp, "bt">,
-  width: BitFieldWidth,
-  value: Value,
-  bitIndex: Value
-): Value {
-  const mask = v.truncate(width, v.binary("shl", v.const(1), bitIndex));
+  value: Integer<Width>,
+  bitIndex: I32Value
+): Integer<Width> {
+  const mask = integer(value.width, 1).shl(bitIndex);
 
   switch (op) {
     case "bts":
-      return v.truncate(width, v.binary("or", value, mask));
+      return value.or(mask);
     case "btr":
-      return v.truncate(
-        width,
-        v.binary("and", value, v.binary("xor", mask, v.const(widthMask(width))))
-      );
+      return value.and(mask.xor(widthMask(value.width)));
     case "btc":
-      return v.truncate(width, v.binary("xor", value, mask));
+      return value.xor(mask);
   }
 }
 
-function bitScanIndex(v: ValueBuilder, op: BitScanOp, source: Value): Value {
+function bitScanIndex<Width extends BitFieldWidth>(
+  op: BitScanOp,
+  source: Integer<Width>
+): Integer<Width> {
   switch (op) {
     case "bsf":
-      return v.unary("ctz", source);
+      return source.ctz();
     case "bsr":
-      return v.binary("sub", v.const(31), v.unary("clz", source));
+      return integer(source.width, source.width - 1).sub(source.clz());
   }
 }
 
-function writeBitScanFlags(
+function writeBitScanFlags<Width extends BitFieldWidth>(
   s: SemanticsBuilder,
-  v: ValueBuilder,
-  sourceIsZero: Value,
-  scanOrZero: Value
+  sourceIsZero: BitValue,
+  scanOrZero: Integer<Width>
 ): void {
-  const zero = v.const(0);
-  const parity = parityFlag(v, scanOrZero);
+  const parity = parityFlag(scanOrZero);
 
   // BSF/BSR define ZF only. CF/PF/AF/SF/OF are architecturally undefined;
   // these writes mirror the local hardware probe: CF/AF/SF/OF clear, and PF
   // is parity of the produced scan index, using index 0 for a zero source.
   writeStatusFlagValues(s, {
-    CF: zero,
+    CF: integer(1, 0),
     PF: parity,
-    AF: zero,
+    AF: integer(1, 0),
     ZF: sourceIsZero,
-    SF: zero,
-    OF: zero
+    SF: integer(1, 0),
+    OF: integer(1, 0)
   });
 }
 
-function parityFlag(v: ValueBuilder, value: ValueInput): Value {
-  const lowByte = v.binary("and", value, v.const(0xff));
-  const odd = lowBit(v, v.unary("popcnt", lowByte));
+function parityFlag<Width extends BitFieldWidth>(value: Integer<Width>): BitValue {
+  const lowByte = value.and(0xff);
+  const odd = lowByte.popcnt().bit(0);
 
-  return v.compare(32, "eq", odd, v.const(0));
-}
-
-function lowBit(v: ValueBuilder, value: ValueInput): Value {
-  return v.binary("and", value, v.const(1));
-}
-
-function elementShift(width: BitFieldWidth): 4 | 5 {
-  switch (width) {
-    case 16:
-      return 4;
-    case 32:
-      return 5;
-  }
-}
-
-function byteShift(width: BitFieldWidth): 1 | 2 {
-  switch (width) {
-    case 16:
-      return 1;
-    case 32:
-      return 2;
-  }
+  return odd.eqz();
 }

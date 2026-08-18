@@ -1,12 +1,12 @@
-import type { ValueId } from "#compiler/ir/values/types.js";
+import type { I32Value } from "#compiler/function/values.js";
 
 export type StatePathKind = "fault" | "completed";
 
-type PendingEntry = { value: ValueId; dirty: boolean };
+type PendingEntry<Value> = { value: Value; dirty: boolean };
 
-export type PendingBufferSnapshot<C> = Readonly<{
-  entries: ReadonlyMap<C, Readonly<PendingEntry>>;
-  boundary: ReadonlyMap<C, ValueId>;
+export type PendingBufferSnapshot<C, Value = I32Value> = Readonly<{
+  entries: ReadonlyMap<C, Readonly<PendingEntry<Value>>>;
+  boundary: ReadonlyMap<C, Value>;
 }>;
 
 // A pending-write buffer with an instruction-boundary snapshot: the
@@ -15,19 +15,19 @@ export type PendingBufferSnapshot<C> = Readonly<{
 // query, and the two flush modes (fault restores the snapshot, completed
 // publishes the current dirty set). Overlap policy and read caching are the
 // stores' own concern; this buffer is key-agnostic.
-export class PendingBuffer<C> {
-  readonly #entries = new Map<C, PendingEntry>();
-  #boundary = new Map<C, ValueId>();
+export class PendingBuffer<C, Value = I32Value> {
+  readonly #entries = new Map<C, PendingEntry<Value>>();
+  #boundary = new Map<C, Value>();
 
-  get(channel: C): PendingEntry | undefined {
+  get(channel: C): PendingEntry<Value> | undefined {
     return this.#entries.get(channel);
   }
 
-  entries(): IterableIterator<[C, PendingEntry]> {
+  entries(): IterableIterator<[C, PendingEntry<Value>]> {
     return this.#entries.entries();
   }
 
-  set(channel: C, value: ValueId): void {
+  set(channel: C, value: Value): void {
     this.#entries.set(channel, { value, dirty: true });
   }
 
@@ -48,14 +48,14 @@ export class PendingBuffer<C> {
     this.#entries.clear();
   }
 
-  snapshot(): PendingBufferSnapshot<C> {
+  snapshot(): PendingBufferSnapshot<C, Value> {
     return {
       entries: new Map([...this.#entries].map(([channel, entry]) => [channel, { ...entry }])),
       boundary: new Map(this.#boundary)
     };
   }
 
-  restore(snapshot: PendingBufferSnapshot<C>): void {
+  restore(snapshot: PendingBufferSnapshot<C, Value>): void {
     this.#entries.clear();
 
     for (const [channel, entry] of snapshot.entries) {
@@ -79,11 +79,11 @@ export class PendingBuffer<C> {
 
   // Records a channel's pre-instruction value before a flush overwrites it in
   // memory, so the fault path can still restore it.
-  setBoundary(channel: C, value: ValueId): void {
+  setBoundary(channel: C, value: Value): void {
     this.#boundary.set(channel, value);
   }
 
-  entriesForPath(path: StatePathKind): ReadonlyArray<readonly [C, ValueId]> {
+  entriesForPath(path: StatePathKind): ReadonlyArray<readonly [C, Value]> {
     return path === "fault"
       ? [...this.#boundary]
       : [...this.#entries].flatMap(([channel, entry]) =>

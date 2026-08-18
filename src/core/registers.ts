@@ -3,6 +3,7 @@ import {
   reg32,
   type OperandWidth,
   type RegisterAlias,
+  type RegisterNameForWidth,
   type Reg8,
   type Reg16,
   type Reg32,
@@ -58,11 +59,14 @@ export function registerAlias<Name extends RegName>(name: Name): RegisterAlias<N
   return alias as RegisterAlias<Name>;
 }
 
-export function registerAliasByCode(width: OperandWidth, code: number): RegisterAlias {
-  const alias = aliases[width][code & 0b111];
-  assert(alias !== undefined, `register alias code is missing: ${width}:${code & 0b111}`);
+export function registerAliasByIndex<Width extends OperandWidth>(
+  width: Width,
+  index: number
+): RegisterAlias<RegisterNameForWidth<Width>> {
+  const alias = aliases[width][index & 0b111];
+  assert(alias !== undefined, `register alias index is missing: ${width}:${index & 0b111}`);
 
-  return alias;
+  return alias as RegisterAlias<RegisterNameForWidth<Width>>;
 }
 
 export function reg32Index(reg: Reg32): number {

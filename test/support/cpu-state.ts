@@ -13,7 +13,7 @@ import { registerAlias } from "#core/registers.js";
 import { reg32, segmentRegisters, type SegmentRegister } from "#core/types.js";
 import { instructionCountField } from "#cpu/instruction-count.js";
 import {
-  type FieldRef,
+  type AnyFieldRef,
   type LayoutByteLength,
   type LayoutWidth,
   type NamedArrayRef
@@ -293,7 +293,7 @@ function channelLocation(channel: InstructionStateChannel): ResolvedLocation {
   }
 }
 
-function fieldLocation(field: FieldRef): ResolvedLocation {
+function fieldLocation(field: AnyFieldRef): ResolvedLocation {
   return cpuState.layout.field(field);
 }
 

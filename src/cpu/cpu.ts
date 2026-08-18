@@ -1,6 +1,6 @@
 import { assert } from "#common/assert.js";
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
-import type { ResourceRef } from "#compiler/ir/resource.js";
+import type { ResourceRef } from "#compiler/reference.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { SegmentRegister } from "#core/types.js";

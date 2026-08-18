@@ -1,4 +1,4 @@
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 import type { OperandWidth } from "#core/types.js";
 import {
   form,
@@ -30,7 +30,7 @@ function aluMnemonic(operation: AluOp, group: Reg3): InstructionMnemonic {
 function binaryAluMnemonic(
   mnemonicName: string,
   group: Reg3,
-  semantic: (width: OperandWidth) => SemanticTemplate
+  semantic: (width: OperandWidth) => InstructionSemantics
 ): InstructionMnemonic {
   // The operation selects both its eight-byte primary-opcode row and the
   // ModRM.reg extension of the shared immediate opcodes.

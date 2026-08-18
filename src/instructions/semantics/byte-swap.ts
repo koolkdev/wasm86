@@ -1,17 +1,13 @@
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 
-export function bswapSemantic(): SemanticTemplate {
-  return (s, v) => {
+export function bswapSemantic(): InstructionSemantics {
+  return (s) => {
     const dst = s.operand(0);
-    const value = s.read(dst, { width: 32 });
-    const lowPairs = v.binary("and", value, v.const(0x00ff_00ff));
-    const highPairs = v.binary("and", value, v.const(0xff00_ff00));
-    const result = v.binary(
-      "or",
-      v.binary("rotr", lowPairs, v.const(8)),
-      v.binary("rotl", highPairs, v.const(8))
-    );
+    const value = s.read(dst, 32);
+    const lowPairs = value.and(0x00ff_00ff);
+    const highPairs = value.and(0xff00_ff00);
+    const result = lowPairs.rotr(8).or(highPairs.rotl(8));
 
-    s.write(dst, result, { width: 32 });
+    s.write(dst, result);
   };
 }

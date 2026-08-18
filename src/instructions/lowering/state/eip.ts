@@ -1,5 +1,5 @@
 import { coreStateFields } from "#core/state/layout.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
+import type { I32Value } from "#compiler/function/values.js";
 import type { BoundStateAccess } from "#core/state/access.js";
 import type { StateFieldTracker } from "./field-tracker.js";
 
@@ -10,12 +10,12 @@ export class EipState {
     this.#state = state;
   }
 
-  read(access: BoundStateAccess): ValueId {
+  read(access: BoundStateAccess): I32Value {
     return this.#state.read(access, coreStateFields.eip);
   }
 
-  write(value: ValueId): void {
-    this.#state.write(coreStateFields.eip, value);
+  write(access: BoundStateAccess, value: I32Value): void {
+    this.#state.write(access, coreStateFields.eip, value);
   }
 
   has(): boolean {

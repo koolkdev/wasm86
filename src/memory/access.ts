@@ -1,4 +1,4 @@
-import type { StorageEffects } from "#compiler/ir/effects.js";
+import type { StorageEffects } from "#compiler/function/storage.js";
 import type { MemoryImport } from "#compiler/program/resources.js";
 import { createMachineMemoryDefinition, type MachineMemoryDefinition } from "./machine-memory.js";
 import {

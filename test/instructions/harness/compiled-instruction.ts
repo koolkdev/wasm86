@@ -2,13 +2,14 @@ import { ok } from "node:assert";
 
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import { encodeVariant } from "#compiler/layout/variant-codec.js";
-import type { StorageAccess, StorageEffects } from "#compiler/ir/effects.js";
-import type { CallTarget } from "#compiler/ir/invocation.js";
-import { buildVariant } from "#compiler/ir/builder/variant.js";
+import type { StorageAccess, StorageEffects } from "#compiler/function/storage.js";
+import type { CallTarget } from "#compiler/function/invocation.js";
+import { buildVariant } from "#compiler/function/builder/variant.js";
 import { compileProgram } from "#compiler/compile.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/wasm/legacy/function-type.js";
+import { functionType } from "#compiler/function/type.js";
+import { Integer } from "#compiler/function/values.js";
 import { programImportModuleName } from "#compiler/program/imports.js";
 import { functionExportRef } from "#compiler/program/exports.js";
 import { functionRef } from "#compiler/reference.js";
@@ -183,12 +184,9 @@ function buildInstructionProgram(instructions: readonly IsaDecodedInstruction[])
     instructionCountField,
     buildExit
   });
-  const entryType = functionType([], ["i64"]);
-  const dispatchType = functionType(["i32"], ["i64"]);
-
   const dispatch = program.importFunction({
     ref: compiledInstructionDispatchRef,
-    type: dispatchType,
+    type: compiledInstructionDispatchType,
     effects: noEffects,
     moduleName: programImportModuleName,
     name: "dispatch"
@@ -196,17 +194,17 @@ function buildInstructionProgram(instructions: readonly IsaDecodedInstruction[])
   const fallthrough = program.defineFunction(
     {
       ref: functionRef("test.compiled-instruction.fallthrough"),
-      type: dispatchType,
+      type: compiledInstructionDispatchType,
       effects: noEffects
     },
     (fn) => {
-      fn.return([buildVariant(fn.values, exitLayout, instructionLimitExit())]);
+      fn.return([buildVariant(exitLayout, instructionLimitExit())]);
     }
   );
   const entry = program.defineFunction(
     {
       ref: functionRef("test.compiled-instruction.entry"),
-      type: entryType,
+      type: compiledInstructionEntryType,
       effects: compiledInstructionEffects
     },
     (fn) => {
@@ -242,18 +240,22 @@ function buildInstructionProgram(instructions: readonly IsaDecodedInstruction[])
   return { program: program.finish(), dispatch };
 }
 
-function instructionFunctionTerminals(dispatch: CallTarget): InstructionTerminals {
+function instructionFunctionTerminals(
+  dispatch: CallTarget<typeof compiledInstructionDispatchType>
+): InstructionTerminals {
   return {
     dispatch: (body, targetEip) => body.returnCall(dispatch, [targetEip]),
     returnExit: (body, result) => body.return([result])
   };
 }
 
+const compiledInstructionEntryType = functionType([], [Integer[64]]);
+const compiledInstructionDispatchType = functionType([Integer[32]], [Integer[64]]);
 const noEffects: StorageEffects = { reads: [], writes: [] };
 const wholeCpuState: StorageAccess = {
-  space: "resource",
+  kind: "resource",
   resource: cpuState.resource,
-  range: { basis: { kind: "resource" } }
+  range: { kind: "whole", origin: "resource" }
 };
 const compiledInstructionEffects: StorageEffects = {
   reads: [wholeCpuState, ...testExecutionModel.memory.effects.reads],

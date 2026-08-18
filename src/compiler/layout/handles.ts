@@ -1,36 +1,73 @@
 import { assert } from "#common/assert.js";
+import type { ValueWidthForStorage } from "#compiler/function/resource.js";
 
 export type LayoutWidth = "u8" | "u16" | "u32";
 export type LayoutByteLength = 1 | 2 | 4;
 
-export type ByteLengthOf<TWidth extends LayoutWidth> = TWidth extends "u8"
-  ? 1
-  : TWidth extends "u16"
-    ? 2
-    : 4;
+type ByteLengthByWidth = Readonly<{
+  u8: 1;
+  u16: 2;
+  u32: 4;
+}>;
 
-export function widthByteLength(width: LayoutWidth): LayoutByteLength {
-  switch (width) {
-    case "u8":
-      return 1;
-    case "u16":
-      return 2;
-    case "u32":
-      return 4;
-  }
+type BitWidthByWidth = Readonly<{
+  u8: 8;
+  u16: 16;
+  u32: 32;
+}>;
+
+export type ByteLengthOf<TWidth extends LayoutWidth> = ByteLengthByWidth[TWidth];
+export type LayoutBitWidth<TWidth extends LayoutWidth> = BitWidthByWidth[TWidth];
+
+const byteLengthByWidth: ByteLengthByWidth = {
+  u8: 1,
+  u16: 2,
+  u32: 4
+};
+
+const bitWidthByWidth: BitWidthByWidth = {
+  u8: 8,
+  u16: 16,
+  u32: 32
+};
+
+export function widthByteLength<TWidth extends LayoutWidth>(width: TWidth): ByteLengthOf<TWidth> {
+  return byteLengthByWidth[width];
 }
 
-// Layout references are opaque identities to consumers. Their stable IDs and
-// scalar widths describe definitions for deterministic composition; resolved
+export function layoutBitWidth<TWidth extends LayoutWidth>(width: TWidth): LayoutBitWidth<TWidth> {
+  return bitWidthByWidth[width];
+}
+
+// Layout references are opaque identities to consumers. Their stable IDs,
+// storage widths, and logical value widths describe definitions; resolved
 // placement remains available only through Layout.
-export class FieldRef<TWidth extends LayoutWidth = LayoutWidth> {
+export class FieldRef<
+  TWidth extends LayoutWidth,
+  TValueWidth extends ValueWidthForStorage<LayoutBitWidth<TWidth>> = LayoutBitWidth<TWidth>
+> {
   readonly kind = "field";
+  readonly valueWidth: TValueWidth;
 
   constructor(
     readonly id: string,
-    readonly width: TWidth
-  ) {}
+    readonly width: TWidth,
+    ...valueWidth: LayoutBitWidth<TWidth> extends TValueWidth
+      ? [valueWidth?: TValueWidth]
+      : [valueWidth: TValueWidth]
+  ) {
+    this.valueWidth =
+      valueWidth[0] ?? (layoutBitWidth(width) as LayoutBitWidth<TWidth> & TValueWidth);
+  }
 }
+
+export function bitField(id: string): FieldRef<"u8", 1> {
+  return new FieldRef(id, "u8", 1);
+}
+
+export type AnyFieldRef = {
+  readonly [Width in LayoutWidth]: FieldRef<Width, ValueWidthForStorage<LayoutBitWidth<Width>>>;
+}[LayoutWidth];
 
 export class NamedArrayRef<
   TWidth extends LayoutWidth = LayoutWidth,
@@ -86,4 +123,4 @@ export class ArrayRef<TElement extends ArrayElementLayout = ArrayElementLayout> 
   }
 }
 
-export type LayoutMember = FieldRef | NamedArrayRef | ArrayRef;
+export type LayoutMember = AnyFieldRef | NamedArrayRef | ArrayRef;

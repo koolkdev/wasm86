@@ -4,7 +4,8 @@ import { test } from "node:test";
 import { assert } from "#common/assert.js";
 import { compileProgram } from "#compiler/compile.js";
 import { instantiateCompiledProgram } from "#compiler/instantiate.js";
-import { functionType } from "#compiler/wasm/legacy/function-type.js";
+import { functionType } from "#compiler/function/type.js";
+import { Integer, i32 } from "#compiler/function/values.js";
 import { functionRef } from "#compiler/reference.js";
 import { createLayoutHostView } from "#compiler/layout/host-view.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
@@ -24,10 +25,10 @@ const faultProjection = {
 const rmwFaultSentinel = -1;
 const directFetchByteOffset = 14;
 
-const classifierType = functionType(["i32", "i32", "i32"], ["i32"]);
-const rmwType = functionType(["i32"], ["i32"]);
-const storeType = functionType(["i32", "i32"], ["i32"]);
-const rangedReadType = functionType(["i32", "i32"], ["i32"]);
+const classifierType = functionType([Integer[32], Integer[32], Integer[32]], [Integer[32]]);
+const rmwType = functionType([Integer[32]], [Integer[32]]);
+const storeType = functionType([Integer[32], Integer[32]], [Integer[32]]);
+const rangedReadType = functionType([Integer[32], Integer[32]], [Integer[32]]);
 
 const classifierEntries = {
   read: {
@@ -65,21 +66,21 @@ const scalarReadEntries = {
     exportRef: functionExportRef("memory.virtual.test.read16-unsigned-export"),
     exportName: "read16Unsigned",
     width: 16,
-    signed: false
+    extension: "unsigned"
   },
   read16Signed: {
     ref: functionRef("memory.virtual.test.read16-signed"),
     exportRef: functionExportRef("memory.virtual.test.read16-signed-export"),
     exportName: "read16Signed",
     width: 16,
-    signed: true
+    extension: "signed"
   },
   read32: {
     ref: functionRef("memory.virtual.test.read32"),
     exportRef: functionExportRef("memory.virtual.test.read32-export"),
     exportName: "read32",
     width: 32,
-    signed: false
+    extension: undefined
   }
 } as const;
 
@@ -426,22 +427,16 @@ function buildVirtualAccessTestProgram() {
         effects: virtualAccess.effects
       },
       (fn) => {
-        const start = fn.parameters[0];
-        const byteLength = fn.parameters[1];
-        const projection = fn.parameters[2];
-
-        assert(start !== undefined, "Virtual classifier start is missing");
-        assert(byteLength !== undefined, "Virtual classifier byte length is missing");
-        assert(projection !== undefined, "Virtual classifier projection is missing");
+        const [start, byteLength, projection] = fn.parameters;
         const resolution = virtualAccess.access
-          .bind(fn.region)
+          .forRegion(fn.region)
           .resolve({ start, byteLength }, intent);
         const projected = fn.region.switch(
           projection,
           [
             {
               match: faultProjection.condition,
-              build: () => resolution.fault.condition
+              build: () => resolution.fault.condition.unsigned.extend(32)
             },
             {
               match: faultProjection.linearAddress,
@@ -468,18 +463,17 @@ function buildVirtualAccessTestProgram() {
       effects: virtualAccess.effects
     },
     (fn) => {
-      const start = fn.parameters[0];
+      const [start] = fn.parameters;
 
-      assert(start !== undefined, "Virtual qword read start is missing");
-      const resolution = virtualAccess.access.bind(fn.region).resolve(
+      const resolution = virtualAccess.access.forRegion(fn.region).resolve(
         {
           start,
-          byteLength: fn.values.const(8)
+          byteLength: i32(8)
         },
         "read"
       );
 
-      fn.return([resolution.fault.condition]);
+      fn.return([resolution.fault.condition.unsigned.extend(32)]);
     }
   );
   builder.exportFunction({
@@ -496,25 +490,30 @@ function buildVirtualAccessTestProgram() {
         effects: virtualAccess.effects
       },
       (fn) => {
-        const start = fn.parameters[0];
+        const [start] = fn.parameters;
 
-        assert(start !== undefined, `${entry.exportName} start is missing`);
-        const resolution = virtualAccess.access.bind(fn.region).resolve(
+        const resolution = virtualAccess.access.forRegion(fn.region).resolve(
           {
             start,
-            byteLength: fn.values.const(entry.width / 8)
+            byteLength: i32(entry.width / 8)
           },
           "read"
         );
         const result = fn.region.ifValue(
           resolution.fault.condition,
-          (fault) => fault.values.const(rmwFaultSentinel),
-          (resolved) =>
-            virtualAccess.access
-              .bind(resolved)
-              .load(resolution.access, resolved.values.const(0), entry.width, {
-                signed: entry.signed
-              }),
+          () => i32(rmwFaultSentinel),
+          (resolved) => {
+            const memory = virtualAccess.access.forRegion(resolved);
+
+            if (entry.width === 32) {
+              return memory.load(resolution.access, i32(0), 32);
+            }
+
+            const value = memory.load(resolution.access, i32(0), 16);
+            return entry.extension === "signed"
+              ? value.signed.extend(32)
+              : value.unsigned.extend(32);
+          },
           { hint: "unlikely" }
         );
 
@@ -536,26 +535,27 @@ function buildVirtualAccessTestProgram() {
         effects: virtualAccess.effects
       },
       (fn) => {
-        const start = fn.parameters[0];
-        const value = fn.parameters[1];
+        const [start, value] = fn.parameters;
 
-        assert(start !== undefined, `${entry.exportName} start is missing`);
-        assert(value !== undefined, `${entry.exportName} value is missing`);
-        const resolution = virtualAccess.access.bind(fn.region).resolve(
+        const resolution = virtualAccess.access.forRegion(fn.region).resolve(
           {
             start,
-            byteLength: fn.values.const(entry.width / 8)
+            byteLength: i32(entry.width / 8)
           },
           "write"
         );
         const result = fn.region.ifValue(
           resolution.fault.condition,
-          (fault) => fault.values.const(1),
+          () => i32(1),
           (resolved) => {
-            virtualAccess.access
-              .bind(resolved)
-              .store(resolution.access, resolved.values.const(0), value, entry.width);
-            return resolved.values.const(0);
+            const memory = virtualAccess.access.forRegion(resolved);
+
+            if (entry.width === 16) {
+              memory.store(resolution.access, i32(0), value.truncate(16));
+            } else {
+              memory.store(resolution.access, i32(0), value);
+            }
+            return i32(0);
           },
           { hint: "unlikely" }
         );
@@ -577,27 +577,24 @@ function buildVirtualAccessTestProgram() {
       effects: virtualAccess.effects
     },
     (fn) => {
-      const start = fn.parameters[0];
-      const value = fn.parameters[1];
+      const [start, value] = fn.parameters;
 
-      assert(start !== undefined, "Virtual byte subaccess start is missing");
-      assert(value !== undefined, "Virtual byte subaccess value is missing");
-      const resolution = virtualAccess.access.bind(fn.region).resolve(
+      const resolution = virtualAccess.access.forRegion(fn.region).resolve(
         {
           start,
-          byteLength: fn.values.const(2)
+          byteLength: i32(2)
         },
         "write"
       );
       const result = fn.region.ifValue(
         resolution.fault.condition,
-        (fault) => fault.values.const(rmwFaultSentinel),
+        () => i32(rmwFaultSentinel),
         (resolved) => {
-          const memory = virtualAccess.access.bind(resolved);
-          const current = memory.load(resolution.access, resolved.values.const(0), 8);
+          const memory = virtualAccess.access.forRegion(resolved);
+          const current = memory.load(resolution.access, i32(0), 8);
 
-          memory.store(resolution.access, resolved.values.const(1), value, 8);
-          return current;
+          memory.store(resolution.access, i32(1), value.truncate(8));
+          return current.unsigned.extend(32);
         },
         { hint: "unlikely" }
       );
@@ -618,24 +615,24 @@ function buildVirtualAccessTestProgram() {
       effects: virtualAccess.effects
     },
     (fn) => {
-      const start = fn.parameters[0];
+      const [start] = fn.parameters;
 
-      assert(start !== undefined, "Virtual direct fetch start is missing");
       const memory = virtualAccess.access.withCache(fn.region);
-      const direct = memory.bind(fn.region).resolveDirect(
+      const direct = memory.forRegion(fn.region).resolveDirect(
         {
           start,
-          byteLength: fn.values.const(15)
+          byteLength: i32(15)
         },
         "instructionFetch"
       );
       const result = fn.region.ifValue(
         direct.unavailable,
-        (unavailable) => unavailable.values.const(-1),
+        () => i32(-1),
         (available) =>
           memory
-            .bind(available)
-            .loadDirect(direct.access, available.values.const(directFetchByteOffset), 8),
+            .forRegion(available)
+            .loadDirect(direct.access, i32(directFetchByteOffset), 8)
+            .unsigned.extend(32),
         { hint: "unlikely" }
       );
 
@@ -655,24 +652,18 @@ function buildVirtualAccessTestProgram() {
       effects: virtualAccess.effects
     },
     (fn) => {
-      const start = fn.parameters[0];
-      const byteLength = fn.parameters[1];
+      const [start, byteLength] = fn.parameters;
 
-      assert(start !== undefined, "direct range read start is missing");
-      assert(byteLength !== undefined, "direct range read byte length is missing");
-      const memory = virtualAccess.access.bind(fn.region);
+      const memory = virtualAccess.access.forRegion(fn.region);
       const direct = memory.resolveDirect({ start, byteLength }, "read");
       const result = fn.region.ifValue(
         direct.unavailable,
-        (unavailable) => unavailable.values.const(-1),
+        () => i32(-1),
         (available) =>
           virtualAccess.access
-            .bind(available)
-            .loadDirect(
-              direct.access,
-              available.values.binary("sub", byteLength, available.values.const(1)),
-              8
-            ),
+            .forRegion(available)
+            .loadDirect(direct.access, byteLength.sub(1), 8)
+            .unsigned.extend(32),
         { hint: "unlikely" }
       );
 
@@ -692,30 +683,24 @@ function buildVirtualAccessTestProgram() {
       effects: virtualAccess.effects
     },
     (fn) => {
-      const start = fn.parameters[0];
+      const [start] = fn.parameters;
 
-      assert(start !== undefined, "Virtual RMW start is missing");
-      const resolution = virtualAccess.access.bind(fn.region).resolve(
+      const resolution = virtualAccess.access.forRegion(fn.region).resolve(
         {
           start,
-          byteLength: fn.values.const(4)
+          byteLength: i32(4)
         },
         "write"
       );
       const result = fn.region.ifValue(
         resolution.fault.condition,
-        (fault) => fault.values.const(rmwFaultSentinel),
+        () => i32(rmwFaultSentinel),
         (resolved) => {
-          const memory = virtualAccess.access.bind(resolved);
-          const zero = resolved.values.const(0);
+          const memory = virtualAccess.access.forRegion(resolved);
+          const zero = i32(0);
           const current = memory.load(resolution.access, zero, 32);
 
-          memory.store(
-            resolution.access,
-            zero,
-            resolved.values.binary("add", current, resolved.values.const(1)),
-            32
-          );
+          memory.store(resolution.access, zero, current.add(1));
           return current;
         },
         { hint: "unlikely" }

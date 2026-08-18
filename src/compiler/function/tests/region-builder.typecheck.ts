@@ -108,10 +108,10 @@ export function regionBuilderBranchTypeContract(
 
   // @ts-expect-error if conditions are one-bit integers.
   builder.if(byte, () => {});
+  // @ts-expect-error if value arms preserve their value kind and width.
   builder.ifValue(
     bit,
     () => single,
-    // @ts-expect-error if value arms preserve their value kind and width.
     () => double
   );
   builder.switch(

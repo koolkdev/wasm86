@@ -40,7 +40,7 @@ function signExtendedRequiredBits(width: WasmIntegerWidth, bits: number): Requir
   return clampRequiredBits(width, width, bits);
 }
 
-export function clampRequiredBits(
+function clampRequiredBits(
   width: WasmIntegerWidth,
   unsigned: number,
   signed: number

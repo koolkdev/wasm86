@@ -9,6 +9,8 @@ export const LAZY_FLAGS_KIND = {
 
 export type LazyFlagsKind = (typeof LAZY_FLAGS_KIND)[keyof typeof LAZY_FLAGS_KIND];
 
+export const lazyFlagWidths = [8, 16, 32] as const satisfies readonly OperandWidth[];
+
 export function lazyFlagsKindByte(kind: LazyFlagsKind, width: 0 | OperandWidth): number {
   return kind | (lazyFlagsWidthCode(width) << 2);
 }

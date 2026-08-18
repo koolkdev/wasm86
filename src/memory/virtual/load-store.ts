@@ -1,10 +1,10 @@
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
-import type { IntegerWidth, ValueId } from "#compiler/ir/values/types.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
+import type { Integer, I32Value } from "#compiler/function/values.js";
 import type { PhysicalAccessConstruction } from "../physical.js";
 import type {
   BoundMemoryAccess,
   DirectMemoryAccess,
-  MemoryLoadOptions,
+  MemoryTransferWidth,
   ResolvedMemoryAccess
 } from "../types.js";
 import type { ScatteredLoadStore } from "./scattered-load-store.js";
@@ -14,97 +14,77 @@ type BoundVirtualLoadStore = Pick<
   "load" | "loadDirect" | "store" | "storeDirect"
 >;
 
-export function bindVirtualLoadStore(
+export function virtualLoadStoreForRegion(
   region: RegionBuilder,
   physical: PhysicalAccessConstruction,
   scattered: ScatteredLoadStore
 ): BoundVirtualLoadStore {
   return {
     // A resolved access uses physical memory unless its pages are scattered.
-    load(
+    load<Width extends MemoryTransferWidth>(
       access: ResolvedMemoryAccess,
-      byteOffset: ValueId,
-      width: IntegerWidth,
-      options: MemoryLoadOptions = {}
-    ): ValueId {
-      const staticScattered = region.values.constValue(access.scattered);
+      byteOffset: I32Value,
+      width: Width
+    ): Integer<Width> {
+      const staticScattered = region.constValue(access.scattered);
 
       if (staticScattered !== undefined) {
         return staticScattered !== 0
-          ? scattered.load(region, linearStart(region, access, byteOffset), width, options)
-          : physical.bind(region).load(access.physicalAccess, byteOffset, width, options);
+          ? scattered.load(region, linearStart(access, byteOffset), width)
+          : physical.forRegion(region).load(access.physicalAccess, byteOffset, width);
       }
-
       return region.ifValue(
         access.scattered,
         (scatteredRegion) =>
-          scattered.load(
-            scatteredRegion,
-            linearStart(scatteredRegion, access, byteOffset),
-            width,
-            options
-          ),
+          scattered.load(scatteredRegion, linearStart(access, byteOffset), width),
         (directRegion) =>
-          physical.bind(directRegion).load(access.physicalAccess, byteOffset, width, options),
+          physical.forRegion(directRegion).load(access.physicalAccess, byteOffset, width),
         { hint: "unlikely" }
       );
     },
-    loadDirect(
+    loadDirect<Width extends MemoryTransferWidth>(
       access: DirectMemoryAccess,
-      byteOffset: ValueId,
-      width: IntegerWidth,
-      options: MemoryLoadOptions = {}
-    ): ValueId {
-      return physical.bind(region).load(access.physicalAccess, byteOffset, width, options);
+      byteOffset: I32Value,
+      width: Width
+    ): Integer<Width> {
+      return physical.forRegion(region).load(access.physicalAccess, byteOffset, width);
     },
-    store(
+    store<Width extends MemoryTransferWidth>(
       access: ResolvedMemoryAccess<"write">,
-      byteOffset: ValueId,
-      value: ValueId,
-      width: IntegerWidth
+      byteOffset: I32Value,
+      value: Integer<Width>
     ): void {
-      const staticScattered = region.values.constValue(access.scattered);
+      const staticScattered = region.constValue(access.scattered);
 
       if (staticScattered !== undefined) {
         if (staticScattered !== 0) {
-          scattered.store(region, linearStart(region, access, byteOffset), value, width);
+          scattered.store(region, linearStart(access, byteOffset), value);
         } else {
-          physical.bind(region).store(access.physicalAccess, byteOffset, value, width);
+          physical.forRegion(region).store(access.physicalAccess, byteOffset, value);
         }
         return;
       }
-
       region.if(
         access.scattered,
         (scatteredRegion) =>
-          scattered.store(
-            scatteredRegion,
-            linearStart(scatteredRegion, access, byteOffset),
-            value,
-            width
-          ),
+          scattered.store(scatteredRegion, linearStart(access, byteOffset), value),
         {
           hint: "unlikely",
           elseBuild: (directRegion) =>
-            physical.bind(directRegion).store(access.physicalAccess, byteOffset, value, width)
+            physical.forRegion(directRegion).store(access.physicalAccess, byteOffset, value)
         }
       );
     },
-    storeDirect(
+    storeDirect<Width extends MemoryTransferWidth>(
       access: DirectMemoryAccess<"write">,
-      byteOffset: ValueId,
-      value: ValueId,
-      width: IntegerWidth
+      byteOffset: I32Value,
+      value: Integer<Width>
     ): void {
-      physical.bind(region).store(access.physicalAccess, byteOffset, value, width);
+      physical.forRegion(region).store(access.physicalAccess, byteOffset, value);
     }
   };
 }
 
-function linearStart(
-  region: RegionBuilder,
-  access: ResolvedMemoryAccess,
-  byteOffset: ValueId
-): ValueId {
-  return region.values.binary("add", access.range.start, byteOffset);
+function linearStart(access: ResolvedMemoryAccess, byteOffset: I32Value): I32Value {
+  return access.range.start.add(byteOffset);
 }

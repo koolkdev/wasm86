@@ -1,10 +1,10 @@
 import { strictEqual, throws } from "node:assert";
 import { test } from "node:test";
 
-import { functionType } from "#compiler/wasm/legacy/function-type.js";
-import { functionRef } from "#compiler/reference.js";
+import { functionType } from "#compiler/function/type.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
 import { createProgramResources } from "#compiler/program/resources.js";
+import { functionRef } from "#compiler/reference.js";
 
 const voidType = functionType([], []);
 const noEffects = { reads: [], writes: [] } as const;
@@ -21,7 +21,6 @@ test("a finished program builder rejects later use", () => {
     },
     (fn) => fn.return([])
   );
-
   program.finish();
 
   throws(() => program.finish(), /finished program/);
@@ -39,41 +38,29 @@ test("a finished program builder rejects later use", () => {
   );
 });
 
-test("closing rejects topology changes without poisoning the builder", () => {
+test("finishing snapshots declarations without building function bodies", () => {
   const program = new ProgramBuilder(emptyResources);
-  let triesMutation = true;
-
-  const original = program.defineFunction(
+  let builds = 0;
+  const definition = program.defineFunction(
     {
-      ref: functionRef("test.closing-function"),
+      ref: functionRef("test.snapshot-function"),
       type: voidType,
       effects: noEffects
     },
     (fn) => {
-      if (triesMutation) {
-        triesMutation = false;
-        program.defineFunction(
-          {
-            ref: functionRef("test.closing-late-function"),
-            type: voidType,
-            effects: noEffects
-          },
-          (late) => late.return([])
-        );
-      }
+      builds += 1;
       fn.return([]);
     }
   );
 
-  throws(() => program.finish(), /while it is closing/);
+  const source = program.finish();
 
-  const closed = program.finish();
-
-  strictEqual(closed.functions.length, 1);
-  strictEqual(closed.functions[0]?.ref, original.ref);
+  strictEqual(builds, 0);
+  strictEqual(source.functions.length, 1);
+  strictEqual(source.functions[0], definition);
 });
 
-test("function imports and definitions cannot reuse one declaration ref", () => {
+test("function imports and definitions share one declaration identity", () => {
   const ref = functionRef("test.function-declaration");
   const program = new ProgramBuilder(emptyResources);
 

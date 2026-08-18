@@ -1,26 +1,22 @@
 import { assert } from "#common/assert.js";
 import { buildDefinition } from "#build";
-import type { FunctionType } from "#compiler/wasm/legacy/function-type.js";
-import type { StorageEffects } from "#compiler/ir/effects.js";
+import type { StorageEffects } from "#compiler/function/storage.js";
+import type { FunctionType } from "#compiler/function/type.js";
 import { type BuildFunction, FunctionDefinition } from "#compiler/program/functions.js";
 import { FunctionImport, type FunctionImportDeclaration } from "./imports.js";
-import { buildProgram, DeclarationCollection } from "./closure.js";
-import type { FunctionDeclaration, Program } from "./program.js";
+import type { FunctionDeclaration, Program, ProgramDeclarations } from "./program.js";
 import type { FunctionExport } from "./exports.js";
 import type { FunctionRef } from "#compiler/reference.js";
-import type { ProgramResources, TableImport } from "./resources.js";
-import { maximumWasmTableElements, type TableLimits } from "./limits.js";
-import { validateProgramDeclarations } from "./validate.js";
+import type { ProgramResources } from "./resources.js";
+import { validateProgramDeclarationEffects, validateProgramExportTargets } from "./validate.js";
 
 export class ProgramBuilder {
-  readonly #tables = new DeclarationCollection<TableImport>();
   readonly #functions = new DeclarationCollection<FunctionDeclaration>();
   readonly #exports = new DeclarationCollection<FunctionExport>();
   readonly #externalImportNames = new Map<string, Set<string>>();
   readonly #exportNames = new Set<string>();
   readonly #owner = {};
   readonly #resources: ProgramResources;
-  #closing = false;
   #finished = false;
 
   constructor(resources: ProgramResources) {
@@ -31,19 +27,9 @@ export class ProgramBuilder {
     }
   }
 
-  importTable(declaration: TableImport): void {
-    this.#assertOpen();
-    validateTableLimits(declaration);
-    this.#validateExternalImport(declaration);
-
-    this.#tables.add({
-      ...declaration,
-      limits: copyTableLimits(declaration.limits)
-    });
-    this.#recordExternalImport(declaration);
-  }
-
-  importFunction(declaration: FunctionImportDeclaration): FunctionImport {
+  importFunction<Type extends FunctionType>(
+    declaration: FunctionImportDeclaration<Type>
+  ): FunctionImport<Type> {
     this.#assertOpen();
     this.#validateExternalImport(declaration);
     const imported = new FunctionImport(declaration, this.#owner);
@@ -53,20 +39,21 @@ export class ProgramBuilder {
     return imported;
   }
 
-  defineFunction(
+  defineFunction<Type extends FunctionType>(
     declaration: Readonly<{
       ref: FunctionRef;
-      type: FunctionType;
+      type: Type;
       effects: StorageEffects;
     }>,
-    build: BuildFunction
-  ): FunctionDefinition {
+    build: BuildFunction<NoInfer<Type>>
+  ): FunctionDefinition<Type> {
     this.#assertOpen();
     const definition = new FunctionDefinition({
       ref: declaration.ref,
       type: declaration.type,
       effects: declaration.effects,
       owner: this.#owner,
+      buildStability: "dynamic",
       build
     });
 
@@ -92,31 +79,24 @@ export class ProgramBuilder {
 
   finish(): Program {
     this.#assertOpen();
-    this.#closing = true;
-    try {
-      const declarations = {
-        owner: this.#owner,
-        resources: this.#resources,
-        tables: this.#tables.all(),
-        functions: this.#functions.all(),
-        exports: this.#exports.all()
-      };
+    const declarations: ProgramDeclarations = {
+      owner: this.#owner,
+      resources: { memoryImports: [...this.#resources.memoryImports] },
+      functions: this.#functions.all(),
+      exports: this.#exports.all()
+    };
 
-      if (buildDefinition.validation) {
-        validateProgramDeclarations(declarations);
-      }
-      const program = buildProgram(declarations);
-
-      this.#finished = true;
-      return program;
-    } finally {
-      this.#closing = false;
+    validateProgramExportTargets(declarations);
+    if (buildDefinition.validation) {
+      validateProgramDeclarationEffects(declarations);
     }
+
+    this.#finished = true;
+    return declarations as Program;
   }
 
   #assertOpen(): void {
     assert(!this.#finished, "cannot modify a finished program");
-    assert(!this.#closing, "cannot modify a program while it is closing");
   }
 
   #validateExternalImport(
@@ -151,30 +131,24 @@ export class ProgramBuilder {
   }
 }
 
-function copyTableLimits(limits: TableLimits): TableLimits {
-  return limits.maxElements === undefined
-    ? { minElements: limits.minElements }
-    : { minElements: limits.minElements, maxElements: limits.maxElements };
-}
+type Declaration = Readonly<{ ref: Readonly<{ kind: string; id: string }> }>;
 
-function validateTableLimits(table: TableImport): void {
-  assert(
-    Number.isInteger(table.limits.minElements) &&
-      table.limits.minElements >= 0 &&
-      table.limits.minElements <= maximumWasmTableElements,
-    `table ${table.ref.id} minimum elements out of range: ${table.limits.minElements}`
-  );
-  if (table.limits.maxElements === undefined) {
-    return;
+class DeclarationCollection<T extends Declaration> {
+  readonly #ordered: T[] = [];
+  readonly #byRef = new Map<T["ref"], T>();
+  readonly #byId = new Map<string, T>();
+
+  add(declaration: T): void {
+    const { ref } = declaration;
+
+    assert(!this.#byRef.has(ref), `duplicate program ${ref.kind} declaration: ${ref.id}`);
+    assert(!this.#byId.has(ref.id), `duplicate program ${ref.kind} identity: ${ref.id}`);
+    this.#ordered.push(declaration);
+    this.#byRef.set(ref, declaration);
+    this.#byId.set(ref.id, declaration);
   }
-  assert(
-    Number.isInteger(table.limits.maxElements) &&
-      table.limits.maxElements >= 0 &&
-      table.limits.maxElements <= maximumWasmTableElements,
-    `table ${table.ref.id} maximum elements out of range: ${table.limits.maxElements}`
-  );
-  assert(
-    table.limits.maxElements >= table.limits.minElements,
-    `table ${table.ref.id} maximum elements are below its minimum`
-  );
+
+  all(): readonly T[] {
+    return [...this.#ordered];
+  }
 }

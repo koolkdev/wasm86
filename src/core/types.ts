@@ -11,6 +11,14 @@ export type SegmentRegister = (typeof segmentRegisters)[number];
 export type OperandWidth = 8 | 16 | 32;
 export type MemoryOperandWidth = OperandWidth | 64;
 
+type RegisterNameByWidth = Readonly<{
+  8: Reg8;
+  16: Reg16;
+  32: Reg32;
+}>;
+
+export type RegisterNameForWidth<Width extends OperandWidth> = RegisterNameByWidth[Width];
+
 export type RegisterWidth<Name extends RegName> = Name extends Reg8
   ? 8
   : Name extends Reg16

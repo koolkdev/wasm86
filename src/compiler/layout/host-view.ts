@@ -1,7 +1,7 @@
 import { assert } from "#common/assert.js";
 import type {
+  AnyFieldRef,
   ArrayRef,
-  FieldRef,
   LayoutByteLength,
   LayoutWidth,
   NamedArrayRef
@@ -9,8 +9,8 @@ import type {
 import type { Layout } from "./layout.js";
 
 export interface LayoutHostView {
-  readField<TWidth extends LayoutWidth>(field: FieldRef<TWidth>): number;
-  writeField<TWidth extends LayoutWidth>(field: FieldRef<TWidth>, value: number): void;
+  readField(field: AnyFieldRef): number;
+  writeField(field: AnyFieldRef, value: number): void;
   readNamedArrayElement<TWidth extends LayoutWidth, TElementId extends string>(
     array: NamedArrayRef<TWidth, TElementId>,
     elementId: TElementId
@@ -54,13 +54,13 @@ class LayoutHostViewImpl implements LayoutHostView {
     this.#layout = layout;
   }
 
-  readField<TWidth extends LayoutWidth>(field: FieldRef<TWidth>): number {
+  readField(field: AnyFieldRef): number {
     const resolved = this.#layout.field(field);
 
     return this.#read(resolved.offset, resolved.byteLength);
   }
 
-  writeField<TWidth extends LayoutWidth>(field: FieldRef<TWidth>, value: number): void {
+  writeField(field: AnyFieldRef, value: number): void {
     const resolved = this.#layout.field(field);
 
     this.#write(resolved.offset, resolved.byteLength, value);

@@ -1,23 +1,20 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert";
+import { deepStrictEqual, ok, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import {
-  resourceRef,
-  type ResourceByteOperand,
-  type ResourceEffect,
-  type ResourceRef
-} from "#compiler/ir/resource.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
-import { resourceRead } from "#compiler/ir/operations/resource.js";
+import { type ResourceAccess } from "#compiler/function/resource.js";
+import type { ResourceEffect } from "#compiler/function/resource.js";
+import { resourceRef, type ResourceRef } from "#compiler/reference.js";
 import { compileProgram } from "#compiler/compile.js";
 import { ProgramBuilder } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/wasm/legacy/function-type.js";
+import { FunctionDefinition } from "#compiler/program/functions.js";
+import { functionType } from "#compiler/function/type.js";
 import { functionExportRef } from "#compiler/program/exports.js";
-import { functionRef, tableRef } from "#compiler/reference.js";
+import { functionRef } from "#compiler/reference.js";
 import { createProgramResources, type ProgramResources } from "#compiler/program/resources.js";
+import { Integer, i32, nonzero, type I32Value } from "#compiler/function/values.js";
 
 const fixture = createTestResources();
-const readType = functionType([], ["i32"]);
+const readType = functionType([], [Integer[32]]);
 
 test("compiled programs preserve reachable memories, exact exports, and runnable bytes", async () => {
   const program = new ProgramBuilder(fixture.resources);
@@ -29,9 +26,7 @@ test("compiled programs preserve reachable memories, exact exports, and runnable
       effects: { reads: [access], writes: [] }
     },
     (fn) => {
-      const value = fn.region.operation(resourceRead, {
-        source: memoryOperand(fixture.used, access, fn.values.const(0))
-      });
+      const value = fn.region.readResource(memoryOperand(fixture.used, access, i32(0)));
 
       fn.return([value]);
     }
@@ -67,153 +62,142 @@ test("compiled programs preserve reachable memories, exact exports, and runnable
   strictEqual((exportedRead as () => number)(), 42);
 });
 
-test("compiled control preserves a selected trap when its value is unused", () => {
-  const program = new ProgramBuilder(createProgramResources([]));
+test("ownerless functions with dynamic builds are replanned for each program", () => {
+  let current = 1;
+  const helper = new FunctionDefinition({
+    ref: functionRef("test.compile.dynamic-helper"),
+    type: readType,
+    effects: { reads: [], writes: [] },
+    owner: undefined,
+    buildStability: "dynamic",
+    build: (fn) => fn.return([i32(current)])
+  });
+  const compileCurrent = (): number => {
+    const program = new ProgramBuilder(createProgramResources([]));
+    const entry = program.defineFunction(
+      {
+        ref: functionRef("test.compile.dynamic-entry"),
+        type: readType,
+        effects: { reads: [], writes: [] }
+      },
+      (fn) => {
+        const [value] = fn.region.call(helper, []);
+
+        fn.return([value]);
+      }
+    );
+
+    program.exportFunction({
+      ref: functionExportRef("test.compile.dynamic-export"),
+      name: "run",
+      target: entry.ref
+    });
+    const instance = new WebAssembly.Instance(
+      new WebAssembly.Module(compileProgram(program.finish()).bytes)
+    );
+    const run = instance.exports.run;
+
+    ok(typeof run === "function", "missing dynamic helper export");
+    return run();
+  };
+
+  strictEqual(compileCurrent(), 1);
+  current = 2;
+  strictEqual(compileCurrent(), 2);
+});
+
+test("late Wasm emission agrees with program dependency analysis on dead producers", () => {
+  const memory = {
+    ref: resourceRef("test.compile.dead-producer-memory"),
+    moduleName: "test",
+    name: "deadProducerMemory",
+    limits: { minPages: 1 }
+  };
+  const access = memoryRead(memory.ref);
+  const program = new ProgramBuilder(createProgramResources([memory]));
+  const deadImport = program.importFunction({
+    ref: functionRef("test.compile.dead-producer-import"),
+    type: readType,
+    effects: { reads: [], writes: [] },
+    moduleName: "test",
+    name: "deadProducerImport"
+  });
   const entry = program.defineFunction(
     {
-      ref: functionRef("test.compile.selected-trap"),
-      type: functionType(["i32"], []),
+      ref: functionRef("test.compile.dead-producer-entry"),
+      type: readType,
       effects: { reads: [], writes: [] }
     },
     (fn) => {
-      fn.region.ifValue(
-        fn.parameters[0]!,
-        (then) => then.values.const(7),
-        (otherwise) => otherwise.values.unreachable()
-      );
-      fn.return([]);
+      fn.region.call(deadImport, []);
+      fn.region.readResource(memoryOperand(memory.ref, access, i32(0)));
+      fn.return([i32(9)]);
     }
   );
-  const exportRef = functionExportRef("test.compile.selected-trap-export");
 
   program.exportFunction({
-    ref: exportRef,
+    ref: functionExportRef("test.compile.dead-producer-export"),
     name: "run",
     target: entry.ref
   });
   const compiled = compileProgram(program.finish());
+
+  deepStrictEqual(compiled.functionImports, []);
+  deepStrictEqual(compiled.memoryImports, []);
   const instance = new WebAssembly.Instance(new WebAssembly.Module(compiled.bytes));
   const run = instance.exports.run;
 
-  strictEqual(typeof run, "function");
-  if (typeof run !== "function") {
-    throw new Error("compiled control export is missing");
-  }
-  strictEqual(run(1), undefined);
-  throws(() => run(0), WebAssembly.RuntimeError);
+  ok(typeof run === "function", "missing dead-producer export");
+  strictEqual(run(), 9);
 });
 
-test("compiled indirect calls use their selected table", () => {
+test("defined calls normalize narrow arguments and results at the internal ABI", () => {
   const program = new ProgramBuilder(createProgramResources([]));
-  const type = functionType(["i32"], ["i32"]);
-  const unusedTable = tableRef("test.compile.indirect-unused-table");
-  const selectedTable = tableRef("test.compile.indirect-selected-table");
+  const byteType = functionType([Integer[8]], [Integer[8]]);
+  const callee = program.defineFunction(
+    {
+      ref: functionRef("test.compile.narrow-internal-callee"),
+      type: byteType,
+      effects: { reads: [], writes: [] }
+    },
+    (fn) => {
+      const [parameter] = fn.parameters;
+      const dirtyLogicalByte = parameter.eq(1).unsigned.extend(8).add(255);
 
-  program.importTable({
-    ref: unusedTable,
-    moduleName: "test",
-    name: "unusedTable",
-    limits: { minElements: 1 }
+      fn.return([dirtyLogicalByte]);
+    }
+  );
+  const entry = program.defineFunction(
+    {
+      ref: functionRef("test.compile.narrow-internal-entry"),
+      type: functionType([Integer[32]], [Integer[32]]),
+      effects: { reads: [], writes: [] }
+    },
+    (fn) => {
+      const [source] = fn.parameters;
+      const [result] = fn.region.call(callee, [source.truncate(8)]);
+
+      fn.return([result.unsigned.extend(32)]);
+    }
+  );
+
+  program.exportFunction({
+    ref: functionExportRef("test.compile.narrow-internal-export"),
+    name: "run",
+    target: entry.ref
   });
-  program.importTable({
-    ref: selectedTable,
-    moduleName: "test",
-    name: "selectedTable",
-    limits: { minElements: 1 }
-  });
-  const target = program.defineFunction(
-    {
-      ref: functionRef("test.compile.indirect-target"),
-      type,
-      effects: { reads: [], writes: [] }
-    },
-    (fn) => {
-      const argument = fn.parameters[0];
-
-      ok(argument !== undefined, "missing indirect target argument");
-      fn.return([argument]);
-    }
-  );
-  const ordinary = program.defineFunction(
-    {
-      ref: functionRef("test.compile.indirect-ordinary"),
-      type,
-      effects: { reads: [], writes: [] }
-    },
-    (fn) => {
-      const argument = fn.parameters[0];
-
-      ok(argument !== undefined, "missing ordinary indirect-call argument");
-      fn.return(
-        fn.region.call(
-          fn.region.indirectTarget({
-            table: selectedTable,
-            type,
-            effects: { reads: [], writes: [] },
-            elementIndex: fn.values.const(0)
-          }),
-          [argument]
-        )
-      );
-    }
-  );
-  const returned = program.defineFunction(
-    {
-      ref: functionRef("test.compile.indirect-returned"),
-      type,
-      effects: { reads: [], writes: [] }
-    },
-    (fn) => {
-      const argument = fn.parameters[0];
-
-      ok(argument !== undefined, "missing returned indirect-call argument");
-      fn.returnCall(
-        fn.region.indirectTarget({
-          table: selectedTable,
-          type,
-          effects: { reads: [], writes: [] },
-          elementIndex: fn.values.const(0)
-        }),
-        [argument]
-      );
-    }
-  );
-
-  for (const [name, targetRef] of [
-    ["target", target.ref],
-    ["ordinary", ordinary.ref],
-    ["returned", returned.ref]
-  ] as const) {
-    program.exportFunction({
-      ref: functionExportRef(`test.compile.indirect-${name}-export`),
-      name,
-      target: targetRef
-    });
-  }
-
-  const unused = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
-  const selected = new WebAssembly.Table({ element: "anyfunc", initial: 1 });
   const instance = new WebAssembly.Instance(
-    new WebAssembly.Module(compileProgram(program.finish()).bytes),
-    { test: { unusedTable: unused, selectedTable: selected } }
+    new WebAssembly.Module(compileProgram(program.finish()).bytes)
   );
-  const exportedTarget = instance.exports.target;
+  const run = instance.exports.run;
 
-  ok(typeof exportedTarget === "function", "missing indirect target export");
-  selected.set(0, exportedTarget);
-
-  const ordinaryEntry = instance.exports.ordinary;
-  const returnedEntry = instance.exports.returned;
-
-  ok(typeof ordinaryEntry === "function", "missing ordinary indirect caller");
-  ok(typeof returnedEntry === "function", "missing returned indirect caller");
-  strictEqual(ordinaryEntry(37), 37);
-  strictEqual(returnedEntry(73), 73);
+  ok(typeof run === "function", "missing narrow internal ABI export");
+  strictEqual(run(0x101), 0);
 });
 
 test("compiled returned calls keep deep recursion on a bounded stack", () => {
   const program = new ProgramBuilder(createProgramResources([]));
-  const type = functionType(["i32"], []);
+  const type = functionType([Integer[32]], []);
   const countdown = program.defineFunction(
     {
       ref: functionRef("test.compile.tail-countdown"),
@@ -221,13 +205,12 @@ test("compiled returned calls keep deep recursion on a bounded stack", () => {
       effects: { reads: [], writes: [] }
     },
     (fn, self) => {
-      const remaining = fn.parameters[0];
+      const [remaining] = fn.parameters;
 
-      ok(remaining !== undefined, "missing countdown argument");
       fn.region.if(
-        remaining,
+        nonzero(remaining),
         (thenBody) => {
-          thenBody.returnCall(self, [fn.values.binary("sub", remaining, fn.values.const(1))]);
+          thenBody.returnCall(self, [remaining.sub(1)]);
         },
         {
           elseBuild: (elseBody) => {
@@ -282,23 +265,21 @@ function createTestResources(): TestResources {
 
 function memoryRead(resource: ResourceRef): ResourceEffect {
   return {
-    space: "resource",
+    kind: "resource",
     resource,
-    range: {
-      basis: { kind: "resource" },
-      slice: { byteOffset: 0, byteLength: 4 }
-    }
+    range: { kind: "slice", origin: "resource", byteOffset: 0, byteLength: 4 }
   };
 }
 
 function memoryOperand(
   resource: ResourceRef,
   effect: ResourceEffect,
-  base: ValueId
-): ResourceByteOperand {
+  base: I32Value
+): ResourceAccess<32> {
   return {
     effect: { ...effect, resource },
     address: { base, displacement: 0 },
-    width: 32
+    storageWidth: 32,
+    valueWidth: 32
   };
 }

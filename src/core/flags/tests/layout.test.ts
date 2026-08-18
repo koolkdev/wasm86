@@ -8,9 +8,12 @@ import {
   isLazyFlagStateField
 } from "#core/flags/layout.js";
 
-test("concrete flags use individual byte fields", () => {
+test("concrete flags store one-bit values in individual byte fields", () => {
   for (const flag of x86Flags) {
-    strictEqual(flagStateFields.concrete[flag].width, "u8");
+    const field = flagStateFields.concrete[flag];
+
+    strictEqual(field.width, "u8");
+    strictEqual(field.valueWidth, 1);
   }
 });
 

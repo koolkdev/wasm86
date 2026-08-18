@@ -1,8 +1,9 @@
 import { assert } from "#common/assert.js";
-import type { StorageEffects } from "#compiler/ir/effects.js";
-import type { ResourceEffect, ResourceRef } from "#compiler/ir/resource.js";
+import type { StorageEffects } from "#compiler/function/storage.js";
+import type { ResourceEffect } from "#compiler/function/resource.js";
+import type { ResourceRef } from "#compiler/reference.js";
 import type { ProgramBuilder } from "#compiler/program/builder.js";
-import { functionType } from "#compiler/wasm/legacy/function-type.js";
+import { functionType } from "#compiler/function/type.js";
 import type { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/reference.js";
 import type { ExecutionModel } from "#execution/model.js";
@@ -11,19 +12,20 @@ import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";
 import { coreStateFields } from "#core/state/layout.js";
 import { buildExit } from "#cpu/exit.js";
 import { instructionCountField, instructionLimitField } from "#cpu/instruction-count.js";
-import type { FunctionBuilder } from "#compiler/ir/builder/function.js";
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
+import type { FunctionBuilder } from "#compiler/function/builder/function.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
+import { Integer, i32, unreachable } from "#compiler/function/values.js";
 import { buildDecodeAndDispatch, type BuildDecodedInstruction } from "./decode.js";
 import { instructionLimitExit } from "./exits.js";
 import { buildInterpreterInstruction, type BuildInterpreterContinuation } from "./instruction.js";
 
-const interpreterRunType = functionType([], ["i64"]);
+const interpreterRunType = functionType([], [Integer[64]]);
 const instructionLengthLimit = X86_32_DECODE_MODEL.instructionLengthLimit;
 
 export function defineInterpreterRun(
   program: ProgramBuilder,
   model: ExecutionModel
-): FunctionDefinition {
+): FunctionDefinition<typeof interpreterRunType> {
   const stateAccess = model.cpuState.access;
   const memory = model.memory.access;
   const instructionLowerer = createInstructionLowerer({
@@ -41,7 +43,7 @@ export function defineInterpreterRun(
   // The exact path checks only the bytes consumed by one instruction, then
   // tail-calls `run` to return to the common path. Function bodies are built
   // after both definitions exist, so the two paths can refer to each other.
-  let exactInstruction: FunctionDefinition | undefined;
+  let exactInstruction: FunctionDefinition<typeof interpreterRunType> | undefined;
   const run = program.defineFunction(
     {
       ref: functionRef("interpreter.run"),
@@ -61,21 +63,22 @@ export function defineInterpreterRun(
   );
   return run;
 
-  function buildRunBody(fn: FunctionBuilder): void {
+  function buildRunBody(fn: FunctionBuilder<typeof interpreterRunType>): void {
     assert(exactInstruction !== undefined, "exact interpreter instruction function is missing");
     const exact = exactInstruction;
     // This cache survives loop iterations but resets on the next invocation.
     const fetchMemory = memory.withCache(fn.region);
-    const entryEip = stateAccess.bind(fn.region).readField(coreStateFields.eip);
-    const instructionStart = fn.values.addLoopInput();
+    const entryEip = stateAccess.forRegion(fn.region).readField(coreStateFields.eip);
 
-    fn.region.loop([{ seed: entryEip, loopInput: instructionStart }], (body) => {
+    fn.region.loop([entryEip], (body, inputs) => {
+      const instructionStart = inputs[0];
+
       buildInstructionLimitExit(body);
       // One range proof makes every direct byte read in this decode safe.
-      const directFetch = fetchMemory.bind(body).resolveDirect(
+      const directFetch = fetchMemory.forRegion(body).resolveDirect(
         {
           start: instructionStart,
-          byteLength: body.values.const(instructionLengthLimit)
+          byteLength: i32(instructionLengthLimit)
         },
         "instructionFetch"
       );
@@ -102,13 +105,13 @@ export function defineInterpreterRun(
     });
 
     // Every live path continues, falls back to an exact instruction, or exits.
-    fn.return([fn.values.unreachable("i64")]);
+    fn.return([unreachable(64)]);
   }
 
-  function buildExactInstructionBody(fn: FunctionBuilder): void {
+  function buildExactInstructionBody(fn: FunctionBuilder<typeof interpreterRunType>): void {
     // Exact mode resolves only the bytes this instruction actually consumes.
     const fetchMemory = memory.withCache(fn.region);
-    const instructionStart = stateAccess.bind(fn.region).readField(coreStateFields.eip);
+    const instructionStart = stateAccess.forRegion(fn.region).readField(coreStateFields.eip);
     const resumeRun: BuildInterpreterContinuation = (region) => region.returnCall(run, []);
 
     buildInstructionLimitExit(fn.region);
@@ -129,16 +132,16 @@ export function defineInterpreterRun(
   }
 
   function buildInstructionLimitExit(region: RegionBuilder): void {
-    const state = stateAccess.bind(region);
+    const state = stateAccess.forRegion(region);
     const count = state.readField(instructionCountField);
     const limit = state.readField(instructionLimitField);
-    const countMinusLimit = region.values.binary("sub", count, limit);
-    const reached = region.values.compare(32, "ge_s", countMinusLimit, region.values.const(0));
+    const countMinusLimit = count.sub(limit);
+    const reached = countMinusLimit.signed.ge(0);
 
     region.if(
       reached,
       (expired) => {
-        expired.return([buildExit(expired.values, instructionLimitExit())]);
+        expired.return([buildExit(instructionLimitExit())]);
       },
       { hint: "unlikely" }
     );
@@ -156,8 +159,8 @@ function interpreterRunEffects(state: ResourceRef, memory: StorageEffects): Stor
 
 function wholeResourceEffect(resource: ResourceRef): ResourceEffect {
   return {
-    space: "resource",
+    kind: "resource",
     resource,
-    range: { basis: { kind: "resource" } }
+    range: { kind: "whole", origin: "resource" }
   };
 }

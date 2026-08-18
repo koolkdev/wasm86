@@ -1,234 +1,202 @@
+import {
+  type Integer,
+  type BitValue,
+  type I32Value,
+  type I64Value
+} from "#compiler/function/values.js";
 import { divideError } from "#core/exceptions.js";
-import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticTemplate, SemanticsBuilder } from "#instructions/semantics/builder.js";
-import type { Value } from "#instructions/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
+import type { InstructionSemantics, SemanticsBuilder } from "#instructions/semantics/builder.js";
+import { reg, type RegRefForWidth } from "#instructions/semantics/refs.js";
 
 type DivideKind = "signed" | "unsigned";
-type DivideResult = Readonly<{ quotient: Value; remainder: Value }>;
-type UnsignedDividend = Readonly<{ high: Value; full: Value }>;
+type DivideResult<Width extends OperandWidth> = Readonly<{
+  quotient: Integer<Width>;
+  remainder: Integer<Width>;
+}>;
+type DivideOperation<Width extends OperandWidth> = (
+  s: SemanticsBuilder,
+  kind: DivideKind,
+  divisor: Integer<Width>
+) => DivideResult<Width>;
 
-export function divImplicitSemantic(width: OperandWidth): SemanticTemplate {
+export function divImplicitSemantic(width: OperandWidth): InstructionSemantics {
   return implicitDivideSemantic("unsigned", width);
 }
 
-export function idivImplicitSemantic(width: OperandWidth): SemanticTemplate {
+export function idivImplicitSemantic(width: OperandWidth): InstructionSemantics {
   return implicitDivideSemantic("signed", width);
 }
 
-function implicitDivideSemantic(kind: DivideKind, width: OperandWidth): SemanticTemplate {
-  return (s, v) => {
-    const src = s.operand(0);
-    const divisor = s.read(src, { width, signed: kind === "signed" });
-    const result =
-      kind === "signed" ? signedDivide(s, v, width, divisor) : unsignedDivide(s, v, width, divisor);
+function implicitDivideSemantic(kind: DivideKind, width: OperandWidth): InstructionSemantics {
+  switch (width) {
+    case 8:
+      return divideTemplate(kind, reg("al"), reg("ah"), divideByte);
+    case 16:
+      return divideTemplate(kind, reg("ax"), reg("dx"), divideWord);
+    case 32:
+      return divideTemplate(kind, reg("eax"), reg("edx"), divideDword);
+  }
+}
+
+function divideTemplate<Width extends OperandWidth>(
+  kind: DivideKind,
+  quotientTarget: RegRefForWidth<Width>,
+  remainderTarget: RegRefForWidth<Width>,
+  divide: DivideOperation<Width>
+): InstructionSemantics {
+  return (s) => {
+    const divisor = s.read(s.operand(0), quotientTarget.width);
+    const result = divide(s, kind, divisor);
 
     // The undefined DIV/IDIV status flags keep their prior values on observed
     // hardware, so no flags are written.
-    writeDivideResult(s, width, result);
+    s.write(quotientTarget, result.quotient);
+    s.write(remainderTarget, result.remainder);
   };
 }
 
-function unsignedDivide(
-  s: SemanticsBuilder,
-  v: ValueBuilder,
-  width: OperandWidth,
-  divisor: Value
-): DivideResult {
-  const dividend = unsignedDividend(s, v, width);
+function divideByte(s: SemanticsBuilder, kind: DivideKind, divisor: Integer<8>): DivideResult<8> {
+  const ax = s.read(s.reg("ax"));
 
-  // The quotient fits if the dividend's high half is below the divisor; a
-  // zero divisor fails that too, so one check covers both #DE causes.
+  if (kind === "signed") {
+    return signedNarrowDivide(s, ax.signed.extend(32), divisor);
+  }
+
+  return unsignedNarrowDivide(s, ax.unsigned.shr(8).truncate(8), ax.unsigned.extend(32), divisor);
+}
+
+function divideWord(s: SemanticsBuilder, kind: DivideKind, divisor: Integer<16>): DivideResult<16> {
+  const low = s.read(s.reg("ax"));
+  const high = s.read(s.reg("dx"));
+  const dividend = high.unsigned.extend(32).shl(16).or(low.unsigned.extend(32));
+
+  return kind === "signed"
+    ? signedNarrowDivide(s, dividend, divisor)
+    : unsignedNarrowDivide(s, high, dividend, divisor);
+}
+
+function divideDword(
+  s: SemanticsBuilder,
+  kind: DivideKind,
+  divisor: Integer<32>
+): DivideResult<32> {
+  const low = s.read(s.reg("eax"));
+  const high = s.read(s.reg("edx"));
+  const dividend = high.unsigned.extend(64).shl(32).or(low.unsigned.extend(64));
+
+  if (kind === "unsigned") {
+    guardUnsignedDivision(s, high, divisor);
+    const divisor64 = divisor.unsigned.extend(64);
+
+    return {
+      quotient: dividend.unsigned.div(divisor64).truncate(32),
+      remainder: dividend.unsigned.rem(divisor64).truncate(32)
+    };
+  }
+
   s.if(
-    v.compare(width, "ge_u", dividend.high, divisor),
+    undefinedSignedDwordDivision(dividend, divisor),
     (then) => then.cpuException(divideError()),
     "unlikely"
   );
 
-  switch (width) {
-    case 8:
-    case 16:
-      return {
-        quotient: v.binary("div_u", dividend.full, divisor),
-        remainder: v.binary("rem_u", dividend.full, divisor)
-      };
-    case 32: {
-      const divisor64 = v.extend64(32, divisor, false);
+  const divisor64 = divisor.signed.extend(64);
+  const quotient64 = dividend.signed.div(divisor64);
+  const quotient = quotient64.truncate(32);
 
-      return {
-        quotient: v.truncate64(32, v.binary64("div_u", dividend.full, divisor64)),
-        remainder: v.truncate64(32, v.binary64("rem_u", dividend.full, divisor64))
-      };
-    }
-  }
+  // The quotient fits if it round-trips through its low 32 bits; the
+  // truncation is shared with the register write.
+  s.if(
+    quotient64.ne(quotient.signed.extend(64)),
+    (then) => then.cpuException(divideError()),
+    "unlikely"
+  );
+
+  return {
+    quotient,
+    remainder: dividend.signed.rem(divisor64).truncate(32)
+  };
 }
 
-function signedDivide(
+function unsignedNarrowDivide<Width extends 8 | 16>(
   s: SemanticsBuilder,
-  v: ValueBuilder,
-  width: OperandWidth,
-  divisor: Value
-): DivideResult {
-  switch (width) {
-    case 8:
-    case 16: {
-      const dividend = signedNarrowDividend(s, v, width);
+  high: Integer<Width>,
+  dividend: I32Value,
+  divisor: Integer<Width>
+): DivideResult<Width> {
+  guardUnsignedDivision(s, high, divisor);
+  const divisor32 = divisor.unsigned.extend(32);
 
-      s.if(
-        undefinedSignedDivision(v, width, dividend, divisor),
-        (then) => then.cpuException(divideError()),
-        "unlikely"
-      );
-
-      const quotient = v.binary("div_s", dividend, divisor);
-
-      s.if(
-        narrowQuotientOverflows(v, width, quotient),
-        (then) => then.cpuException(divideError()),
-        "unlikely"
-      );
-
-      return { quotient, remainder: v.binary("rem_s", dividend, divisor) };
-    }
-    case 32: {
-      const dividend = signedDwordDividend(s, v);
-
-      s.if(
-        undefinedSignedDivision(v, width, dividend, divisor),
-        (then) => then.cpuException(divideError()),
-        "unlikely"
-      );
-
-      const divisor64 = v.extend64(32, divisor, true);
-      const quotient64 = v.binary64("div_s", dividend, divisor64);
-      const quotient = v.truncate64(32, quotient64);
-
-      // The quotient fits if it round-trips through its low 32 bits; the
-      // truncation is shared with the register write.
-      s.if(
-        v.compare64("ne", v.extend64(32, quotient, true), quotient64),
-        (then) => then.cpuException(divideError()),
-        "unlikely"
-      );
-
-      return { quotient, remainder: v.truncate64(32, v.binary64("rem_s", dividend, divisor64)) };
-    }
-  }
+  return {
+    quotient: dividend.unsigned.div(divisor32).truncate(divisor.width),
+    remainder: dividend.unsigned.rem(divisor32).truncate(divisor.width)
+  };
 }
 
-// The division cannot evaluate a zero divisor, nor the minimum dividend of
-// its computation type over -1; both raise #DE (the latter overflows the
-// destination), so both are checked before dividing.
-function undefinedSignedDivision(
-  v: ValueBuilder,
-  width: OperandWidth,
-  dividend: Value,
-  divisor: Value
-): Value {
-  const divisorZero = v.compare(32, "eq", divisor, v.const(0));
+function signedNarrowDivide<Width extends 8 | 16>(
+  s: SemanticsBuilder,
+  dividend: I32Value,
+  divisor: Integer<Width>
+): DivideResult<Width> {
+  const divisor32 = divisor.signed.extend(32);
+
+  // The division cannot evaluate a zero divisor, nor the minimum dividend of
+  // its computation type over -1; both raise #DE (the latter overflows the
+  // destination), so both are checked before dividing.
+  s.if(
+    undefinedSignedNarrowDivision(divisor.width, dividend, divisor32),
+    (then) => then.cpuException(divideError()),
+    "unlikely"
+  );
+
+  const quotient = dividend.signed.div(divisor32);
+
+  s.if(
+    narrowQuotientOverflows(divisor.width, quotient),
+    (then) => then.cpuException(divideError()),
+    "unlikely"
+  );
+
+  return {
+    quotient: quotient.truncate(divisor.width),
+    remainder: dividend.signed.rem(divisor32).truncate(divisor.width)
+  };
+}
+
+function guardUnsignedDivision<Width extends OperandWidth>(
+  s: SemanticsBuilder,
+  high: Integer<Width>,
+  divisor: Integer<NoInfer<Width>>
+): void {
+  // The quotient fits if the dividend's high half is below the divisor; a
+  // zero divisor fails that too, so one check covers both #DE causes.
+  s.if(high.unsigned.ge(divisor), (then) => then.cpuException(divideError()), "unlikely");
+}
+
+function undefinedSignedNarrowDivision(
+  width: 8 | 16,
+  dividend: I32Value,
+  divisor: I32Value
+): BitValue {
+  const divisorZero = divisor.eq(0);
 
   // A byte divide's sign-extended 16-bit dividend cannot reach INT32_MIN.
   if (width === 8) {
     return divisorZero;
   }
 
-  const dividendMin =
-    width === 16
-      ? v.compare(32, "eq", dividend, v.const(-0x8000_0000))
-      : v.compare64("eq", dividend, v.const64(-0x8000_0000_0000_0000n));
-  const divisorMinusOne = v.compare(32, "eq", divisor, v.const(-1));
+  return divisorZero.or(dividend.eq(-0x8000_0000).and(divisor.eq(-1)));
+}
 
-  return v.binary("or", divisorZero, v.binary("and", dividendMin, divisorMinusOne));
+function undefinedSignedDwordDivision(dividend: I64Value, divisor: I32Value): BitValue {
+  return divisor.eq(0).or(dividend.eq(-0x8000_0000_0000_0000n).and(divisor.eq(-1)));
 }
 
 // The quotient fits its signed width if quotient + 2^(width-1) fits the
 // unsigned width.
-function narrowQuotientOverflows(
-  v: ValueBuilder,
-  width: Extract<OperandWidth, 8 | 16>,
-  quotient: Value
-): Value {
+function narrowQuotientOverflows(width: 8 | 16, quotient: I32Value): BitValue {
   const bias = width === 8 ? 0x80 : 0x8000;
 
-  return v.compare(32, "ge_u", v.binary("add", quotient, v.const(bias)), v.const(bias * 2));
-}
-
-function unsignedDividend(
-  s: SemanticsBuilder,
-  v: ValueBuilder,
-  width: OperandWidth
-): UnsignedDividend {
-  switch (width) {
-    case 8: {
-      const ax = s.read(s.reg("ax"), { width: 16 });
-
-      return {
-        high: v.binary("shr_u", ax, v.const(8)),
-        full: ax
-      };
-    }
-    case 16: {
-      const low = s.read(s.reg("ax"), { width: 16 });
-      const high = s.read(s.reg("dx"), { width: 16 });
-
-      return {
-        high,
-        full: v.binary("or", v.binary("shl", high, v.const(16)), low)
-      };
-    }
-    case 32: {
-      const low = s.read(s.reg("eax"), { width: 32 });
-      const high = s.read(s.reg("edx"), { width: 32 });
-      const low64 = v.extend64(32, low, false);
-      const high64 = v.extend64(32, high, false);
-
-      return {
-        high,
-        full: v.binary64("or", v.binary64("shl", high64, v.const64(32n)), low64)
-      };
-    }
-  }
-}
-
-function signedNarrowDividend(
-  s: SemanticsBuilder,
-  v: ValueBuilder,
-  width: Extract<OperandWidth, 8 | 16>
-): Value {
-  switch (width) {
-    case 8:
-      return s.read(s.reg("ax"), { width: 16, signed: true });
-    case 16: {
-      const low = s.read(s.reg("ax"), { width: 16 });
-      const high = s.read(s.reg("dx"), { width: 16, signed: true });
-
-      return v.binary("or", v.binary("shl", high, v.const(16)), low);
-    }
-  }
-}
-
-function signedDwordDividend(s: SemanticsBuilder, v: ValueBuilder): Value {
-  const low = s.read(s.reg("eax"), { width: 32 });
-  const high = s.read(s.reg("edx"), { width: 32 });
-  const low64 = v.extend64(32, low, false);
-  const high64 = v.extend64(32, high, true);
-
-  return v.binary64("or", v.binary64("shl", high64, v.const64(32n)), low64);
-}
-
-function writeDivideResult(s: SemanticsBuilder, width: OperandWidth, result: DivideResult): void {
-  switch (width) {
-    case 8:
-      s.write(s.reg("al"), result.quotient, { width: 8 });
-      s.write(s.reg("ah"), result.remainder, { width: 8 });
-      return;
-    case 16:
-      s.write(s.reg("ax"), result.quotient, { width: 16 });
-      s.write(s.reg("dx"), result.remainder, { width: 16 });
-      return;
-    case 32:
-      s.write(s.reg("eax"), result.quotient, { width: 32 });
-      s.write(s.reg("edx"), result.remainder, { width: 32 });
-      return;
-  }
+  return quotient.add(bias).unsigned.ge(bias * 2);
 }

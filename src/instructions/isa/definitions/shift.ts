@@ -1,6 +1,6 @@
 import { form, imm, implicitReg, mnemonic, modrmReg, modrmRm } from "../dsl.js";
 import type { InstructionMnemonic } from "../spec.js";
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 import { rotateSemantic, type RotateOp } from "#instructions/semantics/rotate.js";
 import {
   doubleShiftSemantic,
@@ -26,7 +26,7 @@ export const SAR = shiftMnemonic("sar", 7);
 export const SHLD = doubleShiftMnemonic("shld", { imm8: 0xa4, cl: 0xa5 });
 export const SHRD = doubleShiftMnemonic("shrd", { imm8: 0xac, cl: 0xad });
 
-type Group2Semantic = (width: OperandWidth, countSource: ShiftCountSource) => SemanticTemplate;
+type Group2Semantic = (width: OperandWidth, countSource: ShiftCountSource) => InstructionSemantics;
 
 function shiftMnemonic(op: ShiftOp, group: ShiftGroup): InstructionMnemonic {
   return group2Mnemonic(op, group, (width, countSource) => shiftSemantic(op, width, countSource));

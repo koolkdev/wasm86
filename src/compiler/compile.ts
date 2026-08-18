@@ -1,6 +1,7 @@
-import { emitModule } from "#compiler/wasm/legacy/emission/module.js";
+import { emitWasmModule } from "#compiler/wasm/module/emit.js";
 import type { FunctionRef } from "#compiler/reference.js";
-import { layoutProgram } from "#compiler/wasm/module/layout.js";
+import { indexWasmModule } from "#compiler/wasm/module/indices.js";
+import { planWasmModule } from "#compiler/wasm/module/plan.js";
 import type { FunctionExportRef } from "#compiler/program/exports.js";
 import type { Program } from "#compiler/program/program.js";
 import type { MemoryImport } from "#compiler/program/resources.js";
@@ -24,16 +25,17 @@ export type CompiledProgram = Readonly<{
 }>;
 
 export function compileProgram(program: Program): CompiledProgram {
-  const layout = layoutProgram(program);
+  const plan = planWasmModule(program);
+  const indices = indexWasmModule(plan);
 
   return {
-    bytes: emitModule(program, layout),
-    memoryImports: program.memoryImports,
-    functionImports: program.functionImports.map(({ ref, moduleName, name }) => ({
+    bytes: emitWasmModule(plan, indices),
+    memoryImports: plan.memoryImports,
+    functionImports: plan.functionImports.map(({ ref, moduleName, name }) => ({
       ref,
       moduleName,
       name
     })),
-    functionExports: program.exports.map(({ ref, name }) => ({ ref, name }))
+    functionExports: plan.exports.map(({ ref, name }) => ({ ref, name }))
   };
 }

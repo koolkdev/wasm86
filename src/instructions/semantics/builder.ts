@@ -2,51 +2,52 @@ import type { ConditionCode } from "#core/flags/conditions.js";
 import type { CpuException } from "#core/exceptions.js";
 import type { SimpleFlagSource } from "#core/flags/lazy/sources.js";
 import type { X86Flag } from "#core/flags/definitions.js";
-import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { VariableRef } from "#compiler/ir/variable.js";
+import {
+  type Integer,
+  type BitValue,
+  type I32Value,
+  type TruncationTargets
+} from "#compiler/function/values.js";
 import type { MemoryDataAccessIntent, ResolvedMemoryAccess } from "#memory/types.js";
 import type { OperandWidth, RegName, SegmentRegister } from "#core/types.js";
 import type {
   MemRef,
-  OperandInput,
   OperandRef,
   RegRef,
+  RegRefForWidth,
+  SemanticVar,
   SegmentRef,
-  StorageInput,
-  TargetInput,
-  Value,
-  ValueInput
+  StorageRef
 } from "./refs.js";
+
+export type { SemanticVar } from "./refs.js";
 
 export type SemanticBranchHint = "unlikely" | "likely";
 
-export type SemanticOperandMemoryOptions = Readonly<{
-  addressOffset?: () => ValueInput;
-  width?: OperandWidth;
-}>;
-
 export type SemanticReadOptions = Readonly<{
-  width: OperandWidth;
-  signed?: boolean;
-  memory?: SemanticOperandMemoryOptions;
+  addressOffset?: I32Value;
 }>;
 
-export type SemanticWriteOptions = Readonly<{
-  width: OperandWidth;
-  memory?: SemanticOperandMemoryOptions;
-}>;
+export type SemanticWriteOptions<Width extends OperandWidth> = SemanticReadOptions &
+  Readonly<{
+    memoryWidth?: TruncationTargets<Width> & OperandWidth;
+  }>;
 
-// A resolved destination can cross into structured control. The consuming
-// semantic region is explicit so its read or write lands in that region while
-// retaining the original range check and resolved-access metadata.
-export interface SemanticUpdate {
-  read(region: SemanticOps): Value;
-  write(region: SemanticOps, value: ValueInput): void;
-}
+type SemanticUpdateDestination =
+  | Readonly<{ kind: "storage"; reference: StorageRef }>
+  | Readonly<{ kind: "memory"; access: ResolvedMemoryAccess<"write"> }>;
+
+// An update resolves its writable destination once. The consuming builder
+// selects the region where each later read or write is emitted.
+export type SemanticUpdate<Width extends OperandWidth> = Readonly<{
+  kind: "update";
+  width: Width;
+  destination: SemanticUpdateDestination;
+}>;
 
 export type AccessFault = Readonly<{
-  condition: Value;
-  exception: CpuException<Value>;
+  condition: BitValue;
+  exception: CpuException<I32Value>;
 }>;
 
 export type AccessResolution<TIntent extends MemoryDataAccessIntent = MemoryDataAccessIntent> =
@@ -57,33 +58,13 @@ export type AccessResolution<TIntent extends MemoryDataAccessIntent = MemoryData
 
 export type SemanticMemoryAccessOptions<TIntent extends MemoryDataAccessIntent> = Readonly<{
   reference: MemRef;
-  byteLength: ValueInput;
+  byteLength: I32Value;
   intent: TIntent;
 }>;
 
-export type SemanticMemoryReadOptions = Readonly<{
-  width: OperandWidth;
-  signed?: boolean;
-}>;
-
-export type SemanticMemoryWriteOptions = Readonly<{
-  width: OperandWidth;
-  value: ValueInput;
-}>;
-
-export type SemanticMemoryLoadOptions = SemanticMemoryReadOptions &
-  Readonly<{
-    byteOffset?: ValueInput;
-  }>;
-
-export type SemanticMemoryStoreOptions = SemanticMemoryWriteOptions &
-  Readonly<{
-    byteOffset?: ValueInput;
-  }>;
-
 export interface SemanticMemoryOps {
-  reference(segment: SegmentRegister, offset: ValueInput): MemRef;
-  operand(operand: OperandInput, addressOffset?: ValueInput): MemRef;
+  reference(segment: SegmentRegister, offset: I32Value): MemRef;
+  operand(operand: OperandRef, addressOffset?: I32Value): MemRef;
   // Guards a reusable range without transferring bytes.
   guard<TIntent extends MemoryDataAccessIntent>(
     options: SemanticMemoryAccessOptions<TIntent>
@@ -92,71 +73,97 @@ export interface SemanticMemoryOps {
   resolve<TIntent extends MemoryDataAccessIntent>(
     options: SemanticMemoryAccessOptions<TIntent>
   ): AccessResolution<TIntent>;
-  read(reference: MemRef, options: SemanticMemoryReadOptions): Value;
-  write(reference: MemRef, options: SemanticMemoryWriteOptions): void;
+  read<Width extends OperandWidth>(reference: MemRef, width: Width): Integer<Width>;
+  write<Width extends OperandWidth>(reference: MemRef, value: Integer<Width>): void;
   // Loads and stores consume an existing access without selecting its fault.
-  load(access: ResolvedMemoryAccess, options: SemanticMemoryLoadOptions): Value;
-  store(access: ResolvedMemoryAccess<"write">, options: SemanticMemoryStoreOptions): void;
+  load<Width extends OperandWidth>(
+    access: ResolvedMemoryAccess,
+    width: Width,
+    byteOffset?: I32Value
+  ): Integer<Width>;
+  store<Width extends OperandWidth>(
+    access: ResolvedMemoryAccess<"write">,
+    value: Integer<Width>,
+    byteOffset?: I32Value
+  ): void;
 }
 
 export interface SemanticOps {
   readonly memory: SemanticMemoryOps;
 
   operand(index: number): OperandRef;
-  reg(reg: RegName): RegRef;
-  segment(operand: OperandInput): SegmentRef;
+  reg<Name extends RegName>(reg: Name): RegRef<Name>;
+  segment(operand: OperandRef): SegmentRef;
 
-  read(source: StorageInput, options: SemanticReadOptions): Value;
-  write(target: StorageInput, value: ValueInput, options: SemanticWriteOptions): void;
-  update(target: StorageInput, options: SemanticWriteOptions): SemanticUpdate;
-  address(operand: OperandInput): Value;
+  read(source: SemanticVar): I32Value;
+  read<Width extends OperandWidth>(source: RegRefForWidth<Width>): Integer<Width>;
+  read<Width extends OperandWidth>(source: SemanticUpdate<Width>): Integer<Width>;
+  read<Width extends OperandWidth>(
+    source: OperandRef,
+    width: Width,
+    options?: SemanticReadOptions
+  ): Integer<Width>;
+  write(target: SemanticVar, value: I32Value): void;
+  write<Width extends OperandWidth>(
+    target: RegRefForWidth<Width>,
+    value: Integer<NoInfer<Width>>
+  ): void;
+  write<Width extends OperandWidth>(
+    target: SemanticUpdate<Width>,
+    value: Integer<NoInfer<Width>>
+  ): void;
+  write<Width extends OperandWidth>(
+    target: OperandRef,
+    value: Integer<Width>,
+    options?: SemanticWriteOptions<NoInfer<Width>>
+  ): void;
+  update(target: SemanticVar): SemanticUpdate<32>;
+  update<Width extends OperandWidth>(target: RegRefForWidth<Width>): SemanticUpdate<Width>;
+  update<Width extends OperandWidth>(
+    target: OperandRef,
+    width: Width,
+    options?: SemanticReadOptions
+  ): SemanticUpdate<Width>;
+  address(operand: OperandRef): I32Value;
 
-  readFlag(flag: X86Flag): Value;
-  writeStatusFlagsSource(source: SimpleFlagSource): void;
-  condition(cc: ConditionCode): Value;
-  cpuException(exception: CpuException<ValueInput>): void;
+  readFlag(flag: X86Flag): BitValue;
+  writeStatusFlagsSource<Width extends OperandWidth>(source: SimpleFlagSource<Width>): void;
+  condition(cc: ConditionCode): BitValue;
+  cpuException(exception: CpuException<I32Value>): void;
 }
 
-export type SemanticVar = VariableRef<"i32">;
-export type IfBody<TBuilder extends SemanticOps = SemanticsBuilder> = (
-  builder: TBuilder,
-  values: ValueBuilder
-) => void;
+export type IfBody<TBuilder extends SemanticOps = SemanticsBuilder> = (builder: TBuilder) => void;
 
 export interface LoopSemanticsBuilder extends SemanticOps {
-  if(
-    condition: ValueInput,
-    thenBuild: IfBody<LoopSemanticsBuilder>,
-    hint?: SemanticBranchHint
-  ): void;
+  if(condition: BitValue, thenBuild: IfBody<LoopSemanticsBuilder>, hint?: SemanticBranchHint): void;
   ifElse(
-    condition: ValueInput,
+    condition: BitValue,
     thenBuild: IfBody<LoopSemanticsBuilder>,
     elseBuild: IfBody<LoopSemanticsBuilder>,
     hint?: SemanticBranchHint
   ): void;
 }
 
-export type LoopBody = (builder: LoopSemanticsBuilder, values: ValueBuilder) => ValueInput;
+export type LoopBody = (builder: LoopSemanticsBuilder) => BitValue;
 
-export type SemanticTemplate = (builder: SemanticsBuilder, values: ValueBuilder) => void;
+export type InstructionSemantics = (builder: SemanticsBuilder) => void;
 
 export interface SemanticsBuilder extends SemanticOps {
-  currentEip(): Value;
-  nextEip(): Value;
+  currentEip(): I32Value;
+  nextEip(): I32Value;
 
-  var(seed: ValueInput): SemanticVar;
-  writeFlag(flag: X86Flag, value: ValueInput): void;
-  addInstructionCount(amount: ValueInput): void;
+  var(seed: I32Value): SemanticVar;
+  writeFlag(flag: X86Flag, value: BitValue): void;
+  addInstructionCount(amount: I32Value): void;
 
-  if(condition: ValueInput, thenBuild: IfBody, hint?: SemanticBranchHint): void;
+  if(condition: BitValue, thenBuild: IfBody, hint?: SemanticBranchHint): void;
   ifElse(
-    condition: ValueInput,
+    condition: BitValue,
     thenBuild: IfBody,
     elseBuild: IfBody,
     hint?: SemanticBranchHint
   ): void;
-  jump(target: TargetInput): void;
+  jump(target: I32Value): void;
   loop(body: LoopBody): void;
-  hostTrap(vector: ValueInput): void;
+  hostTrap(vector: Integer<8>): void;
 }

@@ -1,4 +1,4 @@
-import { maxSwitchMatch } from "#compiler/ir/controls/index.js";
+import { maxSwitchMatch } from "#compiler/function/control.js";
 import { X86_32_DECODE_MODEL } from "#instructions/decoder/model/index.js";
 import type { InstructionForm, ModRmModeForms } from "#instructions/decoder/model/types.js";
 

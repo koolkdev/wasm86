@@ -1,20 +1,19 @@
 import { assert } from "#common/assert.js";
 import type { CpuException } from "#core/exceptions.js";
 import { exceptionExit, segmentExit, trapExit } from "#core/exits.js";
-import { resourceWrite, type ResourceWriteArgs } from "#compiler/ir/operations/resource.js";
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
+import { type I32Value, type I64Value } from "#compiler/function/values.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
 import type { StatePathKind } from "./state/pending-buffer.js";
 import type { InstructionState } from "./state/state.js";
 import type { BoundStateAccess } from "#core/state/access.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
-import type { ValueTable } from "#compiler/ir/values/table.js";
 import type { VariantValue } from "#compiler/layout/variant-codec.js";
+import type { StateWriteback } from "./state/writeback.js";
 
-export type BuildExit = (values: ValueTable, exit: VariantValue<ValueId>) => ValueId;
+export type BuildExit = (exit: VariantValue<I32Value>) => I64Value;
 
 export type InstructionTerminals = Readonly<{
-  dispatch(region: RegionBuilder, targetEip: ValueId): void;
-  returnExit(region: RegionBuilder, result: ValueId): void;
+  dispatch(region: RegionBuilder, targetEip: I32Value): void;
+  returnExit(region: RegionBuilder, result: I64Value): void;
 }>;
 
 // Core settles architectural state before handing a path to the enclosing
@@ -34,12 +33,12 @@ export class InstructionTerminator {
   cpuException(
     region: RegionBuilder,
     access: BoundStateAccess,
-    exception: CpuException<ValueId>
+    exception: CpuException<I32Value>
   ): void {
-    this.#exit(region, access, this.#buildExit(region.values, exceptionExit(exception)), "fault");
+    this.#exit(region, access, this.#buildExit(exceptionExit(exception)), "fault");
   }
 
-  dispatch(region: RegionBuilder, access: BoundStateAccess, targetEip: ValueId): void {
+  dispatch(region: RegionBuilder, access: BoundStateAccess, targetEip: I32Value): void {
     this.publishCompletedState(region, access);
     this.#terminals.dispatch(region, targetEip);
   }
@@ -49,37 +48,32 @@ export class InstructionTerminator {
     this.#emitWritebacks(region, this.#state.flushesForPath(access, "completed"));
   }
 
-  hostTrap(region: RegionBuilder, access: BoundStateAccess, vector: ValueId): void {
-    this.#exit(region, access, this.#buildExit(region.values, trapExit(vector)), "completed");
+  hostTrap(region: RegionBuilder, access: BoundStateAccess, vector: I32Value): void {
+    this.#exit(region, access, this.#buildExit(trapExit(vector)), "completed");
   }
 
   segmentLoad(
     region: RegionBuilder,
     access: BoundStateAccess,
-    segment: ValueId,
-    selector: ValueId
+    segment: I32Value,
+    selector: I32Value
   ): void {
-    this.#exit(
-      region,
-      access,
-      this.#buildExit(region.values, segmentExit(segment, selector)),
-      "fault"
-    );
+    this.#exit(region, access, this.#buildExit(segmentExit(segment, selector)), "fault");
   }
 
   #exit(
     region: RegionBuilder,
     access: BoundStateAccess,
-    result: ValueId,
+    result: I64Value,
     path: StatePathKind
   ): void {
     this.#emitWritebacks(region, this.#state.flushesForPath(access, path));
     this.#terminals.returnExit(region, result);
   }
 
-  #emitWritebacks(region: RegionBuilder, writebacks: readonly ResourceWriteArgs[]): void {
+  #emitWritebacks(region: RegionBuilder, writebacks: readonly StateWriteback[]): void {
     for (const writeback of writebacks) {
-      region.operation(resourceWrite, writeback);
+      writeback.emit(region);
     }
   }
 }

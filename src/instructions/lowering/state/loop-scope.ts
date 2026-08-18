@@ -1,34 +1,26 @@
 import { assert } from "#common/assert.js";
 import { isLazyFlagStateField } from "#core/flags/layout.js";
-import type { ResourceWriteArgs } from "#compiler/ir/operations/resource.js";
 import type { InstructionStateChannel } from "./channels.js";
-import type { ResourceEffect } from "#compiler/ir/resource.js";
-import type { ValueId, WidthBounds } from "#compiler/ir/values/types.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
-import { mayAlias } from "#compiler/ir/effects.js";
-import { channelReadBounds } from "./field-tracker.js";
+import type { ResourceEffect } from "#compiler/function/resource.js";
+import type { I32Value } from "#compiler/function/values.js";
+import { mayAlias } from "#compiler/function/storage.js";
 import type { InstructionState } from "./state.js";
 import type { BoundStateAccess } from "#core/state/access.js";
+import type { StateWriteback } from "./writeback.js";
 
-export type LoopCarriedState = Readonly<{
+type LoopCarriedState = Readonly<{
   channel: InstructionStateChannel;
-  seed: ValueId;
-  loopInput: ValueId;
+  seed: I32Value;
 }>;
 
 export class StateLoopScope {
-  readonly #values: ValueTable;
   readonly #state: InstructionState;
   readonly #bodyWrites: readonly InstructionStateChannel[];
   #carried: readonly LoopCarriedState[] | undefined;
+  #entered = false;
   #closed = false;
 
-  constructor(
-    values: ValueTable,
-    state: InstructionState,
-    bodyWrites: readonly InstructionStateChannel[]
-  ) {
-    this.#values = values;
+  constructor(state: InstructionState, bodyWrites: readonly InstructionStateChannel[]) {
     this.#state = state;
     this.#bodyWrites = bodyWrites;
   }
@@ -49,38 +41,55 @@ export class StateLoopScope {
     // them first also flushes/folds tracked state before loop inputs take over.
     const values = carried.map((channel) => ({
       channel,
-      seed: this.#state.readChannel(access, channel),
-      loopInput: this.#values.addLoopInput(loopInputBounds(channel))
+      seed: this.#state.readChannel(access, channel)
     }));
 
-    for (const value of values) {
-      this.#state.writeChannel(access, value.channel, value.loopInput);
+    this.#carried = values;
+    return values;
+  }
+
+  enter(access: BoundStateAccess, inputs: readonly I32Value[]): void {
+    const carried = this.#openCarried();
+
+    assert(!this.#entered, "loop state scope is already entered");
+    assert(
+      inputs.length === carried.length,
+      "loop state inputs do not align with carried channels"
+    );
+    for (const [index, value] of carried.entries()) {
+      const input = inputs[index];
+
+      assert(input !== undefined, `loop state ${index} has no input`);
+      this.#state.writeChannel(access, value.channel, input);
     }
 
     // The iteration top is the fault boundary: carried values snapshot as
     // loop inputs, so mid-body faults report iteration-start state.
     this.#state.beginInstructionBoundary();
 
-    this.#carried = values;
-    return values;
+    this.#entered = true;
   }
 
-  captureExitValues(access: BoundStateAccess): readonly ValueId[] {
+  captureExitValues(access: BoundStateAccess): readonly I32Value[] {
     return this.#openCarried().map((value) => this.#state.readChannel(access, value.channel));
   }
 
   exitWritebacks(
     access: BoundStateAccess,
-    exitValues: readonly ValueId[]
-  ): readonly ResourceWriteArgs[] {
-    return this.#openCarried().map((value, index) =>
-      this.#state.writeback(access, value.channel, exitValues[index]!)
-    );
+    exitValues: readonly I32Value[]
+  ): readonly StateWriteback[] {
+    return this.#openCarried().map((value, index) => {
+      const exitValue = exitValues[index];
+
+      assert(exitValue !== undefined, `loop state ${index} has no exit value`);
+      return this.#state.writeback(access, value.channel, exitValue);
+    });
   }
 
   close(): void {
     const carried = this.#openCarried();
 
+    assert(this.#entered, "loop state scope was not entered");
     for (const value of carried) {
       this.#state.invalidate(value.channel);
     }
@@ -96,23 +105,23 @@ export class StateLoopScope {
     this.#closed = true;
   }
 
-  assertHoistableRead(effect: ResourceEffect): void {
+  resourceReadPlacement(effect: ResourceEffect): "entry" | "body" {
+    if (!this.#state.owns(effect)) {
+      return "body";
+    }
+
+    // Semantic loops exclude dynamic GPR reads. A dynamic segment base is
+    // loop-invariant like any static non-carried channel because segment loads
+    // stay outside loop bodies and terminate their surrounding block.
     assert(
       this.#openCarried().every((value) => !mayAlias(this.#state.effect(value.channel), effect)),
       "an execution-state read overlaps loop-carried state"
     );
-  }
-
-  isExecutionStateEffect(effect: ResourceEffect): boolean {
-    return this.#state.owns(effect);
+    return "entry";
   }
 
   #openCarried(): readonly LoopCarriedState[] {
     assert(this.#carried !== undefined && !this.#closed, "loop state scope is not open");
     return this.#carried;
   }
-}
-
-function loopInputBounds(channel: InstructionStateChannel): WidthBounds | undefined {
-  return channel.kind === "gpr" ? undefined : channelReadBounds(channel);
 }

@@ -1,23 +1,24 @@
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import { u8 } from "#compiler/function/values.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 
-export function nopSemantic(): SemanticTemplate {
+export function nopSemantic(): InstructionSemantics {
   return () => {};
 }
 
-export function intSemantic(): SemanticTemplate {
+export function intSemantic(): InstructionSemantics {
   return (s) => {
-    s.hostTrap(s.read(s.operand(0), { width: 32 }));
+    s.hostTrap(s.read(s.operand(0), 8));
   };
 }
 
-export function int3Semantic(): SemanticTemplate {
-  return (s, v) => {
-    s.hostTrap(v.const(3));
+export function int3Semantic(): InstructionSemantics {
+  return (s) => {
+    s.hostTrap(u8(3));
   };
 }
 
-export function intoSemantic(): SemanticTemplate {
-  return (s, v) => {
-    s.if(s.readFlag("OF"), (then) => then.hostTrap(v.const(4)), "unlikely");
+export function intoSemantic(): InstructionSemantics {
+  return (s) => {
+    s.if(s.readFlag("OF"), (then) => then.hostTrap(u8(4)), "unlikely");
   };
 }

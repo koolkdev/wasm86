@@ -10,6 +10,7 @@ import { floatFromSource } from "./float/value.js";
 import { simplifyInteger } from "./integer/simplify.js";
 import { integerFromSource } from "./integer/value.js";
 import type { AnyValue, ValueForType, ValueTuple, ValueType } from "./type.js";
+import type { AnyNarrowInteger } from "./integer/types.js";
 
 export type ValueIdentity = number;
 
@@ -92,6 +93,14 @@ export class ValueResolver {
       a.width === b.width &&
       this.resolve(a).identity === this.resolve(b).identity
     );
+  }
+
+  constValue(value: AnyNarrowInteger): number | undefined {
+    const expression = this.resolve(value).expression;
+
+    return expression.op === "integer.constant"
+      ? Number(BigInt.asIntN(32, expression.attr))
+      : undefined;
   }
 
   #createSourceValue(type: ValueType, source: ValueSource): ValueRef {

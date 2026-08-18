@@ -1,7 +1,6 @@
 import { assert } from "#common/assert.js";
-import { buildVariant } from "#compiler/ir/builder/variant.js";
-import type { ValueTable } from "#compiler/ir/values/table.js";
-import type { ValueId } from "#compiler/ir/values/types.js";
+import { buildVariant } from "#compiler/function/builder/variant.js";
+import type { I32Value, I64Value } from "#compiler/function/values.js";
 import { decodeVariant, type VariantValue } from "#compiler/layout/variant-codec.js";
 import { createVariantLayout } from "#compiler/layout/variant.js";
 import { coreExits, coreExitFields, coreExitSet } from "#core/exits.js";
@@ -14,8 +13,8 @@ import type { RunStop } from "./cpu.js";
 // dispatch and never enter this layout.
 export const exitLayout = createVariantLayout("cpu.exit", [coreExitSet, interpreterExitSet]);
 
-export function buildExit(values: ValueTable, exit: VariantValue<ValueId>): ValueId {
-  return buildVariant(values, exitLayout, exit);
+export function buildExit(exit: VariantValue<I32Value>): I64Value {
+  return buildVariant(exitLayout, exit);
 }
 
 export function decodeExit(encoded: bigint): RunStop {

@@ -1,17 +1,17 @@
 import type { OperandWidth } from "#core/types.js";
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
 
-export function xchgSemantic(width: OperandWidth = 32): SemanticTemplate {
+export function xchgSemantic(width: OperandWidth = 32): InstructionSemantics {
   return (s) => {
     const leftOperand = s.operand(0);
     const rightOperand = s.operand(1);
 
-    const leftTarget = s.update(leftOperand, { width });
-    const rightTarget = s.update(rightOperand, { width });
-    const left = leftTarget.read(s);
-    const right = rightTarget.read(s);
+    const leftTarget = s.update(leftOperand, width);
+    const rightTarget = s.update(rightOperand, width);
+    const left = s.read(leftTarget);
+    const right = s.read(rightTarget);
 
-    rightTarget.write(s, left);
-    leftTarget.write(s, right);
+    s.write(rightTarget, left);
+    s.write(leftTarget, right);
   };
 }

@@ -15,6 +15,6 @@ export const LEA = mnemonic("lea", [
     opcode: [0x8d],
     operands: [modrmReg("r32"), modrmRm("m32")],
     syntax: "lea {0}, {1}",
-    semantics: leaSemantic()
+    semantics: leaSemantic(32)
   })
 ]);

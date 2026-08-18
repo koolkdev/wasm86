@@ -1,5 +1,5 @@
-import type { ValueId } from "#compiler/ir/values/types.js";
-import { VariableRef } from "#compiler/ir/variable.js";
+import { Integer, select, u8, unreachable, type I32Value } from "#compiler/function/values.js";
+import { VariableRef } from "#compiler/function/storage.js";
 import type {
   DecodeOperand,
   InstructionForm,
@@ -19,30 +19,30 @@ import {
   type OperandBinding,
   type SegmentBindingSelection
 } from "#instructions/lowering/bindings.js";
-import { registerAliasByCode } from "#core/registers.js";
+import { registerAliasByIndex } from "#core/registers.js";
 import { segmentRegisterIndex } from "#core/segments.js";
-import type { RegionBuilder } from "#compiler/ir/builder/region.js";
+import type { RegionBuilder } from "#compiler/function/builder/region.js";
 import type { DecodedMemoryAddress } from "./address.js";
 import type { SegmentOverrideState } from "./prefixes.js";
 import { InstructionByteStream } from "./stream.js";
 
 export type DecodedRm =
   | Readonly<{ kind: "none" }>
-  | Readonly<{ kind: "register"; registerIndex: ValueId }>
+  | Readonly<{ kind: "register"; registerIndex: Integer<8> }>
   | DecodedMemoryAddress;
 
 type OperandDecoderOptions = Readonly<{
-  instructionStart: ValueId;
+  instructionStart: I32Value;
   stream: InstructionByteStream;
   segmentOverride: SegmentOverrideState;
-  modRmByte: VariableRef;
+  modRmByte: VariableRef<(typeof Integer)[8]>;
 }>;
 
 export class OperandDecoder {
-  readonly #instructionStart: ValueId;
+  readonly #instructionStart: I32Value;
   readonly #stream: InstructionByteStream;
   readonly #segmentOverride: SegmentOverrideState;
-  readonly #modRmByte: VariableRef;
+  readonly #modRmByte: VariableRef<(typeof Integer)[8]>;
 
   constructor(options: OperandDecoderOptions) {
     this.#instructionStart = options.instructionStart;
@@ -68,38 +68,29 @@ export class OperandDecoder {
     switch (operand.kind) {
       case "modrm.reg": {
         const modRmByte = region.read(this.#modRmByte);
+        const registerIndex = modRmByte.unsigned.shr(3).and(0b111);
 
-        return regDynamicBinding(
-          region.values.binary(
-            "and",
-            region.values.binary("shr_u", modRmByte, region.values.const(3)),
-            region.values.const(0b111)
-          )
-        );
+        return regDynamicBinding(registerIndex);
       }
       case "modrm.sreg": {
         const modRmByte = region.read(this.#modRmByte);
-        const encodedIndex = region.values.binary(
-          "and",
-          region.values.binary("shr_u", modRmByte, region.values.const(3)),
-          region.values.const(0b111)
-        );
+        const encodedIndex = modRmByte.unsigned.shr(3).and(0b111);
 
         return segmentDynamicBinding(
           region.switch(
             encodedIndex,
             operand.registers.map((segment, match) => ({
               match,
-              build: (arm) => arm.values.const(segmentRegisterIndex(segment))
+              build: () => u8(segmentRegisterIndex(segment))
             })),
-            (invalid) => invalid.values.unreachable()
+            () => unreachable(8)
           )
         );
       }
       case "modrm.rm":
-        return this.#rmBinding(region, rm);
+        return this.#rmBinding(rm);
       case "opcode.reg":
-        return regBinding(registerAliasByCode(operand.width, form.opcodeLowBits!).name);
+        return regBinding(registerAliasByIndex(operand.width, form.opcodeLowBits!).name);
       case "implicit.reg":
         return regBinding(operand.alias.name);
       case "implicit.sreg":
@@ -123,23 +114,15 @@ export class OperandDecoder {
         return immDynamicBinding(this.#stream.readEncoded(region, operand.value));
       case "relative": {
         const displacement = this.#stream.readEncoded(region, operand.displacement);
-        const nextEip = region.values.binary(
-          "add",
-          this.#instructionStart,
-          this.#stream.offset(region)
-        );
-        const target = region.values.binary("add", nextEip, displacement);
+        const nextEip = this.#instructionStart.add(this.#stream.offset(region));
+        const target = nextEip.add(displacement);
 
-        return immDynamicBinding(
-          operand.width === 16
-            ? region.values.binary("and", target, region.values.const(0xffff))
-            : target
-        );
+        return immDynamicBinding(operand.width === 16 ? target.and(0xffff) : target);
       }
     }
   }
 
-  #rmBinding(region: RegionBuilder, rm: DecodedRm): OperandBinding {
+  #rmBinding(rm: DecodedRm): OperandBinding {
     switch (rm.kind) {
       case "register":
         return regDynamicBinding(rm.registerIndex);
@@ -152,7 +135,7 @@ export class OperandDecoder {
           dynamicMemSegment(rm.segmentIndex)
         );
       case "none":
-        return regDynamicBinding(region.values.unreachable());
+        return regDynamicBinding(unreachable(8));
     }
   }
 
@@ -168,11 +151,11 @@ export class OperandDecoder {
   #segmentValue(
     region: RegionBuilder,
     selection: Extract<SegmentSelection, { kind: "overrideOrDefault" }>
-  ): ValueId {
-    return region.values.select(
+  ): Integer<8> {
+    return select(
       region.read(this.#segmentOverride.present),
       region.read(this.#segmentOverride.registerIndex),
-      region.values.const(segmentRegisterIndex(selection.defaultSegment))
+      u8(segmentRegisterIndex(selection.defaultSegment))
     );
   }
 }

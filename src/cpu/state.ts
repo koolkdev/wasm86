@@ -1,4 +1,4 @@
-import { resourceRef } from "#compiler/ir/resource.js";
+import { resourceRef } from "#compiler/reference.js";
 import { createLayout } from "#compiler/layout/layout.js";
 import type { LayoutStructure } from "#compiler/layout/structure.js";
 import type { MemoryImport } from "#compiler/program/resources.js";

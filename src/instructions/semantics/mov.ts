@@ -1,84 +1,99 @@
-import type { ValueBuilder } from "#compiler/ir/values/builder.js";
+import { integer, select, type BitValue } from "#compiler/function/values.js";
 import { invalidOpcode } from "#core/exceptions.js";
 import type { ConditionCode } from "#core/flags/conditions.js";
 import { segmentRegisterIndex } from "#core/segments.js";
-import type { SemanticTemplate } from "#instructions/semantics/builder.js";
-import type { SegmentRef, Value } from "#instructions/semantics/refs.js";
+import type { InstructionSemantics } from "#instructions/semantics/builder.js";
+import type { SegmentRef } from "#instructions/semantics/refs.js";
 import type { OperandWidth } from "#core/types.js";
 
-export function movSemantic(width: OperandWidth = 32): SemanticTemplate {
+type MoveExtensionTarget<SourceWidth extends 8 | 16> =
+  32 | ([SourceWidth] extends [8] ? 16 : never);
+
+export function movSemantic(width: OperandWidth = 32): InstructionSemantics {
   return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-    const value = s.read(src, { width });
+    const value = s.read(src, width);
 
-    s.write(dst, value, { width });
+    s.write(dst, value);
   };
 }
 
-export function movSregSemantic(registerWidth: Extract<OperandWidth, 16 | 32>): SemanticTemplate {
+export function movSregSemantic(registerWidth: 16 | 32): InstructionSemantics {
   return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-    const value = s.read(src, { width: 16 });
+    const value = s.read(src, 16).unsigned.extend(registerWidth);
 
-    s.write(dst, value, { width: registerWidth, memory: { width: 16 } });
+    s.write(dst, value, { memoryWidth: 16 });
   };
 }
 
-export function movToSregSemantic(): SemanticTemplate {
-  return (s, v) => {
+export function movToSregSemantic(): InstructionSemantics {
+  return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-    const csLoad = segmentTargetIsCs(v, s.segment(dst));
+    const csLoad = segmentTargetIsCs(s.segment(dst));
 
     if (csLoad !== undefined) {
       s.if(csLoad, (failure) => failure.cpuException(invalidOpcode()), "unlikely");
     }
 
-    s.write(dst, s.read(src, { width: 16 }), { width: 16 });
+    s.write(dst, s.read(src, 16));
   };
 }
 
-function segmentTargetIsCs(v: ValueBuilder, segment: SegmentRef): Value | undefined {
+function segmentTargetIsCs(segment: SegmentRef): BitValue | undefined {
   switch (segment.kind) {
     case "static":
-      return segment.reg === "cs" ? v.const(1) : undefined;
+      return segment.reg === "cs" ? integer(1, 1) : undefined;
     case "dynamic":
-      return v.compare(32, "eq", segment.index, v.const(segmentRegisterIndex("cs")));
+      return segment.index.eq(segmentRegisterIndex("cs"));
   }
 }
 
-export function movzxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {
+export function movzxSemantic<SourceWidth extends 8 | 16>(
+  sourceWidth: SourceWidth,
+  destinationWidth: MoveExtensionTarget<NoInfer<SourceWidth>>
+): InstructionSemantics {
+  return extendedMove("unsigned", sourceWidth, destinationWidth);
+}
+
+export function movsxSemantic<SourceWidth extends 8 | 16>(
+  sourceWidth: SourceWidth,
+  destinationWidth: MoveExtensionTarget<NoInfer<SourceWidth>>
+): InstructionSemantics {
+  return extendedMove("signed", sourceWidth, destinationWidth);
+}
+
+function extendedMove(
+  signedness: "signed" | "unsigned",
+  sourceWidth: 8 | 16,
+  destinationWidth: 16 | 32
+): InstructionSemantics {
   return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-    const value = s.read(src, { width: sourceWidth });
+    const value = s.read(src, sourceWidth);
+    const result =
+      signedness === "signed"
+        ? value.signed.extend(destinationWidth)
+        : value.unsigned.extend(destinationWidth);
 
-    s.write(dst, value, { width: destinationWidth });
+    s.write(dst, result);
   };
 }
 
-export function movsxSemantic(sourceWidth: 8 | 16, destinationWidth: 16 | 32): SemanticTemplate {
+export function cmovSemantic(cc: ConditionCode, width: 16 | 32): InstructionSemantics {
   return (s) => {
     const dst = s.operand(0);
     const src = s.operand(1);
-    const value = s.read(src, { width: sourceWidth, signed: true });
-
-    s.write(dst, value, { width: destinationWidth });
-  };
-}
-
-export function cmovSemantic(cc: ConditionCode, width: OperandWidth = 32): SemanticTemplate {
-  return (s, v) => {
-    const dst = s.operand(0);
-    const src = s.operand(1);
-    const value = s.read(src, { width });
-    const destination = s.update(dst, { width });
+    const value = s.read(src, width);
+    const destination = s.update(dst, width);
     const condition = s.condition(cc);
-    const fallback = destination.read(s);
-    const selected = v.select(condition, value, fallback);
+    const fallback = s.read(destination);
+    const selected = select(condition, value, fallback);
 
-    destination.write(s, selected);
+    s.write(destination, selected);
   };
 }

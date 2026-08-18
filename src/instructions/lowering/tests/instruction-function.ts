@@ -1,15 +1,16 @@
-import type { InstructionBuilder } from "#instructions/lowering/builder.js";
+import type { InstructionSequenceBuilder } from "#instructions/lowering/builder.js";
 import type { InstructionLowerer } from "#instructions/lowering/lowerer.js";
 import type { InstructionTerminals } from "#instructions/lowering/terminal.js";
-import { functionType } from "#compiler/wasm/legacy/function-type.js";
+import { functionType } from "#compiler/function/type.js";
 import { FunctionDefinition } from "#compiler/program/functions.js";
 import { functionRef } from "#compiler/reference.js";
-import { buildFunction } from "#compiler/ir/builder/function.js";
-import type { Function as IrFunction } from "#compiler/wasm/legacy/function.js";
+import { buildFunction } from "#compiler/function/builder/function.js";
+import type { FunctionBody } from "#compiler/function/body.js";
+import { Integer, i64 } from "#compiler/function/values.js";
 import { testInstructionLowerer } from "#test/support/execution-model.js";
 
-const instructionFunctionType = functionType([], ["i64"]);
-const dispatchFunctionType = functionType(["i32"], ["i64"]);
+const instructionFunctionType = functionType([], [Integer[64]]);
+const dispatchFunctionType = functionType([Integer[32]], [Integer[64]]);
 const noEffects = { reads: [], writes: [] } as const;
 
 export const testInstructionDispatch = new FunctionDefinition({
@@ -17,13 +18,14 @@ export const testInstructionDispatch = new FunctionDefinition({
   type: dispatchFunctionType,
   effects: noEffects,
   owner: undefined,
-  build: (fn) => fn.return([fn.values.const64(0n)])
+  buildStability: "dynamic",
+  build: (fn) => fn.return([i64(0n)])
 });
 
 export function buildInstructionFunction(
-  build: (instructions: InstructionBuilder) => void,
+  build: (instructions: InstructionSequenceBuilder) => void,
   lowerer: InstructionLowerer = testInstructionLowerer
-): IrFunction {
+): FunctionBody {
   return buildFunction(instructionFunctionType, (fn) => {
     const finalFallthrough = lowerer.lower(fn.region, instructionFunctionTerminals(), build);
 

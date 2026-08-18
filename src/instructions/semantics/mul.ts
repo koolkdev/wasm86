@@ -1,162 +1,160 @@
-import type { ValueBuilder } from "#compiler/ir/values/builder.js";
-import type { SemanticTemplate, SemanticsBuilder } from "#instructions/semantics/builder.js";
-import type { StorageInput, Value } from "#instructions/semantics/refs.js";
-import type { OperandWidth, RegName } from "#core/types.js";
+import { integer, type Integer, type BitValue } from "#compiler/function/values.js";
+import type { InstructionSemantics, SemanticsBuilder } from "#instructions/semantics/builder.js";
+import type { OperandWidth } from "#core/types.js";
+import { accumulator } from "./registers.js";
 
 type MultiplyKind = "signed" | "unsigned";
-type MultiplyProduct = Readonly<{ full: Value; low: Value; high: Value; overflow: Value }>;
 
-export function mulImplicitSemantic(width: OperandWidth): SemanticTemplate {
+type MultiplyProduct<Width extends OperandWidth, FullWidth extends 32 | 64> = Readonly<{
+  full: Integer<FullWidth>;
+  low: Integer<Width>;
+  high: Integer<Width>;
+  overflow: BitValue;
+}>;
+
+type MultiplyOperation<Width extends OperandWidth, FullWidth extends 32 | 64> = (
+  kind: MultiplyKind,
+  left: Integer<Width>,
+  right: Integer<NoInfer<Width>>
+) => MultiplyProduct<Width, FullWidth>;
+
+type ImplicitProductWriter<Width extends OperandWidth, FullWidth extends 32 | 64> = (
+  s: SemanticsBuilder,
+  product: MultiplyProduct<Width, FullWidth>
+) => void;
+
+export function mulImplicitSemantic(width: OperandWidth): InstructionSemantics {
   return implicitMultiplySemantic("unsigned", width);
 }
 
-export function imulImplicitSemantic(width: OperandWidth): SemanticTemplate {
+export function imulImplicitSemantic(width: OperandWidth): InstructionSemantics {
   return implicitMultiplySemantic("signed", width);
 }
 
-function implicitMultiplySemantic(kind: MultiplyKind, width: OperandWidth): SemanticTemplate {
-  return (s, v) => {
-    const src = s.operand(0);
-    const right = s.read(src, { width });
-    const left = s.read(s.reg(accumulatorForWidth(width)), { width });
-    const product = multiplyProduct(v, kind, width, left, right);
-
-    writeImplicitProduct(s, v, width, product);
-    writeMultiplyFlags(s, v, product.overflow);
-  };
-}
-
-export function imulRegRmSemantic(width: OperandWidth): SemanticTemplate {
-  return (s, v) => {
-    const dst = s.operand(0);
-    const src = s.operand(1);
-    const srcValue = s.read(src, { width });
-    const dstValue = s.read(dst, { width });
-
-    writeImulResult(s, v, width, dst, dstValue, srcValue);
-  };
-}
-
-export function imulRegRmImmSemantic(width: OperandWidth): SemanticTemplate {
-  return (s, v) => {
-    const dst = s.operand(0);
-    const src = s.operand(1);
-    const srcValue = s.read(src, { width });
-    const immValue = s.read(s.operand(2), { width });
-
-    writeImulResult(s, v, width, dst, srcValue, immValue);
-  };
-}
-
-function writeImulResult(
-  s: SemanticsBuilder,
-  v: ValueBuilder,
-  width: OperandWidth,
-  dst: StorageInput,
-  left: Value,
-  right: Value
-): void {
-  const product = multiplyProduct(v, "signed", width, left, right);
-
-  writeMultiplyFlags(s, v, product.overflow);
-  s.write(dst, product.low, { width });
-}
-
-function writeImplicitProduct(
-  s: SemanticsBuilder,
-  v: ValueBuilder,
-  width: OperandWidth,
-  product: MultiplyProduct
-): void {
+function implicitMultiplySemantic(kind: MultiplyKind, width: OperandWidth): InstructionSemantics {
   switch (width) {
     case 8:
-      s.write(s.reg("ax"), v.truncate(16, product.full), { width: 16 });
-      return;
+      return implicitMultiplyTemplate(kind, width, narrowProduct, writeByteProduct);
     case 16:
-      s.write(s.reg("ax"), product.low, { width: 16 });
-      s.write(s.reg("dx"), product.high, { width: 16 });
-      return;
+      return implicitMultiplyTemplate(kind, width, narrowProduct, writeWordProduct);
     case 32:
-      s.write(s.reg("eax"), product.low, { width: 32 });
-      s.write(s.reg("edx"), product.high, { width: 32 });
-      return;
+      return implicitMultiplyTemplate(kind, width, dwordProduct, writeDwordProduct);
   }
 }
 
-function multiplyProduct(
-  v: ValueBuilder,
+function implicitMultiplyTemplate<Width extends OperandWidth, FullWidth extends 32 | 64>(
   kind: MultiplyKind,
-  width: OperandWidth,
-  left: Value,
-  right: Value
-): MultiplyProduct {
+  width: Width,
+  multiply: MultiplyOperation<Width, FullWidth>,
+  writeProduct: ImplicitProductWriter<Width, FullWidth>
+): InstructionSemantics {
+  return (s) => {
+    const product = multiply(kind, s.read(accumulator(width)), s.read(s.operand(0), width));
+
+    writeProduct(s, product);
+    writeMultiplyFlags(s, product.overflow);
+  };
+}
+
+export function imulRegRmSemantic(width: 16 | 32): InstructionSemantics {
+  return explicitImulSemantic(width, 0, 1);
+}
+
+export function imulRegRmImmSemantic(width: 16 | 32): InstructionSemantics {
+  return explicitImulSemantic(width, 1, 2);
+}
+
+function explicitImulSemantic(
+  width: 16 | 32,
+  leftIndex: number,
+  rightIndex: number
+): InstructionSemantics {
   switch (width) {
-    case 8:
     case 16:
-      return narrowProduct(v, kind, width, left, right);
+      return explicitImulTemplate(width, leftIndex, rightIndex, narrowProduct);
     case 32:
-      return dwordProduct(v, kind, left, right);
+      return explicitImulTemplate(width, leftIndex, rightIndex, dwordProduct);
   }
 }
 
-function narrowProduct(
-  v: ValueBuilder,
+function explicitImulTemplate<Width extends 16 | 32, FullWidth extends 32 | 64>(
+  width: Width,
+  leftIndex: number,
+  rightIndex: number,
+  multiply: MultiplyOperation<Width, FullWidth>
+): InstructionSemantics {
+  return (s) => {
+    const product = multiply(
+      "signed",
+      s.read(s.operand(leftIndex), width),
+      s.read(s.operand(rightIndex), width)
+    );
+
+    writeMultiplyFlags(s, product.overflow);
+    s.write(s.operand(0), product.low);
+  };
+}
+
+function writeByteProduct(s: SemanticsBuilder, product: MultiplyProduct<8, 32>): void {
+  s.write(s.reg("ax"), product.full.truncate(16));
+}
+
+function writeWordProduct(s: SemanticsBuilder, product: MultiplyProduct<16, 32>): void {
+  s.write(s.reg("ax"), product.low);
+  s.write(s.reg("dx"), product.high);
+}
+
+function writeDwordProduct(s: SemanticsBuilder, product: MultiplyProduct<32, 64>): void {
+  s.write(s.reg("eax"), product.low);
+  s.write(s.reg("edx"), product.high);
+}
+
+function narrowProduct<Width extends 8 | 16>(
   kind: MultiplyKind,
-  width: Extract<OperandWidth, 8 | 16>,
-  left: Value,
-  right: Value
-): MultiplyProduct {
+  left: Integer<Width>,
+  right: Integer<NoInfer<Width>>
+): MultiplyProduct<Width, 32> {
   const signed = kind === "signed";
-  const leftFull = v.extend(width, left, signed);
-  const rightFull = v.extend(width, right, signed);
-  const full = v.binary("mul", leftFull, rightFull);
-  const low = v.truncate(width, full);
-  const high = v.truncate(width, v.binary("shr_u", full, v.const(width)));
-  const overflow = signed
-    ? v.compare(32, "ne", full, v.extend(width, low, true))
-    : v.compare(width, "ne", high, v.const(0));
+  const leftFull = signed ? left.signed.extend(32) : left.unsigned.extend(32);
+  const rightFull = signed ? right.signed.extend(32) : right.unsigned.extend(32);
+  const full = leftFull.mul(rightFull);
+  const low = full.truncate(left.width);
+  const high = full.unsigned.shr(left.width).truncate(left.width);
 
-  return { full, low, high, overflow };
+  return {
+    full,
+    low,
+    high,
+    overflow: signed ? full.ne(low.signed.extend(32)) : high.ne(0)
+  };
 }
 
 function dwordProduct(
-  v: ValueBuilder,
   kind: MultiplyKind,
-  left: Value,
-  right: Value
-): MultiplyProduct {
+  left: Integer<32>,
+  right: Integer<32>
+): MultiplyProduct<32, 64> {
   const signed = kind === "signed";
-  const leftFull = v.extend64(32, left, signed);
-  const rightFull = v.extend64(32, right, signed);
-  const full = v.binary64("mul", leftFull, rightFull);
-  const low = v.truncate64(32, full);
-  const high = v.truncate64(32, v.binary64("shr_u", full, v.extend64(32, v.const(32), false)));
-  const overflow = signed
-    ? v.compare64("ne", full, v.extend64(32, low, true))
-    : v.compare(32, "ne", high, v.const(0));
+  const leftFull = signed ? left.signed.extend(64) : left.unsigned.extend(64);
+  const rightFull = signed ? right.signed.extend(64) : right.unsigned.extend(64);
+  const full = leftFull.mul(rightFull);
+  const low = full.truncate(32);
+  const high = full.unsigned.shr(32).truncate(32);
 
-  return { full, low, high, overflow };
+  return {
+    full,
+    low,
+    high,
+    overflow: signed ? full.ne(low.signed.extend(64)) : high.ne(0)
+  };
 }
 
-function accumulatorForWidth(width: OperandWidth): RegName {
-  switch (width) {
-    case 8:
-      return "al";
-    case 16:
-      return "ax";
-    case 32:
-      return "eax";
-  }
-}
-
-function writeMultiplyFlags(s: SemanticsBuilder, v: ValueBuilder, overflow: Value): void {
-  const zero = v.const(0);
-
+function writeMultiplyFlags(s: SemanticsBuilder, overflow: BitValue): void {
   // Undefined MUL/IMUL status flags are fixed to observed deterministic values.
   s.writeFlag("CF", overflow);
-  s.writeFlag("PF", v.const(1));
-  s.writeFlag("AF", zero);
-  s.writeFlag("ZF", zero);
-  s.writeFlag("SF", zero);
+  s.writeFlag("PF", integer(1, 1));
+  s.writeFlag("AF", integer(1, 0));
+  s.writeFlag("ZF", integer(1, 0));
+  s.writeFlag("SF", integer(1, 0));
   s.writeFlag("OF", overflow);
 }

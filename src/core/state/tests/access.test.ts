@@ -1,35 +1,32 @@
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { test } from "node:test";
 
-import type { ResourceByteOperand } from "#compiler/ir/resource.js";
-import { ValueTable } from "#compiler/ir/values/table.js";
-import { fitsUnsigned } from "#compiler/ir/values/width-bounds.js";
-import { instructionCountField } from "#cpu/instruction-count.js";
+import type { ResourceAccess, StorageWidth } from "#compiler/function/resource.js";
+import { RegionBuilder } from "#compiler/function/builder/region.js";
+import { i32, u8 } from "#compiler/function/values.js";
+import { ValueResolver } from "#compiler/function/values/resolver.js";
 import { flagStateFields } from "#core/flags/layout.js";
 import { coreStateFields } from "#core/state/layout.js";
-import { RegionBuilder } from "#compiler/ir/builder/region.js";
+import { instructionCountField } from "#cpu/instruction-count.js";
 import { testExecutionModel } from "#test/support/execution-model.js";
 import { BoundStateAccess, StateAccess } from "../access.js";
 
 const cpuState = testExecutionModel.cpuState;
 
 function createAccess(): Readonly<{
-  values: ValueTable;
   body: RegionBuilder;
   access: BoundStateAccess;
 }> {
-  const values = new ValueTable();
-  const body = new RegionBuilder(values);
+  const body = new RegionBuilder(new ValueResolver());
 
   return {
-    values,
     body,
-    access: new StateAccess(cpuState).bind(body)
+    access: new StateAccess(cpuState).forRegion(body)
   };
 }
 
 test("static execution-state operands use exact absolute resource slices", () => {
-  const { values, access } = createAccess();
+  const { body, access } = createAccess();
   const gprs = cpuState.layout.namedArray(coreStateFields.gprs);
   const eax = access.gpr("eax");
   const ax = access.gpr("ax");
@@ -42,74 +39,71 @@ test("static execution-state operands use exact absolute resource slices", () =>
   exactSlice(al, gprs.offset, 1);
   exactSlice(ah, gprs.offset + 1, 1);
   exactSlice(ebx, gprs.offset + 3 * gprs.stride, 4);
-  strictEqual(values.constValue(eax.address.base), 0);
+  strictEqual(body.constValue(eax.address.base), 0);
   strictEqual(eax.address.displacement, gprs.offset);
 });
 
 test("a folded dynamic GPR address becomes an exact static operand", () => {
-  const { values, access } = createAccess();
+  const { body, access } = createAccess();
   const gprs = cpuState.layout.namedArray(coreStateFields.gprs);
-  const highEax = access.dynamicGpr(values.const(4), 8);
+  const highEax = access.dynamicGpr(u8(4), 8);
 
   exactSlice(highEax, gprs.offset + 1, 1);
-  strictEqual(values.constValue(highEax.address.base), 0);
+  strictEqual(body.constValue(highEax.address.base), 0);
 });
 
 test("an unresolved dynamic GPR operand covers only the GPR array", () => {
-  const { values, access } = createAccess();
+  const { body, access } = createAccess();
   const gprs = cpuState.layout.namedArray(coreStateFields.gprs);
-  const operand = access.dynamicGpr(values.parameter(0, "i32"), 8);
+  const index = access.read(access.gpr("al"));
+  const operand = access.dynamicGpr(index, 8);
 
   exactSlice(operand, gprs.offset, gprs.stride * gprs.count);
   strictEqual(operand.address.displacement, gprs.offset);
-  strictEqual(values.node(operand.address.base).kind, "binary");
+  strictEqual(body.constValue(operand.address.base), undefined);
 });
 
 test("dynamic segment effects stay within the selected field array", () => {
-  const { values, access } = createAccess();
+  const { access } = createAccess();
   const bases = cpuState.layout.namedArray(coreStateFields.segmentBases);
-  const operand = access.dynamicSegment(values.parameter(0, "i32"), "base");
+  const index = access.read(access.gpr("al"));
+  const operand = access.dynamicSegment(index, "base");
 
   exactSlice(operand, bases.offset, bases.stride * bases.count);
-  strictEqual(operand.width, 32);
+  strictEqual(operand.storageWidth, 32);
 });
 
-test("state reads and writes normalize to resource operations", () => {
-  const { values, body, access } = createAccess();
+test("state reads and writes emit resource operations with their declared effects", () => {
+  const { body, access } = createAccess();
   const flag = access.field(flagStateFields.concrete.ZF);
   const count = access.field(instructionCountField);
-  const flagValue = access.readField(flagStateFields.concrete.ZF, {
-    kind: "unsigned",
-    bounds: fitsUnsigned(1)
-  });
 
-  access.write(count, values.const(7));
+  access.read(flag);
+  access.write(count, i32(7));
 
   const nodes = body.build().nodes;
-  const read = nodes[0];
-  const write = nodes[1];
+  const reads = nodes.filter((node) => node.kind === "resource.read");
+  const writes = nodes.filter((node) => node.kind === "resource.write");
+  const read = reads[0];
+  const write = writes[0];
 
-  if (read?.kind !== "resource.read") {
-    throw new Error("missing state resource read");
-  }
-  if (write?.kind !== "resource.write") {
-    throw new Error("missing state resource write");
-  }
-
-  strictEqual(read.output, flagValue);
-  deepStrictEqual(read.source, flag);
-  deepStrictEqual(read.mode, {
-    kind: "unsigned",
-    bounds: { unsignedBits: 1, signedBits: 2 }
-  });
-  strictEqual(write.destination, count);
-  strictEqual(write.destination.effect.resource, cpuState.resource);
+  strictEqual(reads.length, 1);
+  strictEqual(writes.length, 1);
+  strictEqual(read?.source, flag);
+  strictEqual(write?.destination, count);
+  strictEqual(write?.destination.effect.resource, cpuState.resource);
 });
 
-function exactSlice(operand: ResourceByteOperand, byteOffset: number, byteLength: number): void {
+function exactSlice<Width extends StorageWidth>(
+  operand: ResourceAccess<Width>,
+  byteOffset: number,
+  byteLength: number
+): void {
   strictEqual(operand.effect.resource, cpuState.resource);
   deepStrictEqual(operand.effect.range, {
-    basis: { kind: "resource" },
-    slice: { byteOffset, byteLength }
+    kind: "slice",
+    origin: "resource",
+    byteOffset,
+    byteLength
   });
 }

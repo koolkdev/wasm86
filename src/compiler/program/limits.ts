@@ -3,14 +3,8 @@ export type MemoryLimits = Readonly<{
   maxPages?: number;
 }>;
 
-export type TableLimits = Readonly<{
-  minElements: number;
-  maxElements?: number;
-}>;
-
 export const wasmPageByteLength = 0x1_0000;
 export const maximumWasmMemoryPages = 0x1_0000;
-export const maximumWasmTableElements = 0xffff_ffff;
 export const maximumWasmMemoryByteLength = wasmPageByteLength * maximumWasmMemoryPages;
 
 export function wasmPagesForByteLength(byteLength: number): number {
